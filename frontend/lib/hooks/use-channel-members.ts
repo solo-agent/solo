@@ -1,0 +1,133 @@
+// ============================================================================
+// useChannelMembers — channel members hook backed by real API
+// - CRUD via REST API
+// - updateMemberStatus kept as local WS-driven state
+// ============================================================================
+
+'use client';
+
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { apiClient, ApiError } from '@/lib/api-client';
+import type { ChannelMember } from '@/lib/types';
+
+// ---- Backend response shape (from service.Member) ----
+
+interface MemberResponse {
+  channel_id: string;
+  member_type: string;
+  member_id: string;
+  display_name: string;
+  email?: string;
+  role: string;
+  joined_at: string;
+}
+
+// ---- Mapping helpers ----
+
+function mapMember(resp: MemberResponse): ChannelMember {
+  return {
+    channel_id: resp.channel_id,
+    member_type: resp.member_type as 'user' | 'agent',
+    member_id: resp.member_id,
+    role: resp.role as 'owner' | 'admin' | 'member',
+    // Backend only resolves display_name for user members.
+    // For agent members, fall back to member_id.
+    display_name: resp.display_name || resp.member_id,
+    status: 'offline' as const,
+  };
+}
+
+// ---- Hook ----
+
+export function useChannelMembers(channelId: string | null) {
+  const [members, setMembers] = useState<ChannelMember[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const channelIdRef = useRef(channelId);
+  channelIdRef.current = channelId;
+
+  const loadMembers = useCallback(async () => {
+    if (!channelId) {
+      setMembers([]);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await apiClient.get<MemberResponse[]>(
+        `/api/v1/channels/${channelId}/members`,
+      );
+      if (mountedRef.current) {
+        setMembers(res.map(mapMember));
+      }
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : '加载成员列表失败';
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [channelId]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    loadMembers();
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [loadMembers]);
+
+  const addAgentToChannel = useCallback(
+    async (agentId: string, _agentName: string) => {
+      if (!channelId) return;
+      await apiClient.post(`/api/v1/channels/${channelId}/members`, {
+        member_type: 'agent',
+        member_id: agentId,
+      });
+      // Reload to get up-to-date member list including display names
+      await loadMembers();
+    },
+    [channelId, loadMembers],
+  );
+
+  const removeMember = useCallback(
+    async (_memberType: 'user' | 'agent', memberId: string) => {
+      if (!channelId) return;
+      await apiClient.delete(
+        `/api/v1/channels/${channelId}/members/${memberId}`,
+      );
+      setMembers((prev) => prev.filter((m) => m.member_id !== memberId));
+    },
+    [channelId],
+  );
+
+  /**
+   * 实时更新指定成员的状态（由 WebSocket agent.thinking / agent.typing 驱动）
+   * 这是纯本地状态操作，不涉及后端 API
+   */
+  const updateMemberStatus = useCallback(
+    (memberId: string, status: ChannelMember['status']) => {
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.member_id === memberId ? { ...m, status } : m,
+        ),
+      );
+    },
+    [],
+  );
+
+  return {
+    members,
+    users: members.filter((m) => m.member_type === 'user'),
+    agents: members.filter((m) => m.member_type === 'agent'),
+    isLoading,
+    error,
+    addAgentToChannel,
+    removeMember,
+    updateMemberStatus,
+    refetch: loadMembers,
+  } as const;
+}

@@ -1,0 +1,693 @@
+// ============================================================================
+// MessageInput — bottom message composition with brutalist styling
+// - input-brutal textarea with Space Mono placeholder
+// - Send button: btn-brutal-pink circular icon button
+// - Enter/Shift+Enter handling
+// - @mention autocomplete (SOLO-51-F)
+// - File upload: drag & drop + paste (SOLO-247-F)
+// ============================================================================
+
+'use client';
+
+import {
+  useState,
+  useRef,
+  useCallback,
+  useEffect,
+  type KeyboardEvent,
+  type DragEvent,
+  type ClipboardEvent,
+} from 'react';
+import {
+  Send,
+  ClipboardList,
+  Upload,
+  X,
+  Loader2,
+  Check,
+  AlertTriangle,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { useMentions } from '@/lib/hooks/use-mentions';
+import { MentionDropdown, type DropdownAnchor } from './mention-dropdown';
+import { useToast } from '@/components/ui/toast';
+import type { ChannelMember } from '@/lib/types';
+
+// ---- Types ----
+
+/** A single file being uploaded or already uploaded */
+export interface UploadItem {
+  id: string;
+  filename: string;
+  url: string;
+  mimeType: string;
+  size: number;
+  status: 'uploading' | 'done' | 'error';
+}
+
+interface MessageInputProps {
+  onSend: (
+    content: string,
+    mentionedAgentIds?: string[],
+    asTask?: boolean,
+    taskTitle?: string,
+    attachmentIds?: string[],
+  ) => Promise<unknown> | void;
+  placeholder?: string;
+  /** All channel members (users + agents) for @mention filtering */
+  members: ChannelMember[];
+  /** Show the "As Task" toggle (for channel views only) */
+  showAsTaskToggle?: boolean;
+}
+
+// ---- Upload helper ----
+
+let uploadCounter = 0;
+
+async function uploadSingleFile(file: File): Promise<UploadItem> {
+  const id = `upload-${++uploadCounter}-${Date.now()}`;
+
+  // Validate size (max 50MB)
+  if (file.size > 50 * 1024 * 1024) {
+    throw new Error(`${file.name} 超过 50MB 限制`);
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  // Use apiClient.postFormData for multipart — browser sets Content-Type with boundary.
+  // Dynamic import avoids potential module-level circular dependency issues.
+  const { apiClient } = await import('@/lib/api-client');
+  const res = await apiClient.postFormData<{
+    id: string;
+    url: string;
+    mime_type: string;
+  }>('/api/v1/attachments/upload', formData);
+
+  return {
+    id: res.id,
+    filename: file.name,
+    url: res.url,
+    mimeType: res.mime_type,
+    size: file.size,
+    status: 'done' as const,
+  };
+}
+
+// ---- Main component ----
+
+export function MessageInput({
+  onSend,
+  placeholder = '输入消息... (Enter 发送, Shift+Enter 换行)',
+  members,
+  showAsTaskToggle = false,
+}: MessageInputProps) {
+  const [content, setContent] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [cursorPosition, setCursorPosition] = useState(0);
+  const [asTask, setAsTask] = useState(false);
+  const [taskTitle, setTaskTitle] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const isSendingRef = useRef(false);
+
+  // ---- Upload state ----
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploads, setUploads] = useState<UploadItem[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const dragCounterRef = useRef(0);
+  const { showToast } = useToast();
+
+  const {
+    suggestions,
+    showSuggestions,
+    selectedIndex,
+    searchQuery,
+    handleKeyDown: mentionHandleKeyDown,
+    selectSuggestion: mentionSelectSuggestion,
+    resetMention,
+    mentionedAgentIds,
+  } = useMentions(members, content, cursorPosition);
+
+  const mentionActive = showSuggestions || searchQuery !== '';
+
+  // ---- Dropdown anchor calculation ----
+
+  const [dropdownAnchor, setDropdownAnchor] = useState<DropdownAnchor | null>(
+    null,
+  );
+
+  const updateDropdownPosition = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setDropdownAnchor({
+      top: rect.top - 8,
+      left: rect.left + 16,
+      width: rect.width - 32,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (mentionActive) {
+      updateDropdownPosition();
+    } else {
+      setDropdownAnchor(null);
+    }
+  }, [mentionActive, updateDropdownPosition]);
+
+  // Recalculate on scroll/resize while dropdown is open
+  useEffect(() => {
+    if (!mentionActive) return;
+    const handleUpdate = () => updateDropdownPosition();
+    window.addEventListener('scroll', handleUpdate, true);
+    window.addEventListener('resize', handleUpdate);
+    return () => {
+      window.removeEventListener('scroll', handleUpdate, true);
+      window.removeEventListener('resize', handleUpdate);
+    };
+  }, [mentionActive, updateDropdownPosition]);
+
+  // ---- Click-outside handler ----
+
+  useEffect(() => {
+    if (!mentionActive) return;
+
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      const dropdownEl = document.querySelector(
+        '[role="listbox"][aria-label="提及成员选择"]',
+      );
+      if (
+        dropdownEl &&
+        !dropdownEl.contains(target) &&
+        textareaRef.current &&
+        !textareaRef.current.contains(target)
+      ) {
+        resetMention();
+      }
+    };
+
+    const timer = setTimeout(() => {
+      document.addEventListener('mousedown', handleClick);
+    }, 0);
+
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('mousedown', handleClick);
+    };
+  }, [mentionActive, resetMention]);
+
+  // ---- Upload logic ----
+
+  /** Remove a single upload by ID */
+  const removeUpload = useCallback((id: string) => {
+    setUploads((prev) => prev.filter((u) => u.id !== id));
+  }, []);
+
+  /** Upload one or more files and add them to the uploads list */
+  const uploadFiles = useCallback(async (files: File[]) => {
+    if (files.length === 0) return;
+
+    setUploading(true);
+
+    // Add placeholder entries for each file
+    const placeholders: UploadItem[] = files.map((file) => ({
+      id: `upload-${++uploadCounter}-${Date.now()}`,
+      filename: file.name,
+      url: '',
+      mimeType: file.type,
+      size: file.size,
+      status: 'uploading',
+    }));
+    setUploads((prev) => [...prev, ...placeholders]);
+
+    // Upload each file sequentially
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const placeholder = placeholders[i];
+
+      // Validate size
+      if (file.size > 50 * 1024 * 1024) {
+        showToast(`${file.name} 超过 50MB 限制`, 'error');
+        setUploads((prev) =>
+          prev.map((u) =>
+            u.id === placeholder.id ? { ...u, status: 'error' as const } : u,
+          ),
+        );
+        continue;
+      }
+
+      try {
+        const result = await uploadSingleFile(file);
+        // Replace placeholder with real result
+        setUploads((prev) =>
+          prev.map((u) =>
+            u.id === placeholder.id
+              ? { ...result, id: result.id, filename: file.name }
+              : u,
+          ),
+        );
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : `${file.name} 上传失败`;
+        showToast(msg, 'error');
+        setUploads((prev) =>
+          prev.map((u) =>
+            u.id === placeholder.id ? { ...u, status: 'error' as const } : u,
+          ),
+        );
+      }
+    }
+
+    setUploading(false);
+  }, [showToast]);
+
+  // ---- Drag & drop handlers ----
+
+  const handleDragOver = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDragEnter = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer?.types?.includes('Files')) {
+      setIsDragging(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback(
+    async (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounterRef.current = 0;
+      setIsDragging(false);
+
+      const files = e.dataTransfer?.files;
+      if (files && files.length > 0) {
+        await uploadFiles(Array.from(files));
+      }
+    },
+    [uploadFiles],
+  );
+
+  // ---- Paste handler ----
+
+  const handlePaste = useCallback(
+    async (e: ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const imageFiles: File[] = [];
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) {
+            imageFiles.push(file);
+          }
+        }
+      }
+
+      if (imageFiles.length > 0) {
+        await uploadFiles(imageFiles);
+      }
+    },
+    [uploadFiles],
+  );
+
+  // ---- Send logic ----
+
+  const trimmed = content.trim();
+  const doneUploads = uploads.filter((u) => u.status === 'done');
+  const hasUploading = uploads.some((u) => u.status === 'uploading');
+  const canSend = (trimmed.length > 0 || doneUploads.length > 0) && !isSending && !hasUploading;
+
+  const handleSend = useCallback(async () => {
+    if (!canSend || isSendingRef.current) return;
+
+    isSendingRef.current = true;
+    setIsSending(true);
+    try {
+      const attachmentIds =
+        doneUploads.length > 0
+          ? doneUploads.map((u) => u.id)
+          : undefined;
+
+      await onSend(
+        trimmed,
+        mentionedAgentIds,
+        asTask,
+        taskTitle.trim() || undefined,
+        attachmentIds,
+      );
+      setContent('');
+      setTaskTitle('');
+      setAsTask(false);
+      setUploads([]);
+      resetMention();
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+    } finally {
+      isSendingRef.current = false;
+      setIsSending(false);
+      textareaRef.current?.focus();
+    }
+  }, [canSend, trimmed, onSend, mentionedAgentIds, asTask, taskTitle, doneUploads, resetMention]);
+
+  // ---- Keyboard handling ----
+
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      // Arrow up/down with mention active: navigate suggestions
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (mentionActive) {
+          e.preventDefault();
+          mentionHandleKeyDown(e);
+        }
+        return;
+      }
+
+      // Escape: close mention dropdown
+      if (e.key === 'Escape') {
+        if (mentionActive) {
+          e.preventDefault();
+          resetMention();
+        }
+        return;
+      }
+
+      // Enter: select suggestion OR send message
+      if (e.key === 'Enter' && !e.shiftKey) {
+        if (showSuggestions) {
+          e.preventDefault();
+          const newValue = mentionSelectSuggestion(selectedIndex);
+          if (newValue !== null) {
+            setContent(newValue);
+          }
+          return;
+        }
+
+        e.preventDefault();
+        handleSend();
+        return;
+      }
+    },
+    [
+      mentionActive,
+      mentionHandleKeyDown,
+      resetMention,
+      showSuggestions,
+      mentionSelectSuggestion,
+      selectedIndex,
+      handleSend,
+    ],
+  );
+
+  // ---- Cursor tracking ----
+
+  const handleCursorMove = useCallback(() => {
+    if (textareaRef.current) {
+      setCursorPosition(textareaRef.current.selectionStart);
+    }
+  }, []);
+
+  const handleInput = useCallback(
+    (value: string) => {
+      setContent(value);
+      const el = textareaRef.current;
+      if (el) {
+        setCursorPosition(el.selectionStart);
+        el.style.height = 'auto';
+        el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+      }
+    },
+    [],
+  );
+
+  // ---- Drag overlay container events ----
+  // Attach drag enter/leave to the outer wrapper so the overlay covers all input area
+
+  const dragContainerRef = useRef<HTMLDivElement>(null);
+
+  // ---- Format file size ----
+
+  const formatSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes}B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+  };
+
+  // ---- Image MIME check ----
+
+  const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
+    'image/jpg', 'image/bmp', 'image/tiff'];
+
+  const isImageMime = (mime: string): boolean =>
+    IMAGE_MIME_TYPES.includes(mime) || mime.startsWith('image/');
+
+  // ---- Render ----
+
+  return (
+    <div
+      ref={dragContainerRef}
+      className="relative border-t-2 border-black bg-brutal-cream px-6 py-4"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Drag overlay */}
+      {isDragging && (
+        <div
+          className={cn(
+            'absolute inset-0 z-50 flex flex-col items-center justify-center gap-2',
+            'border-2 border-dashed border-black bg-brutal-pink-light/60 backdrop-blur-sm',
+          )}
+          aria-live="polite"
+        >
+          <Upload className="h-8 w-8 text-brutal-black opacity-60" aria-hidden />
+          <p className="font-display text-base font-bold text-foreground">
+            拖放文件到此处上传
+          </p>
+          <p className="font-mono text-xs text-muted-foreground">
+            最大 50MB
+          </p>
+        </div>
+      )}
+
+      <div className="relative flex flex-col">
+        {/* Mention dropdown via portal */}
+        {mentionActive && dropdownAnchor && (
+          <MentionDropdown
+            suggestions={suggestions}
+            selectedIndex={selectedIndex}
+            searchQuery={searchQuery}
+            anchor={dropdownAnchor}
+            onSelect={(index) => {
+              const newValue = mentionSelectSuggestion(index);
+              if (newValue !== null) {
+                setContent(newValue);
+                textareaRef.current?.focus();
+              }
+            }}
+          />
+        )}
+
+        {/* Upload previews */}
+        {uploads.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2" aria-label="上传文件预览">
+            {uploads.map((upload) => (
+              <div
+                key={upload.id}
+                className={cn(
+                  'relative flex items-start gap-2 border-2 border-black bg-white px-2.5 py-1.5',
+                  'shadow-brutal-sm',
+                  upload.status === 'error' && 'border-brutal-red',
+                )}
+              >
+                {/* Uploading: indeterminate progress bar */}
+                {upload.status === 'uploading' && (
+                  <div className="absolute inset-x-0 bottom-1 left-1 right-1 h-1 overflow-hidden bg-brutal-stone/30">
+                    <div className="h-full w-1/3 animate-indeterminate-progress bg-brutal-pink" />
+                  </div>
+                )}
+
+                {/* Image thumbnail for done image uploads */}
+                {upload.status === 'done' && isImageMime(upload.mimeType) ? (
+                  <img
+                    src={upload.url}
+                    alt={upload.filename}
+                    className="h-10 w-10 flex-shrink-0 border border-black object-cover bg-brutal-cream"
+                  />
+                ) : (
+                  /* Status icon for non-image files */
+                  <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center">
+                    {upload.status === 'uploading' && (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-label="上传中" />
+                    )}
+                    {upload.status === 'done' && (
+                      <Check className="h-3.5 w-3.5 text-brutal-lime" aria-label="已上传" />
+                    )}
+                    {upload.status === 'error' && (
+                      <AlertTriangle className="h-3.5 w-3.5 text-brutal-red" aria-label="上传失败" />
+                    )}
+                  </div>
+                )}
+
+                {/* Filename + size */}
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate font-mono text-xs font-bold text-foreground">
+                    {upload.filename}
+                  </span>
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    {upload.status === 'uploading'
+                      ? '上传中...'
+                      : upload.status === 'done'
+                        ? formatSize(upload.size)
+                        : '上传失败'}
+                  </span>
+                </div>
+
+                {/* Remove button */}
+                <button
+                  type="button"
+                  onClick={() => removeUpload(upload.id)}
+                  disabled={upload.status === 'uploading'}
+                  className={cn(
+                    'flex-shrink-0 p-0.5 text-muted-foreground hover:text-foreground transition-colors',
+                    'disabled:opacity-30 disabled:pointer-events-none',
+                  )}
+                  aria-label={`移除 ${upload.filename}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* As Task toggle */}
+        {showAsTaskToggle && (
+          <div className="mb-2 flex items-center">
+            <button
+              type="button"
+              onClick={() => {
+                const next = !asTask;
+                setAsTask(next);
+                if (next) {
+                  setTimeout(() => titleInputRef.current?.focus(), 0);
+                } else {
+                  setTaskTitle('');
+                }
+              }}
+              className={cn(
+                'flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] font-bold transition-all',
+                'border-2 border-black shadow-brutal-sm',
+                asTask
+                  ? 'bg-brutal-pink text-black translate-x-[2px] translate-y-[2px] shadow-none'
+                  : 'bg-white text-muted-foreground hover:text-foreground hover:-translate-x-px hover:-translate-y-px hover:shadow-brutal',
+              )}
+              aria-label={asTask ? '取消创建为任务' : '创建为任务'}
+              aria-pressed={asTask}
+            >
+              <ClipboardList className="h-3.5 w-3.5" />
+              {asTask ? '取消任务' : '创建为任务'}
+            </button>
+          </div>
+        )}
+
+        {/* Title input — visible only in asTask mode */}
+        {showAsTaskToggle && asTask && (
+          <div className="mb-2">
+            <input
+              ref={titleInputRef}
+              type="text"
+              value={taskTitle}
+              onChange={(e) => setTaskTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  textareaRef.current?.focus();
+                }
+              }}
+              placeholder="任务标题（可选，留空则使用消息前100字符）"
+              disabled={isSending}
+              className={cn(
+                'input-brutal w-full font-mono text-sm',
+                asTask && 'border-brutal-pink',
+              )}
+              aria-label="任务标题"
+            />
+          </div>
+        )}
+
+        <div className="relative flex items-end gap-2">
+          <textarea
+            ref={textareaRef}
+            value={content}
+            onChange={(e) => handleInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onSelect={handleCursorMove}
+            onClick={handleCursorMove}
+            onPaste={handlePaste}
+            placeholder={asTask ? '任务描述（可选）... (Enter 创建, Shift+Enter 换行)' : placeholder}
+            rows={1}
+            autoFocus
+            disabled={isSending}
+            aria-label={asTask ? '任务描述输入框' : '消息输入框'}
+            aria-autocomplete="list"
+            aria-controls={mentionActive ? 'mention-listbox' : undefined}
+            aria-expanded={mentionActive}
+            aria-haspopup="listbox"
+            className={cn(
+              'input-brutal min-h-[44px] resize-none pr-24 font-mono text-sm leading-relaxed',
+              'placeholder:font-mono placeholder:text-muted-foreground/60',
+              'disabled:opacity-50',
+              asTask && 'border-brutal-pink',
+            )}
+          />
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={!canSend}
+            className={cn(
+              'absolute bottom-2 right-2 flex h-8 items-center justify-center gap-1.5 px-3',
+              'btn-brutal btn-brutal-pink',
+              !canSend && 'opacity-40 pointer-events-none',
+              asTask ? 'w-auto' : 'w-8 p-0',
+            )}
+            aria-label={asTask ? '创建任务' : '发送消息'}
+          >
+            {asTask ? (
+              <span className="font-mono text-[11px] font-bold whitespace-nowrap">创建任务</span>
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+          </button>
+        </div>
+      </div>
+      <p className="mt-1.5 text-center font-mono text-[10px] text-muted-foreground">
+        {asTask
+          ? 'Enter 创建任务 · 标题可留空（取消息前100字符）· 切换按钮取消任务模式'
+          : 'Enter 发送 · Shift+Enter 换行 · @ 提及成员 · 拖放文件或 Ctrl+V 粘贴图片'}
+      </p>
+    </div>
+  );
+}

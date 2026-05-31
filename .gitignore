@@ -1,0 +1,57 @@
+# Claude Code
+.claude/
+CLAUDE.md
+
+# Environment
+.env
+.env.production
+
+# Frontend
+frontend/.next/
+frontend/node_modules/
+node_modules/
+
+# Go
+*.exe
+*.test
+*.out
+bin/
+/solo
+/server
+/daemon
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+*.log
+
+# Runtime
+.pids/
+test-results/
+monitoring/
+
+# Binary artifacts
+.pids/
+solo-server
+
+# Logs
+*.log
+*.log.bak
+
+# Agent runtime
+pkg/agent/.solo/
+
+# Screenshots
+*.png
+frontend/e2e/screenshots/
+
+# Research docs (reference only, not project docs)
+docs/research/
+*.bak
+*.bak2
+.playwright-cli/

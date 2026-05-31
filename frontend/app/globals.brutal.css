@@ -1,0 +1,577 @@
+/* ============================================================
+   globals.brutal.css — Solo Neubrutalist Design System v3.0
+   Based on neubrutalism.com canonical patterns
+   Replaces globals.css as the primary stylesheet
+   ============================================================ */
+
+@import "tailwindcss";
+
+/* Limit Tailwind v4 content scanning to source directories,
+   preventing recursive scanning of .next and node_modules. */
+@source "../app/";
+@source "../components/";
+@source "../lib/";
+
+@theme inline {
+  /* ---- Typography ---- */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui;
+  --font-body: var(--font-inter), ui-sans-serif, system-ui;
+  --font-display: var(--font-syne), var(--font-space-grotesk), 'Space Grotesk', sans-serif;
+  --font-heading: var(--font-space-grotesk), 'Space Grotesk', sans-serif;
+  --font-mono: var(--font-space-mono), ui-monospace, monospace;
+
+  /* ---- Brand Color Palette ---- */
+  --color-brutal-bg: #fffaef;
+  --color-brutal-fg: #000000;
+  --color-brutal-cream: #fffaef;
+  --color-brutal-black: #000000;
+  --color-brutal-white: #ffffff;
+  --color-brutal-pink: #FFD23F;
+  --color-brutal-pink-light: #FFF9E0;
+  --color-brutal-yellow: #FF6B6B;
+  --color-brutal-yellow-light: #FFD4D4;
+  --color-brutal-lavender: #bbafe6;
+  --color-brutal-lavender-light: #f0ecff;
+  --color-brutal-cyan: #74B9FF;
+  --color-brutal-cyan-light: #E0F0FF;
+  --color-brutal-lime: #88D498;
+  --color-brutal-lime-light: #E0F5E0;
+  --color-brutal-orange: #f8a16f;
+  --color-brutal-orange-light: #fff0e0;
+  --color-brutal-red: #f97264;
+  --color-brutal-red-light: #ffe0dc;
+  --color-brutal-stone: #c0b9b1;
+
+  /* ---- Functional Colors (shadcn/ui compatibility) ---- */
+  --color-background: #fffaef;
+  --color-foreground: #000000;
+  --color-card: #ffffff;
+  --color-card-foreground: #000000;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #000000;
+  --color-primary: #FFD23F;
+  --color-primary-foreground: #000000;
+  --color-secondary: #ffffff;
+  --color-secondary-foreground: #000000;
+  --color-muted: #f5f0e8;
+  --color-muted-foreground: #666666;
+  --color-accent: #FF6B6B;
+  --color-accent-foreground: #000000;
+  --color-destructive: #f97264;
+  --color-destructive-foreground: #000000;
+  --color-border: #000000;
+  --color-input: #000000;
+  --color-ring: #74b9ff;
+  --color-sidebar: #fffaef;
+  --color-sidebar-foreground: #000000;
+  --color-sidebar-muted: #f5f0e8;
+  --color-sidebar-muted-foreground: #666666;
+  --color-sidebar-border: #000000;
+  --color-sidebar-accent: #FFD4D4;
+  --color-sidebar-accent-foreground: #000000;
+
+  /* ---- Border Radius: zero (neubrutalism canon) ---- */
+  --radius: 0px;
+
+  /* ---- Custom Animations ---- */
+  --animate-slide-in-from-right: slide-in-from-right 0.2s ease-out;
+  --animate-slide-in-from-left: slide-in-from-left 0.2s ease-out;
+  --animate-fade-in: fade-in 0.3s ease-out;
+  --animate-indeterminate-progress: indeterminate-progress 1.2s ease-in-out infinite;
+}
+
+@keyframes slide-in-from-right {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slide-in-from-left {
+  from { opacity: 0; transform: translateX(-100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: scale(0.5); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes indeterminate-progress {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(100%); }
+  100% { transform: translateX(200%); }
+}
+
+/* ============================================================
+   Base Layer — shadcn/ui conventions with black borders
+   ============================================================ */
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* ============================================================
+   Shadow System — hard offset, zero blur, pure black
+   ============================================================ */
+
+.shadow-brutal {
+  box-shadow: 5px 5px 0 0 #000;
+}
+
+.shadow-brutal-sm {
+  box-shadow: 3px 3px 0 0 #000;
+}
+
+.shadow-brutal-lg {
+  box-shadow: 7px 7px 0 0 #000;
+}
+
+.shadow-brutal-xl {
+  box-shadow: 10px 10px 0 0 #000;
+}
+
+/* Colored shadow variants */
+.shadow-brutal-pink {
+  --tw-shadow-color: #FFD23F;
+}
+.shadow-brutal-yellow {
+  --tw-shadow-color: #FF6B6B;
+}
+.shadow-brutal-blue {
+  --tw-shadow-color: #74b9ff;
+}
+.shadow-brutal-lime {
+  --tw-shadow-color: #88D498;
+}
+
+/* ============================================================
+   Border Utilities
+   ============================================================ */
+
+.border-brutal {
+  border: 2px solid #000;
+}
+
+.border-brutal-thick {
+  border: 3px solid #000;
+}
+
+.border-brutal-thin {
+  border: 1px solid #000;
+}
+
+/* ============================================================
+   Button — btn-brutal with lift/press interactions
+   ============================================================ */
+
+.btn-brutal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-heading);
+  font-weight: 700;
+  border: 2px solid #000;
+  background: #fff;
+  color: #000;
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  box-shadow: 5px 5px 0 0 #000;
+}
+
+.btn-brutal:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 7px 7px 0 0 #000;
+}
+
+.btn-brutal:active {
+  transform: translate(3px, 3px);
+  box-shadow: none;
+}
+
+.btn-brutal:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Pink primary variant */
+.btn-brutal-pink {
+  background: #FFD23F;
+}
+
+/* Small variant */
+.btn-brutal-sm {
+  box-shadow: 3px 3px 0 0 #000;
+}
+
+.btn-brutal-sm:hover {
+  box-shadow: 5px 5px 0 0 #000;
+}
+
+.btn-brutal-sm:active {
+  transform: translate(2px, 2px);
+  box-shadow: none;
+}
+
+/* Flat (ghost) variant */
+.btn-flat {
+  background: none;
+  border: none;
+  font-family: var(--font-heading);
+  font-weight: 500;
+  color: var(--color-brutal-stone);
+  cursor: pointer;
+  padding: 0.375rem 0.75rem;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.btn-flat:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #000;
+}
+
+.btn-flat:active {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+/* ============================================================
+   Card
+   ============================================================ */
+
+.card-brutal {
+  border: 2px solid #000;
+  background: #fff;
+  box-shadow: 5px 5px 0 0 #000;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card-brutal:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 7px 7px 0 0 #000;
+}
+
+/* ============================================================
+   Input
+   ============================================================ */
+
+.input-brutal {
+  border: 2px solid #000;
+  background: #fff;
+  font-family: var(--font-sans);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9375rem;
+  box-shadow: 3px 3px 0 0 #000;
+  outline: none;
+  width: 100%;
+  height: 44px;
+  transition: box-shadow 0.15s ease;
+}
+
+.input-brutal:focus {
+  box-shadow: 5px 5px 0 0 #000;
+  outline: 3px solid #74b9ff;
+  outline-offset: 2px;
+}
+
+.input-brutal::placeholder {
+  color: #999;
+}
+
+.input-brutal:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Error state */
+.input-brutal[aria-invalid="true"],
+.input-brutal.input-error {
+  border-color: #f97264;
+  box-shadow: 3px 3px 0 0 #f97264;
+}
+
+.input-brutal[aria-invalid="true"]:focus,
+.input-brutal.input-error:focus {
+  box-shadow: 5px 5px 0 0 #f97264;
+  outline: 3px solid #f97264;
+}
+
+/* ============================================================
+   Badge
+   ============================================================ */
+
+.badge-brutal {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: 2px solid #000;
+  box-shadow: 2px 2px 0 0 #000;
+}
+
+/* ============================================================
+   Divider
+   ============================================================ */
+
+.divider-brutal {
+  border: none;
+  border-top: 2px solid #000;
+  margin: 1rem 0;
+}
+
+.divider-brutal-thick {
+  border-top-width: 3px;
+}
+
+/* ============================================================
+   Sidebar Overrides (HSL-based sidebar stays functional)
+   ============================================================ */
+
+.sidebar-brutal {
+  --sidebar: 48 100% 97%;
+  --sidebar-foreground: 0 0% 0%;
+  --sidebar-muted-foreground: 0 0% 40%;
+  --sidebar-accent: 0 0% 93%;
+  --sidebar-accent-foreground: 0 0% 0%;
+  --sidebar-border: 0 0% 0%;
+  --sidebar-muted: 48 100% 97%;
+}
+
+/* ============================================================
+   NavBar — 56px icon-only navigation bar
+   ============================================================ */
+
+.navbar-brutal {
+  background: #FFD23F;
+}
+
+.navbar-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 2px solid #000;
+  background: #fff;
+  box-shadow: 3px 3px 0 0 #000;
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  color: #000;
+}
+
+.navbar-icon:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 0 #000;
+}
+
+.navbar-icon:active {
+  transform: translate(2px, 2px);
+  box-shadow: none;
+}
+
+.navbar-icon-active {
+  background: #FFD23F;
+  box-shadow: 5px 5px 0 0 #000;
+  transform: translate(-1px, -1px);
+}
+
+/* ============================================================
+   Global Focus Visible
+   ============================================================ */
+
+*:focus-visible {
+  outline: 3px solid #74b9ff;
+  outline-offset: 2px;
+}
+
+/* Remove default focus outline for mouse users */
+*:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ============================================================
+   Selection Styling
+   ============================================================ */
+
+::selection {
+  background-color: #FFD23F;
+  color: #000;
+}
+
+/* ============================================================
+   Reduced Motion
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-brutal,
+  .btn-brutal-sm,
+  .card-brutal,
+  .input-brutal {
+    transition: none;
+  }
+
+  .btn-brutal:hover,
+  .btn-brutal-sm:hover {
+    transform: none;
+    box-shadow: 5px 5px 0 0 #000;
+  }
+
+  .btn-brutal:active,
+  .btn-brutal-sm:active {
+    transform: none;
+    box-shadow: 5px 5px 0 0 #000;
+  }
+
+  .card-brutal:hover {
+    transform: none;
+    box-shadow: 5px 5px 0 0 #000;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* ============================================================
+   Responsive: Shadow scaling on mobile
+   ============================================================ */
+
+/* ============================================================
+   Cursor Blink Animation — pink pulse for streaming cursor
+   ============================================================ */
+
+@keyframes cursor-blink-pink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.cursor-blink-pink {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: #FFD23F;
+  animation: cursor-blink-pink 1s step-end infinite;
+  vertical-align: text-bottom;
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.cursor-blink {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: #000;
+  animation: cursor-blink 1s step-end infinite;
+  vertical-align: text-bottom;
+}
+
+/* ============================================================
+   Left border color utilities for message types
+   ============================================================ */
+
+.border-l-brutal-pink {
+  border-left: 3px solid #FF6B6B;
+}
+
+.border-l-brutal-gray {
+  border-left: 3px solid #c0b9b1;
+}
+
+/* ============================================================
+   Message bubble — brutalist card for user messages
+   ============================================================ */
+
+.message-bubble {
+  border: 2px solid #000;
+  background: #fff;
+  box-shadow: 3px 3px 0 0 #000;
+  padding: 0.625rem 0.75rem;
+  font-family: var(--font-body);
+  font-size: 0.9375rem;
+}
+
+/* ============================================================
+   Agent message container
+   ============================================================ */
+
+.agent-message {
+  background: #fffaef;
+}
+
+.agent-message code {
+  background: #000 !important;
+  color: #88D498 !important;
+  font-family: var(--font-mono);
+}
+
+@media (max-width: 768px) {
+  .shadow-brutal {
+    box-shadow: 4px 4px 0 0 #000;
+  }
+  .shadow-brutal-lg {
+    box-shadow: 6px 6px 0 0 #000;
+  }
+  .shadow-brutal-xl {
+    box-shadow: 8px 8px 0 0 #000;
+  }
+}
+
+/* ============================================================
+   Pixel Avatar — 7×7 CSS grid pixel art (3px per cell)
+   ============================================================ */
+
+.pixel-avatar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 3px);
+  grid-template-rows: repeat(7, 3px);
+  gap: 0;
+  width: 21px;
+  height: 21px;
+}
+
+.pixel-avatar-cell {
+  width: 3px;
+  height: 3px;
+}
+
+.pixel-avatar-cell-filled { background: var(--pixel-fill, #000); }
+.pixel-avatar-cell-empty { background: transparent; }
+
+/* Pixel avatar wrapper sizes */
+.pixel-avatar-sm { width: 28px; height: 28px; }
+.pixel-avatar-md { width: 32px; height: 32px; }
+
+/* ============================================================
+   @mention highlight in agent messages
+   ============================================================ */
+
+.mention-highlight {
+  display: inline-block;
+  background: #FF6B6B;
+  color: #000;
+  font-weight: 700;
+  padding: 0 0.25rem;
+  border: 2px solid #000;
+  box-shadow: 2px 2px 0 0 #000;
+}
+
+.tasknum-highlight {
+  display: inline-block;
+  background: #74B9FF;
+  color: #000;
+  font-weight: 700;
+  padding: 0 0.25rem;
+  border: 2px solid #000;
+  box-shadow: 2px 2px 0 0 #000;
+}
