@@ -81,7 +81,7 @@ function ParentMessageBlock({ message }: { message: Message }) {
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeRaw]}
-            components={mdComponents}
+            components={mdComponents as any}
           >
             {message.content}
           </ReactMarkdown>
@@ -124,25 +124,25 @@ function CodeBlock({ className, children }: { className?: string; children?: Rea
 }
 
 const mdComponents = {
-  p({ children }: { children: React.ReactNode }) {
+  p({ children }: { children?: React.ReactNode }) {
     return <p className="my-1 whitespace-pre-wrap break-words">{children}</p>;
   },
-  strong({ children }: { children: React.ReactNode }) {
+  strong({ children }: { children?: React.ReactNode }) {
     return <strong className="font-heading font-black">{children}</strong>;
   },
-  a({ href, children }: { href?: string; children: React.ReactNode }) {
+  a({ href, children }: { href?: string; children?: React.ReactNode }) {
     return <a href={href} target="_blank" rel="noopener noreferrer" className="text-brutal-cyan font-bold underline decoration-2 underline-offset-2 hover:text-brutal-pink transition-colors">{children}</a>;
   },
-  ul({ children }: { children: React.ReactNode }) {
+  ul({ children }: { children?: React.ReactNode }) {
     return <ul className="my-1 list-disc pl-4 space-y-0.5">{children}</ul>;
   },
-  ol({ children }: { children: React.ReactNode }) {
+  ol({ children }: { children?: React.ReactNode }) {
     return <ol className="my-1 list-decimal pl-4 space-y-0.5">{children}</ol>;
   },
-  li({ children }: { children: React.ReactNode }) {
+  li({ children }: { children?: React.ReactNode }) {
     return <li className="leading-relaxed">{children}</li>;
   },
-  blockquote({ children }: { children: React.ReactNode }) {
+  blockquote({ children }: { children?: React.ReactNode }) {
     return <blockquote className="my-1.5 border-l-2 border-brutal-pink/50 pl-3 italic text-muted-foreground">{children}</blockquote>;
   },
   code({ className, children, ...props }: { className?: string; children?: React.ReactNode; [key: string]: unknown }) {
@@ -152,19 +152,19 @@ const mdComponents = {
     }
     return <CodeBlock className={className}>{children}</CodeBlock>;
   },
-  pre({ children }: { children: React.ReactNode }) {
+  pre({ children }: { children?: React.ReactNode }) {
     return <>{children}</>;
   },
   hr() {
     return <hr className="divider-brutal my-3" />;
   },
-  table({ children }: { children: React.ReactNode }) {
+  table({ children }: { children?: React.ReactNode }) {
     return <div className="my-2 overflow-x-auto border-2 border-black shadow-brutal-sm"><table className="w-full text-sm font-body">{children}</table></div>;
   },
-  th({ children }: { children: React.ReactNode }) {
+  th({ children }: { children?: React.ReactNode }) {
     return <th className="border-b-2 border-black bg-brutal-pink px-3 py-2 text-left font-heading font-bold text-black">{children}</th>;
   },
-  td({ children }: { children: React.ReactNode }) {
+  td({ children }: { children?: React.ReactNode }) {
     return <td className="border-t border-black px-3 py-1.5">{children}</td>;
   },
 };
@@ -224,7 +224,7 @@ function ReplyItem({ message }: { message: { id: string; display_name?: string; 
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 rehypePlugins={[rehypeRaw]}
-                components={mdComponents}
+                components={mdComponents as any}
               >
                 {highlightSpecials(message.content)}
               </ReactMarkdown>
