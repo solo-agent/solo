@@ -23,10 +23,16 @@ docker compose up -d
 # 4. 运行数据库迁移
 ./scripts/migrate.sh up
 
-# 5. 访问 http://localhost:8080
+# 5. 启动前端（另一个终端）
+cd frontend
+npm install
+npm run dev
+
+# 6. 访问 http://localhost:3000
 ```
 
 启动后你会看到：
+- **Frontend**: http://localhost:3000 （用户界面）
 - **Server**: http://localhost:8080 （REST API + WebSocket）
 - **Daemon**: http://localhost:8081 （Agent 执行引擎）
 - **PostgreSQL**: localhost:5432
@@ -333,4 +339,4 @@ npm run build
 
 ## 许可证
 
-[LICENSE](./LICENSE)
+Proprietary. All rights reserved.

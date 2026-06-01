@@ -7,7 +7,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 MIGRATIONS_DIR="${DIR}/migrations"
-DATABASE_URL="${DATABASE_URL:-postgres://solo:solo@localhost:5432/solo?sslmode=disable}"
+DATABASE_URL="${DATABASE_URL:-postgres://solo:solo-dev@localhost:5432/solo?sslmode=disable}"
 
 # Detect golang-migrate binary
 MIGRATE=""

@@ -31,8 +31,8 @@ services:
       DATABASE_URL: postgres://solo:solo-dev@postgres:5432/solo?sslmode=disable
       JWT_SECRET: solo-dev-internal-token
       INTERNAL_TOKEN_SECRET: solo-dev-internal-token
-      LLM_API_KEY: ""
-      LLM_PROVIDER: anthropic
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
       SERVER_PORT: "8080"
       DAEMON_PORT: "8081"
       APP_ENV: development
@@ -60,8 +60,8 @@ services:
       DATABASE_URL: postgres://solo:solo-dev@postgres:5432/solo?sslmode=disable
       JWT_SECRET: solo-dev-internal-token
       INTERNAL_TOKEN_SECRET: solo-dev-internal-token
-      LLM_API_KEY: ""
-      LLM_PROVIDER: anthropic
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
       DAEMON_PORT: "8081"
       DAEMON_ID: daemon-01
       DAEMON_SERVER_URL: http://server:8080

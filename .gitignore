@@ -4,7 +4,7 @@ CLAUDE.md
 
 # Environment
 .env
-.env.production
+# .env.production is tracked — it's a template with placeholders, no real secrets
 
 # Frontend
 frontend/.next/

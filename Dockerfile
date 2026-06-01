@@ -10,7 +10,7 @@ WORKDIR /app
 
 # Cache module downloads
 COPY go.mod go.sum ./
-RUN GOPROXY=https://goproxy.cn,direct go mod download
+RUN go mod download
 
 # Copy full source
 COPY . .
