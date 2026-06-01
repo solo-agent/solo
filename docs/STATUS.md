@@ -1,6 +1,6 @@
 # Solo 功能状态矩阵
 
-> 最后更新: 2026-05-15
+> 最后更新: 2026-06-01
 > 基于代码实际状态（router.go / handler / migration / frontend components），非猜测。
 
 ## 状态图例
@@ -23,6 +23,7 @@
 | JWT Access Token (HS256, 15min) | ✅ | v0 | `internal/auth/jwt.go` |
 | Refresh Token (single-use, 7d) | ✅ | v0 | SHA-256 hash in `sessions` table |
 | 登出 | ✅ | v0 | `POST /api/v1/auth/logout` |
+| Agent Token 持久化 (365d) | ✅ | v1.3 | `~/.solo/agent-tokens/<id>/current.token`，daemon 自动 refresh |
 | OAuth / 社交登录 | ❌ | — | 未排期 |
 | 密码重置 | ❌ | — | 未排期 |
 | 多工作区 / 团队管理 | ❌ | — | roadmap v2.0 |
@@ -51,8 +52,8 @@
 | 消息编辑 | ✅ | v1.1 | `PATCH .../messages/{id}`, 标记 is_edited |
 | 消息删除（软删除） | ✅ | v1.1 | `DELETE .../messages/{id}`, 标记 is_deleted |
 | Markdown 渲染 | ✅ | v1.1 | 代码块 + 语法高亮 |
-| 消息搜索 | ❌ | — | 无全文搜索 API |
-| 文件上传/附件 | ❌ | — | 无 attachment 端点 |
+| 消息搜索 | ✅ | v1.3 | PostgreSQL FTS + ts_headline 高亮 + 游标分页 |
+| 文件上传/附件 | ✅ | v1.3 | `POST .../attachments/upload`，缩略图生成，拖拽/粘贴上传 |
 | 表情/Reactions | ❌ | — | 未排期 |
 | 已保存/收藏消息 | ❌ | — | 未排期 |
 | 消息翻译 | ❌ | — | 未排期 |
@@ -64,9 +65,8 @@
 | 功能 | 状态 | 版本 | 备注 |
 |------|------|------|------|
 | 线程创建/回复 | ✅ | v0 | `POST .../messages/{id}/thread` |
-| 线程面板 | ✅ | v1.1 | ThreadPanel 组件 |
-| Agent 线程响应 | ✅ | v0 | `TriggerAgentResponseInThread()` |
-| 线程内 Agent @提及 | 🔶 | v0 | `TriggerAgentResponseInThread` 存在但需确认 bug 修复状态 |
+| 线程面板 | ✅ | v1.1 | ThreadPanel 组件，含任务元数据展示 |
+| Agent 线程响应 | ✅ | v1.3 | Thread @mention 触发 + 三路 ID 解析 |
 | 线程收件箱 | ❌ | — | 未排期 |
 
 ---
@@ -86,10 +86,14 @@
 | Agent Tools 系统 | ✅ | v1.2 | `pkg/agent/tools.go` |
 | Agent 交互模式 | ✅ | v1.2 | 对话模式 / 交互模式（文件操作）切换 |
 | Agent 详情面板 | ✅ | v1.2 | runtime label, status, history tab |
-| Agent 自动认领任务 | ❌ | — | task-system-spec Phase 2 |
-| Agent-to-Agent 协作 | ❌ | — | roadmap v1.3 |
+| 持久化会话 (PersistentBackend) | ✅ | v1.3 | AgentSessionManager：会话池、串行锁、idle reaper |
+| System Prompt (15 节 ~387 行) | ✅ | v1.3 | 完全对齐 Slock |
+| Agent 自主认领任务 | ✅ | v1.3 | CLI `solo task claim -n N`，FOR UPDATE 防冲突 |
+| Agent-to-Agent @mention 协作 | ✅ | v1.3 | agentChain 追踪，maxDepth=3，去重检测 |
+| Agent 死循环防护 | ✅ | v1.3 | cascade 检测（>20次/10s → 60s 冷却） |
+| Agent 团队管理页 | 🔶 | v1.3 | 页面已创建，待 API 联调验证 |
 | Agent 生命周期管理 | ❌ | — | spawn/wake/sleep/restart |
-| 电脑/机器管理 | ❌ | — | roadmap v1.3 G-01 |
+| 电脑/机器管理 | 🔶 | v1.3 | API + 页面已创建，待心跳验证 + UI 验证 |
 
 ---
 
@@ -103,7 +107,8 @@
 | DM 消息编辑 | ✅ | v1.1 | `PATCH /api/v1/dm/{id}/messages/{id}` |
 | DM 消息删除 | ✅ | v1.1 | `DELETE /api/v1/dm/{id}/messages/{id}` |
 | DM Agent 响应 | ✅ | v0 | Agent 可在 DM 中回复 |
-| DM 任务支持 | ❌ | — | task-system-spec Phase 3 |
+| DM 任务 API | ✅ | v1.3 | 完整 CRUD + Claim/Unclaim + asTask |
+| DM 任务 UI | ❌ | v1.4 | DM 中 TaskBoard 视图待实现 |
 | DM 文件上传 | ❌ | — | 同消息模块 |
 
 ---
@@ -120,9 +125,9 @@
 | 全局任务视图 | ✅ | v1.2 | `/api/v1/tasks` |
 | 频道任务 Tab | ✅ | v1.2 | ChannelView 含 Tasks tab |
 | 系统消息广播 | ✅ | v1.2 | 创建/认领/释放/完成广播 |
-| Agent 自动认领 (Phase 2) | ❌ | — | system prompt 注入认领协议 |
-| DM 任务 (Phase 3) | ❌ | — | DM 频道启用独立任务编号 |
-| 消息框直接创建任务 | ❌ | — | 用户反馈需求 |
+| 子任务 (parent_task_id) | ✅ | v1.3 | API 支持 + 子任务计数 + 进度条 |
+| Agent 自主认领 (CLI-based) | ✅ | v1.3 | `solo task claim -n N`，FOR UPDATE 事务锁 |
+| DM 任务支持 | ✅ | v1.3 | API 层面完成，UI 待 v1.4 |
 | 任务排序/筛选 | ❌ | — | 待定 |
 | 任务依赖 | ❌ | — | 待定 |
 
@@ -140,6 +145,13 @@
 | 消息编辑/删除 UI | ✅ | v1.1 | MessageItem hover 操作菜单 |
 | Agent 管理页样式 | ✅ | v1.1 | neubrutalist 卡片 |
 | Settings 页面 | ✅ | v1.1 | 基础设置页 |
+| CMD+K 全局搜索面板 | 🔶 | v1.3 | 组件已创建，待 API 集成验证 |
+| 频道内搜索 | 🔶 | v1.3 | 组件已创建，待 API 集成验证 |
+| 任务父子视觉关联 | ✅ | v1.3 | parent badge + subtask progress bar |
+| ThreadPanel 任务元数据 | ✅ | v1.3 | task_number / status / assignee / priority |
+| 拖拽/粘贴上传 UI | 🔶 | v1.3 | message-input 已实现，待完整验证 |
+| Agent 团队管理页 | 🔶 | v1.3 | 页面已创建 (490 行)，待联调 |
+| 电脑管理页 | 🔶 | v1.3 | 页面已创建 (530 行)，待联调 |
 | 响应式适配 | 🔶 | v1.1 | 基础响应式，移动端未深度优化 |
 | 动画/微交互 | 🔶 | v1.1 | 消息入场动画完成，其余待补充 |
 | 暗色主题 | ❌ | — | 仅亮色主题 |
@@ -166,7 +178,7 @@
 
 | 功能 | 状态 | 版本 | 备注 |
 |------|------|------|------|
-| Go 单元测试 | ✅ | v0 | 14 个测试文件，143 个测试函数 |
+| Go 单元测试 | 🔶 | v1.3 | 14 个测试文件，143 个测试函数，4 个失败待修复 |
 | 后端 Handler 测试 | ✅ | v0 | channel/message/task/thread |
 | pkg/agent 测试 | ✅ | v1.2 | factory/lock/memory/workspace/prompt/tools/claude |
 | E2E Playwright 测试 | ✅ | v1.2 | 5 个 spec 文件 |

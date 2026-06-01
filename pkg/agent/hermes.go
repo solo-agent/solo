@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -882,4 +883,329 @@ func hermesToolNameFromTitle(title string, kind string) string {
 		}
 		return kind
 	}
+}
+
+// ── Persistent Backend (v1.4) ──────────────────────────────────────────────────
+
+// hermesPersistentState holds the runtime state of a long-running Hermes ACP
+// subprocess across multiple turns.
+type hermesPersistentState struct {
+	runner    *persistentRunner
+	client    *acpClient
+	sessionID string
+	turnFin   atomic.Bool // guards duplicate onPromptDone calls per turn
+}
+
+// Compile-time check.
+var _ SessionStater = (*hermesPersistentState)(nil)
+
+func (s *hermesPersistentState) IsAlive() bool            { return s.runner.isAlive() }
+func (s *hermesPersistentState) SessionID() string        { return s.sessionID }
+func (s *hermesPersistentState) Done() <-chan struct{}    { return s.runner.done }
+func (s *hermesPersistentState) Notify(msg string) error  { return s.runner.write([]byte(msg)) }
+
+// Start creates a persistent Hermes session via ACP. The initial handshake
+// and prompt are processed synchronously before Start returns.
+func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *ExecuteOptions) (*PersistentSession, error) {
+	execPath := b.executablePath
+	if _, err := exec.LookPath(execPath); err != nil {
+		return nil, fmt.Errorf("hermes executable not found at %q: %w", execPath, err)
+	}
+
+	hermesArgs := append([]string{"acp"}, filterCustomArgs(opts.ExtraArgs, hermesBlockedArgs)...)
+	hermesArgs = append(hermesArgs, filterCustomArgs(opts.CustomArgs, hermesBlockedArgs)...)
+
+	env := buildEnv(opts.Env)
+	env = append(env, "HERMES_YOLO_MODE=1")
+
+	runner, err := startPersistent(ctx, execPath, hermesArgs, opts.WorkspaceDir, env, b.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	prompt := buildPrompt(req, opts)
+	msgCh := make(chan OutputChunk, 256)
+	resCh := make(chan *Result, 1)
+
+	var outputMu sync.Mutex
+	var output strings.Builder
+	turnDone := make(chan acpPromptResult, 1)
+
+	cl := &acpClient{
+		logger:  b.logger,
+		stdin:   runner.stdin,
+		pending: make(map[int]*pendingRPC),
+		onChunk: func(chunk OutputChunk) {
+			if chunk.Type == string(MessageText) && chunk.Content != "" {
+				outputMu.Lock()
+				output.WriteString(chunk.Content)
+				outputMu.Unlock()
+			}
+			trySend(msgCh, chunk)
+		},
+		onPromptDone: func(pr acpPromptResult) {
+			select {
+			case turnDone <- pr:
+			default:
+			}
+		},
+	}
+
+	state := &hermesPersistentState{
+		runner: runner,
+		client: cl,
+	}
+
+	// Start reader goroutine for process lifetime.
+	go func() {
+		defer close(state.runner.done)
+		scanner := bufio.NewScanner(runner.stdout)
+		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			cl.handleLine(line)
+		}
+		cl.closeAllPending(fmt.Errorf("hermes process exited"))
+
+		// If a turn is still active, signal failure.
+		if state.turnFin.CompareAndSwap(false, true) {
+			resCh <- &Result{Status: "failed", Error: "hermes process exited unexpectedly"}
+			close(msgCh)
+			close(resCh)
+		}
+	}()
+
+	// Drive the initial handshake and prompt synchronously.
+	startTime := time.Now()
+	handleError := func(errMsg string) {
+		resCh <- &Result{Status: "failed", Error: errMsg, DurationMs: time.Since(startTime).Milliseconds()}
+		close(msgCh)
+		close(resCh)
+		state.turnFin.Store(true)
+	}
+
+	// 1. Initialize handshake.
+	_, err = cl.request(ctx, "initialize", map[string]any{
+		"protocolVersion": 1,
+		"clientInfo": map[string]any{
+			"name":    "solo-agent-sdk",
+			"version": "1.0.0",
+		},
+		"clientCapabilities": map[string]any{},
+	})
+	if err != nil {
+		runner.close()
+		handleError(fmt.Sprintf("hermes initialize failed: %v", err))
+		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+	}
+
+	// 2. Create session.
+	cwd := opts.WorkspaceDir
+	if cwd == "" {
+		cwd = "."
+	}
+	result, err := cl.request(ctx, "session/new", buildHermesSessionParams(cwd, opts.Model))
+	if err != nil {
+		runner.close()
+		handleError(fmt.Sprintf("hermes session/new failed: %v", err))
+		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+	}
+	sessionID := extractACPSessionID(result)
+	if sessionID == "" {
+		runner.close()
+		handleError("hermes session/new returned no session ID")
+		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+	}
+	cl.sessionID = sessionID
+	state.sessionID = sessionID
+	b.logger.Info("hermes: persistent session created", "session_id", sessionID)
+
+	// 3. Set model if specified (session/new already passes model, but
+	// explicit set_model provides a clearer error path).
+	if opts.Model != "" {
+		if _, err := cl.request(ctx, "session/set_model", map[string]any{
+			"sessionId": sessionID,
+			"modelId":   opts.Model,
+		}); err != nil {
+			b.logger.Warn("hermes: set_session_model failed", "error", err)
+		}
+	}
+
+	// 4. Build prompt content with system prompt prepended.
+	userText := prompt
+	if opts.SystemPrompt != "" {
+		userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
+	}
+
+	// 5. Send the initial prompt.
+	_, err = cl.request(ctx, "session/prompt", map[string]any{
+		"sessionId": sessionID,
+		"prompt": []map[string]any{
+			{"type": "text", "text": userText},
+		},
+	})
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			handleError(fmt.Sprintf("hermes timed out during initial prompt"))
+		} else if errors.Is(ctx.Err(), context.Canceled) {
+			handleError("execution cancelled")
+		} else {
+			handleError(fmt.Sprintf("hermes session/prompt failed: %v", err))
+		}
+		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+	}
+
+	// Collect prompt result (usage, stop reason).
+	var usage TokenUsage
+	select {
+	case pr := <-turnDone:
+		usage = pr.usage
+	default:
+	}
+
+	duration := time.Since(startTime)
+	outputMu.Lock()
+	finalOutput := output.String()
+	outputMu.Unlock()
+
+	resCh <- &Result{
+		Status:     "completed",
+		Output:     finalOutput,
+		DurationMs: duration.Milliseconds(),
+		Usage:      buildHermesUsageMap(usage, opts.Model),
+	}
+	close(msgCh)
+	close(resCh)
+	state.turnFin.Store(true)
+
+	b.logger.Info("hermes: initial persistent turn completed",
+		"session_id", sessionID,
+		"duration", duration.Round(time.Millisecond).String(),
+	)
+
+	var stopOnce sync.Once
+	stop := func() error { stopOnce.Do(func() { runner.cancel() }); return nil }
+
+	return &PersistentSession{
+		Messages:  msgCh,
+		Result:    resCh,
+		Stop:      stop,
+		SessionID: sessionID,
+		state:     state,
+	}, nil
+}
+
+// Send delivers new messages to a running persistent Hermes session on the
+// existing ACP session.
+func (b *HermesBackend) Send(ctx context.Context, ps *PersistentSession, messages []Message) (*PersistentSession, error) {
+	state, ok := ps.state.(*hermesPersistentState)
+	if !ok || state == nil {
+		return nil, fmt.Errorf("hermes: invalid session state")
+	}
+	if !state.runner.isAlive() {
+		return nil, fmt.Errorf("hermes: session process has exited")
+	}
+
+	prompt := buildPromptFromMessages(messages)
+
+	msgCh := make(chan OutputChunk, 256)
+	resCh := make(chan *Result, 1)
+
+	var outputMu sync.Mutex
+	var output strings.Builder
+	turnDone := make(chan acpPromptResult, 1)
+
+	// Redirect client callbacks to this turn's channels.
+	state.client.onChunk = func(chunk OutputChunk) {
+		if chunk.Type == string(MessageText) && chunk.Content != "" {
+			outputMu.Lock()
+			output.WriteString(chunk.Content)
+			outputMu.Unlock()
+		}
+		trySend(msgCh, chunk)
+	}
+	state.client.onPromptDone = func(pr acpPromptResult) {
+		select {
+		case turnDone <- pr:
+		default:
+		}
+	}
+
+	startTime := time.Now()
+	state.turnFin.Store(false)
+
+	_, err := state.client.request(ctx, "session/prompt", map[string]any{
+		"sessionId": state.sessionID,
+		"prompt": []map[string]any{
+			{"type": "text", "text": prompt},
+		},
+	})
+	if err != nil {
+		state.turnFin.Store(true)
+		close(msgCh)
+		close(resCh)
+		return nil, fmt.Errorf("hermes persistent session/prompt: %w", err)
+	}
+
+	var usage TokenUsage
+	select {
+	case pr := <-turnDone:
+		usage = pr.usage
+	default:
+	}
+
+	duration := time.Since(startTime)
+	outputMu.Lock()
+	finalOutput := output.String()
+	outputMu.Unlock()
+
+	resCh <- &Result{
+		Status:     "completed",
+		Output:     finalOutput,
+		DurationMs: duration.Milliseconds(),
+		Usage:      buildHermesUsageMap(usage, "unknown"),
+	}
+	close(msgCh)
+	close(resCh)
+	state.turnFin.Store(true)
+
+	b.logger.Info("hermes: persistent turn completed via Send",
+		"session_id", state.sessionID,
+		"duration", duration.Round(time.Millisecond).String(),
+	)
+
+	var stopOnce sync.Once
+	stop := func() error { stopOnce.Do(func() {}); return nil }
+
+	return &PersistentSession{
+		Messages:  msgCh,
+		Result:    resCh,
+		Stop:      stop,
+		SessionID: state.sessionID,
+		state:     state,
+	}, nil
+}
+
+// Close terminates the persistent Hermes session.
+func (b *HermesBackend) Close(ps *PersistentSession) error {
+	state, ok := ps.state.(*hermesPersistentState)
+	if !ok || state == nil {
+		return fmt.Errorf("hermes: invalid session state")
+	}
+	return state.runner.close()
+}
+
+// buildHermesUsageMap returns a usage map for the given model, or nil if
+// there are no tokens.
+func buildHermesUsageMap(usage TokenUsage, model string) map[string]TokenUsage {
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 {
+		return nil
+	}
+	if model == "" {
+		model = "unknown"
+	}
+	return map[string]TokenUsage{model: usage}
 }

@@ -42,7 +42,7 @@ type daemonHandler struct {
 	mu               sync.Mutex
 	workspaceManager *agent.WorkspaceManager
 	memoryManager    *agent.MemoryManager
-	sessionManager   *agent.AgentSessionManager // v1.3: persistent agent sessions
+	sessionManagers  map[string]*agent.AgentSessionManager // v1.4: per-provider persistent sessions
 
 	// v1.4: per-agent token store for persistent session token auto-refresh (SOLO-254-B).
 	agentTokens   map[string]*agentTokenState // agentID -> cached token + expiry
@@ -67,9 +67,20 @@ func newDaemonHandler(pool *pgxpool.Pool, tm *taskManager, provider llm.Provider
 	}
 }
 
-// SetSessionManager sets the agent session manager for persistent agent support.
-func (h *daemonHandler) SetSessionManager(sm *agent.AgentSessionManager) {
-	h.sessionManager = sm
+// SetSessionManager registers a session manager for a provider type.
+func (h *daemonHandler) SetSessionManager(providerType string, sm *agent.AgentSessionManager) {
+	if h.sessionManagers == nil {
+		h.sessionManagers = make(map[string]*agent.AgentSessionManager)
+	}
+	h.sessionManagers[providerType] = sm
+}
+
+// getSessionManager returns the session manager for the given provider type.
+func (h *daemonHandler) getSessionManager(providerType string) *agent.AgentSessionManager {
+	if h.sessionManagers == nil {
+		return nil
+	}
+	return h.sessionManagers[providerType]
 }
 
 // ── Token store (SOLO-254-B: persistent session token auto-refresh) ────────────
@@ -228,7 +239,7 @@ func (h *daemonHandler) holdAndRevise(ctx context.Context, req runTaskRequest, d
 		{Role: agent.RoleUser, Content: revBuilder.String()},
 	}
 
-	ps, err := h.sessionManager.DeliverMessage(ctx, req.AgentID, pendingMsgs)
+	ps, err := h.getSessionManager(req.ModelConfig.Provider).DeliverMessage(ctx, req.AgentID, pendingMsgs)
 	if err != nil {
 		slog.Warn("task: holdAndRevise failed to deliver", "agent_id", req.AgentID, "error", err)
 		return draftContent, false
@@ -844,10 +855,10 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	// For Claude backend, use persistent sessions via AgentSessionManager.
 	// Falls back to backend.Execute() for non-persistent backends.
 	var session *agent.Session
-	if _, isPersistent := backend.(agent.PersistentBackend); isPersistent && h.sessionManager != nil {
-		if h.sessionManager.IsActive(req.AgentID) {
+	if _, isPersistent := backend.(agent.PersistentBackend); isPersistent && h.getSessionManager(req.ModelConfig.Provider) != nil {
+		if h.getSessionManager(req.ModelConfig.Provider).IsActive(req.AgentID) {
 			slog.Info("task: reusing persistent session", "agent_id", req.AgentID)
-			ps, psErr := h.sessionManager.DeliverMessage(ctx, req.AgentID, msgs)
+			ps, psErr := h.getSessionManager(req.ModelConfig.Provider).DeliverMessage(ctx, req.AgentID, msgs)
 			if psErr == nil {
 				session = &agent.Session{Messages: ps.Messages, Result: ps.Result, Stop: ps.Stop}
 			} else {
@@ -856,7 +867,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		} else {
 			_, _ = h.refreshToken(ctx, req.AgentID)
 			slog.Info("task: creating persistent session", "agent_id", req.AgentID)
-			ps, psErr := h.sessionManager.GetOrCreateSession(ctx, req.AgentID, agentCfg, channelCtx, msgs)
+			ps, psErr := h.getSessionManager(req.ModelConfig.Provider).GetOrCreateSession(ctx, req.AgentID, agentCfg, channelCtx, msgs)
 			if psErr == nil {
 				session = &agent.Session{Messages: ps.Messages, Result: ps.Result, Stop: ps.Stop}
 			} else {

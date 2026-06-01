@@ -100,18 +100,19 @@ func main() {
 	// Create handler
 	h := newDaemonHandler(dbPool, taskMgr, llmProvider, serverURL, internalToken)
 
-	// v1.3: Initialize persistent agent session manager (Slock-aligned).
-	// Only Claude backend supports persistent sessions currently.
-	if psBackend, err := agent.NewPersistentBackend("claude"); err == nil {
+	// v1.4: Initialize persistent agent session managers for all supported types.
+	for _, providerType := range []string{"claude", "local", "codex", "opencode", "openclaw", "hermes"} {
+		psBackend, err := agent.NewPersistentBackend(providerType)
+		if err != nil {
+			slog.Debug("persistent session not available", "provider", providerType, "error", err)
+			continue
+		}
 		workspaceMgr := agent.NewWorkspaceManager("")
 		memoryMgr := agent.NewMemoryManager("")
 		sessionMgr := agent.NewAgentSessionManager(psBackend, workspaceMgr, memoryMgr, slog.Default())
-		h.SetSessionManager(sessionMgr)
-		slog.Info("persistent agent session manager initialized")
-		// Ensure sessions are closed on shutdown.
+		h.SetSessionManager(providerType, sessionMgr)
+		slog.Info("persistent agent session manager initialized", "provider", providerType)
 		defer sessionMgr.CloseAll()
-	} else {
-		slog.Info("persistent agent sessions not available (Claude not found)", "error", err)
 	}
 
 	r := chi.NewRouter()
