@@ -196,14 +196,11 @@ func (m *AgentSessionManager) isSessionAlive(entry *agentSessionEntry) bool {
 	if entry.asleep || entry.Session == nil {
 		return false
 	}
-	state, ok := entry.Session.state.(*claudePersistentState)
-	if !ok || state == nil {
+	state, ok := entry.Session.state.(SessionStater)
+	if !ok {
 		return false
 	}
-	if state.cmd.ProcessState != nil && state.cmd.ProcessState.Exited() {
-		return false
-	}
-	return true
+	return state.IsAlive()
 }
 
 func (m *AgentSessionManager) deliverToSession(ctx context.Context, agentID string, entry *agentSessionEntry, messages []Message) (*PersistentSession, error) {
@@ -222,8 +219,10 @@ func (m *AgentSessionManager) deliverToSession(ctx context.Context, agentID stri
 
 	entry.LastActive = time.Now()
 	entry.Session = ps
-	if state, ok := ps.state.(*claudePersistentState); ok && state != nil && state.sessionID != "" {
-		entry.sessionID = state.sessionID
+	if state, ok := ps.state.(SessionStater); ok {
+		if sid := state.SessionID(); sid != "" {
+			entry.sessionID = sid
+		}
 	}
 	return ps, nil
 }
@@ -308,12 +307,12 @@ func (m *AgentSessionManager) createSession(ctx context.Context, agentID string,
 // watchCrash monitors a session. On unexpected exit (crash, not sleep),
 // auto-restarts with --resume to recover context.
 func (m *AgentSessionManager) watchCrash(agentID string, agentCfg AgentConfig, channelCtx ChannelContext, entry *agentSessionEntry) {
-	state, ok := entry.Session.state.(*claudePersistentState)
-	if !ok || state == nil {
+	state, ok := entry.Session.state.(SessionStater)
+	if !ok {
 		return
 	}
 
-	<-state.done
+	<-state.Done()
 
 	m.mu.RLock()
 	currentEntry, exists := m.sessions[agentID]
@@ -323,8 +322,8 @@ func (m *AgentSessionManager) watchCrash(agentID string, agentCfg AgentConfig, c
 	}
 
 	resumeID := entry.sessionID
-	if state.sessionID != "" {
-		resumeID = state.sessionID
+	if sid := state.SessionID(); sid != "" {
+		resumeID = sid
 	}
 
 	m.logger.Warn("session: crashed, auto-restarting",
@@ -360,12 +359,12 @@ func (m *AgentSessionManager) notifyInbox(agentID string, count int) {
 	if !exists || entry.asleep || entry.Session == nil {
 		return
 	}
-	state, ok := entry.Session.state.(*claudePersistentState)
-	if !ok || state == nil {
+	state, ok := entry.Session.state.(SessionStater)
+	if !ok {
 		return
 	}
 	notification := fmt.Sprintf("\n[Solo] %d pending message(s). Use `solo message check` when ready.\n", count)
-	state.stdin.Write([]byte(notification))
+	_ = state.Notify(notification)
 }
 
 func (m *AgentSessionManager) acquireTurn(agentID string) func() {

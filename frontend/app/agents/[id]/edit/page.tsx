@@ -46,6 +46,8 @@ export default function EditAgentPage() {
             model_provider: agentData.model_provider,
             model_name: agentData.model_name,
             system_prompt: agentData.system_prompt || '',
+            custom_env: agentData.custom_env || {},
+            custom_args: agentData.custom_args || [],
           });
         } else {
           setError('Agent 不存在或已被删除');
@@ -69,6 +71,8 @@ export default function EditAgentPage() {
           model_provider: values.model_provider,
           model_name: values.model_name,
           system_prompt: values.system_prompt || undefined,
+          custom_env: values.custom_env,
+          custom_args: values.custom_args,
         });
         router.push('/agents');
       } catch {

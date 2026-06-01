@@ -73,6 +73,8 @@ function mapAgentResponse(resp: Record<string, unknown>): Agent {
     avatar_url: (resp.avatar_url as string) || null,
     enabled_tools: (resp.enabled_tools as string[]) ?? [],
     interaction_mode: (resp.interaction_mode as AgentInteractionMode) ?? 'mention',
+    custom_env: (resp.custom_env as Record<string, string>) ?? {},
+    custom_args: (resp.custom_args as string[]) ?? [],
     created_at: resp.created_at as string,
     updated_at: resp.updated_at as string,
   };

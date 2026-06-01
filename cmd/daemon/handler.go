@@ -758,6 +758,10 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	if agentToken != "" {
 		agentEnv["SOLO_AUTH_TOKEN"] = agentToken
 	}
+	// Merge agent-level custom_env over base agentEnv (agent wins).
+	for k, v := range agentInfo.CustomEnv {
+		agentEnv[k] = v
+	}
 
 	// Build system prompt using PromptBuilder
 	hostname, _ := os.Hostname()
@@ -832,13 +836,15 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		MaxTokens:    req.ModelConfig.MaxTokens,
 		Env:          agentEnv,
 		Temperature:  req.ModelConfig.Temperature,
+		CustomArgs:   agentInfo.CustomArgs,
+		// ExtraArgs: daemonConfig.ExtraArgs[backend.Name()], // P1 reserved
 	}
 
 	// v1.3: Session-aware dispatch (Slock-aligned).
 	// For Claude backend, use persistent sessions via AgentSessionManager.
 	// Falls back to backend.Execute() for non-persistent backends.
 	var session *agent.Session
-	if h.sessionManager != nil {
+	if _, isPersistent := backend.(agent.PersistentBackend); isPersistent && h.sessionManager != nil {
 		if h.sessionManager.IsActive(req.AgentID) {
 			slog.Info("task: reusing persistent session", "agent_id", req.AgentID)
 			ps, psErr := h.sessionManager.DeliverMessage(ctx, req.AgentID, msgs)
@@ -975,17 +981,32 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 
 // agentInfo holds agent metadata fetched from the database.
 type agentInfo struct {
-	Name string
+	Name       string
+	CustomEnv  map[string]string // agent-level env overrides (from custom_env JSONB)
+	CustomArgs []string          // agent-level CLI args (from custom_args JSONB)
 }
 
-// fetchAgentInfo queries an agent's name by ID.
+// fetchAgentInfo queries agent metadata by ID.
 func (h *daemonHandler) fetchAgentInfo(ctx context.Context, agentID string) (*agentInfo, error) {
 	var info agentInfo
+	var customEnvBytes, customArgsBytes []byte
 	err := h.pool.QueryRow(ctx,
-		`SELECT name FROM agents WHERE id = $1 AND is_active = true`, agentID,
-	).Scan(&info.Name)
+		`SELECT name, custom_env, custom_args FROM agents WHERE id = $1 AND is_active = true`, agentID,
+	).Scan(&info.Name, &customEnvBytes, &customArgsBytes)
 	if err != nil {
 		return nil, fmt.Errorf("fetch agent %s: %w", agentID, err)
+	}
+	if len(customEnvBytes) > 0 {
+		json.Unmarshal(customEnvBytes, &info.CustomEnv)
+	}
+	if info.CustomEnv == nil {
+		info.CustomEnv = make(map[string]string)
+	}
+	if len(customArgsBytes) > 0 {
+		json.Unmarshal(customArgsBytes, &info.CustomArgs)
+	}
+	if info.CustomArgs == nil {
+		info.CustomArgs = make([]string, 0)
 	}
 	return &info, nil
 }

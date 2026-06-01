@@ -6,6 +6,7 @@ package agent
 
 import (
 	"context"
+	"time"
 )
 
 // Backend is the unified interface for executing prompts via coding agents.
@@ -36,8 +37,10 @@ type ExecuteOptions struct {
 	Model        string            `json:"model,omitempty"`
 	MaxTokens    int               `json:"max_tokens,omitempty"`
 	Temperature  float64           `json:"temperature,omitempty"`
-	Env          map[string]string `json:"env,omitempty"`
-	CustomArgs   []string          `json:"custom_args,omitempty"`
+	Env                       map[string]string `json:"env,omitempty"`
+	CustomArgs                []string          `json:"custom_args,omitempty"`
+	ExtraArgs                 []string          `json:"extra_args,omitempty"`                   // daemon-level global default args
+	SemanticInactivityTimeout time.Duration     `json:"semantic_inactivity_timeout,omitempty"`  // 0 = disabled
 }
 
 // Session represents a running agent execution.
@@ -159,4 +162,20 @@ type PersistentSession struct {
 
 	// internal state handle — unexported, type-asserted by implementations.
 	state any
+}
+
+// SessionStater exposes session metadata and control to AgentSessionManager
+// without coupling to a specific backend's persistent state type.
+// Any PersistentBackend that wants to participate in the session pool,
+// crash recovery, and inbox notification must have its persistent state
+// implement this interface.
+type SessionStater interface {
+	// IsAlive returns true if the subprocess is still running.
+	IsAlive() bool
+	// SessionID returns the CLI session identifier for --resume.
+	SessionID() string
+	// Done returns a channel that closes when the session is terminated.
+	Done() <-chan struct{}
+	// Notify writes a lightweight notification to the agent's stdin.
+	Notify(msg string) error
 }

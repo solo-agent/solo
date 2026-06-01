@@ -193,6 +193,10 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 			})
 		})
 
+		// Agent backends metadata (registered backend adapters)
+		r.Get("/api/v1/agent-backends", agentHandler.AgentBackends)
+		r.Get("/api/v1/agent-backends/detect", agentHandler.AgentBackendsDetect)
+
 		// Global tasks routes (all channels)
 		r.Route("/api/v1/tasks", func(r chi.Router) {
 			r.Get("/", taskHandler.ListAll)

@@ -14,6 +14,166 @@ import (
 	"time"
 )
 
+// ── Persistent Backend (v1.4) ──────────────────────────────────────────────────
+
+// codexPersistentState holds the runtime state of a long-running Codex
+// subprocess across multiple JSON-RPC turns.
+type codexPersistentState struct {
+	runner   *persistentRunner
+	client   *codexClient
+	threadID string
+}
+
+// Compile-time check.
+var _ SessionStater = (*codexPersistentState)(nil)
+
+func (s *codexPersistentState) IsAlive() bool         { return s.runner.isAlive() }
+func (s *codexPersistentState) SessionID() string     { return s.threadID }
+func (s *codexPersistentState) Done() <-chan struct{} { return s.runner.done }
+func (s *codexPersistentState) Notify(msg string) error {
+	return s.runner.write([]byte(msg))
+}
+
+// Start creates a persistent Codex session with JSON-RPC initialize + thread/start handshake.
+func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *ExecuteOptions) (*PersistentSession, error) {
+	execPath := b.executablePath
+	if _, err := exec.LookPath(execPath); err != nil {
+		return nil, fmt.Errorf("codex executable not found at %q: %w", execPath, err)
+	}
+
+	args := buildCodexArgs(opts)
+	b.logger.Info("codex: starting persistent session", "args", args)
+
+	runner, err := startPersistent(ctx, execPath, args, opts.WorkspaceDir, buildEnv(opts.Env), b.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	prompt := buildPrompt(req, opts)
+
+	msgCh := make(chan OutputChunk, 256)
+	resCh := make(chan *Result, 1)
+
+	c := &codexClient{
+		logger:  b.logger,
+		stdin:   runner.stdin,
+		pending: make(map[int]*pendingRPC),
+		onChunk: func(chunk OutputChunk) { trySend(msgCh, chunk) },
+		onTurnDone: func(aborted bool) {
+			resCh <- &Result{Status: "completed"}
+			close(msgCh)
+			close(resCh)
+		},
+	}
+
+	// Start reader goroutine for process lifetime.
+	go func() {
+		scanner := bufio.NewScanner(runner.stdout)
+		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			c.handleLine(line)
+		}
+		c.closeAllPending(fmt.Errorf("codex process exited"))
+	}()
+
+	// Initialize handshake.
+	if _, err := c.request(ctx, "initialize", map[string]any{
+		"clientInfo":   map[string]any{"name": "solo-agent-sdk", "title": "Solo Agent SDK", "version": "1.0.0"},
+		"capabilities": map[string]any{"experimentalApi": true},
+	}); err != nil {
+		runner.close()
+		return nil, fmt.Errorf("codex persistent initialize: %w", err)
+	}
+
+	// Start thread.
+	threadID, err := c.startThread(ctx, opts)
+	if err != nil {
+		runner.close()
+		return nil, fmt.Errorf("codex persistent thread/start: %w", err)
+	}
+	c.threadID = threadID
+
+	// First turn.
+	if _, err := c.request(ctx, "turn/start", map[string]any{
+		"threadId": threadID,
+		"input":    []map[string]any{{"type": "text", "text": prompt}},
+	}); err != nil {
+		runner.close()
+		return nil, fmt.Errorf("codex persistent turn/start: %w", err)
+	}
+
+	state := &codexPersistentState{
+		runner:   runner,
+		client:   c,
+		threadID: threadID,
+	}
+
+	var stopOnce sync.Once
+	stop := func() error { stopOnce.Do(func() { runner.cancel() }); return nil }
+
+	return &PersistentSession{
+		Messages: msgCh,
+		Result:   resCh,
+		Stop:     stop,
+		state:    state,
+	}, nil
+}
+
+// Send delivers new messages to a running persistent Codex session on the existing thread.
+func (b *CodexBackend) Send(ctx context.Context, ps *PersistentSession, messages []Message) (*PersistentSession, error) {
+	state, ok := ps.state.(*codexPersistentState)
+	if !ok || state == nil {
+		return nil, fmt.Errorf("codex: invalid session state")
+	}
+	if !state.runner.isAlive() {
+		return nil, fmt.Errorf("codex: session process has exited")
+	}
+
+	prompt := buildPromptFromMessages(messages)
+
+	msgCh := make(chan OutputChunk, 256)
+	resCh := make(chan *Result, 1)
+
+	// Redirect client callbacks to this turn's channels.
+	state.client.onChunk = func(chunk OutputChunk) { trySend(msgCh, chunk) }
+	state.client.onTurnDone = func(aborted bool) {
+		resCh <- &Result{Status: "completed"}
+		close(msgCh)
+		close(resCh)
+	}
+
+	if _, err := state.client.request(ctx, "turn/start", map[string]any{
+		"threadId": state.threadID,
+		"input":    []map[string]any{{"type": "text", "text": prompt}},
+	}); err != nil {
+		return nil, fmt.Errorf("codex persistent turn/start: %w", err)
+	}
+
+	var stopOnce sync.Once
+	stop := func() error { stopOnce.Do(func() {}); return nil }
+
+	return &PersistentSession{
+		Messages:  msgCh,
+		Result:    resCh,
+		Stop:      stop,
+		SessionID: state.threadID,
+		state:     state,
+	}, nil
+}
+
+// Close terminates the persistent Codex session.
+func (b *CodexBackend) Close(ps *PersistentSession) error {
+	state, ok := ps.state.(*codexPersistentState)
+	if !ok || state == nil {
+		return fmt.Errorf("codex: invalid session state")
+	}
+	return state.runner.close()
+}
+
 // ── Blocked args ──
 
 // codexBlockedArgs are flags hardcoded by the backend that must not be
@@ -66,6 +226,9 @@ func (b *CodexBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *E
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	semanticInactivityTimeout := defaultCodexSemanticInactivityTimeout
+	if opts.SemanticInactivityTimeout > 0 {
+		semanticInactivityTimeout = opts.SemanticInactivityTimeout
+	}
 
 	args := buildCodexArgs(opts)
 	b.logger.Info("codex: starting", "exec", execPath, "args", args)
@@ -351,8 +514,22 @@ func (c *codexClient) startThread(ctx context.Context, opts *ExecuteOptions) (st
 
 // ── CLI argument construction ──
 
+// buildPromptFromMessages builds a simple prompt from messages for persistent Send.
+func buildPromptFromMessages(messages []Message) string {
+	var b strings.Builder
+	for _, msg := range messages {
+		if msg.Role == RoleSystem {
+			continue
+		}
+		b.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, msg.Content))
+	}
+	return b.String()
+}
+
 func buildCodexArgs(opts *ExecuteOptions) []string {
 	args := []string{"app-server", "--listen", "stdio://"}
+	// Daemon-level ExtraArgs first, then agent-level CustomArgs can override.
+	args = append(args, filterCustomArgs(opts.ExtraArgs, codexBlockedArgs)...)
 	args = append(args, filterCustomArgs(opts.CustomArgs, codexBlockedArgs)...)
 	return args
 }

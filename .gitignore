@@ -49,8 +49,8 @@ pkg/agent/.solo/
 *.png
 frontend/e2e/screenshots/
 
-# Research docs (reference only, not project docs)
-docs/research/
+# Docs — design/research/version docs are working documents, not production artifacts
+docs/
 *.bak
 *.bak2
 .playwright-cli/

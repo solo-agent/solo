@@ -130,6 +130,9 @@ func (b *ClaudeBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 
 // ── Persistent session types ──────────────────────────────────────────────────
 
+// Compile-time check: claudePersistentState implements SessionStater.
+var _ SessionStater = (*claudePersistentState)(nil)
+
 // claudePersistentState holds the runtime state of a long-running Claude Code
 // subprocess. The subprocess stays alive across multiple turns (Start → Send →
 // Send → ... → Close), maintaining full conversation context.
@@ -167,6 +170,21 @@ type turnState struct {
 	msgCh  chan OutputChunk
 	resCh  chan *Result
 	output strings.Builder
+}
+
+// ── SessionStater implementation ──────────────────────────────────────────────
+
+func (s *claudePersistentState) IsAlive() bool {
+	return s.cmd.ProcessState == nil || !s.cmd.ProcessState.Exited()
+}
+
+func (s *claudePersistentState) SessionID() string { return s.sessionID }
+
+func (s *claudePersistentState) Done() <-chan struct{} { return s.done }
+
+func (s *claudePersistentState) Notify(msg string) error {
+	_, err := s.stdin.Write([]byte(msg))
+	return err
 }
 
 // ── Persistent Backend: Start ────────────────────────────────────────────────

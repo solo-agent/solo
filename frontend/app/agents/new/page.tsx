@@ -34,10 +34,12 @@ export default function CreateAgentPage() {
         model_provider: values.model_provider,
         model_name: values.model_name,
         system_prompt: values.system_prompt || undefined,
+        custom_env: values.custom_env,
+        custom_args: values.custom_args,
       });
       router.push('/agents');
-    } catch {
-      // Error handling will be added with real API
+    } catch (err) {
+      console.error('创建 Agent 失败:', err);
     } finally {
       setIsSubmitting(false);
     }

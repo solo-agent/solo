@@ -2,7 +2,9 @@
 // AgentForm — create/edit Agent form with brutalist styling
 // - input-brutal, textarea-brutal
 // - radio-brutal for Provider selection
-// - btn-brutal-pink for submit
+// - CLI detection display next to provider
+// - EnvEditor for custom_env key-value pairs (v1.4)
+// - ArgsEditor for custom_args tags (v1.4)
 // - ROLE_TEMPLATES for role template selector (SOLO-210-F)
 // ============================================================================
 
@@ -12,12 +14,16 @@ import { useState, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Bot } from 'lucide-react';
+import { Bot, Wrench, Terminal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { MODEL_OPTIONS, type AgentModelProvider } from '@/lib/types';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EnvEditor } from '@/components/agents/env-editor';
+import { ArgsEditor } from '@/components/agents/args-editor';
+import { useCliDetection } from '@/lib/hooks/use-cli-detection';
+import { useBackendMeta } from '@/lib/hooks/use-backend-meta';
 
 // ============================================================================
 // Role Templates (SOLO-210-F) — frontend-defined preset system prompts
@@ -74,9 +80,13 @@ const agentFormSchema = z.object({
     .min(1, '名称不能为空')
     .max(50, '名称不能超过 50 个字符'),
   description: z.string().max(200, '描述不能超过 200 个字符').optional(),
-  model_provider: z.enum(['anthropic', 'openai', 'ollama', 'local']),
+  model_provider: z.string().min(1, '请选择 Runtime'),
   model_name: z.string().min(1, '请选择一个模型'),
   system_prompt: z.string().optional(),
+  // v1.4: custom_env and custom_args are managed via controlled components,
+  // not validated by zod (they use their own UI validation)
+  custom_env: z.record(z.string(), z.string()).optional(),
+  custom_args: z.array(z.string()).optional(),
 });
 
 export type AgentFormValues = z.infer<typeof agentFormSchema>;
@@ -105,38 +115,51 @@ export function AgentForm({
     defaultValues: {
       name: '',
       description: '',
-      model_provider: 'anthropic',
-      model_name: 'claude-sonnet-4-20250514',
+      model_provider: '',
+      model_name: '',
       system_prompt: '',
+      custom_env: {},
+      custom_args: [],
       ...defaultValues,
     },
+    mode: 'onChange',
   });
 
-  const selectedProvider = watch('model_provider') as AgentModelProvider;
-  const currentModels = MODEL_OPTIONS[selectedProvider]?.models || [];
+  const selectedRuntime = watch('model_provider');
   const currentSystemPrompt = watch('system_prompt') || '';
+
+  // v1.4: dynamic CLI detection + backend metadata
+  const { results: detection, isLoading: detectionLoading } = useCliDetection();
+  const { metas: backendMeta } = useBackendMeta();
 
   // Role template selection state (SOLO-210-F)
   const [selectedTemplateKey, setSelectedTemplateKey] = useState<string | null>(null);
 
-  const handleProviderChange = (provider: AgentModelProvider) => {
-    setValue('model_provider', provider);
-    const firstModel = MODEL_OPTIONS[provider]?.models[0]?.value;
-    if (firstModel) {
-      setValue('model_name', firstModel);
-    }
+  // v1.4: separate local state for complex editors, synced to form values
+  const [envValues, setEnvValues] = useState<Record<string, string>>(
+    defaultValues?.custom_env || {},
+  );
+  const [argsValues, setArgsValues] = useState<string[]>(
+    defaultValues?.custom_args || [],
+  );
+
+  // v1.4: runtime change handler — auto-set model_name from backend metadata
+  const runtimeReg = register('model_provider');
+  const handleRuntimeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    runtimeReg.onChange(e);
+    const type = e.target.value;
+    const meta = backendMeta[type];
+    const defaultModel = meta?.default_model || meta?.models?.[0]?.id || type;
+    setValue('model_name', defaultModel, { shouldValidate: true, shouldDirty: true });
   };
 
   const handleTemplateSelect = useCallback(
     (template: RoleTemplate) => {
-      // Clicking the already-selected template: reset text to template prompt
       if (selectedTemplateKey === template.key) {
         setValue('system_prompt', template.prompt);
         return;
       }
 
-      // Switching to a different template or selecting for the first time:
-      // confirm if the current textarea has user-written content
       const isTextareaDirty =
         currentSystemPrompt.trim() !== '' &&
         currentSystemPrompt !==
@@ -155,8 +178,35 @@ export function AgentForm({
     [currentSystemPrompt, selectedTemplateKey, setValue],
   );
 
+  const handleEnvChange = useCallback(
+    (env: Record<string, string>) => {
+      setEnvValues(env);
+      setValue('custom_env', env);
+    },
+    [setValue],
+  );
+
+  const handleArgsChange = useCallback(
+    (args: string[]) => {
+      setArgsValues(args);
+      setValue('custom_args', args);
+    },
+    [setValue],
+  );
+
+  const handleFormSubmit = useCallback(
+    async (values: AgentFormValues) => {
+      await onSubmit({
+        ...values,
+        custom_env: envValues,
+        custom_args: argsValues,
+      });
+    },
+    [onSubmit, envValues, argsValues],
+  );
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+    <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-6">
       {/* Name */}
       <div className="space-y-2">
         <Label htmlFor="name">
@@ -192,37 +242,25 @@ export function AgentForm({
         )}
       </div>
 
-      {/* Model selection */}
+      {/* Runtime Selection (v1.4: dynamic, based on CLI detection) */}
       <div className="space-y-3">
-        <Label>模型选择</Label>
+        <Label>
+          Runtime <span className="text-brutal-red">*</span>
+        </Label>
 
-        {/* Provider radio buttons — brutalist radio-brutal style */}
-        <div className="flex gap-2">
-          {(Object.entries(MODEL_OPTIONS) as [AgentModelProvider, (typeof MODEL_OPTIONS)['anthropic']][]).map(
-            ([key, option]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => handleProviderChange(key)}
-                className={cn(
-                  'flex-1 border-2 px-3 py-2 font-heading text-sm font-bold transition-all',
-                  selectedProvider === key
-                    ? 'border-black bg-brutal-pink text-black shadow-brutal-sm'
-                    : 'border-black bg-white text-muted-foreground shadow-brutal-sm hover:bg-black/5',
-                )}
-              >
-                {option.label}
-              </button>
-            ),
-          )}
-        </div>
+        {/* Loading state */}
+        {detectionLoading && (
+          <Skeleton className="h-10 w-full rounded-none" />
+        )}
 
-        {/* Model select — brutalist style */}
-        <div className="space-y-2">
-          <Label htmlFor="model_name">具体模型</Label>
+        {/* Runtime dropdown — only show available runtimes */}
+        {!detectionLoading && (
           <select
-            id="model_name"
-            {...register('model_name')}
+            name={runtimeReg.name}
+            ref={runtimeReg.ref}
+            onBlur={runtimeReg.onBlur}
+            value={selectedRuntime}
+            onChange={handleRuntimeChange}
             className="input-brutal h-10 appearance-none bg-white pr-8 font-body text-sm"
             style={{
               backgroundImage:
@@ -231,18 +269,41 @@ export function AgentForm({
               backgroundPosition: 'right 0.75rem center',
             }}
           >
-            {currentModels.map((model) => (
-              <option key={model.value} value={model.value}>
-                {model.label}
+            <option value="">选择 Runtime...</option>
+            {Object.values(detection).map((rt) => (
+              <option
+                key={rt.type}
+                value={rt.type}
+                disabled={!rt.available}
+              >
+                {rt.available ? '●' : '○'} {rt.display_name}
+                {rt.version ? ` (v${rt.version})` : ''}
               </option>
             ))}
           </select>
-          {errors.model_name && (
-            <p className="font-mono text-[11px] text-brutal-red">
-              {errors.model_name.message}
-            </p>
-          )}
-        </div>
+        )}
+        {errors.model_provider && (
+          <p className="font-mono text-[11px] text-brutal-red">
+            {errors.model_provider.message}
+          </p>
+        )}
+
+        {/* Unavailable runtimes shown below with install hint */}
+        {!detectionLoading &&
+          Object.values(detection)
+            .filter((rt) => !rt.available)
+            .map((rt) => (
+              <div
+                key={rt.type}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground"
+              >
+                <span className="font-mono text-[11px]">
+                  {rt.display_name} — 未安装
+                  {rt.error ? ` (${rt.error})` : ` (${rt.binary})`}
+                </span>
+              </div>
+            ))}
+
       </div>
 
       {/* Role Template Selector (SOLO-210-F) */}
@@ -288,6 +349,38 @@ export function AgentForm({
         <p className="font-mono text-[11px] text-muted-foreground">
           定义 Agent 的角色和行为方式。填写后 Agent 将根据此指令回复消息。
         </p>
+      </div>
+
+      {/* v1.4: Custom Environment Variables */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Terminal className="h-4 w-4" />
+          <Label>Environment Variables <span className="font-normal text-muted-foreground">(可选)</span></Label>
+        </div>
+        <p className="font-mono text-[11px] text-muted-foreground">
+          为 Agent 运行时注入环境变量，例如 API 密钥、配置参数等。
+        </p>
+        <EnvEditor
+          value={envValues}
+          onChange={handleEnvChange}
+          disabled={isSubmitting}
+        />
+      </div>
+
+      {/* v1.4: Custom CLI Arguments */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Wrench className="h-4 w-4" />
+          <Label>Custom Arguments <span className="font-normal text-muted-foreground">(可选)</span></Label>
+        </div>
+        <p className="font-mono text-[11px] text-muted-foreground">
+          传递给 CLI 的额外参数。每个参数作为独立标签添加。
+        </p>
+        <ArgsEditor
+          value={argsValues}
+          onChange={handleArgsChange}
+          disabled={isSubmitting}
+        />
       </div>
 
       {/* Submit */}

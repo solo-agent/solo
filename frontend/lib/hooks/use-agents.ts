@@ -26,6 +26,8 @@ interface AgentResponse {
   avatar_url: string;
   enabled_tools: string[];
   interaction_mode: string;
+  custom_env: Record<string, string> | null;
+  custom_args: string[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -48,6 +50,8 @@ function mapAgent(resp: AgentResponse): Agent {
     avatar_url: resp.avatar_url || null,
     enabled_tools: resp.enabled_tools ?? [],
     interaction_mode: (resp.interaction_mode as AgentInteractionMode) ?? 'mention',
+    custom_env: resp.custom_env ?? {},
+    custom_args: resp.custom_args ?? [],
     created_at: resp.created_at,
     updated_at: resp.updated_at,
   };
@@ -97,6 +101,8 @@ export function useAgents() {
       temperature: input.temperature,
       max_tokens: input.max_tokens,
       avatar_url: input.avatar_url || `pixel:${nextIndex}`,
+      custom_env: input.custom_env || {},
+      custom_args: input.custom_args || [],
     });
     const agent = mapAgent(res);
     setAgents((prev) => [...prev, agent]);
@@ -112,6 +118,8 @@ export function useAgents() {
       system_prompt: input.system_prompt,
       temperature: input.temperature,
       max_tokens: input.max_tokens,
+      custom_env: input.custom_env,
+      custom_args: input.custom_args,
     });
     const updated = mapAgent(res);
     setAgents((prev) => prev.map((a) => (a.id === id ? updated : a)));

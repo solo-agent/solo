@@ -73,11 +73,14 @@ export interface Agent {
   avatar_url: string | null;
   enabled_tools: string[];
   interaction_mode: 'active' | 'mention' | 'dnd';
+  custom_env: Record<string, string>;
+  custom_args: string[];
   created_at: string;
   updated_at: string;
 }
 
-export type AgentModelProvider = 'anthropic' | 'openai' | 'ollama' | 'local';
+/** v1.4: runtime type is dynamic, driven by backend registry (claude, codex, opencode, etc.) */
+export type AgentModelProvider = string;
 
 export interface CreateAgentInput {
   name: string;
@@ -88,6 +91,8 @@ export interface CreateAgentInput {
   temperature?: number;
   max_tokens?: number;
   avatar_url?: string;
+  custom_env?: Record<string, string>;
+  custom_args?: string[];
 }
 
 export interface UpdateAgentInput extends Partial<CreateAgentInput> {
@@ -111,7 +116,8 @@ export const AVAILABLE_TOOLS: AgentToolDef[] = [
   { id: 'search_files', name: 'Search Files', description: '搜索文件内容' },
 ];
 
-export const MODEL_OPTIONS: Record<AgentModelProvider, { label: string; models: { value: string; label: string }[] }> = {
+/** @deprecated v1.4 — use AgentBackendMeta.models from /api/v1/agent-backends instead. Kept for backward compatibility. */
+export const MODEL_OPTIONS: Record<string, { label: string; models: { value: string; label: string }[] }> = {
   anthropic: {
     label: 'Anthropic',
     models: [
@@ -309,4 +315,44 @@ export interface SearchResponse {
   next_cursor: string | null;
   has_more: boolean;
   total_approx: number;
+}
+
+// ---- Agent Backend / CLI Detection types (v1.4) ----
+
+/** Registered agent backend metadata from GET /api/v1/agent-backends */
+export interface AgentBackendMeta {
+  type: string;
+  display_name: string;
+  requires_binary: string;
+  protocols: string[];
+  default_model: string;
+  models: { id: string; label: string; default: boolean }[];
+}
+
+/** CLI detection item from GET /api/v1/agent-backends/detect */
+export interface AgentBackendDetectItem {
+  type: string;
+  display_name: string;
+  binary: string;
+  available: boolean;
+  version?: string;
+  error?: string;
+}
+
+/** @deprecated v1.4 — use AgentBackendMeta instead */
+export interface AgentBackendInfo {
+  provider: AgentModelProvider;
+  label: string;
+  description: string;
+  binary: string;
+  install_hint?: string;
+}
+
+/** @deprecated v1.4 — use AgentBackendDetectItem instead */
+export interface AgentBackendDetectResult {
+  provider: AgentModelProvider;
+  available: boolean;
+  binary: string;
+  version?: string;
+  install_hint?: string;
 }

@@ -11,7 +11,10 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // opencodeBlockedArgs are flags hardcoded by the backend that must not be
@@ -59,6 +62,13 @@ func (b *OpenCodeBackend) Execute(ctx context.Context, req *ExecuteRequest, opts
 		}
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
+
+	// P1: semantic inactivity timeout entry point (not yet wired to an
+	// ActivityTracker for OpenCode). Reserved for future implementation.
+	if opts.SemanticInactivityTimeout > 0 {
+		b.logger.Debug("opencode: semantic inactivity timeout configured (not yet implemented)",
+			"timeout", opts.SemanticInactivityTimeout)
+	}
 
 	prompt := buildPrompt(req, opts)
 	args := buildOpenCodeArgs(prompt, opts)
@@ -352,6 +362,213 @@ type opencodeErrorData struct {
 	Message string `json:"message,omitempty"`
 }
 
+// ── Persistent Backend (v1.4) ──────────────────────────────────────────────────
+
+// opencodePersistentState holds the runtime state of a long-running OpenCode
+// subprocess across multiple turns.
+type opencodePersistentState struct {
+	runner    *persistentRunner
+	turn      atomic.Pointer[opencodeTurnState]
+	sessionID string
+}
+
+// Compile-time check: opencodePersistentState implements SessionStater.
+var _ SessionStater = (*opencodePersistentState)(nil)
+
+func (s *opencodePersistentState) IsAlive() bool            { return s.runner.isAlive() }
+func (s *opencodePersistentState) SessionID() string        { return s.sessionID }
+func (s *opencodePersistentState) Done() <-chan struct{}    { return s.runner.done }
+func (s *opencodePersistentState) Notify(msg string) error  { return s.runner.write([]byte(msg)) }
+
+type opencodeTurnState struct {
+	id    string
+	msgCh chan OutputChunk
+	resCh chan *Result
+}
+
+func buildOpenCodePersistentArgs(opts *ExecuteOptions) []string {
+	args := []string{"run", "--format", "json"}
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
+	}
+	args = append(args, filterCustomArgs(opts.ExtraArgs, opencodeBlockedArgs)...)
+	args = append(args, filterCustomArgs(opts.CustomArgs, opencodeBlockedArgs)...)
+	return args
+}
+
+// Start creates a persistent OpenCode session. The process stays alive across
+// multiple turns with full conversation context preserved via stdin/stdout.
+func (b *OpenCodeBackend) Start(ctx context.Context, req *ExecuteRequest, opts *ExecuteOptions) (*PersistentSession, error) {
+	args := buildOpenCodePersistentArgs(opts)
+	b.logger.Info("opencode: starting persistent session", "args", args)
+
+	env := buildEnv(opts.Env)
+	env = append(env, `OPENCODE_PERMISSION={"*":"allow"}`)
+
+	runner, err := startPersistent(ctx, b.executablePath, args, opts.WorkspaceDir, env, b.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	prompt := buildPrompt(req, opts)
+	if err := runner.write([]byte(prompt + "\n")); err != nil {
+		runner.close()
+		return nil, fmt.Errorf("opencode: write initial prompt: %w", err)
+	}
+
+	state := &opencodePersistentState{
+		runner: runner,
+	}
+
+	turn := &opencodeTurnState{
+		id:    uuid.New().String(),
+		msgCh: make(chan OutputChunk, 256),
+		resCh: make(chan *Result, 1),
+	}
+	state.turn.Store(turn)
+
+	go b.opencodePersistentLoop(state)
+
+	var stopOnce sync.Once
+	stop := func() error {
+		stopOnce.Do(func() { runner.cancel() })
+		return nil
+	}
+
+	return &PersistentSession{
+		Messages: turn.msgCh,
+		Result:   turn.resCh,
+		Stop:     stop,
+		state:    state,
+	}, nil
+}
+
+// Send delivers new messages to a running persistent OpenCode session.
+func (b *OpenCodeBackend) Send(ctx context.Context, ps *PersistentSession, messages []Message) (*PersistentSession, error) {
+	state, ok := ps.state.(*opencodePersistentState)
+	if !ok || state == nil {
+		return nil, fmt.Errorf("opencode: invalid session state")
+	}
+	if !state.runner.isAlive() {
+		return nil, fmt.Errorf("opencode: session process has exited")
+	}
+
+	var promptBuilder strings.Builder
+	for _, msg := range messages {
+		if msg.Role == RoleSystem {
+			continue
+		}
+		promptBuilder.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, msg.Content))
+	}
+
+	turn := &opencodeTurnState{
+		id:    uuid.New().String(),
+		msgCh: make(chan OutputChunk, 256),
+		resCh: make(chan *Result, 1),
+	}
+	state.turn.Store(turn)
+
+	if err := state.runner.write([]byte(promptBuilder.String() + "\n")); err != nil {
+		state.turn.Store(nil)
+		return nil, fmt.Errorf("opencode: write send input: %w", err)
+	}
+
+	b.logger.Info("opencode: turn started via Send", "turn_id", turn.id, "session_id", state.sessionID)
+
+	var stopOnce sync.Once
+	stop := func() error { stopOnce.Do(func() {}); return nil }
+
+	return &PersistentSession{
+		Messages:  turn.msgCh,
+		Result:    turn.resCh,
+		Stop:      stop,
+		SessionID: state.sessionID,
+		state:     state,
+	}, nil
+}
+
+// Close terminates the persistent OpenCode session.
+func (b *OpenCodeBackend) Close(ps *PersistentSession) error {
+	state, ok := ps.state.(*opencodePersistentState)
+	if !ok || state == nil {
+		return fmt.Errorf("opencode: invalid session state")
+	}
+	return state.runner.close()
+}
+
+// opencodePersistentLoop reads OpenCode's stdout across multiple turns.
+// Each "result" event closes the current turn's channels.
+func (b *OpenCodeBackend) opencodePersistentLoop(state *opencodePersistentState) {
+	defer close(state.runner.done)
+
+	scanner := bufio.NewScanner(state.runner.stdout)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+	startTime := time.Now()
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		var event opencodeEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			continue
+		}
+
+		if event.SessionID != "" && state.sessionID == "" {
+			state.sessionID = event.SessionID
+		}
+
+		turn := state.turn.Load()
+		if turn == nil {
+			continue
+		}
+
+		switch event.Type {
+		case "text":
+			turn.msgCh <- OutputChunk{Type: string(MessageText), Content: event.Part.Text}
+		case "tool_use":
+			tool := &ToolInfo{Name: event.Part.Tool, CallID: event.Part.CallID}
+			if event.Part.State != nil && len(event.Part.State.Input) > 0 {
+				var input map[string]any
+				if json.Unmarshal(event.Part.State.Input, &input) == nil {
+					tool.Input = input
+				}
+			}
+			turn.msgCh <- OutputChunk{Type: string(MessageToolUse), Tool: tool}
+		case "tool_result":
+			var resultContent string
+			if event.Part.State != nil && event.Part.State.Output != nil {
+				resultContent = fmt.Sprint(event.Part.State.Output)
+			}
+			turn.msgCh <- OutputChunk{
+				Type:    string(MessageToolResult),
+				Content: resultContent,
+				Tool:    &ToolInfo{Name: event.Part.Tool, CallID: event.Part.CallID},
+			}
+		case "result":
+			duration := time.Since(startTime)
+			turn.resCh <- &Result{
+				Status:     "completed",
+				DurationMs: duration.Milliseconds(),
+			}
+			close(turn.msgCh)
+			close(turn.resCh)
+			state.turn.Store(nil)
+		}
+	}
+
+	// Scanner error or EOF — close any remaining turn
+	turn := state.turn.Load()
+	if turn != nil {
+		turn.resCh <- &Result{Status: "failed", Error: "opencode process exited unexpectedly"}
+		close(turn.msgCh)
+		close(turn.resCh)
+		state.turn.Store(nil)
+	}
+}
+
 // ── CLI argument construction ──
 
 func buildOpenCodeArgs(prompt string, opts *ExecuteOptions) []string {
@@ -362,6 +579,8 @@ func buildOpenCodeArgs(prompt string, opts *ExecuteOptions) []string {
 	if opts.SystemPrompt != "" {
 		args = append(args, "--prompt", opts.SystemPrompt)
 	}
+	// Daemon-level ExtraArgs first, then agent-level CustomArgs can override.
+	args = append(args, filterCustomArgs(opts.ExtraArgs, opencodeBlockedArgs)...)
 	args = append(args, filterCustomArgs(opts.CustomArgs, opencodeBlockedArgs)...)
 	args = append(args, prompt)
 	return args
