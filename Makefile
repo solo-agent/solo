@@ -1,4 +1,4 @@
-.PHONY: init start restart stop
+.PHONY: init start restart rebuild stop
 
 # ── 1. 初次初始化 ────────────────────────────────────────────────────────────
 init:
@@ -32,14 +32,14 @@ start:
 		done; \
 	fi
 	@echo "PostgreSQL ✓"
-	@# Build
-	@echo "Building..."
-	@go build -o .pids/server ./cmd/server/
-	@go build -o .pids/daemon ./cmd/daemon/
 	@# Server
 	@if [ -f .pids/server.pid ] && kill -0 $$(cat .pids/server.pid) 2>/dev/null; then \
 		echo "Server already running"; \
 	else \
+		if [ ! -f .pids/server ]; then \
+			echo "Building server..."; \
+			go build -o .pids/server ./cmd/server/; \
+		fi; \
 		.pids/server > server.log 2>&1 & \
 		echo $$! > .pids/server.pid; \
 		for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do \
@@ -52,13 +52,16 @@ start:
 	@if [ -f .pids/daemon.pid ] && kill -0 $$(cat .pids/daemon.pid) 2>/dev/null; then \
 		echo "Daemon already running"; \
 	else \
+		if [ ! -f .pids/daemon ]; then \
+			echo "Building daemon..."; \
+			go build -o .pids/daemon ./cmd/daemon/; \
+		fi; \
 		.pids/daemon > daemon.log 2>&1 & \
 		echo $$! > .pids/daemon.pid; \
 		sleep 2; \
 		echo "Daemon :8081 ✓"; \
 	fi
 	@# Frontend
-	@echo "Starting frontend..."
 	@if [ -f .pids/frontend.pid ] && kill -0 $$(cat .pids/frontend.pid) 2>/dev/null; then \
 		echo "Frontend already running"; \
 	else \
@@ -72,7 +75,15 @@ start:
 # ── 3. 重启 ──────────────────────────────────────────────────────────────────
 restart: stop start
 
-# ── 4. 关闭所有 ──────────────────────────────────────────────────────────────
+# ── 4. 重建重启 ──────────────────────────────────────────────────────────────
+rebuild: stop
+	@echo "=== 重新构建 ==="
+	@mkdir -p .pids
+	@go build -o .pids/server ./cmd/server/
+	@go build -o .pids/daemon ./cmd/daemon/
+	@$(MAKE) start
+
+# ── 5. 关闭所有 ──────────────────────────────────────────────────────────────
 stop:
 	@echo "=== 关闭所有服务 ==="
 	@-lsof -ti :8080 | xargs kill 2>/dev/null && echo "Server stopped" || echo "Server not running"

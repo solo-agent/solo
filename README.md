@@ -9,13 +9,14 @@
 - Docker & Docker Compose
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI（`claude` 命令）
 
-### 四条命令
+### 命令
 
 ```bash
-make init      # 1. 初次初始化（装依赖、建表）
-make start     # 2. 启动所有服务
-make restart   # 3. 重启所有服务
-make stop      # 4. 关闭所有服务
+make init      # 初次初始化（装依赖、建表）
+make start     # 启动所有服务
+make restart   # 重启所有服务
+make rebuild   # 重新构建并重启
+make stop      # 关闭所有服务
 ```
 
 启动后访问 http://localhost:3000。
