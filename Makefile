@@ -55,6 +55,7 @@ start:
 		if [ ! -f .pids/daemon ]; then \
 			echo "Building daemon..."; \
 			go build -o .pids/daemon ./cmd/daemon/; \
+			go build -o .pids/solo ./cmd/solo/; \
 		fi; \
 		.pids/daemon > daemon.log 2>&1 & \
 		echo $$! > .pids/daemon.pid; \
@@ -81,6 +82,7 @@ rebuild: stop
 	@mkdir -p .pids
 	@go build -o .pids/server ./cmd/server/
 	@go build -o .pids/daemon ./cmd/daemon/
+	@go build -o .pids/solo ./cmd/solo/
 	@$(MAKE) start
 
 # ── 5. 关闭所有 ──────────────────────────────────────────────────────────────
