@@ -100,18 +100,17 @@ func main() {
 	// Create handler
 	h := newDaemonHandler(dbPool, taskMgr, llmProvider, serverURL, internalToken)
 
-	// v1.4: Initialize persistent agent session managers for all supported types.
-	for _, providerType := range []string{"claude", "local", "codex", "opencode", "openclaw", "hermes"} {
-		psBackend, err := agent.NewPersistentBackend(providerType)
+	// v1.4: Initialize persistent agent session managers for all registered types.
+	for _, meta := range agent.GlobalRegistry().ListMeta() {
+		psBackend, err := agent.NewPersistentBackend(meta.Type)
 		if err != nil {
-			slog.Debug("persistent session not available", "provider", providerType, "error", err)
-			continue
+			continue // not all types support persistent sessions
 		}
 		workspaceMgr := agent.NewWorkspaceManager("")
 		memoryMgr := agent.NewMemoryManager("")
 		sessionMgr := agent.NewAgentSessionManager(psBackend, workspaceMgr, memoryMgr, slog.Default())
-		h.SetSessionManager(providerType, sessionMgr)
-		slog.Info("persistent agent session manager initialized", "provider", providerType)
+		h.SetSessionManager(meta.Type, sessionMgr)
+		slog.Info("persistent agent session manager initialized", "provider", meta.Type)
 		defer sessionMgr.CloseAll()
 	}
 
@@ -221,7 +220,7 @@ func registerWithServer(ctx context.Context) error {
 		Capabilities:  []string{"llm"},
 		MaxConcurrent: 10,
 		CurrentLoad:   0,
-		AgentTypes:    []string{"anthropic", "openai", "local"},
+		AgentTypes:    registeredAgentTypes(),
 	}
 
 	payload, err := json.Marshal(req)
@@ -388,4 +387,14 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		slog.Error("writeJSON encode error", "error", err)
 	}
+}
+
+// registeredAgentTypes returns all agent types from the global registry.
+func registeredAgentTypes() []string {
+	metas := agent.GlobalRegistry().ListMeta()
+	types := make([]string, 0, len(metas))
+	for _, m := range metas {
+		types = append(types, m.Type)
+	}
+	return types
 }

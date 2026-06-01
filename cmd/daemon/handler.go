@@ -239,7 +239,7 @@ func (h *daemonHandler) holdAndRevise(ctx context.Context, req runTaskRequest, d
 		{Role: agent.RoleUser, Content: revBuilder.String()},
 	}
 
-	ps, err := h.getSessionManager(req.ModelConfig.Provider).DeliverMessage(ctx, req.AgentID, pendingMsgs)
+	sm := h.getSessionManager(req.ModelConfig.Provider); if sm == nil { slog.Warn("task: holdAndRevise: no session manager", "provider", req.ModelConfig.Provider); return draftContent, false }; ps, err := sm.DeliverMessage(ctx, req.AgentID, pendingMsgs)
 	if err != nil {
 		slog.Warn("task: holdAndRevise failed to deliver", "agent_id", req.AgentID, "error", err)
 		return draftContent, false
@@ -531,10 +531,9 @@ func (h *daemonHandler) Run(w http.ResponseWriter, r *http.Request) {
 }
 
 // processTaskStreaming executes the LLM call in streaming mode and pushes events.
-// It tries the new Backend interface first (for claude/local providers);
-// falls back to the old LLM provider path for unsupported providers.
+// It tries the Backend interface first (for all registered CLI backends);
+// falls back to the old LLM provider path for API-based providers.
 func (h *daemonHandler) processTaskStreaming(ctx context.Context, req runTaskRequest) {
-	// Try the new Backend interface for supported providers (claude, local).
 	if backend, err := agent.NewBackend(req.ModelConfig.Provider, os.Getenv("LLM_API_KEY")); err == nil {
 		h.processTaskWithBackend(ctx, req, backend)
 		return

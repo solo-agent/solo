@@ -100,9 +100,6 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	modelProvider := req.ModelProvider
-	if modelProvider == "" {
-		modelProvider = "anthropic"
-	}
 
 	modelName := req.ModelName
 	if modelName == "" {
