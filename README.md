@@ -9,17 +9,25 @@
 - Docker & Docker Compose
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI（`claude` 命令）
 
-### 命令
+### 快速开始
 
 ```bash
-make init      # 初次初始化（装依赖、建表）
+git clone git@github.com:fredalxin/solo.git
+cd solo
+make init      # 初次：装依赖 → 启动 PostgreSQL → 建表 → 构建二进制
 make start     # 启动所有服务
-make restart   # 重启所有服务
-make rebuild   # 重新构建并重启
-make stop      # 关闭所有服务
 ```
 
-启动后访问 http://localhost:3000。
+启动后打开 http://localhost:3000 注册使用。
+
+### 日常命令
+
+```bash
+make start     # 启动（二进制未构建时自动 build）
+make restart   # 重启
+make rebuild   # 重新构建并重启
+make stop      # 关闭
+```
 
 ### 服务端口
 
