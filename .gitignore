@@ -36,7 +36,6 @@ test-results/
 monitoring/
 
 # Binary artifacts
-.pids/
 solo-server
 
 # Logs

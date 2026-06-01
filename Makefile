@@ -17,6 +17,11 @@ init:
 	@for f in migrations/*.up.sql; do \
 		docker exec -i solo-postgres psql -U solo -d solo < "$$f" > /dev/null 2>&1; \
 	done
+	@echo "=== 构建二进制 ==="
+	@mkdir -p .pids
+	@go build -o .pids/server ./cmd/server/
+	@go build -o .pids/daemon ./cmd/daemon/
+	@go build -o .pids/solo ./cmd/solo/
 	@echo "=== 初始化完成 ==="
 
 # ── 2. 启动所有服务 ─────────────────────────────────────────────────────────
