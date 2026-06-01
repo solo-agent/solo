@@ -1,4 +1,6 @@
-version: "3.9"
+# Solo — local development stack
+# Only PostgreSQL runs in Docker. Server and Daemon run natively (they need
+# access to the local `claude` binary for LLM_PROVIDER=local mode).
 
 services:
   postgres:
@@ -12,114 +14,11 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-    networks:
-      - solo-net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U solo -d solo"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  server:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: solo-server
-    entrypoint: /usr/local/bin/server
-    command: ""
-    environment:
-      DATABASE_URL: postgres://solo:solo-dev@postgres:5432/solo?sslmode=disable
-      JWT_SECRET: solo-dev-internal-token
-      INTERNAL_TOKEN_SECRET: solo-dev-internal-token
-      LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
-      SERVER_PORT: "8080"
-      DAEMON_PORT: "8081"
-      APP_ENV: development
-    ports:
-      - "8080:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - solo-net
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://localhost:8080/healthz | grep -q alive"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  daemon:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: solo-daemon
-    entrypoint: /usr/local/bin/daemon
-    command: ""
-    environment:
-      DATABASE_URL: postgres://solo:solo-dev@postgres:5432/solo?sslmode=disable
-      JWT_SECRET: solo-dev-internal-token
-      INTERNAL_TOKEN_SECRET: solo-dev-internal-token
-      LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
-      DAEMON_PORT: "8081"
-      DAEMON_ID: daemon-01
-      DAEMON_SERVER_URL: http://server:8080
-      APP_ENV: development
-    ports:
-      - "8081:8081"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      server:
-        condition: service_healthy
-    networks:
-      - solo-net
-
-  # ---- Optional: Monitoring Stack (Prometheus + Grafana) ----
-  # Uncomment the monitoring services below to enable metrics collection.
-  # Requires configuration files in the monitoring/ directory.
-  #
-  # prometheus:
-  #   image: prom/prometheus:v2.53.0
-  #   container_name: solo-prometheus
-  #   volumes:
-  #     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-  #     - prometheus_data:/prometheus
-  #   ports:
-  #     - "9090:9090"
-  #   command:
-  #     - '--config.file=/etc/prometheus/prometheus.yml'
-  #     - '--storage.tsdb.path=/prometheus'
-  #     - '--web.console.libraries=/etc/prometheus/console_libraries'
-  #     - '--web.console.templates=/etc/prometheus/consoles'
-  #     - '--web.enable-lifecycle'
-  #   networks:
-  #     - solo-net
-  #
-  # grafana:
-  #   image: grafana/grafana:11.1.0
-  #   container_name: solo-grafana
-  #   volumes:
-  #     - grafana_data:/var/lib/grafana
-  #     - ./monitoring/grafana-dashboards:/etc/grafana/provisioning/dashboards:ro
-  #     - ./monitoring/grafana-datasources:/etc/grafana/provisioning/datasources:ro
-  #   environment:
-  #     - GF_SECURITY_ADMIN_USER=admin
-  #     - GF_SECURITY_ADMIN_PASSWORD=admin
-  #     - GF_USERS_ALLOW_SIGN_UP=false
-  #   ports:
-  #     - "3000:3000"
-  #   depends_on:
-  #     - prometheus
-  #   networks:
-  #     - solo-net
-
 volumes:
   pgdata:
-  prometheus_data:
-  grafana_data:
-
-networks:
-  solo-net:
-    driver: bridge

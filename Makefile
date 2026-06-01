@@ -1,62 +1,61 @@
-.PHONY: start stop restart update status logs solo solo-deploy clean
+.PHONY: install db-up db-down migrate server daemon dev build clean stop
 
-# ── Main ────────────────────────────────────────────────────────────────────
+# ── Setup ────────────────────────────────────────────────────────────────────
 
-start:
-	@bash scripts/start.sh
+install:
+	@cp -n .env.example .env 2>/dev/null || true
+	@echo ".env ready — edit it to set LLM_API_KEY if needed"
+	cd frontend && npm install
+	@echo "Frontend dependencies installed"
 
-stop:
-	@bash scripts/stop.sh
-
-restart: stop start
-
-# Rebuild binaries + deploy solo + restart
-update:
-	@bash scripts/stop.sh 2>/dev/null || true
-	@bash scripts/start.sh
-
-# ── Status ──────────────────────────────────────────────────────────────────
-
-status:
-	@echo "── PostgreSQL ──"
-	@docker ps --filter name=solo-postgres --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || echo "  not running"
-	@echo ""
-	@echo "── Server (8080) ──"
-	@curl -sf http://localhost:8080/healthz && echo "" || echo "  DOWN"
-	@echo "── Daemon (8081) ──"
-	@lsof -ti:8081 | while read p; do ps -p $$p -o pid,etime,command 2>/dev/null; done || echo "  DOWN"
-
-# ── Logs ────────────────────────────────────────────────────────────────────
-
-logs-server:
-	@tail -f .pids/server-run.log
-
-logs-daemon:
-	@tail -f .pids/daemon-run.log
-
-# ── Solo CLI ────────────────────────────────────────────────────────────────
-
-solo:
-	@go build -o .pids/solo ./cmd/solo/
-	@echo "solo built → .pids/solo"
-
-solo-deploy: solo
-	@for dir in $$HOME/.solo/agents/*/workspace/; do \
-		cp .pids/solo "$$dir/solo" 2>/dev/null && echo "  → $$dir"; \
-	done
-	@echo "deployed"
-
-# ── Database ────────────────────────────────────────────────────────────────
+# ── Database ─────────────────────────────────────────────────────────────────
 
 db-up:
-	docker start solo-postgres 2>/dev/null || docker compose up -d postgres
+	docker compose up -d postgres
+	@echo "PostgreSQL running on :5432"
 
 db-down:
 	docker compose down
 
-# ── Cleanup ─────────────────────────────────────────────────────────────────
+migrate:
+	@for f in migrations/*.up.sql; do \
+		docker exec -i solo-postgres psql -U solo -d solo < "$$f" > /dev/null 2>&1; \
+	done
+	@echo "Migrations applied"
 
-clean:
-	-bash scripts/stop.sh
-	@rm -rf .pids/
+# ── Run (start each in a separate terminal) ─────────────────────────────────
+
+server:
+	go run ./cmd/server/
+
+daemon:
+	go run ./cmd/daemon/
+
+dev:
+	cd frontend && npm run dev
+
+# ── Build ────────────────────────────────────────────────────────────────────
+
+build:
+	go build -o bin/server ./cmd/server/
+	go build -o bin/daemon ./cmd/daemon/
+	cd frontend && npm run build
+	@echo "Build complete"
+
+# ── Test ─────────────────────────────────────────────────────────────────────
+
+test:
+	go test ./... -v
+
+# ── Stop ─────────────────────────────────────────────────────────────────────
+
+stop:
+	@lsof -ti :8080 | xargs kill 2>/dev/null || true
+	@lsof -ti :8081 | xargs kill 2>/dev/null || true
+	@echo "Server and daemon stopped"
+
+# ── Clean ────────────────────────────────────────────────────────────────────
+
+clean: stop db-down
+	@rm -rf bin/ .pids/
 	@echo "Cleaned"
