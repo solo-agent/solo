@@ -926,14 +926,37 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 			return
 
 		case string(agent.MessageToolUse):
-			if chunk.Tool != nil && chunk.Tool.Name == "Bash" {
-				if input, ok := chunk.Tool.Input["command"].(string); ok {
-					if strings.Contains(input, "solo message send") {
-						messageSentViaCLI = true
+			if chunk.Tool != nil {
+				// Detect solo message send for Slock-aligned routing
+				if chunk.Tool.Name == "Bash" {
+					if input, ok := chunk.Tool.Input["command"].(string); ok {
+						if strings.Contains(input, "solo message send") {
+							messageSentViaCLI = true
+						}
 					}
 				}
+				// Forward tool_use as SSE for agent view
+				inputJSON, _ := json.Marshal(chunk.Tool.Input)
+				h.pushEventJSON(req.TaskID, "tool_use", map[string]interface{}{
+					"agent_id":   req.AgentID,
+					"agent_name": agentInfo.Name,
+					"tool_name":  chunk.Tool.Name,
+					"tool_input": string(inputJSON),
+					"call_id":    chunk.Tool.CallID,
+				})
 			}
-		case string(agent.MessageToolResult), string(agent.MessageStatus):
+
+		case string(agent.MessageToolResult):
+			if chunk.Tool != nil {
+				h.pushEventJSON(req.TaskID, "tool_result", map[string]interface{}{
+					"agent_id":   req.AgentID,
+					"agent_name": agentInfo.Name,
+					"tool_name":  chunk.Tool.Name,
+					"output":     chunk.Tool.Output,
+					"call_id":    chunk.Tool.CallID,
+					"is_error":   chunk.Tool.IsError,
+				})
+			}
 		}
 	}
 
