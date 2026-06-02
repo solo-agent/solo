@@ -102,9 +102,6 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	modelProvider := req.ModelProvider
 
 	modelName := req.ModelName
-	if modelName == "" {
-		modelName = "claude-sonnet-4-20250514"
-	}
 
 	temperature := 0.7
 	if req.Temperature != nil {
