@@ -165,10 +165,11 @@ func (b *OpenCodeBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 
 	startTime := time.Now()
 	handleError := func(errMsg string) {
-		resCh <- &Result{Status: "failed", Error: errMsg, DurationMs: time.Since(startTime).Milliseconds()}
-		close(msgCh)
-		close(resCh)
-		state.turnFin.Store(true)
+		if state.turnFin.CompareAndSwap(false, true) {
+			resCh <- &Result{Status: "failed", Error: errMsg, DurationMs: time.Since(startTime).Milliseconds()}
+			close(msgCh)
+			close(resCh)
+		}
 	}
 
 	if _, err := cl.request(ctx, "initialize", map[string]any{
