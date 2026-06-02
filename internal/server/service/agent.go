@@ -304,7 +304,6 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 	taskCompleted := false
 
 	for event := range eventCh {
-			slog.Debug("agent-view: SSE event received", "event", event.Event, "agent_id", ag.ID)
 		switch event.Event {
 		case "thinking":
 			var data struct {

@@ -15,6 +15,22 @@ export interface AgentChunk {
 const MAX_CHUNKS_PER_AGENT = 200;
 const DONE_CLEANUP_MS = 3000;
 
+/** Merge consecutive same-type chunks (thinking, text) to avoid fragment spam. */
+function mergeChunks(existing: AgentChunk[], incoming: AgentChunk): AgentChunk[] {
+  const last = existing[existing.length - 1];
+  if (
+    last &&
+    (last.chunkType === 'thinking' || last.chunkType === 'text') &&
+    last.chunkType === incoming.chunkType
+  ) {
+    const merged = { ...last, content: last.content + incoming.content, timestamp: incoming.timestamp };
+    const trimmed = existing.length >= MAX_CHUNKS_PER_AGENT ? existing.slice(1) : existing.slice(0, -1);
+    return [...trimmed, merged];
+  }
+  const trimmed = existing.length >= MAX_CHUNKS_PER_AGENT ? existing.slice(1) : existing;
+  return [...trimmed, incoming];
+}
+
 export function useAgentChunks(channelId: string | null) {
   const [agentTracks, setAgentTracks] = useState<Map<string, AgentChunk[]>>(new Map());
   const [activeAgentIds, setActiveAgentIds] = useState<string[]>([]);
@@ -46,8 +62,7 @@ export function useAgentChunks(channelId: string | null) {
         setAgentTracks(prev => {
           const next = new Map(prev);
           const existing = next.get(chunk.agentId) || [];
-          const trimmed = existing.length >= MAX_CHUNKS_PER_AGENT ? existing.slice(1) : existing;
-          next.set(chunk.agentId, [...trimmed, chunk]);
+          next.set(chunk.agentId, mergeChunks(existing, chunk));
           return next;
         });
 
