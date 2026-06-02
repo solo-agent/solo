@@ -42,6 +42,9 @@ const (
 	// Agent streaming events (SOLO-50-B / SOLO-51-B)
 	EventAgentStreamToken  = "message.agent_typing"
 
+	// Agent chunk events (SOLO-agent-view)
+	EventAgentChunk = "agent.chunk"
+
 	// DM events (SOLO-57-B)
 	EventDMMessageNew  = "dm.message.new"
 
@@ -157,6 +160,24 @@ type AgentErrorPayload struct {
 	AgentID   string `json:"agent_id"`
 	AgentName string `json:"agent_name,omitempty"`
 	Error     string `json:"error"`
+}
+
+// AgentChunkPayload is broadcast on agent.chunk for each agent output chunk.
+type AgentChunkPayload struct {
+	ChannelID string   `json:"channel_id"`
+	AgentID   string   `json:"agent_id"`
+	AgentName string   `json:"agent_name"`
+	ChunkType string   `json:"chunk_type"` // thinking, tool_use, tool_result, text, error
+	Content   string   `json:"content"`
+	Tool      *ToolRef `json:"tool,omitempty"`
+}
+
+// ToolRef carries tool call metadata in an agent chunk.
+type ToolRef struct {
+	Name   string `json:"name"`
+	Input  string `json:"input,omitempty"`
+	Output string `json:"output,omitempty"`
+	CallID string `json:"call_id,omitempty"`
 }
 
 // ThreadMessageItem is the message portion of a thread.message.new payload.
