@@ -5,7 +5,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
-import { Hash, Users, Loader2, ClipboardList, MessageSquare, Plus } from 'lucide-react';
+import { Hash, Users, Loader2, ClipboardList, MessageSquare, Plus, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
 import { useChannelMembers } from '@/lib/hooks/use-channel-members';
@@ -33,6 +33,8 @@ import type { Channel, CreateTaskInput, Message, Task, TaskStatus } from '@/lib/
 const ThreadPanel = lazy(() =>
   import('./thread-panel').then((m) => ({ default: m.ThreadPanel })),
 );
+
+import { AgentViewPanel } from './agent-view-panel';
 
 // ---- Inline quick-create task form ----
 
@@ -134,6 +136,10 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
 
   // ---- Thread panel width ----
   const [threadPanelWidth, setThreadPanelWidth] = useState(400);
+
+  // ---- Agent View panel state ----
+  const [showAgentView, setShowAgentView] = useState(false);
+  const [agentViewWidth, setAgentViewWidth] = useState(320);
 
   // ---- Tasks tab state (SOLO-128-F) ----
   const [channelViewTab, setChannelViewTab] = useState<'messages' | 'tasks'>('messages');
@@ -451,6 +457,20 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
             </div>
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowAgentView(prev => !prev)}
+              className={cn(
+                'flex h-8 w-8 items-center justify-center border-2 border-black shadow-brutal-sm transition-colors',
+                showAgentView
+                  ? 'bg-brutal-pink text-black'
+                  : 'bg-white hover:bg-brutal-cream',
+              )}
+              aria-label="Agent View"
+              title="Agent View"
+            >
+              <Eye className="h-4 w-4" />
+            </button>
             {/* SOLO-237-F: Channel-internal search */}
             {channelViewTab === 'messages' && (
               <ChannelSearch
@@ -546,6 +566,14 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
           </div>
         )}
       </div>
+
+      {/* Agent View panel */}
+      <AgentViewPanel
+        channelId={channel.id}
+        visible={showAgentView}
+        width={agentViewWidth}
+        onWidthChange={setAgentViewWidth}
+      />
 
       {/* Thread panel (lazy-loaded, SOLO-63-F) */}
       {threadMessage && (
