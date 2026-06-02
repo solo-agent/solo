@@ -81,7 +81,7 @@ const agentFormSchema = z.object({
     .max(50, '名称不能超过 50 个字符'),
   description: z.string().max(200, '描述不能超过 200 个字符').optional(),
   model_provider: z.string().min(1, '请选择 Runtime'),
-  model_name: z.string().min(1, '请选择一个模型'),
+  model_name: z.string().optional(),
   system_prompt: z.string().optional(),
   // v1.4: custom_env and custom_args are managed via controlled components,
   // not validated by zod (they use their own UI validation)
@@ -149,7 +149,7 @@ export function AgentForm({
     runtimeReg.onChange(e);
     const type = e.target.value;
     const meta = backendMeta[type];
-    const defaultModel = meta?.default_model || meta?.models?.[0]?.id || type;
+    const defaultModel = meta?.default_model || meta?.models?.[0]?.id || '';
     setValue('model_name', defaultModel, { shouldValidate: true, shouldDirty: true });
   };
 

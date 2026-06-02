@@ -70,8 +70,7 @@ func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 	if opts.WorkspaceDir != "" {
 		cmd.Dir = opts.WorkspaceDir
 	}
-	cmd.Env = buildEnv(opts.Env)
-	// Enable yolo mode so Hermes auto-approves all tool executions.
+	cmd.Env = buildEnvAt(opts.WorkspaceDir, opts.Env)
 	cmd.Env = append(cmd.Env, "HERMES_YOLO_MODE=1")
 
 	stdout, err := cmd.StdoutPipe()
@@ -915,10 +914,13 @@ func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 	hermesArgs := append([]string{"acp"}, filterCustomArgs(opts.ExtraArgs, hermesBlockedArgs)...)
 	hermesArgs = append(hermesArgs, filterCustomArgs(opts.CustomArgs, hermesBlockedArgs)...)
 
-	env := buildEnv(opts.Env)
-	env = append(env, "HERMES_YOLO_MODE=1")
+	extraEnv := make(map[string]string, len(opts.Env)+1)
+		for k, v := range opts.Env {
+			extraEnv[k] = v
+		}
+	extraEnv["HERMES_YOLO_MODE"] = "1"
 
-	runner, err := startPersistent(ctx, execPath, hermesArgs, opts.WorkspaceDir, env, b.logger)
+	runner, err := startPersistent(ctx, execPath, hermesArgs, opts.WorkspaceDir, extraEnv, b.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -1034,18 +1036,21 @@ func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 		}
 	}
 
-	// 4. Build prompt content with system prompt prepended.
-	userText := prompt
+	// 4. Build prompt blocks with role-based format so the agent
+	// treats system instructions as authoritative.
+	promptBlocks := []map[string]any{
+		{"type": "text", "text": prompt, "role": "user"},
+	}
 	if opts.SystemPrompt != "" {
-		userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
+		promptBlocks = append([]map[string]any{
+			{"type": "text", "text": opts.SystemPrompt, "role": "system"},
+		}, promptBlocks...)
 	}
 
 	// 5. Send the initial prompt.
 	_, err = cl.request(ctx, "session/prompt", map[string]any{
-		"sessionId": sessionID,
-		"prompt": []map[string]any{
-			{"type": "text", "text": userText},
-		},
+		"sessionId":  sessionID,
+		"prompt":     promptBlocks,
 	})
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -1140,7 +1145,7 @@ func (b *HermesBackend) Send(ctx context.Context, ps *PersistentSession, message
 	_, err := state.client.request(ctx, "session/prompt", map[string]any{
 		"sessionId": state.sessionID,
 		"prompt": []map[string]any{
-			{"type": "text", "text": prompt},
+			{"type": "text", "text": prompt, "role": "user"},
 		},
 	})
 	if err != nil {

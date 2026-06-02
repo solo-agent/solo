@@ -36,8 +36,6 @@ func init() {
 		RequiresBinary: "opencode",
 		DetectCommand:  "--version",
 		Protocols:      []string{"stream-json"},
-		DefaultModel:   "gpt-5",
-		Models:         opencodeModels(),
 	}, opencodeFactory)
 
 	// ── cursor — Cursor Agent CLI via stream-json ───────────────────
@@ -102,8 +100,6 @@ func init() {
 		RequiresBinary: "openclaw",
 		DetectCommand:  "--version",
 		Protocols:      []string{"stream-json"},
-		DefaultModel:   "openclaw",
-		Models:         singleModel("openclaw"),
 	}, openclawFactory)
 
 	// ── hermes — Hermes CLI via ACP ─────────────────────────────────

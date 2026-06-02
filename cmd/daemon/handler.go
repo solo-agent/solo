@@ -489,10 +489,6 @@ func (h *daemonHandler) Run(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channel_id is required"})
 		return
 	}
-	if req.ModelConfig.Model == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model_config.model is required"})
-		return
-	}
 	if req.ModelConfig.MaxTokens <= 0 {
 		req.ModelConfig.MaxTokens = 4096
 	}
@@ -743,10 +739,16 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	// Fetch channel name for context
 	channelName, _ := h.fetchChannelName(ctx, req.ChannelID)
 
-	// Determine trigger type
+	// Determine trigger type.
 	triggerType := agent.TriggerChat
 	if req.ThreadID != "" {
 		triggerType = agent.TriggerThread
+	}
+	for _, name := range req.MentionedNames {
+		if strings.EqualFold(name, agentInfo.Name) {
+			triggerType = agent.TriggerMention
+			break
+		}
 	}
 
 	// Build channel context
@@ -779,6 +781,11 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		AgentID:       req.AgentID,
 		Name:          agentInfo.Name,
 		SystemPrompt:  req.SystemPrompt,
+		Model:         req.ModelConfig.Model,
+		Provider:      req.ModelConfig.Provider,
+		MaxTokens:     req.ModelConfig.MaxTokens,
+		Temperature:   req.ModelConfig.Temperature,
+		CustomArgs:    agentInfo.CustomArgs,
 		Env:           agentEnv,
 		WorkspacePath: ws.WorkDir,
 		ServerID:      h.serverURL,
@@ -866,7 +873,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		} else {
 			_, _ = h.refreshToken(ctx, req.AgentID)
 			slog.Info("task: creating persistent session", "agent_id", req.AgentID)
-			ps, psErr := h.getSessionManager(req.ModelConfig.Provider).GetOrCreateSession(ctx, req.AgentID, agentCfg, channelCtx, msgs)
+			ps, psErr := h.getSessionManager(req.ModelConfig.Provider).GetOrCreateSession(ctx, req.AgentID, agentCfg, channelCtx, msgs, req.MentionedNames)
 			if psErr == nil {
 				session = &agent.Session{Messages: ps.Messages, Result: ps.Result, Stop: ps.Stop}
 			} else {

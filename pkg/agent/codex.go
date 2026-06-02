@@ -44,12 +44,15 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 	args := buildCodexArgs(opts)
 	b.logger.Info("codex: starting persistent session", "args", args)
 
-	runner, err := startPersistent(ctx, execPath, args, opts.WorkspaceDir, buildEnv(opts.Env), b.logger)
+	runner, err := startPersistent(ctx, execPath, args, opts.WorkspaceDir, opts.Env, b.logger)
 	if err != nil {
 		return nil, err
 	}
 
 	prompt := buildPrompt(req, opts)
+	if opts.SystemPrompt != "" {
+		prompt = opts.SystemPrompt + "\n\n---\n\n" + prompt
+	}
 
 	msgCh := make(chan OutputChunk, 256)
 	resCh := make(chan *Result, 1)
@@ -238,7 +241,7 @@ func (b *CodexBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *E
 	if opts.WorkspaceDir != "" {
 		cmd.Dir = opts.WorkspaceDir
 	}
-	cmd.Env = buildEnv(opts.Env)
+	cmd.Env = buildEnvAt(opts.WorkspaceDir, opts.Env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

@@ -86,7 +86,7 @@ export interface CreateAgentInput {
   name: string;
   description?: string;
   model_provider: AgentModelProvider;
-  model_name: string;
+  model_name?: string;
   system_prompt?: string;
   temperature?: number;
   max_tokens?: number;
