@@ -308,6 +308,40 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 				s.broadcastAgentThinking(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, data.Thought)
 			}
 
+
+		case "tool_use":
+			var data struct {
+				AgentID   string `json:"agent_id"`
+				AgentName string `json:"agent_name"`
+				ToolName  string `json:"tool_name"`
+				ToolInput string `json:"tool_input"`
+				CallID    string `json:"call_id"`
+			}
+			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
+				s.broadcastAgentChunk(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "tool_use", "", map[string]interface{}{
+					"name":    data.ToolName,
+					"input":   data.ToolInput,
+					"call_id": data.CallID,
+				})
+			}
+
+		case "tool_result":
+			var data struct {
+				AgentID   string `json:"agent_id"`
+				AgentName string `json:"agent_name"`
+				ToolName  string `json:"tool_name"`
+				Output    string `json:"output"`
+				CallID    string `json:"call_id"`
+				IsError   bool   `json:"is_error"`
+			}
+			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
+				s.broadcastAgentChunk(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "tool_result", data.Output, map[string]interface{}{
+					"name":   data.ToolName,
+					"output": data.Output,
+					"call_id": data.CallID,
+				})
+			}
+
 		case "complete":
 			var data struct {
 				Usage struct {
@@ -532,6 +566,45 @@ func (s *AgentService) broadcastThreadMessage(threadID, channelID, agentID, agen
 	})
 	s.hub.BroadcastToChannel(channelID, replyEnvelope)
 }
+
+func (s *AgentService) broadcastAgentChunk(threadID, channelID, agentID, agentName, chunkType, content string, tool map[string]interface{}) {
+	if threadID != "" {
+		payload := map[string]interface{}{
+			"channel_id": channelID,
+			"agent_id":   agentID,
+			"agent_name": agentName,
+			"chunk_type": chunkType,
+			"content":    content,
+		}
+		if tool != nil {
+			payload["tool"] = tool
+		}
+		data, _ := json.Marshal(payload)
+		envelope, _ := json.Marshal(map[string]interface{}{
+			"type":    "agent.chunk",
+			"payload": json.RawMessage(data),
+		})
+		s.hub.BroadcastToScope(realtime.ScopeThread, threadID, envelope)
+	} else {
+		payload := map[string]interface{}{
+			"channel_id": channelID,
+			"agent_id":   agentID,
+			"agent_name": agentName,
+			"chunk_type": chunkType,
+			"content":    content,
+		}
+		if tool != nil {
+			payload["tool"] = tool
+		}
+		data, _ := json.Marshal(payload)
+		envelope, _ := json.Marshal(map[string]interface{}{
+			"type":    "agent.chunk",
+			"payload": json.RawMessage(data),
+		})
+		s.hub.BroadcastToChannel(channelID, envelope)
+	}
+}
+
 
 func (s *AgentService) HandleTaskComplete(ctx context.Context, req *TaskCompleteRequest) error {
 	// Remove from pending task tracking
