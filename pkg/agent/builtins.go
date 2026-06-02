@@ -45,8 +45,6 @@ func init() {
 		RequiresBinary: "cursor-agent",
 		DetectCommand:  "--version",
 		Protocols:      []string{"stream-json"},
-		DefaultModel:   "cursor",
-		Models:         singleModel("cursor"),
 	}, cursorFactory)
 
 	// ── gemini — Google Gemini CLI via stream-json ──────────────────
@@ -56,8 +54,6 @@ func init() {
 		RequiresBinary: "gemini",
 		DetectCommand:  "--version",
 		Protocols:      []string{"stream-json"},
-		DefaultModel:   "gemini",
-		Models:         singleModel("gemini"),
 	}, geminiFactory)
 
 	// ── kimi — Kimi CLI via ACP ─────────────────────────────────────
@@ -67,8 +63,6 @@ func init() {
 		RequiresBinary: "kimi",
 		DetectCommand:  "--version",
 		Protocols:      []string{"acp"},
-		DefaultModel:   "kimi",
-		Models:         singleModel("kimi"),
 	}, kimiFactory)
 
 	// ── kiro — Kiro CLI via ACP ─────────────────────────────────────
@@ -78,8 +72,6 @@ func init() {
 		RequiresBinary: "kiro-cli",
 		DetectCommand:  "--version",
 		Protocols:      []string{"acp"},
-		DefaultModel:   "kiro",
-		Models:         singleModel("kiro"),
 	}, kiroFactory)
 
 	// ── copilot — GitHub Copilot CLI via JSONL ──────────────────────
@@ -89,8 +81,6 @@ func init() {
 		RequiresBinary: "copilot",
 		DetectCommand:  "--version",
 		Protocols:      []string{"jsonl"},
-		DefaultModel:   "copilot",
-		Models:         singleModel("copilot"),
 	}, copilotFactory)
 
 	// ── openclaw — OpenClaw Agent CLI via stream-json ───────────────
@@ -119,8 +109,6 @@ func init() {
 		RequiresBinary: "pi",
 		DetectCommand:  "--version",
 		Protocols:      []string{"jsonl"},
-		DefaultModel:   "pi",
-		Models:         singleModel("pi"),
 	}, piFactory)
 }
 
@@ -145,15 +133,6 @@ func opencodeModels() []ModelInfo {
 	return []ModelInfo{
 		{ID: "gpt-5", Label: "GPT-5", Provider: "opencode", Default: true},
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "opencode", Default: false},
-	}
-}
-
-// singleModel returns a single-element model list for backends that
-// do not yet have a known model catalog. The type name doubles as the
-// model ID until more information is available.
-func singleModel(typ string) []ModelInfo {
-	return []ModelInfo{
-		{ID: typ, Label: typ, Provider: typ, Default: true},
 	}
 }
 
