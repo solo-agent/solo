@@ -91,6 +91,7 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 		runner.close()
 		return nil, fmt.Errorf("codex persistent initialize: %w", err)
 	}
+	c.notify("initialized")
 
 	// Start thread.
 	threadID, err := c.startThread(ctx, opts)
@@ -503,7 +504,6 @@ func (c *codexClient) startThread(ctx context.Context, opts *ExecuteOptions) (st
 		"compactPrompt":          nil,
 		"includeApplyPatchTool":  nil,
 		"experimentalRawEvents":  false,
-		"persistExtendedHistory": true,
 	})
 	if err != nil {
 		return "", fmt.Errorf("codex thread/start failed: %w", err)
@@ -572,10 +572,9 @@ func (c *codexClient) request(ctx context.Context, method string, params any) (j
 	c.mu.Unlock()
 
 	msg := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      id,
-		"method":  method,
-		"params":  params,
+		"id":     id,
+		"method": method,
+		"params": params,
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -605,8 +604,7 @@ func (c *codexClient) request(ctx context.Context, method string, params any) (j
 
 func (c *codexClient) notify(method string) {
 	msg := map[string]any{
-		"jsonrpc": "2.0",
-		"method":  method,
+		"method": method,
 	}
 	data, _ := json.Marshal(msg)
 	data = append(data, '\n')
@@ -615,9 +613,8 @@ func (c *codexClient) notify(method string) {
 
 func (c *codexClient) respond(id int, result any) {
 	msg := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      id,
-		"result":  result,
+		"id":     id,
+		"result": result,
 	}
 	data, _ := json.Marshal(msg)
 	data = append(data, '\n')
@@ -626,8 +623,7 @@ func (c *codexClient) respond(id int, result any) {
 
 func (c *codexClient) respondError(id int, code int, message string) {
 	msg := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      id,
+		"id": id,
 		"error": map[string]any{
 			"code":    code,
 			"message": message,
