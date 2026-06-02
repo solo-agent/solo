@@ -59,6 +59,8 @@ export type WSServerEvent =
   | { type: 'agent.typing'; channel_id: string; agent_id: string; status: string; detail?: string }
   | { type: 'agent.status'; channel_id: string; agent_id: string; status: string; detail?: string }
   | { type: 'agent.error'; channel_id: string; agent_id: string; status: string; detail?: string }
+  // ---- Agent chunk events (agent view) ----
+  | { type: 'agent.chunk'; channel_id: string; agent_id: string; agent_name: string; chunk_type: string; content: string; tool?: { name: string; input?: string; output?: string; call_id?: string }; timestamp: string }
   // ---- 流式消息事件 (SOLO-51-F, SOLO-52-F) ----
   | { type: 'message.agent_typing'; id: string; channel_id: string; thread_id?: string; sender_id: string; sender_name?: string; content: string; created_at: string }
   // ---- 任务事件 (SOLO-122-B) ----
