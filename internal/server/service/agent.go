@@ -304,6 +304,7 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 	taskCompleted := false
 
 	for event := range eventCh {
+			slog.Debug("agent-view: SSE event received", "event", event.Event, "agent_id", ag.ID)
 		switch event.Event {
 		case "thinking":
 			var data struct {
@@ -312,6 +313,7 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 			}
 			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
 				s.broadcastAgentThinking(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, data.Thought)
+			s.broadcastAgentChunk(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "thinking", data.Thought, nil)
 			}
 
 
