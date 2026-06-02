@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+// failedStartRetryInterval is how long to wait before retrying after a process
+// exits immediately (indicating a CLI misconfiguration, not a transient failure).
+const failedStartRetryInterval = 30 * time.Second
+
 // AgentSessionManager manages a pool of agent sessions aligned with Slock:
 // processes stay alive indefinitely (no idle timeout), crash recovery is
 // automatic via --resume, and concurrent starts are rate-limited.
@@ -32,6 +36,11 @@ type AgentSessionManager struct {
 	// startSlots limits concurrent agent process starts to prevent CPU
 	// spikes when multiple agents are triggered at once (Slock-aligned).
 	startSlots chan struct{}
+
+	// failedStarts tracks timestamps of recent failed session creations
+	// to prevent retry storms when the CLI is misconfigured or missing.
+	failedStarts   map[string]time.Time
+	failedStartsMu sync.Mutex
 }
 
 // agentSessionEntry wraps a session with lifetime metadata.
@@ -61,6 +70,7 @@ func NewAgentSessionManager(backend PersistentBackend, workspaceMgr *WorkspaceMa
 		activeTurns:     make(map[string]chan struct{}),
 		pendingMessages: make(map[string][]Message),
 		startSlots:      slots,
+		failedStarts:    make(map[string]time.Time),
 	}
 }
 
@@ -75,7 +85,13 @@ func (m *AgentSessionManager) GetOrCreateSession(ctx context.Context, agentID st
 		if m.isSessionAlive(entry) {
 			return m.deliverToSession(ctx, agentID, entry, initialMessages)
 		}
-	return m.createSession(ctx, agentID, agentCfg, channelCtx, initialMessages, entry.sessionID, mentionedNames)
+		return m.createSession(ctx, agentID, agentCfg, channelCtx, initialMessages, entry.sessionID, mentionedNames)
+	}
+
+	// Check retry cooldown for agents with recent failed starts.
+	if m.inFailedCooldown(agentID) {
+		m.logger.Warn("session: skipping start, in cooldown after recent failure", "agent_id", agentID)
+		return nil, fmt.Errorf("session start cooldown for agent %s", agentID)
 	}
 
 	return m.createSession(ctx, agentID, agentCfg, channelCtx, initialMessages, "", mentionedNames)
@@ -304,8 +320,33 @@ func (m *AgentSessionManager) createSession(ctx context.Context, agentID string,
 
 	go m.watchCrash(agentID, agentCfg, channelCtx, entry)
 
+	// If the process died immediately (CLI broken/missing), record failure
+	// to prevent retry storms on the next trigger.
+	if !m.isSessionAlive(entry) {
+		m.failedStartsMu.Lock()
+		m.failedStarts[agentID] = time.Now()
+		m.failedStartsMu.Unlock()
+		m.logger.Warn("session: created but process died immediately, cooling down", "agent_id", agentID)
+	}
+
 	m.logger.Info("session: created", "agent_id", agentID)
 	return ps, nil
+}
+
+// inFailedCooldown returns true if this agent had a failed start recently
+// and should not be retried yet.
+func (m *AgentSessionManager) inFailedCooldown(agentID string) bool {
+	m.failedStartsMu.Lock()
+	defer m.failedStartsMu.Unlock()
+	t, ok := m.failedStarts[agentID]
+	if !ok {
+		return false
+	}
+	if time.Since(t) > failedStartRetryInterval {
+		delete(m.failedStarts, agentID)
+		return false
+	}
+	return true
 }
 
 // watchCrash monitors a session. On unexpected exit (crash, not sleep),
