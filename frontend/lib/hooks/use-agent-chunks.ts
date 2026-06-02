@@ -46,10 +46,8 @@ export function useAgentChunks(channelId: string | null) {
         setAgentTracks(prev => {
           const next = new Map(prev);
           const existing = next.get(chunk.agentId) || [];
-          if (existing.length >= MAX_CHUNKS_PER_AGENT) {
-            existing.shift();
-          }
-          next.set(chunk.agentId, [...existing, chunk]);
+          const trimmed = existing.length >= MAX_CHUNKS_PER_AGENT ? existing.slice(1) : existing;
+          next.set(chunk.agentId, [...trimmed, chunk]);
           return next;
         });
 
