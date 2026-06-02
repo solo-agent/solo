@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { useAgentChunks } from '@/lib/hooks/use-agent-chunks';
 import { AgentTrack } from './agent-track';
@@ -13,6 +14,16 @@ interface AgentViewPanelProps {
 
 export function AgentViewPanel({ channelId, visible, width, onWidthChange }: AgentViewPanelProps) {
   const { agentTracks, activeAgentIds, clearAgentChunks, clearAllChunks } = useAgentChunks(channelId);
+  const isDragging = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      // cleanup if component unmounts mid-drag
+      isDragging.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, []);
 
   if (!visible) return null;
 

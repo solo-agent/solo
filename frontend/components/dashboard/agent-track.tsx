@@ -19,8 +19,11 @@ export function AgentTrack({ agentId, agentName, chunks, isActive, onClear }: Ag
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (scrollRef.current && isActive) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const el = scrollRef.current;
+    if (!el || !isActive) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+    if (atBottom) {
+      el.scrollTop = el.scrollHeight;
     }
   }, [chunks, isActive]);
 

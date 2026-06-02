@@ -11,7 +11,8 @@ interface AgentChunkItemProps {
 
 function ToolUseDisplay({ chunk }: { chunk: AgentChunk }) {
   const [expanded, setExpanded] = useState(false);
-  const tool = chunk.tool!;
+  const tool = chunk.tool;
+  if (!tool) return null;
 
   return (
     <div className="chunk-tool-use border-l-2 border-brutal-pink pl-2 py-0.5">
@@ -38,7 +39,8 @@ function ToolUseDisplay({ chunk }: { chunk: AgentChunk }) {
 }
 
 function ToolResultDisplay({ chunk }: { chunk: AgentChunk }) {
-  const tool = chunk.tool!;
+  const tool = chunk.tool;
+  if (!tool) return null;
 
   return (
     <div className={cn(
