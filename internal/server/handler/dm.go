@@ -53,8 +53,9 @@ type DMChannelResponse struct {
 	CreatedBy       string  `json:"created_by"`
 	OtherMemberType string  `json:"other_member_type"`
 	OtherMemberID   string  `json:"other_member_id"`
-	OtherMemberName string  `json:"other_member_name"`
-	IsArchived      bool    `json:"is_archived"`
+	OtherMemberName   string `json:"other_member_name"`
+	OtherMemberActive bool   `json:"other_member_active"`
+	IsArchived        bool   `json:"is_archived"`
 	CreatedAt       string  `json:"created_at"`
 	UpdatedAt       string  `json:"updated_at"`
 	LastMessage     string  `json:"last_message,omitempty"`
@@ -62,14 +63,15 @@ type DMChannelResponse struct {
 }
 
 type DMListResponse struct {
-	ID              string  `json:"id"`
-	Name            string  `json:"name"`
-	OtherMemberType string  `json:"other_member_type"`
-	OtherMemberID   string  `json:"other_member_id"`
-	OtherMemberName string  `json:"other_member_name"`
-	LastMessage     string  `json:"last_message,omitempty"`
-	LastMessageAt   *string `json:"last_message_at,omitempty"`
-	CreatedAt       string  `json:"created_at"`
+	ID               string  `json:"id"`
+	Name             string  `json:"name"`
+	OtherMemberType  string  `json:"other_member_type"`
+	OtherMemberID    string  `json:"other_member_id"`
+	OtherMemberName  string  `json:"other_member_name"`
+	OtherMemberActive bool   `json:"other_member_active"`
+	LastMessage      string  `json:"last_message,omitempty"`
+	LastMessageAt    *string `json:"last_message_at,omitempty"`
+	CreatedAt        string  `json:"created_at"`
 }
 
 // CreateOrGetDM handles POST /api/v1/dm
@@ -173,6 +175,7 @@ func (h *DMHandler) CreateOrGetDM(w http.ResponseWriter, r *http.Request) {
 			OtherMemberType: req.MemberType,
 			OtherMemberID:   req.MemberID,
 			OtherMemberName: targetName,
+			OtherMemberActive: true, // target was verified active above
 			IsArchived:      false,
 			CreatedAt:       existingCreatedAt.Format(time.RFC3339),
 			UpdatedAt:       existingUpdatedAt.Format(time.RFC3339),
@@ -267,6 +270,7 @@ func (h *DMHandler) CreateOrGetDM(w http.ResponseWriter, r *http.Request) {
 		OtherMemberType: req.MemberType,
 		OtherMemberID:   req.MemberID,
 		OtherMemberName: targetName,
+		OtherMemberActive: true, // target was verified active above
 		IsArchived:      false,
 		CreatedAt:       createdAt.Format(time.RFC3339),
 		UpdatedAt:       updatedAt.Format(time.RFC3339),
@@ -288,6 +292,7 @@ func (h *DMHandler) ListDMs(w http.ResponseWriter, r *http.Request) {
 		`SELECT c.id, c.name,
 		        dm_other.member_type AS other_type, dm_other.member_id AS other_id,
 		        COALESCE(u.display_name, a.name, '') AS other_name,
+		        COALESCE(a.is_active, true) AS other_active,
 		        COALESCE(msg.content, '') AS last_content,
 		        msg.created_at AS last_at,
 		        c.created_at
@@ -323,6 +328,7 @@ func (h *DMHandler) ListDMs(w http.ResponseWriter, r *http.Request) {
 
 		err := rows.Scan(&d.ID, &d.Name,
 			&d.OtherMemberType, &d.OtherMemberID, &d.OtherMemberName,
+			&d.OtherMemberActive,
 			&lastContent, &lastAt, &createdAt)
 		if err != nil {
 			slog.Error("failed to scan DM row", "error", err)
@@ -373,12 +379,14 @@ func (h *DMHandler) GetDM(w http.ResponseWriter, r *http.Request) {
 		otherType    string
 		otherID      string
 		otherName    string
+		otherActive  bool
 	)
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT c.id, c.name, COALESCE(c.description, ''), c.created_by, c.is_archived,
 		        c.created_at, c.updated_at,
 		        dm_other.member_type, dm_other.member_id,
-		        COALESCE(u.display_name, a.name, '') AS other_name
+		        COALESCE(u.display_name, a.name, '') AS other_name,
+		        COALESCE(a.is_active, true) AS other_active
 		 FROM channels c
 		 INNER JOIN dm_members dm_self ON dm_self.channel_id = c.id
 		     AND dm_self.member_type = 'user' AND dm_self.member_id = $1
@@ -390,7 +398,7 @@ func (h *DMHandler) GetDM(w http.ResponseWriter, r *http.Request) {
 		userID, dmID,
 	).Scan(&channelID, &channelName, &description, &createdBy, &isArchived,
 		&createdAt, &updatedAt,
-		&otherType, &otherID, &otherName)
+		&otherType, &otherID, &otherName, &otherActive)
 	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "DM not found")
@@ -410,6 +418,7 @@ func (h *DMHandler) GetDM(w http.ResponseWriter, r *http.Request) {
 		OtherMemberType: otherType,
 		OtherMemberID:   otherID,
 		OtherMemberName: otherName,
+		OtherMemberActive: otherActive,
 		IsArchived:      isArchived,
 		CreatedAt:       createdAt.Format(time.RFC3339),
 		UpdatedAt:       updatedAt.Format(time.RFC3339),
@@ -478,6 +487,7 @@ func (h *DMHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	// Build message query with cursor pagination (same pattern as MessageHandler.List)
 	query := `SELECT m.id, m.channel_id, m.sender_type, m.sender_id,
 	                 COALESCE(u.display_name, a.name, '') as sender_name,
+	                 COALESCE(a.is_active, false) AS sender_active,
 	                 m.content, m.content_type, COALESCE(m.attachment_ids, '{}') as attachment_ids,
                  m.created_at
 	          FROM messages m
@@ -508,7 +518,7 @@ func (h *DMHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 		var msg MessageResponse
 		var createdAt time.Time
 		err := rows.Scan(&msg.ID, &msg.ChannelID, &msg.SenderType, &msg.SenderID,
-			&msg.SenderName, &msg.Content, &msg.ContentType, &msg.AttachmentIDs, &createdAt)
+			&msg.SenderName, &msg.SenderActive, &msg.Content, &msg.ContentType, &msg.AttachmentIDs, &createdAt)
 		if err != nil {
 			slog.Error("failed to scan message row", "error", err)
 			continue

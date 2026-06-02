@@ -18,6 +18,8 @@ export interface WSMessage {
   sender_type: WSMessageSource;
   sender_id: string;
   sender_name?: string;
+  /** 发送者是否活跃（agent 被删除后为 false） */
+  sender_active?: boolean;
   /** 前端渲染别名 */
   display_name?: string;
   user_id?: string;

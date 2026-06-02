@@ -27,6 +27,7 @@ interface DMChannelResponse {
   other_member_type: string;
   other_member_id: string;
   other_member_name: string;
+  other_member_active?: boolean;
   last_message?: string;
   last_message_at?: string;
   created_at: string;
@@ -38,6 +39,7 @@ interface DMMessageResponse {
   sender_type: string;
   sender_id: string;
   sender_name: string;
+  sender_active?: boolean;
   content: string;
   content_type: string;
   created_at: string;
@@ -73,6 +75,7 @@ function mapDMChannel(resp: DMChannelResponse): DMChannel {
     channel.other_agent = {
       id: resp.other_member_id,
       name: resp.other_member_name,
+      is_active: resp.other_member_active,
     };
   }
   return channel;
@@ -88,6 +91,7 @@ function mapDMMessageResponse(resp: DMMessageResponse): Message {
     created_at: resp.created_at,
     status: 'sent',
     sender_type: resp.sender_type as 'user' | 'agent' | 'system' | undefined,
+    sender_active: resp.sender_active,
     task_number: resp.task_number,
     task_title: resp.task_title,
     task_status: resp.task_status,
@@ -263,6 +267,18 @@ export function useDM() {
         const exists = prev.find((c) => c.id === channel.id);
         return exists ? prev : [...prev, channel];
       });
+      // Remove from closed DMs so it reappears in the sidebar
+      try {
+        const key = 'solo-closed-dm-ids';
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          const ids = new Set<string>(JSON.parse(stored));
+          if (ids.delete(channel.id)) {
+            localStorage.setItem(key, JSON.stringify([...ids]));
+            window.dispatchEvent(new CustomEvent('dm-closed-changed'));
+          }
+        }
+      } catch { /* ignore */ }
       return channel;
     },
     [],

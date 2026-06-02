@@ -78,6 +78,7 @@ type MessageResponse struct {
 	SenderType        string   `json:"sender_type"`
 	SenderID          string   `json:"sender_id"`
 	SenderName        string   `json:"sender_name,omitempty"`
+		SenderActive      bool     `json:"sender_active"`
 	Content           string   `json:"content"`
 	ContentType       string   `json:"content_type"`
 	MentionedAgentIDs []string         `json:"mentioned_agent_ids,omitempty"`
@@ -494,6 +495,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		                   WHEN m.sender_type = 'system' THEN 'Solo'
 		                   ELSE COALESCE(u.display_name, a.name, m.sender_id::text)
 		                 END as sender_name,
+		                 COALESCE(a.is_active, false) AS sender_active,
 	                 m.content, m.content_type, COALESCE(m.attachment_ids, '{}') as attachment_ids, m.created_at,
 		                 COALESCE(t.reply_count, 0) AS reply_count,
 		                 COALESCE(tasks.task_number, 0) AS task_number,
@@ -533,7 +535,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		var msg MessageResponse
 		var createdAt time.Time
 		err := rows.Scan(&msg.ID, &msg.ChannelID, &msg.SenderType, &msg.SenderID,
-			&msg.SenderName, &msg.Content, &msg.ContentType, &msg.AttachmentIDs, &createdAt,
+			&msg.SenderName, &msg.SenderActive, &msg.Content, &msg.ContentType, &msg.AttachmentIDs, &createdAt,
 			&msg.ReplyCount, &msg.TaskNumber, &msg.TaskStatus, &msg.TaskClaimerName, &msg.HasUnreadThread)
 		if err != nil {
 			slog.Error("failed to scan message row", "error", err)

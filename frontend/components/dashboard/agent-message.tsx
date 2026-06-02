@@ -79,11 +79,17 @@ export function AgentMessage({ message, onReply }: AgentMessageProps) {
           <span className="font-heading text-sm font-bold text-foreground">
             {message.display_name}
           </span>
+          {message.sender_active === false ? (
+            <span className="badge-brutal bg-brutal-stone text-black">
+              DELETED
+            </span>
+          ) : (
+            <span className="badge-brutal bg-brutal-pink text-black">
+              Agent
+            </span>
+          )}
           <span className="font-mono text-[11px] text-muted-foreground">
             {time}
-          </span>
-          <span className="badge-brutal bg-brutal-pink text-black">
-            Agent
           </span>
         </div>
         <div className="font-body text-sm leading-relaxed space-y-1">

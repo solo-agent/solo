@@ -64,6 +64,10 @@ function isAgentDM(dm: DMChannel): boolean {
   return !!dm.other_agent;
 }
 
+function isAgentDeleted(dm: DMChannel): boolean {
+  return isAgentDM(dm) && dm.other_agent?.is_active === false;
+}
+
 export function DMView({
   dm,
   messages,
@@ -91,6 +95,7 @@ export function DMView({
 }: DMViewProps) {
   const name = getDisplayName(dm);
   const isAgent = isAgentDM(dm);
+  const deleted = isAgentDeleted(dm);
   const [viewTab, setViewTab] = useState<'messages' | 'tasks'>('messages');
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
   const [createTaskTitle, setCreateTaskTitle] = useState('');
@@ -254,14 +259,26 @@ export function DMView({
               />
             )}
 
-            {/* Input */}
-            <MessageInput
-              onSend={(content, mentionedAgentIds, asTask, _taskTitle, attachmentIds) =>
-                sendMessage(content, mentionedAgentIds, asTask, attachmentIds)
-              }
-              members={members}
-              placeholder={`发送消息给 ${name}...`}
-            />
+            {/* Input — hidden for deleted agents */}
+            {!deleted && (
+              <MessageInput
+                onSend={(content, mentionedAgentIds, asTask, _taskTitle, attachmentIds) =>
+                  sendMessage(content, mentionedAgentIds, asTask, attachmentIds)
+                }
+                members={members}
+                placeholder={`发送消息给 ${name}...`}
+              />
+            )}
+            {deleted && (
+              <div className="border-t-2 border-black bg-brutal-stone/20 px-4 py-3 text-center">
+                <span className="badge-brutal bg-brutal-stone text-black">
+                  DELETED
+                </span>
+                <p className="mt-2 font-body text-xs text-muted-foreground">
+                  此 Agent 已被删除，无法发送消息
+                </p>
+              </div>
+            )}
           </div>
         )}
 

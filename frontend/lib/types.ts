@@ -49,6 +49,8 @@ export interface Message {
   has_unread_thread?: boolean;
   /** 附件列表 (SOLO-249-F) */
   attachments?: Attachment[];
+  /** 发送者是否活跃（agent 被删除后为 false） */
+  sender_active?: boolean;
 }
 
 export interface CreateChannelInput {
@@ -253,6 +255,7 @@ export interface DMChannel {
     id: string;
     name: string;
     avatar_url?: string;
+    is_active?: boolean;
   };
   last_message?: {
     content: string;

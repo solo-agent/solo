@@ -22,6 +22,7 @@ interface ThreadReplyResponse {
   sender_type: string;
   sender_id: string;
   sender_name?: string;
+  sender_active?: boolean;
   content: string;
   content_type: string;
   created_at: string;
@@ -41,6 +42,7 @@ function toWSMessage(r: ThreadReplyResponse): WSMessage {
     sender_type: r.sender_type as WSMessageSource,
     sender_id: r.sender_id,
     sender_name: r.sender_name || (r.sender_type === 'system' ? 'Solo' : undefined),
+    sender_active: r.sender_active,
     display_name: r.sender_name || (r.sender_type === 'system' ? 'Solo' : undefined),
     content: r.content,
     content_type: r.content_type,
