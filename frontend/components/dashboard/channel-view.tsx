@@ -567,13 +567,14 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
         )}
       </div>
 
-      {/* Agent View panel */}
-      <AgentViewPanel
-        channelId={channel.id}
-        visible={showAgentView}
-        width={agentViewWidth}
-        onWidthChange={setAgentViewWidth}
-      />
+      {/* Agent View panel — conditionally mounted to avoid running hooks when hidden */}
+      {showAgentView && (
+        <AgentViewPanel
+          channelId={channel.id}
+          width={agentViewWidth}
+          onWidthChange={setAgentViewWidth}
+        />
+      )}
 
       {/* Thread panel (lazy-loaded, SOLO-63-F) */}
       {threadMessage && (

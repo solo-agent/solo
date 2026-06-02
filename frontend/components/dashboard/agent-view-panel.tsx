@@ -7,12 +7,11 @@ import { AgentTrack } from './agent-track';
 
 interface AgentViewPanelProps {
   channelId: string | null;
-  visible: boolean;
   width: number;
   onWidthChange: (width: number) => void;
 }
 
-export function AgentViewPanel({ channelId, visible, width, onWidthChange }: AgentViewPanelProps) {
+export function AgentViewPanel({ channelId, width, onWidthChange }: AgentViewPanelProps) {
   const { agentTracks, activeAgentIds, clearAgentChunks, clearAllChunks } = useAgentChunks(channelId);
   const isDragging = useRef(false);
 
@@ -25,7 +24,6 @@ export function AgentViewPanel({ channelId, visible, width, onWidthChange }: Age
     };
   }, []);
 
-  if (!visible) return null;
 
   const hasContent = agentTracks.size > 0;
 
