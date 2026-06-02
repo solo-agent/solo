@@ -103,14 +103,13 @@ func init() {
 	}, openclawFactory)
 
 	// ── hermes — Hermes CLI via ACP ─────────────────────────────────
+	// No DefaultModel — hermes uses its own configured provider default.
 	r.Register(AdapterMeta{
 		Type:           "hermes",
 		DisplayName:    "Hermes CLI",
 		RequiresBinary: "hermes",
 		DetectCommand:  "--version",
 		Protocols:      []string{"acp"},
-		DefaultModel:   "hermes",
-		Models:         singleModel("hermes"),
 	}, hermesFactory)
 
 	// ── pi — Pi CLI via JSONL ───────────────────────────────────────
