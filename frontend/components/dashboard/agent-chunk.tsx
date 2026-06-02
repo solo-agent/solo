@@ -94,6 +94,15 @@ export function AgentChunkItem({ chunk }: AgentChunkItemProps) {
       return <ToolUseDisplay chunk={chunk} />;
     case 'tool_result':
       return <ToolResultDisplay chunk={chunk} />;
+    case 'context':
+      return (
+        <div className="chunk-context border-l-2 border-blue-500 pl-2 py-1 mb-1 bg-blue-50/50">
+          <div className="font-mono text-[10px] text-blue-600 font-bold mb-0.5">Trigger</div>
+          <div className="font-mono text-[11px] text-foreground whitespace-pre-wrap break-words">
+            {chunk.content.length > 300 ? chunk.content.slice(0, 300) + '…' : chunk.content}
+          </div>
+        </div>
+      );
     case 'error':
       return (
         <div className="chunk-error border-l-2 border-red-500 pl-2 py-0.5 flex items-start gap-1">

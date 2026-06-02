@@ -280,6 +280,12 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 	// Broadcast thinking event immediately
 	s.broadcastAgentThinking(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "Processing request...")
 
+	// Broadcast user trigger message as context for agent view
+	if len(taskReq.Messages) > 0 {
+		lastMsg := taskReq.Messages[len(taskReq.Messages)-1]
+		s.broadcastAgentChunk(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "context", lastMsg.Content, nil)
+	}
+
 	// Send via SSE streaming
 	eventCh, err := s.dm.StreamTask(streamCtx, daemon, taskReq)
 	if err != nil {
@@ -308,6 +314,16 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 				s.broadcastAgentThinking(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, data.Thought)
 			}
 
+
+		case "text":
+			var data struct {
+				AgentID   string `json:"agent_id"`
+				AgentName string `json:"agent_name"`
+				Content   string `json:"content"`
+			}
+			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
+				s.broadcastAgentChunk(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "text", data.Content, nil)
+			}
 
 		case "tool_use":
 			var data struct {

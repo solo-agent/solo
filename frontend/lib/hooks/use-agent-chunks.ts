@@ -6,7 +6,7 @@ import { useWebSocket } from '@/lib/ws-context';
 export interface AgentChunk {
   agentId: string;
   agentName: string;
-  chunkType: 'thinking' | 'tool_use' | 'tool_result' | 'text' | 'error';
+  chunkType: 'thinking' | 'tool_use' | 'tool_result' | 'text' | 'error' | 'context';
   content: string;
   tool?: { name: string; input?: string; output?: string; call_id?: string };
   timestamp: string;

@@ -905,9 +905,14 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		switch chunk.Type {
 		case string(agent.MessageText):
 			// v1.3: Slock-aligned — text output is internal thinking.
-			// Do NOT stream to frontend. Only solo message send (proxy→API)
+			// Forward as SSE for agent view. Chat messages via solo message send (proxy→API)
 			// delivers visible messages via message.new WebSocket events.
 			fullContent += chunk.Content
+			h.pushEventJSON(req.TaskID, "text", map[string]interface{}{
+				"agent_id":   req.AgentID,
+				"agent_name": agentInfo.Name,
+				"content":    chunk.Content,
+			})
 
 		case string(agent.MessageThinking):
 			h.pushEventJSON(req.TaskID, "thinking", map[string]interface{}{
