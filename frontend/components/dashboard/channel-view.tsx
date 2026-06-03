@@ -124,6 +124,7 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
     agents,
     isLoading: membersLoading,
     addAgentToChannel,
+    removeMember,
     updateMemberStatus,
   } = useChannelMembers(channel.id);
 
@@ -727,6 +728,7 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
               setIsMemberPopoverOpen(false);
               setIsAddAgentModalOpen(true);
             }}
+            onRemoveAgent={(memberId) => removeMember('agent', memberId)}
           />
         </div>
       </Dialog>

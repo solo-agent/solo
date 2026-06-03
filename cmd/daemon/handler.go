@@ -766,7 +766,10 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	if err != nil {
 		slog.Warn("task: failed to generate agent token — agent cannot call APIs", "agent_id", req.AgentID, "error", err)
 	}
-	agentEnv := make(map[string]string)
+	agentEnv := map[string]string{
+		"SOLO_AGENT_ID":   req.AgentID,
+		"SOLO_AGENT_NAME": agentInfo.Name,
+	}
 	if agentToken != "" {
 		agentEnv["SOLO_AUTH_TOKEN"] = agentToken
 	}

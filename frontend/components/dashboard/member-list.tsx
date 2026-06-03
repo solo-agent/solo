@@ -4,7 +4,8 @@
 
 'use client';
 
-import { Users, Bot, Circle, Plus, User as UserIcon } from 'lucide-react';
+import { useState } from 'react';
+import { Users, Bot, Circle, Plus, User as UserIcon, X } from 'lucide-react';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { ChannelMember } from '@/lib/types';
@@ -14,10 +15,12 @@ interface MemberListProps {
   agents: ChannelMember[];
   isLoading: boolean;
   onAddAgent: () => void;
+  onRemoveAgent?: (memberId: string) => void;
 }
 
-function MemberItem({ member }: { member: ChannelMember }) {
+function MemberItem({ member, onRemove }: { member: ChannelMember; onRemove?: (id: string) => void }) {
   const isAgent = member.member_type === 'agent';
+  const [confirming, setConfirming] = useState(false);
   const statusColor = {
     online: 'fill-green-500 text-green-500',
     offline: 'fill-gray-300 text-gray-300',
@@ -61,6 +64,26 @@ function MemberItem({ member }: { member: ChannelMember }) {
       <div className="flex-shrink-0" title={statusLabel}>
         <Circle className={`h-2 w-2 ${statusColor}`} />
       </div>
+
+      {/* Remove button (agents only) — brutalist: thick borders, no rounding, bold */}
+      {isAgent && onRemove && (
+        confirming ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); onRemove(member.member_id); }}
+            className="btn-brutal btn-brutal-sm bg-brutal-red text-black border-2 border-black font-heading text-[10px] font-bold shadow-brutal-sm"
+          >
+            KICK
+          </button>
+        ) : (
+          <button
+            onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
+            className="flex-shrink-0 border-2 border-black bg-white px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-all shadow-brutal-sm hover:bg-brutal-red hover:text-black"
+            title="移除 Agent"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )
+      )}
     </div>
   );
 }
@@ -78,7 +101,7 @@ function MemberListSkeleton() {
   );
 }
 
-export function MemberList({ users, agents, isLoading, onAddAgent }: MemberListProps) {
+export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent }: MemberListProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Section header */}
@@ -130,7 +153,7 @@ export function MemberList({ users, agents, isLoading, onAddAgent }: MemberListP
                   </span>
                 </div>
                 {agents.map((member) => (
-                  <MemberItem key={`agent-${member.member_id}`} member={member} />
+                  <MemberItem key={`agent-${member.member_id}`} member={member} onRemove={onRemoveAgent} />
                 ))}
               </div>
             )}
