@@ -284,6 +284,7 @@ func (m *AgentSessionManager) createSession(ctx context.Context, agentID string,
 	}
 	if prevSessionID != "" {
 		executeOpts.CustomArgs = append(executeOpts.CustomArgs, "--resume", prevSessionID)
+		executeOpts.ResumeSessionID = prevSessionID
 	}
 
 	// v1.3: Rate-limit concurrent starts to prevent CPU spikes when

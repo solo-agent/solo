@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/solo-ai/solo/internal/server/service"
+	"strings"
 )
 
 // MemberHandler handles channel member management requests.
@@ -143,6 +144,13 @@ func (h *MemberHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 // ListMembers handles GET /api/v1/channels/{channelID}/members
 func (h *MemberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	channelID := chi.URLParam(r, "channelID")
+	// Resolve channel name (e.g. "#test-2" or "test-2") to UUID.
+	if !looksLikeUUID(channelID) {
+		name := strings.TrimPrefix(channelID, "#")
+		if resolved, err := h.resolveChannelName(r, name); err == nil {
+			channelID = resolved
+		}
+	}
 	requesterID, ok := requireUserID(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
@@ -162,4 +170,17 @@ func (h *MemberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, members)
+}
+
+// looksLikeUUID returns true if s looks like a UUID.
+func looksLikeUUID(s string) bool {
+	return len(s) >= 32 && len(s) <= 36 && (s[8] == '-' || s[12] == '-')
+}
+
+func (h *MemberHandler) resolveChannelName(r *http.Request, name string) (string, error) {
+	id, ok := h.svc.ResolveChannelName(r.Context(), name)
+	if !ok {
+		return "", errors.New("channel not found")
+	}
+	return id, nil
 }

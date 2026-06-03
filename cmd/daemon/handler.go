@@ -326,7 +326,7 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	case "message_read":
 		serverPath = fmt.Sprintf("/api/v1/channels/%s/messages", req.ChannelID)
 	case "message_check":
-		serverPath = fmt.Sprintf("/api/v1/channels/%s/messages?limit=5", req.ChannelID)
+		serverPath = fmt.Sprintf("/api/v1/messages/check?channel_id=%s", req.ChannelID)
 	case "channel_join":
 		serverPath = "/api/v1/channels/join"
 		serverBody, _ = json.Marshal(map[string]string{"target": req.Content})

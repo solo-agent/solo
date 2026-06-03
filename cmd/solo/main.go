@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 
@@ -556,7 +557,10 @@ func handleChannelMembers(args []string, baseURL, token string) {
 		doExit(exitUsage)
 	}
 
-	url := fmt.Sprintf("%s/api/v1/channels/%s/members", baseURL, channelID)
+	// Strip # prefix from channel names and URL-encode to avoid
+	// fragment parsing issues (e.g. "#test-2" → "test-2").
+	channelID = strings.TrimPrefix(channelID, "#")
+	url := fmt.Sprintf("%s/api/v1/channels/%s/members", baseURL, url.PathEscape(channelID))
 	statusCode, body, err := doHTTP(http.MethodGet, url, token, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)

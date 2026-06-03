@@ -1,6 +1,7 @@
 // ============================================================================
 // RuntimeTab — display/edit Agent runtime configuration
-// - Shows: model_provider, model_name, temperature, max_tokens
+// - Shows: temperature, max_tokens
+// - Model is managed by CLI local configuration, not selected here.
 // - Edit mode with input-brutal fields
 // - Save/Cancel with btn-brutal
 // - All neubrutalism style, zero rounding
@@ -11,7 +12,7 @@
 import { useState } from 'react';
 import { Bot, Pencil, X, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { MODEL_OPTIONS, type AgentModelProvider } from '@/lib/types';
+import type { AgentModelProvider } from '@/lib/types';
 import type { Agent } from '@/lib/types';
 
 interface RuntimeTabProps {
@@ -25,29 +26,17 @@ interface RuntimeTabProps {
   isSaving?: boolean;
 }
 
-const PROVIDER_COLORS: Record<string, string> = {
-  anthropic: 'bg-brutal-pink text-black',
-  openai: 'bg-brutal-cyan text-black',
-  ollama: 'bg-brutal-pink text-black',
-  local: 'bg-brutal-lavender text-black',
-};
-
 export function RuntimeTab({ agent, onSave, isSaving = false }: RuntimeTabProps) {
   const [editing, setEditing] = useState(false);
 
-  // Editable form state
-  const [modelProvider, setModelProvider] = useState<AgentModelProvider>(
-    agent.model_provider,
-  );
-  const [modelName, setModelName] = useState(agent.model_name);
   const [temperature, setTemperature] = useState(agent.temperature);
   const [maxTokens, setMaxTokens] = useState(agent.max_tokens);
 
   const handleSave = async () => {
     try {
       await onSave({
-        model_provider: modelProvider,
-        model_name: modelName,
+        model_provider: agent.model_provider,
+        model_name: agent.model_name,
         temperature,
         max_tokens: maxTokens,
       });
@@ -58,90 +47,21 @@ export function RuntimeTab({ agent, onSave, isSaving = false }: RuntimeTabProps)
   };
 
   const handleCancel = () => {
-    // Reset to original values
-    setModelProvider(agent.model_provider);
-    setModelName(agent.model_name);
     setTemperature(agent.temperature);
     setMaxTokens(agent.max_tokens);
     setEditing(false);
   };
 
-  const currentModels = MODEL_OPTIONS[modelProvider]?.models || [];
-
   return (
     <div className="space-y-6">
-      {/* Provider + Model */}
+      {/* Model info — managed by CLI config */}
       <div className="space-y-3">
         <h3 className="font-heading font-bold text-sm text-muted-foreground uppercase tracking-wider">
           模型
         </h3>
-
-        {editing ? (
-          <>
-            {/* Provider selector — inline brutalist radio group */}
-            <div className="flex gap-2">
-              {(
-                Object.entries(MODEL_OPTIONS) as [
-                  AgentModelProvider,
-                  (typeof MODEL_OPTIONS)['anthropic'],
-                ][]
-              ).map(([key, option]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => {
-                    setModelProvider(key);
-                    const first = MODEL_OPTIONS[key]?.models[0]?.value;
-                    if (first) setModelName(first);
-                  }}
-                  className={cn(
-                    'flex-1 border-2 border-black px-3 py-2 font-heading text-sm font-bold transition-all',
-                    modelProvider === key
-                      ? 'bg-brutal-pink text-black shadow-brutal-sm'
-                      : 'bg-white text-muted-foreground shadow-brutal-sm hover:bg-black/5',
-                  )}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Model selector dropdown */}
-            <select
-              value={modelName}
-              onChange={(e) => setModelName(e.target.value)}
-              className="input-brutal h-10 cursor-pointer appearance-none bg-white pr-8 font-body text-sm"
-              style={{
-                backgroundImage:
-                  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")",
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right 0.75rem center',
-              }}
-            >
-              {currentModels.map((model) => (
-                <option key={model.value} value={model.value}>
-                  {model.label}
-                </option>
-              ))}
-            </select>
-          </>
-        ) : (
-          /* Display mode */
-          <div className="flex items-center gap-3">
-            <span
-              className={cn(
-                'badge-brutal',
-                PROVIDER_COLORS[agent.model_provider] ?? 'bg-white',
-              )}
-            >
-              {MODEL_OPTIONS[agent.model_provider]?.label ??
-                agent.model_provider}
-            </span>
-            <span className="font-mono text-sm text-foreground">
-              {agent.model_name}
-            </span>
-          </div>
-        )}
+        <p className="font-mono text-sm text-muted-foreground">
+          Model is configured in the CLI's local settings.
+        </p>
       </div>
 
       <hr className="divider-brutal" />

@@ -195,24 +195,34 @@ func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 			return
 		}
 
-		// 2. Create a new session.
+		// 2. Create or resume session.
 		cwd := opts.WorkspaceDir
 		if cwd == "" {
 			cwd = "."
 		}
-		result, err := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model))
-		if err != nil {
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("hermes session/new failed: %v", err)
-			resCh <- &Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
-			return
+		if opts.ResumeSessionID != "" {
+			result, err := c.request(runCtx, "session/resume", map[string]any{
+				"sessionId": opts.ResumeSessionID,
+			})
+			if err == nil {
+				sessionID, _ = resolveResumedSessionID(opts.ResumeSessionID, result)
+			}
 		}
-		sessionID = extractACPSessionID(result)
 		if sessionID == "" {
-			finalStatus = "failed"
-			finalError = "hermes session/new returned no session ID"
-			resCh <- &Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
-			return
+			result, err := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model))
+			if err != nil {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("hermes session/new failed: %v", err)
+				resCh <- &Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
+			sessionID = extractACPSessionID(result)
+			if sessionID == "" {
+				finalStatus = "failed"
+				finalError = "hermes session/new returned no session ID"
+				resCh <- &Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
 		}
 
 		c.sessionID = sessionID
@@ -301,11 +311,7 @@ func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 
 		var usageMap map[string]TokenUsage
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 {
-			model := opts.Model
-			if model == "" {
-				model = "unknown"
-			}
-			usageMap = map[string]TokenUsage{model: u}
+			usageMap = map[string]TokenUsage{opts.Model: u}
 		}
 
 		resCh <- &Result{
@@ -1005,22 +1011,33 @@ func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
 	}
 
-	// 2. Create session.
+	// 2. Create or resume session.
 	cwd := opts.WorkspaceDir
 	if cwd == "" {
 		cwd = "."
 	}
-	result, err := cl.request(ctx, "session/new", buildHermesSessionParams(cwd, opts.Model))
-	if err != nil {
-		runner.close()
-		handleError(fmt.Sprintf("hermes session/new failed: %v", err))
-		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+	var sessionID string
+	if opts.ResumeSessionID != "" {
+		result, err := cl.request(ctx, "session/resume", map[string]any{
+			"sessionId": opts.ResumeSessionID,
+		})
+		if err == nil {
+			sessionID, _ = resolveResumedSessionID(opts.ResumeSessionID, result)
+		}
 	}
-	sessionID := extractACPSessionID(result)
 	if sessionID == "" {
-		runner.close()
-		handleError("hermes session/new returned no session ID")
-		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		result, err := cl.request(ctx, "session/new", buildHermesSessionParams(cwd, opts.Model))
+		if err != nil {
+			runner.close()
+			handleError(fmt.Sprintf("hermes session/new failed: %v", err))
+			return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		}
+		sessionID = extractACPSessionID(result)
+		if sessionID == "" {
+			runner.close()
+			handleError("hermes session/new returned no session ID")
+			return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		}
 	}
 	cl.sessionID = sessionID
 	state.sessionID = sessionID
@@ -1172,7 +1189,7 @@ func (b *HermesBackend) Send(ctx context.Context, ps *PersistentSession, message
 		Status:     "completed",
 		Output:     finalOutput,
 		DurationMs: duration.Milliseconds(),
-		Usage:      buildHermesUsageMap(usage, "unknown"),
+		Usage:      buildHermesUsageMap(usage, ""),
 	}
 	close(msgCh)
 	close(resCh)
@@ -1209,9 +1226,6 @@ func (b *HermesBackend) Close(ps *PersistentSession) error {
 func buildHermesUsageMap(usage TokenUsage, model string) map[string]TokenUsage {
 	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 {
 		return nil
-	}
-	if model == "" {
-		model = "unknown"
 	}
 	return map[string]TokenUsage{model: usage}
 }

@@ -24,21 +24,11 @@ type BackendConfig struct {
 
 // AdapterMeta describes a registered backend adapter for discovery and UI.
 type AdapterMeta struct {
-	Type           string      // "claude", "codex", "opencode"...
-	DisplayName    string      // "Claude Code", "Codex CLI"
-	RequiresBinary string      // CLI binary name, e.g. "claude", "codex", "opencode"
-	DetectCommand  string      // e.g. "--version"
-	Protocols      []string    // "stream-json", "json-rpc", "acp", "jsonl"
-	DefaultModel   string
-	Models         []ModelInfo
-}
-
-// ModelInfo describes a single model offered by a backend adapter.
-type ModelInfo struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Provider string `json:"provider"`
-	Default  bool   `json:"default"`
+	Type           string   // "claude", "codex", "opencode"...
+	DisplayName    string   // "Claude Code", "Codex CLI"
+	RequiresBinary string   // CLI binary name, e.g. "claude", "codex", "opencode"
+	DetectCommand  string   // e.g. "--version"
+	Protocols      []string // "stream-json", "json-rpc", "acp", "jsonl"
 }
 
 // BackendRegistry is a thread-safe registry of backend adapters.

@@ -24,8 +24,6 @@ interface BackendResponseItem {
   display_name: string;
   requires_binary: string;
   protocols: string[];
-  default_model: string;
-  models: { id: string; label: string; default: boolean }[];
 }
 
 export function useBackendMeta(): BackendMetaState {
@@ -50,8 +48,6 @@ export function useBackendMeta(): BackendMetaState {
             display_name: item.display_name,
             requires_binary: item.requires_binary,
             protocols: item.protocols,
-            default_model: item.default_model,
-            models: item.models,
           };
         }
         setMetas(map);

@@ -186,20 +186,31 @@ func (b *OpenCodeBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 	if cwd == "" {
 		cwd = "."
 	}
-	result, err := cl.request(ctx, "session/new", map[string]any{
-		"cwd":        cwd,
-		"mcpServers": []any{},
-	})
-	if err != nil {
-		runner.close()
-		handleError(fmt.Sprintf("opencode session/new failed: %v", err))
-		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+	var sessionID string
+	if opts.ResumeSessionID != "" {
+		result, err := cl.request(ctx, "session/resume", map[string]any{
+			"sessionId": opts.ResumeSessionID,
+		})
+		if err == nil {
+			sessionID, _ = resolveResumedSessionID(opts.ResumeSessionID, result)
+		}
 	}
-	sessionID := extractACPSessionID(result)
 	if sessionID == "" {
-		runner.close()
-		handleError("opencode session/new returned no session ID")
-		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		result, err := cl.request(ctx, "session/new", map[string]any{
+			"cwd":        cwd,
+			"mcpServers": []any{},
+		})
+		if err != nil {
+			runner.close()
+			handleError(fmt.Sprintf("opencode session/new failed: %v", err))
+			return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		}
+		sessionID = extractACPSessionID(result)
+		if sessionID == "" {
+			runner.close()
+			handleError("opencode session/new returned no session ID")
+			return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		}
 	}
 	cl.sessionID = sessionID
 	state.sessionID = sessionID
@@ -339,7 +350,7 @@ func (b *OpenCodeBackend) Send(ctx context.Context, ps *PersistentSession, messa
 		Status:     "completed",
 		Output:     finalOutput,
 		DurationMs: duration.Milliseconds(),
-		Usage:      buildHermesUsageMap(usage, "unknown"),
+		Usage:      buildHermesUsageMap(usage, ""),
 	}
 	close(msgCh)
 	close(resCh)

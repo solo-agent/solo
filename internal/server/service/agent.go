@@ -736,22 +736,29 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 		slog.Info("mentions found but none resolved to active agents in thread, skipping", "channel_id", channelID, "thread_id", threadID)
 		return
 	} else {
-		// No @mentions — only trigger agents that have already replied in this thread.
-		threadAgentIDs, err := s.getThreadParticipantAgents(ctx, threadID)
-		if err != nil {
-			slog.Error("failed to get thread participant agents for follow-up", "thread_id", threadID, "error", err)
-			return
+		// No @mentions — prefer agents that have already replied in this thread.
+		threadAgentIDs, _ := s.getThreadParticipantAgents(ctx, threadID)
+		if len(threadAgentIDs) > 0 {
+			threadAgentSet := make(map[string]bool, len(threadAgentIDs))
+			for _, id := range threadAgentIDs {
+				threadAgentSet[id] = true
+			}
+			for _, ag := range agents {
+				if threadAgentSet[ag.ID] {
+					targetAgents = append(targetAgents, ag)
+				}
+			}
 		}
-		if len(threadAgentIDs) == 0 {
-			return
-		}
-		threadAgentSet := make(map[string]bool, len(threadAgentIDs))
-		for _, id := range threadAgentIDs {
-			threadAgentSet[id] = true
-		}
-		for _, ag := range agents {
-			if threadAgentSet[ag.ID] {
-				targetAgents = append(targetAgents, ag)
+		// Fallback: if nobody has replied in this thread yet, trigger the
+		// agent whose message was replied to (the root message sender).
+		if len(targetAgents) == 0 {
+			if rootSenderID := s.getThreadRootAgentSender(ctx, threadID); rootSenderID != "" {
+				for _, ag := range agents {
+					if ag.ID == rootSenderID {
+						targetAgents = append(targetAgents, ag)
+						break
+					}
+				}
 			}
 		}
 	}
@@ -1168,6 +1175,19 @@ func (s *AgentService) getThreadParticipantAgents(ctx context.Context, threadID 
 		return nil, err
 	}
 	return agentIDs, nil
+}
+
+// getThreadRootAgentSender returns the agent ID of the root message sender
+// in a thread, or empty string if the root message was sent by a human.
+func (s *AgentService) getThreadRootAgentSender(ctx context.Context, threadID string) string {
+	var senderID string
+	_ = s.pool.QueryRow(ctx,
+		`SELECT m.sender_id FROM messages m
+		 JOIN threads t ON t.root_message_id = m.id
+		 WHERE t.id = $1 AND m.sender_type = 'agent'`,
+		threadID,
+	).Scan(&senderID)
+	return senderID
 }
 
 // getRecentMessages returns the most recent N messages in a channel as agent messages.

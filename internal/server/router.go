@@ -124,7 +124,8 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		// Channel routes
 		r.Get("/api/v1/server/info", channelHandler.ServerInfo)
 
-		r.Post("/api/v1/channels/join", channelHandler.JoinByTarget)
+		r.Get("/api/v1/messages/check", messageHandler.Check)
+			r.Post("/api/v1/channels/join", channelHandler.JoinByTarget)
 
 		r.Route("/api/v1/channels", func(r chi.Router) {
 			r.Get("/", channelHandler.List)

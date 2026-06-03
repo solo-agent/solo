@@ -187,27 +187,37 @@ func (b *KiroBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *Ex
 			return
 		}
 
-		// 2. Create a new session.
+		// 2. Create or resume session.
 		cwd := opts.WorkspaceDir
 		if cwd == "" {
 			cwd = "."
 		}
-		result, err := c.request(runCtx, "session/new", map[string]any{
-			"cwd":        cwd,
-			"mcpServers": []any{},
-		})
-		if err != nil {
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("kiro session/new failed: %v", err)
-			resCh <- &Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
-			return
+		if opts.ResumeSessionID != "" {
+			result, err := c.request(runCtx, "session/resume", map[string]any{
+				"sessionId": opts.ResumeSessionID,
+			})
+			if err == nil {
+				sessionID, _ = resolveResumedSessionID(opts.ResumeSessionID, result)
+			}
 		}
-		sessionID = extractACPSessionID(result)
 		if sessionID == "" {
-			finalStatus = "failed"
-			finalError = "kiro session/new returned no session ID"
-			resCh <- &Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
-			return
+			result, err := c.request(runCtx, "session/new", map[string]any{
+				"cwd":        cwd,
+				"mcpServers": []any{},
+			})
+			if err != nil {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("kiro session/new failed: %v", err)
+				resCh <- &Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
+			sessionID = extractACPSessionID(result)
+			if sessionID == "" {
+				finalStatus = "failed"
+				finalError = "kiro session/new returned no session ID"
+				resCh <- &Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
 		}
 
 		c.sessionID = sessionID
@@ -294,11 +304,7 @@ func (b *KiroBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *Ex
 
 		var usageMap map[string]TokenUsage
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 {
-			model := opts.Model
-			if model == "" {
-				model = "unknown"
-			}
-			usageMap = map[string]TokenUsage{model: u}
+			usageMap = map[string]TokenUsage{opts.Model: u}
 		}
 
 		resCh <- &Result{

@@ -143,15 +143,7 @@ export function AgentForm({
     defaultValues?.custom_args || [],
   );
 
-  // v1.4: runtime change handler — auto-set model_name from backend metadata
   const runtimeReg = register('model_provider');
-  const handleRuntimeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    runtimeReg.onChange(e);
-    const type = e.target.value;
-    const meta = backendMeta[type];
-    const defaultModel = meta?.default_model || meta?.models?.[0]?.id || '';
-    setValue('model_name', defaultModel, { shouldValidate: true, shouldDirty: true });
-  };
 
   const handleTemplateSelect = useCallback(
     (template: RoleTemplate) => {
@@ -260,7 +252,7 @@ export function AgentForm({
             ref={runtimeReg.ref}
             onBlur={runtimeReg.onBlur}
             value={selectedRuntime}
-            onChange={handleRuntimeChange}
+            onChange={runtimeReg.onChange}
             className="input-brutal h-10 appearance-none bg-white pr-8 font-body text-sm"
             style={{
               backgroundImage:

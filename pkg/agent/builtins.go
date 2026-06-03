@@ -7,8 +7,8 @@ import (
 
 // init registers all built-in backend adapters into the global registry
 // when the agent package is imported. Each adapter carries its metadata
-// (display name, binary requirements, protocols, model lists) and a
-// factory function that constructs Backend instances from BackendConfig.
+// (display name, binary requirements, protocols) and a factory function
+// that constructs Backend instances from BackendConfig.
 func init() {
 	r := GlobalRegistry()
 
@@ -25,8 +25,6 @@ func init() {
 		RequiresBinary: "codex",
 		DetectCommand:  "--version",
 		Protocols:      []string{"json-rpc"},
-		DefaultModel:   "gpt-5.1-codex",
-		Models:         codexModels(),
 	}, codexFactory)
 
 	// ── opencode — OpenCode CLI via stream-json ─────────────────────
@@ -93,7 +91,6 @@ func init() {
 	}, openclawFactory)
 
 	// ── hermes — Hermes CLI via ACP ─────────────────────────────────
-	// No DefaultModel — hermes uses its own configured provider default.
 	r.Register(AdapterMeta{
 		Type:           "hermes",
 		DisplayName:    "Hermes CLI",
@@ -112,30 +109,6 @@ func init() {
 	}, piFactory)
 }
 
-// ── Static model lists ───────────────────────────────────────────────────────
-
-func claudeModels() []ModelInfo {
-	return []ModelInfo{
-		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "claude", Default: true},
-		{ID: "claude-opus-4-7", Label: "Claude Opus 4.7", Provider: "claude", Default: false},
-		{ID: "claude-haiku-4-5", Label: "Claude Haiku 4.5", Provider: "claude", Default: false},
-	}
-}
-
-func codexModels() []ModelInfo {
-	return []ModelInfo{
-		{ID: "gpt-5.1-codex", Label: "GPT-5.1 Codex", Provider: "codex", Default: true},
-		{ID: "gpt-5.1", Label: "GPT-5.1", Provider: "codex", Default: false},
-	}
-}
-
-func opencodeModels() []ModelInfo {
-	return []ModelInfo{
-		{ID: "gpt-5", Label: "GPT-5", Provider: "opencode", Default: true},
-		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "opencode", Default: false},
-	}
-}
-
 // claudeMeta builds an AdapterMeta for the claude and local backends.
 // They share the same metadata except for their Type and DisplayName fields.
 func claudeMeta(typ, displayName string) AdapterMeta {
@@ -145,8 +118,6 @@ func claudeMeta(typ, displayName string) AdapterMeta {
 		RequiresBinary: "claude",
 		DetectCommand:  "--version",
 		Protocols:      []string{"stream-json"},
-		DefaultModel:   "claude-sonnet-4-6",
-		Models:         claudeModels(),
 	}
 }
 

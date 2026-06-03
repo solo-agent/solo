@@ -177,7 +177,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 			// Short ID — resolve via LIKE to find message, then get/create thread.
 			var msgID, tid string
 			err := h.pool.QueryRow(r.Context(),
-				`SELECT m.id, COALESCE(t.id::text, '') FROM messages m
+				`SELECT m.id, COALESCE(t.id::text, m.thread_id::text, '') FROM messages m
 				 LEFT JOIN threads t ON t.root_message_id = m.id AND t.channel_id = m.channel_id
 				 WHERE m.id::text LIKE $1 AND m.channel_id = $2
 				 ORDER BY m.created_at DESC LIMIT 1`,
@@ -192,13 +192,23 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 			}
 			if tid != "" { threadID = tid }
 		} else {
-			// Full UUID not a thread — treat as message ID, get/create its thread.
-			tid, _, err := threadSvc.GetOrCreateThread(r.Context(), channelID, threadID)
-			if err != nil {
-				slog.Warn("failed to get-or-create thread for message", "message_id", threadID, "error", err)
-				threadID = ""
+			// Full UUID not a thread — check if message is already in a thread first.
+			var existingThreadID string
+			_ = h.pool.QueryRow(r.Context(),
+				`SELECT COALESCE(t.id::text, m.thread_id::text, '') FROM messages m
+				 LEFT JOIN threads t ON t.root_message_id = m.id
+				 WHERE m.id = $1`, threadID,
+			).Scan(&existingThreadID)
+			if existingThreadID != "" {
+				threadID = existingThreadID
 			} else {
-				threadID = tid
+				tid, _, err := threadSvc.GetOrCreateThread(r.Context(), channelID, threadID)
+				if err != nil {
+					slog.Warn("failed to get-or-create thread for message", "message_id", threadID, "error", err)
+					threadID = ""
+				} else {
+					threadID = tid
+				}
 			}
 		}
 	}
@@ -380,10 +390,18 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		go h.broadcastDMIfNeeded(channelID, msgData)
 	}
 
-	// Trigger agent auto-response (skip if asTask — agents triggered by task creation above)
+	// Trigger agent auto-response (skip if asTask — agents triggered by task creation above).
+	// P25-05-B: Route to thread-scoped or channel-scoped trigger based on threadID.
+	// Thread messages must use TriggerAgentResponseInThread so agents receive
+	// thread context and know to reply in the thread. Channel messages use
+	// TriggerAgentResponse (existing behavior).
 	if h.agentSvc != nil && !req.AsTask {
 		hasMentions := len(mentionedAgentIDs) > 0
-		go h.agentSvc.TriggerAgentResponse(context.Background(), channelID, messageID, senderType, userID, mentionedAgentIDs, hasMentions, nil)
+		if threadID != "" {
+			go h.agentSvc.TriggerAgentResponseInThread(context.Background(), channelID, threadID, senderType, userID, mentionedAgentIDs, hasMentions, nil)
+		} else {
+			go h.agentSvc.TriggerAgentResponse(context.Background(), channelID, messageID, senderType, userID, mentionedAgentIDs, hasMentions, nil)
+		}
 	}
 
 	resp := MessageResponse{
@@ -842,4 +860,90 @@ func collectAttachmentIDs(messages []MessageResponse) []string {
 		}
 	}
 	return ids
+}
+
+// Check handles GET /api/v1/messages/check — a lightweight polling endpoint for
+// agents to pull pending messages. It supports an optional ?channel_id= query param.
+func (h *MessageHandler) Check(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	channelID := r.URL.Query().Get("channel_id")
+	if channelID == "" {
+		writeError(w, http.StatusBadRequest, "channel_id is required")
+		return
+	}
+
+	limit := defaultMessageLimit
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= maxMessageLimit {
+			limit = parsed
+		}
+	}
+
+	if h.pool == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not available")
+		return
+	}
+
+	var isMember bool
+	err := h.pool.QueryRow(r.Context(),
+		`SELECT EXISTS(
+			SELECT 1 FROM channel_members
+			WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2
+		)`, channelID, userID,
+	).Scan(&isMember)
+	if err != nil {
+		slog.Error("message check: membership check failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if !isMember {
+		writeError(w, http.StatusNotFound, "channel not found")
+		return
+	}
+
+	rows, err := h.pool.Query(r.Context(),
+		`SELECT m.id, m.channel_id, m.sender_type, m.sender_id,
+				m.content, m.reply_to, m.created_at, m.updated_at
+		 FROM messages m
+		 WHERE m.channel_id = $1 AND COALESCE(m.is_deleted, false) = false
+		 ORDER BY m.created_at DESC
+		 LIMIT $2`, channelID, limit,
+	)
+	if err != nil {
+		slog.Error("message check: query failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to query messages")
+		return
+	}
+	defer rows.Close()
+
+	type msg struct {
+		ID         string  `json:"id"`
+		ChannelID  string  `json:"channel_id"`
+		SenderType string  `json:"sender_type"`
+		SenderID   string  `json:"sender_id"`
+		Content    string  `json:"content"`
+		ReplyTo   *string `json:"reply_to,omitempty"`
+		CreatedAt  string  `json:"created_at"`
+		UpdatedAt  string  `json:"updated_at"`
+	}
+	messages := make([]msg, 0, limit)
+	for rows.Next() {
+		var m msg
+		var createdAt, updatedAt time.Time
+		if err := rows.Scan(&m.ID, &m.ChannelID, &m.SenderType, &m.SenderID,
+			&m.Content, &m.ReplyTo, &createdAt, &updatedAt); err != nil {
+			slog.Error("message check: scan failed", "error", err)
+			continue
+		}
+		m.CreatedAt = createdAt.Format(time.RFC3339)
+		m.UpdatedAt = updatedAt.Format(time.RFC3339)
+		messages = append(messages, m)
+	}
+
+	writeJSON(w, http.StatusOK, messages)
 }

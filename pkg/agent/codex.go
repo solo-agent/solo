@@ -460,11 +460,7 @@ func (b *CodexBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *E
 
 		var usageMap map[string]TokenUsage
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-			model := opts.Model
-			if model == "" {
-				model = "unknown"
-			}
-			usageMap = map[string]TokenUsage{model: u}
+			usageMap = map[string]TokenUsage{opts.Model: u}
 		}
 
 		if finalError != "" {
@@ -489,8 +485,18 @@ func (b *CodexBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *E
 	}, nil
 }
 
-// startThread calls thread/start to create a fresh codex thread.
+// startThread creates or resumes a codex thread.
 func (c *codexClient) startThread(ctx context.Context, opts *ExecuteOptions) (string, error) {
+	if opts.ResumeSessionID != "" {
+		result, err := c.request(ctx, "thread/resume", map[string]any{
+			"threadId": opts.ResumeSessionID,
+		})
+		if err == nil {
+			if threadID := extractCodexThreadID(result); threadID != "" {
+				return threadID, nil
+			}
+		}
+	}
 	startResult, err := c.request(ctx, "thread/start", map[string]any{
 		"model":                  nilIfEmpty(opts.Model),
 		"modelProvider":          nil,

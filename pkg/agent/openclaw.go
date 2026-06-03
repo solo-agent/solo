@@ -33,6 +33,7 @@ var openclawBlockedArgs = map[string]blockedArgMode{
 	"--message":       blockedWithValue,
 	"--model":         blockedWithValue,
 	"--system-prompt": blockedWithValue,
+	"--thinking":      blockedWithValue,
 }
 
 // OpenClawBackend implements Backend by spawning `openclaw agent --json`
@@ -154,11 +155,7 @@ func (b *OpenClawBackend) Execute(ctx context.Context, req *ExecuteRequest, opts
 		var usage map[string]TokenUsage
 		u := scanResult.usage
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-			model := opts.Model
-			if model == "" {
-				model = "unknown"
-			}
-			usage = map[string]TokenUsage{model: u}
+			usage = map[string]TokenUsage{opts.Model: u}
 		}
 
 		resCh <- &Result{
@@ -517,6 +514,9 @@ func buildOpenClawArgs(prompt, sessionID string, opts *ExecuteOptions) []string 
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
+	}
+	if opts.Effort != "" {
+		args = append(args, "--thinking", opts.Effort)
 	}
 	if opts.SystemPrompt != "" {
 		prompt = opts.SystemPrompt + "\n\n" + prompt
