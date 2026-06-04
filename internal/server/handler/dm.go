@@ -461,7 +461,7 @@ func (h *DMHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT EXISTS(
 			SELECT 1 FROM dm_members
-			WHERE channel_id = $1 AND member_type = 'user' AND member_id = $2
+			WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2
 		)`, dmID, userID,
 	).Scan(&isParticipant)
 	if err != nil {
@@ -486,13 +486,21 @@ func (h *DMHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 
 	// Build message query with cursor pagination (same pattern as MessageHandler.List)
 	query := `SELECT m.id, m.channel_id, m.sender_type, m.sender_id,
-	                 COALESCE(u.display_name, a.name, '') as sender_name,
+	                 CASE WHEN m.sender_type = 'system' THEN 'Solo' ELSE COALESCE(u.display_name, a.name, m.sender_id::text) END as sender_name,
 	                 COALESCE(a.is_active, false) AS sender_active,
 	                 m.content, m.content_type, COALESCE(m.attachment_ids, '{}') as attachment_ids,
+                 COALESCE(t.task_number, 0) AS task_number,
+                 COALESCE(t.status, '') AS task_status,
+                 COALESCE(u_claimer.display_name, a_claimer.name, '') as task_claimer_name,
+                 COALESCE(th.reply_count, 0) AS reply_count,
                  m.created_at
 	          FROM messages m
 	          LEFT JOIN users u ON m.sender_type = 'user' AND m.sender_id = u.id
 	          LEFT JOIN agents a ON m.sender_type = 'agent' AND m.sender_id = a.id
+	          LEFT JOIN tasks t ON t.message_id = m.id
+	          LEFT JOIN users u_claimer ON t.claimer_id = u_claimer.id
+	          LEFT JOIN agents a_claimer ON t.claimer_id = a_claimer.id
+		          LEFT JOIN threads th ON m.id = th.root_message_id
 	          WHERE m.channel_id = $1 AND m.thread_id IS NULL`
 
 	args := []any{dmID}
@@ -518,7 +526,8 @@ func (h *DMHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 		var msg MessageResponse
 		var createdAt time.Time
 		err := rows.Scan(&msg.ID, &msg.ChannelID, &msg.SenderType, &msg.SenderID,
-			&msg.SenderName, &msg.SenderActive, &msg.Content, &msg.ContentType, &msg.AttachmentIDs, &createdAt)
+			&msg.SenderName, &msg.SenderActive, &msg.Content, &msg.ContentType, &msg.AttachmentIDs,
+&msg.TaskNumber, &msg.TaskStatus, &msg.TaskClaimerName, &msg.ReplyCount, &createdAt)
 		if err != nil {
 			slog.Error("failed to scan message row", "error", err)
 			continue
@@ -600,7 +609,7 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT EXISTS(
 			SELECT 1 FROM dm_members
-			WHERE channel_id = $1 AND member_type = 'user' AND member_id = $2
+			WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2
 		)`, dmID, userID,
 	).Scan(&isParticipant)
 	if err != nil {
@@ -695,6 +704,74 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		"dm_id", dmID,
 		"user_id", userID,
 	)
+
+	// If as_task, convert to task and return task response (align with channel behavior)
+	if req.AsTask && h.taskSvc != nil {
+		// Broadcast message.new first so other DM participants see the message
+		if h.hub != nil {
+			msgPayload := ws.Envelope(ws.EventMessageNew, ws.MessageNewPayload{
+				ID:          messageID,
+				ChannelID:   dmID,
+				SenderType:  senderType,
+				SenderID:    userID,
+				SenderName:  displayName,
+				Content:     content,
+				ContentType: "text",
+				CreatedAt:   now.Format(time.RFC3339),
+			})
+			h.hub.BroadcastToChannel(dmID, msgPayload)
+		}
+
+		task, convertErr := h.taskSvc.ConvertMessageToTask(r.Context(), dmID, messageID, userID)
+		if convertErr != nil {
+			slog.Error("failed to convert DM message to task", "error", convertErr, "message_id", messageID)
+			writeError(w, http.StatusInternalServerError, "failed to create task")
+			return
+		}
+		taskResp := toTaskResponse(task)
+		ws.BroadcastTaskCreated(h.hub, ws.TaskCreatedPayload{
+			ID:               task.ID,
+			TaskNumber:       task.TaskNumber,
+			ChannelID:        task.ChannelID,
+			CreatorID:        task.CreatorID,
+			CreatorName:      task.CreatorName,
+			Title:            task.Title,
+			Description:      task.Description,
+			Status:           task.Status,
+			ClaimerID:        task.ClaimerID,
+			ClaimerName:      task.ClaimerName,
+			Priority:         task.Priority,
+			MessageID:        task.MessageID,
+			CreatedAt:        taskResp.CreatedAt,
+			UpdatedAt:        taskResp.UpdatedAt,
+			SubtaskCount:     task.SubtaskCount,
+			DoneSubtaskCount: task.DoneSubtaskCount,
+		})
+		h.broadcastDMTaskMessageUpdated(task.MessageID, dmID, task.TaskNumber, task.Status, task.ClaimerName)
+		threadSvc := service.NewThreadService(h.pool)
+		_, _, _ = threadSvc.GetOrCreateThread(r.Context(), dmID, task.MessageID)
+		if h.agentSvc != nil {
+			go h.agentSvc.TriggerAllAgentsForTask(context.Background(), dmID, task.ID, task.TaskNumber, task.Title, nil, nil)
+		}
+		writeJSON(w, http.StatusCreated, TaskResponse{
+			ID:          taskResp.ID,
+			TaskNumber:  taskResp.TaskNumber,
+			ChannelID:   taskResp.ChannelID,
+			CreatorID:   taskResp.CreatorID,
+			CreatorName: taskResp.CreatorName,
+			Title:       taskResp.Title,
+			Description: taskResp.Description,
+			Status:      taskResp.Status,
+			ClaimerID:   taskResp.ClaimerID,
+			ClaimerName: taskResp.ClaimerName,
+			Priority:    taskResp.Priority,
+			DueDate:     taskResp.DueDate,
+			MessageID:   taskResp.MessageID,
+			CreatedAt:   taskResp.CreatedAt,
+			UpdatedAt:   taskResp.UpdatedAt,
+		})
+		return
+	}
 
 	// Fetch attachment metadata for the response
 	var attachments []AttachmentMeta
@@ -796,7 +873,7 @@ func (h *DMHandler) UpdateMessage(w http.ResponseWriter, r *http.Request) {
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT EXISTS(
 			SELECT 1 FROM dm_members
-			WHERE channel_id = $1 AND member_type = 'user' AND member_id = $2
+			WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2
 		)`, dmID, userID,
 	).Scan(&isParticipant)
 	if err != nil {
@@ -921,7 +998,7 @@ func (h *DMHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT EXISTS(
 			SELECT 1 FROM dm_members
-			WHERE channel_id = $1 AND member_type = 'user' AND member_id = $2
+			WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2
 		)`, dmID, userID,
 	).Scan(&isParticipant)
 	if err != nil {
@@ -1031,24 +1108,36 @@ func (h *DMHandler) ConvertMessageToTask(w http.ResponseWriter, r *http.Request)
 		dueDate = task.DueDate.Format(time.RFC3339)
 	}
 	ws.BroadcastTaskCreated(h.hub, ws.TaskCreatedPayload{
-		ID:          task.ID,
-		TaskNumber:  task.TaskNumber,
-		ChannelID:   task.ChannelID,
-		CreatorID:   task.CreatorID,
-		Title:       task.Title,
-		Description: task.Description,
-		Status:      task.Status,
-		ClaimerID:   task.ClaimerID,
-		Priority:    task.Priority,
-		DueDate:     dueDate,
-		MessageID:   task.MessageID,
-		CreatedAt:   resp.CreatedAt,
-		UpdatedAt:   resp.UpdatedAt,
+		ID:               task.ID,
+		TaskNumber:       task.TaskNumber,
+		ChannelID:        task.ChannelID,
+		CreatorID:        task.CreatorID,
+		CreatorName:      task.CreatorName,
+		Title:            task.Title,
+		Description:      task.Description,
+		Status:           task.Status,
+		ClaimerID:        task.ClaimerID,
+		ClaimerName:      task.ClaimerName,
+		Priority:         task.Priority,
+		DueDate:          dueDate,
+		MessageID:        task.MessageID,
+		CreatedAt:        resp.CreatedAt,
+		UpdatedAt:        resp.UpdatedAt,
+		SubtaskCount:     task.SubtaskCount,
+		DoneSubtaskCount: task.DoneSubtaskCount,
 	})
 
 	// Broadcast system message
-	h.broadcastDMTaskSystemMessage(dmID, task.TaskNumber, task.Title, "已创建（从消息转换）")
-}
+	// Broadcast message.updated so the original message gets task badge fields
+	if task.MessageID != "" {
+		h.broadcastDMTaskMessageUpdated(task.MessageID, dmID, task.TaskNumber, task.Status, task.ClaimerName)
+	}
+
+	// Trigger DM agent participant for auto-claim
+	if h.agentSvc != nil {
+		go h.agentSvc.TriggerAllAgentsForTask(context.Background(), dmID, task.ID, task.TaskNumber, task.Title, nil, nil)
+	}
+	}
 
 // --- DM Task handlers (SOLO v1.2 Phase 2) ---
 
@@ -1085,75 +1174,111 @@ func (h *DMHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	svcReq := service.TaskCreateRequest{
-		Title:       req.Title,
-		Description: req.Description,
-		Priority:    req.Priority,
-		DueDate:     req.DueDate,
+	// Insert a user message first (align with channel CreateGlobal)
+	now := time.Now()
+	msgID := uuid.New().String()
+
+	senderType := "user"
+	var isAgent bool
+	_ = h.pool.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM agents WHERE id = $1)`, userID).Scan(&isAgent)
+	if isAgent {
+		senderType = "agent"
 	}
 
-	task, err := h.taskSvc.CreateTask(r.Context(), dmID, userID, svcReq)
-	if err != nil {
-		slog.Error("failed to create DM task", "error", err)
+	var senderName string
+	_ = h.pool.QueryRow(r.Context(),
+		`SELECT COALESCE(
+			(SELECT display_name FROM users WHERE id = $1),
+			(SELECT name FROM agents WHERE id = $1),
+			$1
+		)`,
+		userID,
+	).Scan(&senderName)
+
+	_, msgErr := h.pool.Exec(r.Context(),
+		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, 'text', $6, $6)`,
+		msgID, dmID, senderType, userID, req.Title, now,
+	)
+	if msgErr != nil {
+		slog.Error("failed to insert DM task user message", "error", msgErr)
 		writeError(w, http.StatusInternalServerError, "failed to create task")
 		return
 	}
 
-	// Create a persistent system message for the task, and a thread for that
-	// message so task discussion is organized under the thread.
-	msgID := uuid.New().String()
-	now := time.Now()
-	sysContent := fmt.Sprintf("📋 Task #%d 已创建: %s", task.TaskNumber, task.Title)
-	_, dbErr := h.pool.Exec(r.Context(),
-		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, created_at, updated_at)
-		 VALUES ($1, $2, 'system', '00000000-0000-0000-0000-000000000000', $3, 'system', $4, $4)`,
-		msgID, dmID, sysContent, now,
-	)
-	if dbErr != nil {
-		slog.Error("failed to persist DM task system message", "task_id", task.ID, "error", dbErr)
-	} else {
-		threadSvc := service.NewThreadService(h.pool)
-		_, _, threadErr := threadSvc.GetOrCreateThread(r.Context(), dmID, msgID)
-		if threadErr != nil {
-			slog.Error("failed to create thread for DM task", "task_id", task.ID, "error", threadErr)
-		} else {
-			_, updErr := h.pool.Exec(r.Context(),
-				`UPDATE tasks SET message_id = $1 WHERE id = $2`,
-				msgID, task.ID,
-			)
-			if updErr != nil {
-				slog.Error("failed to link DM task message_id", "task_id", task.ID, "error", updErr)
-			}
-			task.MessageID = msgID
-		}
+	if h.hub != nil {
+		msgPayload := ws.Envelope(ws.EventMessageNew, ws.MessageNewPayload{
+			ID:          msgID,
+			ChannelID:   dmID,
+			SenderType:  senderType,
+			SenderID:    userID,
+			SenderName:  senderName,
+			Content:     req.Title,
+			ContentType: "text",
+			CreatedAt:   now.Format(time.RFC3339),
+		})
+		h.hub.BroadcastToChannel(dmID, msgPayload)
 	}
 
-	resp := toTaskResponse(task)
-	writeJSON(w, http.StatusCreated, resp)
-
-	// Broadcast task.created event
-	dueDate := ""
-	if task.DueDate != nil {
-		dueDate = task.DueDate.Format(time.RFC3339)
+	task, err := h.taskSvc.ConvertMessageToTask(r.Context(), dmID, msgID, userID)
+	if err != nil {
+		slog.Error("failed to convert DM message to task", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create task")
+		return
 	}
+
+
+	// Create thread for the task message (align with channel task.go Create)
+	threadSvc := service.NewThreadService(h.pool)
+	_, _, threadErr := threadSvc.GetOrCreateThread(r.Context(), dmID, task.MessageID)
+	if threadErr != nil {
+		slog.Error("failed to create thread for DM task", "task_id", task.ID, "error", threadErr)
+	}
+
+	taskResp := toTaskResponse(task)
 	ws.BroadcastTaskCreated(h.hub, ws.TaskCreatedPayload{
-		ID:          task.ID,
-		TaskNumber:  task.TaskNumber,
-		ChannelID:   task.ChannelID,
-		CreatorID:   task.CreatorID,
-		Title:       task.Title,
-		Description: task.Description,
-		Status:      task.Status,
-		ClaimerID:   task.ClaimerID,
-		Priority:    task.Priority,
-		DueDate:     dueDate,
-		MessageID:   task.MessageID,
-		CreatedAt:   resp.CreatedAt,
-		UpdatedAt:   resp.UpdatedAt,
+		ID:               task.ID,
+		TaskNumber:       task.TaskNumber,
+		ChannelID:        task.ChannelID,
+		CreatorID:        task.CreatorID,
+		CreatorName:      task.CreatorName,
+		Title:            task.Title,
+		Description:      task.Description,
+		Status:           task.Status,
+		ClaimerID:        task.ClaimerID,
+		ClaimerName:      task.ClaimerName,
+		Priority:         task.Priority,
+		MessageID:        task.MessageID,
+		CreatedAt:        taskResp.CreatedAt,
+		UpdatedAt:        taskResp.UpdatedAt,
+		SubtaskCount:     task.SubtaskCount,
+		DoneSubtaskCount: task.DoneSubtaskCount,
 	})
+	h.broadcastDMTaskMessageUpdated(task.MessageID, dmID, task.TaskNumber, task.Status, task.ClaimerName)
 
-	// Broadcast system message
-	h.broadcastDMTaskSystemMessage(dmID, task.TaskNumber, task.Title, "已创建")
+	// Trigger DM agent participant for auto-claim
+	if h.agentSvc != nil {
+		go h.agentSvc.TriggerAllAgentsForTask(context.Background(), dmID, task.ID, task.TaskNumber, task.Title, nil, nil)
+	}
+
+	writeJSON(w, http.StatusCreated, TaskResponse{
+		ID:          taskResp.ID,
+		TaskNumber:  taskResp.TaskNumber,
+		ChannelID:   taskResp.ChannelID,
+		CreatorID:   taskResp.CreatorID,
+		CreatorName: taskResp.CreatorName,
+		Title:       taskResp.Title,
+		Description: taskResp.Description,
+		Status:      taskResp.Status,
+		ClaimerID:   taskResp.ClaimerID,
+		ClaimerName: taskResp.ClaimerName,
+		Priority:    taskResp.Priority,
+		DueDate:     taskResp.DueDate,
+		MessageID:   taskResp.MessageID,
+		CreatedAt:   taskResp.CreatedAt,
+		UpdatedAt:   taskResp.UpdatedAt,
+	})
+	return
 }
 
 // ListTasks handles GET /api/v1/dm/{dmID}/tasks
@@ -1283,26 +1408,24 @@ func (h *DMHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		dueDateStr = task.DueDate.Format(time.RFC3339)
 	}
 	ws.BroadcastTaskUpdated(h.hub, ws.TaskUpdatedPayload{
-		ID:          task.ID,
-		TaskNumber:  task.TaskNumber,
-		ChannelID:   task.ChannelID,
-		Title:       task.Title,
-		Description: task.Description,
-		Status:      task.Status,
-		ClaimerID:   task.ClaimerID,
-		Priority:    task.Priority,
-		DueDate:     dueDateStr,
-		MessageID:   task.MessageID,
-		UpdatedAt:   task.UpdatedAt.Format(time.RFC3339),
+		ID:               task.ID,
+		TaskNumber:       task.TaskNumber,
+		ChannelID:        task.ChannelID,
+		Title:            task.Title,
+		Description:      task.Description,
+		Status:           task.Status,
+		ClaimerID:        task.ClaimerID,
+		ClaimerName:      task.ClaimerName,
+		Priority:         task.Priority,
+		DueDate:          dueDateStr,
+		MessageID:        task.MessageID,
+		UpdatedAt:        task.UpdatedAt.Format(time.RFC3339),
+		SubtaskCount:     task.SubtaskCount,
+		DoneSubtaskCount: task.DoneSubtaskCount,
 	})
 
-	// Broadcast system message if status changed
-	if req.Status != nil && *req.Status != "" {
-		statusText := formatStatusDisplay(*req.Status)
-		h.broadcastDMTaskSystemMessage(dmID, task.TaskNumber, task.Title, "状态已更新为 "+statusText)
-	} else {
-		h.broadcastDMTaskSystemMessage(dmID, task.TaskNumber, task.Title, "已更新")
-	}
+		// Broadcast message.updated for task badge (align with channel behavior)
+		h.broadcastDMTaskMessageUpdated(task.MessageID, dmID, task.TaskNumber, task.Status, task.ClaimerName)
 }
 
 // ClaimTask handles POST /api/v1/dm/{dmID}/tasks/{taskID}/claim
@@ -1360,21 +1483,24 @@ func (h *DMHandler) ClaimTask(w http.ResponseWriter, r *http.Request) {
 		dueDateStr = task.DueDate.Format(time.RFC3339)
 	}
 	ws.BroadcastTaskUpdated(h.hub, ws.TaskUpdatedPayload{
-		ID:          task.ID,
-		TaskNumber:  task.TaskNumber,
-		ChannelID:   task.ChannelID,
-		Title:       task.Title,
-		Description: task.Description,
-		Status:      task.Status,
-		ClaimerID:   task.ClaimerID,
-		Priority:    task.Priority,
-		DueDate:     dueDateStr,
-		MessageID:   task.MessageID,
-		UpdatedAt:   task.UpdatedAt.Format(time.RFC3339),
+		ID:               task.ID,
+		TaskNumber:       task.TaskNumber,
+		ChannelID:        task.ChannelID,
+		Title:            task.Title,
+		Description:      task.Description,
+		Status:           task.Status,
+		ClaimerID:        task.ClaimerID,
+		ClaimerName:      task.ClaimerName,
+		Priority:         task.Priority,
+		DueDate:          dueDateStr,
+		MessageID:        task.MessageID,
+		UpdatedAt:        task.UpdatedAt.Format(time.RFC3339),
+		SubtaskCount:     task.SubtaskCount,
+		DoneSubtaskCount: task.DoneSubtaskCount,
 	})
 
-	// Broadcast system message
-	h.broadcastDMTaskSystemClaim(dmID, task.TaskNumber, task.Title, userID)
+	// Broadcast message.updated for task badge
+	h.broadcastDMTaskMessageUpdated(task.MessageID, dmID, task.TaskNumber, task.Status, task.ClaimerName)
 
 	// Persist claim system message to the task's thread.
 	if task.MessageID != "" {
@@ -1389,6 +1515,48 @@ func (h *DMHandler) ClaimTask(w http.ResponseWriter, r *http.Request) {
 				 VALUES ($1, $2, 'system', '00000000-0000-0000-0000-000000000000', $3, 'system', $4, $5, $5)`,
 				claimMsgID, dmID, claimContent, threadID, claimNow,
 			)
+			// Read reply_count for thread.message.new (align with task.go Claim)
+			var replyCount int
+			h.pool.QueryRow(r.Context(),
+				`SELECT reply_count FROM threads WHERE id = $1`, threadID,
+			).Scan(&replyCount)
+			// Broadcast to thread subscribers so ThreadPanel updates in real-time
+			threadMsgPayload := ws.ThreadMessageNewPayload{
+				Message: ws.ThreadMessageItem{
+					ID:          claimMsgID,
+					ChannelID:   dmID,
+					ThreadID:    threadID,
+					SenderType:  "system",
+					SenderID:    "system",
+					SenderName:  "Solo",
+					Content:     claimContent,
+					ContentType: "system",
+					CreatedAt:   claimNow.UTC().Format(time.RFC3339),
+				},
+				Thread: ws.ThreadMetadataItem{
+					ThreadID:    threadID,
+					ReplyCount:  replyCount,
+					LastReplyAt: claimNow.UTC().Format(time.RFC3339),
+				},
+			}
+			h.hub.BroadcastToThread(threadID, ws.Envelope(ws.EventThreadMessageNew, threadMsgPayload))
+			// Broadcast thread.reply so DM message list updates reply_count on parent
+			h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventThreadReplyNotify, ws.ThreadReplyNotifyPayload{
+				ChannelID:     dmID,
+				ThreadID:      threadID,
+				RootMessageID: task.MessageID,
+				ReplyCount:    replyCount,
+				LastReplyAt:   claimNow.UTC().Format(time.RFC3339),
+				LatestReply: &ws.LatestReplyItem{
+					ID:         claimMsgID,
+					SenderType: "system",
+					SenderID:   "system",
+					SenderName: "Solo",
+					Content:    claimContent,
+					CreatedAt:  claimNow.UTC().Format(time.RFC3339),
+				},
+			}))
+			// Also broadcast to channel for DM message list
 			wsMsg := ws.MessageNewPayload{
 				ID:          claimMsgID,
 				ChannelID:   dmID,
@@ -1410,6 +1578,7 @@ func (h *DMHandler) ClaimTask(w http.ResponseWriter, r *http.Request) {
 				SenderName:  "Solo",
 				Content:     claimContent,
 				ContentType: "system",
+				ThreadID:    threadID,
 				CreatedAt:   claimNow.UTC().Format(time.RFC3339),
 			}))
 		}
@@ -1469,21 +1638,105 @@ func (h *DMHandler) UnclaimTask(w http.ResponseWriter, r *http.Request) {
 		dueDateStr = task.DueDate.Format(time.RFC3339)
 	}
 	ws.BroadcastTaskUpdated(h.hub, ws.TaskUpdatedPayload{
-		ID:          task.ID,
-		TaskNumber:  task.TaskNumber,
-		ChannelID:   task.ChannelID,
-		Title:       task.Title,
-		Description: task.Description,
-		Status:      task.Status,
-		ClaimerID:   "",
-		Priority:    task.Priority,
-		DueDate:     dueDateStr,
-		MessageID:   task.MessageID,
-		UpdatedAt:   task.UpdatedAt.Format(time.RFC3339),
+		ID:               task.ID,
+		TaskNumber:       task.TaskNumber,
+		ChannelID:        task.ChannelID,
+		Title:            task.Title,
+		Description:      task.Description,
+		Status:           task.Status,
+		ClaimerID:        "",
+		ClaimerName:      task.ClaimerName,
+		Priority:         task.Priority,
+		DueDate:          dueDateStr,
+		MessageID:        task.MessageID,
+		UpdatedAt:        task.UpdatedAt.Format(time.RFC3339),
+		SubtaskCount:     task.SubtaskCount,
+		DoneSubtaskCount: task.DoneSubtaskCount,
 	})
 
-	// Broadcast system message
-	h.broadcastDMTaskSystemUnclaim(dmID, task.TaskNumber, task.Title, userID)
+	// Broadcast message.updated for task badge (align with task.go Unclaim)
+	h.broadcastDMTaskMessageUpdated(task.MessageID, dmID, task.TaskNumber, task.Status, "")
+
+	// Persist unclaim system message to the task's thread (align with ClaimTask).
+	if task.MessageID != "" {
+		threadSvc := service.NewThreadService(h.pool)
+		threadID, _, tErr := threadSvc.GetOrCreateThread(r.Context(), dmID, task.MessageID)
+		if tErr == nil {
+			unclaimMsgID := uuid.New().String()
+			unclaimNow := time.Now()
+			unclaimContent := fmt.Sprintf("📋 <@%s> released #%d %s", userID, task.TaskNumber, task.Title)
+			_, _ = h.pool.Exec(r.Context(),
+				`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, thread_id, created_at, updated_at)
+				 VALUES ($1, $2, 'system', '00000000-0000-0000-0000-000000000000', $3, 'system', $4, $5, $5)`,
+				unclaimMsgID, dmID, unclaimContent, threadID, unclaimNow,
+			)
+			var replyCount int
+			h.pool.QueryRow(r.Context(),
+				`SELECT reply_count FROM threads WHERE id = $1`, threadID,
+			).Scan(&replyCount)
+			// Broadcast to thread subscribers
+			threadMsgPayload := ws.ThreadMessageNewPayload{
+				Message: ws.ThreadMessageItem{
+					ID:          unclaimMsgID,
+					ChannelID:   dmID,
+					ThreadID:    threadID,
+					SenderType:  "system",
+					SenderID:    "system",
+					SenderName:  "Solo",
+					Content:     unclaimContent,
+					ContentType: "system",
+					CreatedAt:   unclaimNow.UTC().Format(time.RFC3339),
+				},
+				Thread: ws.ThreadMetadataItem{
+					ThreadID:    threadID,
+					ReplyCount:  replyCount,
+					LastReplyAt: unclaimNow.UTC().Format(time.RFC3339),
+				},
+			}
+			h.hub.BroadcastToThread(threadID, ws.Envelope(ws.EventThreadMessageNew, threadMsgPayload))
+			// Broadcast thread.reply so DM message list updates reply_count on parent
+			h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventThreadReplyNotify, ws.ThreadReplyNotifyPayload{
+				ChannelID:     dmID,
+				ThreadID:      threadID,
+				RootMessageID: task.MessageID,
+				ReplyCount:    replyCount,
+				LastReplyAt:   unclaimNow.UTC().Format(time.RFC3339),
+				LatestReply: &ws.LatestReplyItem{
+					ID:         unclaimMsgID,
+					SenderType: "system",
+					SenderID:   "system",
+					SenderName: "Solo",
+					Content:    unclaimContent,
+					CreatedAt:  unclaimNow.UTC().Format(time.RFC3339),
+				},
+			}))
+			// Also broadcast to channel for DM message list
+			wsMsg := ws.MessageNewPayload{
+				ID:          unclaimMsgID,
+				ChannelID:   dmID,
+				SenderType:  "system",
+				SenderID:    "system",
+				SenderName:  "Solo",
+				Content:     unclaimContent,
+				ContentType: "system",
+				ThreadID:    threadID,
+				CreatedAt:   unclaimNow.UTC().Format(time.RFC3339),
+			}
+			h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventMessageNew, wsMsg))
+			h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventDMMessageNew, ws.DMMessageNewPayload{
+				DMID:        dmID,
+				ID:          unclaimMsgID,
+				ChannelID:   dmID,
+				SenderType:  "system",
+				SenderID:    "system",
+				SenderName:  "Solo",
+				Content:     unclaimContent,
+				ContentType: "system",
+				ThreadID:    threadID,
+				CreatedAt:   unclaimNow.UTC().Format(time.RFC3339),
+			}))
+		}
+	}
 }
 
 // --- DM task helpers ---
@@ -1494,7 +1747,7 @@ func (h *DMHandler) isDMParticipant(ctx context.Context, dmID, userID string) bo
 	err := h.pool.QueryRow(ctx,
 		`SELECT EXISTS(
 			SELECT 1 FROM dm_members
-			WHERE channel_id = $1 AND member_type = 'user' AND member_id = $2
+			WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2
 		)`, dmID, userID,
 	).Scan(&exists)
 	if err != nil {
@@ -1503,22 +1756,19 @@ func (h *DMHandler) isDMParticipant(ctx context.Context, dmID, userID string) bo
 	return exists
 }
 
-// broadcastDMMessageNewEvent broadcasts a dm.message.new event from a MessageNewPayload.
-func (h *DMHandler) broadcastDMMessageNewEvent(msg ws.MessageNewPayload) {
-	if h.hub == nil {
+// broadcastDMTaskMessageUpdated broadcasts a message.updated event with task fields.
+func (h *DMHandler) broadcastDMTaskMessageUpdated(messageID, channelID string, taskNumber int, status, claimerName string) {
+	if messageID == "" {
 		return
 	}
-	h.hub.BroadcastToChannel(msg.ChannelID, ws.Envelope(ws.EventDMMessageNew, ws.DMMessageNewPayload{
-		DMID:        msg.ChannelID,
-		ID:          msg.ID,
-		ChannelID:   msg.ChannelID,
-		SenderType:  msg.SenderType,
-		SenderID:    msg.SenderID,
-		SenderName:  msg.SenderName,
-		Content:     msg.Content,
-		ContentType: msg.ContentType,
-		CreatedAt:   msg.CreatedAt,
-	}))
+	msgPayload := ws.Envelope(ws.EventMessageUpdated, ws.MessageUpdatedPayload{
+		ID:              messageID,
+		ChannelID:       channelID,
+		TaskNumber:      taskNumber,
+		TaskStatus:      status,
+		TaskClaimerName: claimerName,
+	})
+	h.hub.BroadcastToChannel(channelID, msgPayload)
 }
 
 // broadcastDMTaskSystemMessage sends a system message to the DM channel via WebSocket.
@@ -1537,7 +1787,6 @@ func (h *DMHandler) broadcastDMTaskSystemMessage(dmID string, taskNumber int, ti
 		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
 	}
 	h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventMessageNew, msg))
-	h.broadcastDMMessageNewEvent(msg)
 }
 
 // broadcastDMTaskSystemClaim sends a claim system message.
@@ -1556,7 +1805,6 @@ func (h *DMHandler) broadcastDMTaskSystemClaim(dmID string, taskNumber int, titl
 		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
 	}
 	h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventMessageNew, msg))
-	h.broadcastDMMessageNewEvent(msg)
 }
 
 // broadcastDMTaskSystemUnclaim sends an unclaim system message.
@@ -1575,7 +1823,6 @@ func (h *DMHandler) broadcastDMTaskSystemUnclaim(dmID string, taskNumber int, ti
 		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
 	}
 	h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventMessageNew, msg))
-	h.broadcastDMMessageNewEvent(msg)
 }
 
 
