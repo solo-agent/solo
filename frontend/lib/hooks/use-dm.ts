@@ -422,6 +422,7 @@ export function useDM() {
                     task_title: event.task_title ?? m.task_title,
                     task_status: event.task_status ?? m.task_status,
                     task_claimer_name: event.task_claimer_name ?? m.task_claimer_name,
+                    reply_count: event.reply_count ?? m.reply_count,
                   }
                 : m,
             ),

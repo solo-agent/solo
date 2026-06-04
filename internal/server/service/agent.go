@@ -568,13 +568,24 @@ func (s *AgentService) broadcastThreadMessage(threadID, channelID, agentID, agen
 	})
 	s.hub.BroadcastToScope(realtime.ScopeThread, threadID, envelope)
 
-	// Also broadcast thread.reply to channel scope
+	// Update thread reply_count and read root_message_id for thread.reply broadcast.
+	now := time.Now().UTC()
+	var rootMessageID string
+	var replyCount int
+	_, _ = s.pool.Exec(context.Background(),
+		`UPDATE threads SET reply_count = reply_count + 1, last_reply_at = $1
+		 WHERE id = $2`, now, threadID)
+	_ = s.pool.QueryRow(context.Background(),
+		`SELECT root_message_id, reply_count FROM threads WHERE id = $1`, threadID,
+	).Scan(&rootMessageID, &replyCount)
+
+	// Broadcast thread.reply to channel scope so DM message list updates reply_count.
 	replyPayload := map[string]interface{}{
-		"thread_id":   threadID,
-		"channel_id":  channelID,
-		"message_id":  messageID,
-		"sender_id":   agentID,
-		"sender_name": agentName,
+		"thread_id":       threadID,
+		"channel_id":      channelID,
+		"root_message_id": rootMessageID,
+		"reply_count":     replyCount,
+		"last_reply_at":   now.Format(time.RFC3339),
 	}
 	replyData, _ := json.Marshal(replyPayload)
 	replyEnvelope, _ := json.Marshal(map[string]interface{}{
