@@ -173,6 +173,16 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
     refetch: refetchTasks,
   } = useTasks({ channel_id: channel.id });
 
+  // Refetch tasks when switching to tasks tab
+  useEffect(() => {
+    if (channelViewTab === 'tasks') refetchTasks();
+  }, [channelViewTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Refetch tasks when ThreadPanel opens via reply click
+  useEffect(() => {
+    if (threadMessage?.id) refetchTasks();
+  }, [threadMessage?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ---- Agent thinking/typing/streaming status tracking (SOLO-47-F, SOLO-52-F) ----
   const [thinkingAgentNames, setThinkingAgentNames] = useState<string[]>([]);
   const [typingAgentNames, setTypingAgentNames] = useState<string[]>([]);
@@ -280,8 +290,8 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
   // ---- Task click in tasks tab: open ThreadPanel with the parent message ----
   const handleTaskClickInTab = useCallback(
     (task: Task) => {
-      // If task has no message_id, can't open thread
       if (!task.message_id) return;
+      refetchTasks();
 
       // Find message in the already-loaded channel messages
       const existingMsg = messages.find((m) => m.id === task.message_id);
@@ -311,7 +321,7 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
         task_claimer_name: task.claimer_name || task.assignee_name,
       });
     },
-    [channel.id, messages],
+    [channel.id, messages, refetchTasks],
   );
 
   const handleThreadClose = useCallback(() => {

@@ -716,9 +716,6 @@ export function ThreadPanel({
 
   useEffect(() => {
     const unsub = onEvent((event) => {
-      // Update reply count on thread.reply
-      if (event.type === 'thread.reply') {
-      }
       if (event.type === 'thread.reply' && event.thread_id === threadId) {
         setReplyCount(event.reply_count);
       }

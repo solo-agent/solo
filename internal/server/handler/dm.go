@@ -1556,31 +1556,6 @@ func (h *DMHandler) ClaimTask(w http.ResponseWriter, r *http.Request) {
 					CreatedAt:  claimNow.UTC().Format(time.RFC3339),
 				},
 			}))
-			// Also broadcast to channel for DM message list
-			wsMsg := ws.MessageNewPayload{
-				ID:          claimMsgID,
-				ChannelID:   dmID,
-				SenderType:  "system",
-				SenderID:    "system",
-				SenderName:  "Solo",
-				Content:     claimContent,
-				ContentType: "system",
-				ThreadID:    threadID,
-				CreatedAt:   claimNow.UTC().Format(time.RFC3339),
-			}
-			h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventMessageNew, wsMsg))
-			h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventDMMessageNew, ws.DMMessageNewPayload{
-				DMID:        dmID,
-				ID:          claimMsgID,
-				ChannelID:   dmID,
-				SenderType:  "system",
-				SenderID:    "system",
-				SenderName:  "Solo",
-				Content:     claimContent,
-				ContentType: "system",
-				ThreadID:    threadID,
-				CreatedAt:   claimNow.UTC().Format(time.RFC3339),
-			}))
 		}
 	}
 }
@@ -1709,31 +1684,6 @@ func (h *DMHandler) UnclaimTask(w http.ResponseWriter, r *http.Request) {
 					Content:    unclaimContent,
 					CreatedAt:  unclaimNow.UTC().Format(time.RFC3339),
 				},
-			}))
-			// Also broadcast to channel for DM message list
-			wsMsg := ws.MessageNewPayload{
-				ID:          unclaimMsgID,
-				ChannelID:   dmID,
-				SenderType:  "system",
-				SenderID:    "system",
-				SenderName:  "Solo",
-				Content:     unclaimContent,
-				ContentType: "system",
-				ThreadID:    threadID,
-				CreatedAt:   unclaimNow.UTC().Format(time.RFC3339),
-			}
-			h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventMessageNew, wsMsg))
-			h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventDMMessageNew, ws.DMMessageNewPayload{
-				DMID:        dmID,
-				ID:          unclaimMsgID,
-				ChannelID:   dmID,
-				SenderType:  "system",
-				SenderID:    "system",
-				SenderName:  "Solo",
-				Content:     unclaimContent,
-				ContentType: "system",
-				ThreadID:    threadID,
-				CreatedAt:   unclaimNow.UTC().Format(time.RFC3339),
 			}))
 		}
 	}

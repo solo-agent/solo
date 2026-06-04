@@ -174,8 +174,6 @@ export function useThread(): UseThreadReturn {
         return;
       }
 
-      if (event.type === 'thread.message.new') {
-      }
       if (event.type === 'thread.message.new' && event.thread.thread_id === tid) {
         // Replace streaming placeholder if one exists, otherwise append
         setMessages((prev) => {

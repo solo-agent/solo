@@ -113,6 +113,11 @@ export function DMView({
   const [threadTask, setThreadTask] = useState<Task | null>(null);
   const [threadPanelWidth, setThreadPanelWidth] = useState(400);
 
+  // Refetch tasks when switching to tasks tab
+  useEffect(() => {
+    if (viewTab === 'tasks') refetchTasks?.();
+  }, [viewTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Sync threadTask when tasks list changes (align with channel-view pattern)
   useEffect(() => {
     if (!threadMessage) return;
@@ -193,19 +198,20 @@ export function DMView({
 
   const handleMessageClick = useCallback(
     (message: Message) => {
-      // If the message is a task, find the task and open ThreadPanel
       if (message.task_number != null) {
+        refetchTasks?.();
         const task = tasks?.find((t) => t.message_id === message.id || t.id === message.id);
         setThreadMessage(message);
         setThreadTask(task ?? null);
       }
     },
-    [tasks],
+    [tasks, refetchTasks],
   );
 
   const handleTaskClickFromBoard = useCallback(
     (task: Task) => {
       if (!task.message_id) return;
+      refetchTasks?.();
       // Use task.message_id to find the original message
       const existingMsg = messages.find((m) => m.id === task.message_id);
       if (existingMsg) {
@@ -228,7 +234,7 @@ export function DMView({
       }
       setThreadTask(task);
     },
-    [messages],
+    [messages, refetchTasks],
   );
 
   const handleAsTask = useCallback(
