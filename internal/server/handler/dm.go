@@ -747,7 +747,6 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 			SubtaskCount:     task.SubtaskCount,
 			DoneSubtaskCount: task.DoneSubtaskCount,
 		})
-		h.broadcastDMTaskMessageUpdated(task.MessageID, dmID, task.TaskNumber, task.Status, task.ClaimerName)
 		threadSvc := service.NewThreadService(h.pool)
 		_, _, _ = threadSvc.GetOrCreateThread(r.Context(), dmID, task.MessageID)
 		if h.agentSvc != nil {
@@ -1130,7 +1129,6 @@ func (h *DMHandler) ConvertMessageToTask(w http.ResponseWriter, r *http.Request)
 	// Broadcast system message
 	// Broadcast message.updated so the original message gets task badge fields
 	if task.MessageID != "" {
-		h.broadcastDMTaskMessageUpdated(task.MessageID, dmID, task.TaskNumber, task.Status, task.ClaimerName)
 	}
 
 	// Trigger DM agent participant for auto-claim
@@ -1254,7 +1252,6 @@ func (h *DMHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		SubtaskCount:     task.SubtaskCount,
 		DoneSubtaskCount: task.DoneSubtaskCount,
 	})
-	h.broadcastDMTaskMessageUpdated(task.MessageID, dmID, task.TaskNumber, task.Status, task.ClaimerName)
 
 	// Trigger DM agent participant for auto-claim
 	if h.agentSvc != nil {
@@ -1425,7 +1422,6 @@ func (h *DMHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	})
 
 		// Broadcast message.updated for task badge (align with channel behavior)
-		h.broadcastDMTaskMessageUpdated(task.MessageID, dmID, task.TaskNumber, task.Status, task.ClaimerName)
 }
 
 // ClaimTask handles POST /api/v1/dm/{dmID}/tasks/{taskID}/claim
@@ -1500,7 +1496,6 @@ func (h *DMHandler) ClaimTask(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Broadcast message.updated for task badge
-	h.broadcastDMTaskMessageUpdated(task.MessageID, dmID, task.TaskNumber, task.Status, task.ClaimerName)
 
 	// Persist claim system message to the task's thread.
 	if task.MessageID != "" {
@@ -1614,7 +1609,6 @@ func (h *DMHandler) UnclaimTask(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Broadcast message.updated for task badge (align with task.go Unclaim)
-	h.broadcastDMTaskMessageUpdated(task.MessageID, dmID, task.TaskNumber, task.Status, "")
 
 	// Persist unclaim system message to the task's thread (align with ClaimTask).
 	if task.MessageID != "" {
@@ -1674,21 +1668,6 @@ func (h *DMHandler) isDMParticipant(ctx context.Context, dmID, userID string) bo
 	return exists
 }
 
-// broadcastDMTaskMessageUpdated broadcasts a message.updated event with task fields.
-func (h *DMHandler) broadcastDMTaskMessageUpdated(messageID, channelID string, taskNumber int, status, claimerName string) {
-	if messageID == "" {
-		return
-	}
-	msgPayload := ws.Envelope(ws.EventMessageUpdated, ws.MessageUpdatedPayload{
-		ID:              messageID,
-		ChannelID:       channelID,
-		TaskNumber:      taskNumber,
-		TaskStatus:      status,
-		TaskClaimerName: claimerName,
-	})
-	h.hub.BroadcastToChannel(channelID, msgPayload)
-}
-
 // broadcastDMTaskSystemMessage sends a system message to the DM channel via WebSocket.
 func (h *DMHandler) broadcastDMTaskSystemMessage(dmID string, taskNumber int, title, action string) {
 	if h.hub == nil {
@@ -1706,43 +1685,6 @@ func (h *DMHandler) broadcastDMTaskSystemMessage(dmID string, taskNumber int, ti
 	}
 	h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventMessageNew, msg))
 }
-
-// broadcastDMTaskSystemClaim sends a claim system message.
-func (h *DMHandler) broadcastDMTaskSystemClaim(dmID string, taskNumber int, title, claimerID string) {
-	if h.hub == nil {
-		return
-	}
-	msg := ws.MessageNewPayload{
-		ID:          uuid.New().String(),
-		ChannelID:   dmID,
-		SenderType:  "system",
-		SenderID:    "system",
-		SenderName:  "Solo",
-		Content:     fmt.Sprintf("📋 <@%s> claimed #%d %s", claimerID, taskNumber, title),
-		ContentType: "system",
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
-	}
-	h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventMessageNew, msg))
-}
-
-// broadcastDMTaskSystemUnclaim sends an unclaim system message.
-func (h *DMHandler) broadcastDMTaskSystemUnclaim(dmID string, taskNumber int, title, unclaimerID string) {
-	if h.hub == nil {
-		return
-	}
-	msg := ws.MessageNewPayload{
-		ID:          uuid.New().String(),
-		ChannelID:   dmID,
-		SenderType:  "system",
-		SenderID:    "system",
-		SenderName:  "Solo",
-		Content:     fmt.Sprintf("📋 <@%s> released #%d %s", unclaimerID, taskNumber, title),
-		ContentType: "system",
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
-	}
-	h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventMessageNew, msg))
-}
-
 
 // DeleteTask handles DELETE /api/v1/dm/{dmID}/tasks/{taskID}
 func (h *DMHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
