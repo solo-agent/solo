@@ -1540,23 +1540,7 @@ func (h *DMHandler) ClaimTask(w http.ResponseWriter, r *http.Request) {
 				},
 			}
 			h.hub.BroadcastToThread(threadID, ws.Envelope(ws.EventThreadMessageNew, threadMsgPayload))
-			// Broadcast thread.reply so DM message list updates reply_count on parent
-			h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventThreadReplyNotify, ws.ThreadReplyNotifyPayload{
-				ChannelID:     dmID,
-				ThreadID:      threadID,
-				RootMessageID: task.MessageID,
-				ReplyCount:    replyCount,
-				LastReplyAt:   claimNow.UTC().Format(time.RFC3339),
-				LatestReply: &ws.LatestReplyItem{
-					ID:         claimMsgID,
-					SenderType: "system",
-					SenderID:   "system",
-					SenderName: "Solo",
-					Content:    claimContent,
-					CreatedAt:  claimNow.UTC().Format(time.RFC3339),
-				},
-			}))
-		}
+					}
 	}
 }
 
@@ -1669,23 +1653,7 @@ func (h *DMHandler) UnclaimTask(w http.ResponseWriter, r *http.Request) {
 				},
 			}
 			h.hub.BroadcastToThread(threadID, ws.Envelope(ws.EventThreadMessageNew, threadMsgPayload))
-			// Broadcast thread.reply so DM message list updates reply_count on parent
-			h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventThreadReplyNotify, ws.ThreadReplyNotifyPayload{
-				ChannelID:     dmID,
-				ThreadID:      threadID,
-				RootMessageID: task.MessageID,
-				ReplyCount:    replyCount,
-				LastReplyAt:   unclaimNow.UTC().Format(time.RFC3339),
-				LatestReply: &ws.LatestReplyItem{
-					ID:         unclaimMsgID,
-					SenderType: "system",
-					SenderID:   "system",
-					SenderName: "Solo",
-					Content:    unclaimContent,
-					CreatedAt:  unclaimNow.UTC().Format(time.RFC3339),
-				},
-			}))
-		}
+					}
 	}
 }
 

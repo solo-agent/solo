@@ -660,26 +660,6 @@ export function ThreadPanel({
     setReplyCount(initialReplyCount);
   }, [initialReplyCount]);
 
-  // Local state for task and parent message so WS events can update them in-place
-  // without requiring the parent to re-render with new props.
-  const [liveTask, setLiveTask] = useState(task);
-  const [liveParentMessage, setLiveParentMessage] = useState(parentMessage);
-
-  // Refs for use in the onEvent callback to avoid re-registering the handler
-  // every time liveTask or liveParentMessage changes.
-  const liveTaskRef = useRef(liveTask);
-  liveTaskRef.current = liveTask;
-  const liveParentMessageRef = useRef(liveParentMessage);
-  liveParentMessageRef.current = liveParentMessage;
-
-  // Sync from props when the panel is opened with a different task/message
-  useEffect(() => {
-    setLiveTask(task);
-  }, [task]);
-  useEffect(() => {
-    setLiveParentMessage(parentMessage);
-  }, [parentMessage]);
-
   const { isConnected, subscribeThread, unsubscribeThread, onEvent } =
     useWebSocket();
 
@@ -720,45 +700,6 @@ export function ThreadPanel({
         setReplyCount(event.reply_count);
       }
 
-      const pm = liveParentMessageRef.current;
-      const t = liveTaskRef.current;
-
-      // Keep liveParentMessage task fields in sync with message.updated
-      if (
-        event.type === 'message.updated' &&
-        event.id === pm.id
-      ) {
-        setLiveParentMessage((prev) => ({
-          ...prev,
-          ...(event.task_number != null && { task_number: event.task_number }),
-          ...(event.task_status != null && { task_status: event.task_status }),
-          ...(event.task_claimer_name != null && { task_claimer_name: event.task_claimer_name }),
-          ...(event.task_title != null && { task_title: event.task_title }),
-        }));
-      }
-
-      // Keep liveTask in sync with task.updated
-      if (
-        event.type === 'task.updated' &&
-        t &&
-        event.id === t.id
-      ) {
-        setLiveTask((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            title: event.title ?? prev.title,
-            description: event.description ?? prev.description,
-            status: (event.status as TaskStatus) ?? prev.status,
-            claimer_id: event.claimer_id ?? prev.claimer_id,
-            claimer_name: event.claimer_name ?? prev.claimer_name,
-            priority: (event.priority as Task['priority']) ?? prev.priority,
-            due_date: event.due_date ?? prev.due_date,
-            subtask_count: event.subtask_count ?? prev.subtask_count,
-            done_subtask_count: event.done_subtask_count ?? prev.done_subtask_count,
-          };
-        });
-      }
     });
     return unsub;
   }, [threadId, onEvent]);
@@ -805,18 +746,18 @@ export function ThreadPanel({
       {/* Content area */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Task metadata bar: prefer full Task object, fallback to message fields */}
-        {liveTask ? (
+        {task ? (
           <TaskMetaBar
-            task={liveTask}
+            task={task}
             onClaim={onClaimTask}
             onUnclaim={onUnclaimTask}
           />
-        ) : liveParentMessage.task_status ? (
-          <ParentMessageTaskBar message={liveParentMessage} />
+        ) : parentMessage.task_status ? (
+          <ParentMessageTaskBar message={parentMessage} />
         ) : null}
 
         {/* Parent message */}
-        <ParentMessageBlock message={liveParentMessage} />
+        <ParentMessageBlock message={parentMessage} />
 
         {/* Divider */}
         <div className="divider-brutal mx-6" />
@@ -847,7 +788,7 @@ export function ThreadPanel({
 
       {/* Reply input */}
       <ThreadReplyInput
-        key={liveParentMessage.id}
+        key={parentMessage.id}
         onSend={handleSendReply}
         disabled={!!error || isLoading}
         members={members}
