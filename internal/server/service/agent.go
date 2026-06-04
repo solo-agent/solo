@@ -991,15 +991,40 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 		}
 	}
 
-	// P25-05-B: If no thread could be resolved for the task, do not fall back
-	// to channel-level broadcast. The agent response MUST go to a thread.
+	// P25-05-B: If no thread could be resolved for the task, create a system
+	// message and thread so agent responses can be routed properly.
 	if threadID == "" {
-		slog.Error("TriggerAgentForTask: no thread_id resolved, skipping agent trigger",
-			"task_id", taskID,
-			"agent_id", agentID,
-			"channel_id", channelID,
+		msgID := uuid.New().String()
+		now := time.Now()
+		sysContent := fmt.Sprintf("Task #%d: %s", taskNumber, taskTitle)
+		_, dbErr := s.pool.Exec(ctx,
+			`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, created_at, updated_at)
+			 VALUES ($1, $2, 'system', '00000000-0000-0000-0000-000000000000', $3, 'system', $4, $4)`,
+			msgID, channelID, sysContent, now,
 		)
-		return
+		if dbErr != nil {
+			slog.Error("TriggerAgentForTask: failed to create system message for task",
+				"task_id", taskID, "error", dbErr,
+			)
+			return
+		}
+		_, _ = s.pool.Exec(ctx,
+			`UPDATE tasks SET message_id = $1 WHERE id = $2`,
+			msgID, taskID,
+		)
+		threadSvc := NewThreadService(s.pool)
+		tid, _, tErr := threadSvc.GetOrCreateThread(ctx, channelID, msgID)
+		if tErr != nil {
+			slog.Error("TriggerAgentForTask: failed to create thread for task",
+				"task_id", taskID, "error", tErr,
+			)
+			return
+		}
+		threadID = tid
+		messageID = msgID
+		slog.Info("TriggerAgentForTask: created thread for task",
+			"task_id", taskID, "thread_id", threadID,
+		)
 	}
 
 	// Select daemon
@@ -1065,9 +1090,10 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 
 	taskContent := fmt.Sprintf("New message received:\n\n[target=%s msg=%s time=%s type=%s] @%s: %s",
 		target, shortMsgID, msgCreatedAt, senderType, senderName, msgContent)
-	taskContent += fmt.Sprintf(" [task #%d status=todo]", taskNumber)
+	taskContent += fmt.Sprintf(" [task #%d status=todo channel=%s]", taskNumber, channelID)
 	taskContent += "\n\nRespond as appropriate. Complete all your work before stopping."
-	taskContent += "\nReply in the channel or create/reply in a thread as appropriate; use each message's `target` and `msg` fields to choose the exact target."
+	taskContent += "\n- To reply to this message, use the `target` and `msg` fields above."
+	taskContent += "\n- To claim or update this task, use the `channel` field above (e.g. `solo task claim -n N -c <channel>`)."
 
 	contextMsgs := []agent.Message{
 		{Role: agent.RoleUser, Content: taskContent, SenderID: ""},

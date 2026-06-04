@@ -123,6 +123,7 @@ func proxyRequest(action, channelID, content, threadID, token string, taskNumber
 	if status != "" { body["status"] = status }
 	// For task_claim with -m, the message_id is passed in the content field.
 	// Forward it as task_id so the proxy can construct the correct URL path.
+	// Only when -n is NOT also specified (taskNumber <= 0) — -n takes priority.
 	if (action == "task_claim" || action == "task_update" || action == "task_unclaim") && len(content) > 0 && taskNumber <= 0 {
 		body["task_id"] = content
 	}
@@ -170,8 +171,8 @@ func handleTask(args []string, baseURL, token string) {
 func handleTaskList(args []string, baseURL, token string) {
 	var channel, status, output string
 	fs := flag.NewFlagSet("task list", flag.ExitOnError)
-	fs.StringVar(&channel, "c", "", "Channel ID (optional, omit for all channels)")
-	fs.StringVar(&channel, "channel", "", "Channel ID (optional, omit for all channels)")
+	fs.StringVar(&channel, "c", "", "Channel ID or #name (optional, omit for all channels)")
+	fs.StringVar(&channel, "channel", "", "Channel ID or #name (optional, omit for all channels)")
 	fs.StringVar(&status, "status", "", "Filter by todo|in_progress|in_review|done")
 	fs.StringVar(&output, "output", "", "Output format: json")
 	fs.Parse(args)
@@ -183,6 +184,15 @@ func handleTaskList(args []string, baseURL, token string) {
 	if output != "" && output != "json" {
 		fmt.Fprintf(os.Stderr, "solo: error: invalid --output value %q (only \"json\" is supported)\n", output)
 		doExit(exitUsage)
+	}
+
+	if channel != "" {
+		resolved, resolveErr := resolveChannelParam(baseURL, token, channel)
+		if resolveErr != nil {
+			fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+			doExit(exitBusiness)
+		}
+		channel = resolved
 	}
 
 	var url string
@@ -222,8 +232,8 @@ func handleTaskClaim(args []string, baseURL, token string) {
 	var channel, messageID string
 	var number int
 	fs := flag.NewFlagSet("task claim", flag.ExitOnError)
-	fs.StringVar(&channel, "c", "", "Channel ID")
-	fs.StringVar(&channel, "channel", "", "Channel ID")
+	fs.StringVar(&channel, "c", "", "Channel ID or #name")
+	fs.StringVar(&channel, "channel", "", "Channel ID or #name")
 	fs.IntVar(&number, "n", 0, "Task number")
 	fs.IntVar(&number, "number", 0, "Task number")
 	fs.StringVar(&messageID, "m", "", "Message ID (from msg= header)")
@@ -239,7 +249,14 @@ func handleTaskClaim(args []string, baseURL, token string) {
 		doExit(exitUsage)
 	}
 
-	// Determine task ID for the URL path
+	// Resolve channel name to UUID (strips #, URL-encodes)
+	channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+
+	// Determine task ID: -n uses task number, -m uses message ID (alternative).
 	taskID := ""
 	if messageID != "" {
 		taskID = messageID
@@ -247,12 +264,13 @@ func handleTaskClaim(args []string, baseURL, token string) {
 		taskID = strconv.Itoa(number)
 	}
 
-	// Try daemon proxy first (Slock-aligned — uses fresh JWT)
-	statusCode, body, err := proxyRequest("task_claim", channel, taskID, "", token, number, "")
+	// Try daemon proxy first (Slock-aligned — uses fresh JWT).
+	// Pass messageID via taskID parameter so the proxy uses it in the URL path.
+	statusCode, body, err := proxyRequest("task_claim", channelID, taskID, "", token, number, "")
 	if err != nil {
 		// Fallback to direct API
-		url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%s/claim", baseURL, channel, taskID)
-		statusCode, body, err = doHTTP(http.MethodPost, url, token, nil)
+		apiURL := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%s/claim", baseURL, channelID, taskID)
+		statusCode, body, err = doHTTP(http.MethodPost, apiURL, token, nil)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
@@ -260,13 +278,19 @@ func handleTaskClaim(args []string, baseURL, token string) {
 	}
 
 	if statusCode == http.StatusConflict {
-		// Already claimed — Slock-aligned output
 		label := fmt.Sprintf("#%d", number)
 		if messageID != "" {
 			label = fmt.Sprintf("msg:%s", messageID)
 		}
+		errMsg := extractErrorMessage(body)
 		fmt.Printf("Claim results (0 claimed, 1 failed):\n")
-		fmt.Printf("%s: FAILED — already assigned. Do not reply.\n", label)
+		if strings.Contains(errMsg, "terminal") {
+			fmt.Printf("%s: FAILED — task is already done/closed, cannot claim.\n", label)
+		} else if strings.Contains(errMsg, "status does not allow") {
+			fmt.Printf("%s: FAILED — task status does not allow claiming.\n", label)
+		} else {
+			fmt.Printf("%s: FAILED — already assigned. Do not reply.\n", label)
+		}
 		doExit(exitBusiness)
 	}
 	if statusCode >= 400 {
@@ -305,12 +329,18 @@ func handleTaskUpdate(args []string, baseURL, token string) {
 		doExit(exitUsage)
 	}
 
+	channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+
 	// Try daemon proxy first (Slock-aligned — uses fresh JWT)
-	statusCode, body, err := proxyRequest("task_update", channel, "", "", token, number, status)
+	statusCode, body, err := proxyRequest("task_update", channelID, "", "", token, number, status)
 	if err != nil {
 		// Fallback to direct API
 		reqBody, _ := json.Marshal(map[string]string{"status": status})
-		url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d", baseURL, channel, number)
+		url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d", baseURL, channelID, number)
 		statusCode, body, err = doHTTP(http.MethodPatch, url, token, reqBody)
 	}
 	if err != nil {
@@ -332,8 +362,8 @@ func handleTaskCreate(args []string, baseURL, token string) {
 	var channel, title, description, priority string
 	var parent int
 	fs := flag.NewFlagSet("task create", flag.ExitOnError)
-	fs.StringVar(&channel, "c", "", "Channel ID (required)")
-	fs.StringVar(&channel, "channel", "", "Channel ID (required)")
+	fs.StringVar(&channel, "c", "", "Channel ID or #name (required)")
+	fs.StringVar(&channel, "channel", "", "Channel ID or #name (required)")
 	fs.StringVar(&title, "title", "", "Task title (required)")
 	fs.StringVar(&description, "description", "", "Task description")
 	fs.StringVar(&priority, "priority", "", "Task priority: p0|p1|p2|p3")
@@ -357,6 +387,12 @@ func handleTaskCreate(args []string, baseURL, token string) {
 		}
 	}
 
+channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+
 	bodyMap := map[string]string{
 		"title":       title,
 		"description": description,
@@ -365,7 +401,7 @@ func handleTaskCreate(args []string, baseURL, token string) {
 
 	// Resolve --parent: look up the parent task by number in the channel to get its UUID.
 	if parent > 0 {
-		parentID, err := resolveTaskNumberToID(baseURL, token, channel, parent)
+		parentID, err := resolveTaskNumberToID(baseURL, token, channelID, parent)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "solo: error: %v\n", err)
 			doExit(exitBusiness)
@@ -374,7 +410,7 @@ func handleTaskCreate(args []string, baseURL, token string) {
 	}
 
 	reqBody, _ := json.Marshal(bodyMap)
-	url := fmt.Sprintf("%s/api/v1/channels/%s/tasks", baseURL, channel)
+	url := fmt.Sprintf("%s/api/v1/channels/%s/tasks", baseURL, channelID)
 	statusCode, body, err := doHTTP(http.MethodPost, url, token, reqBody)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
@@ -410,11 +446,17 @@ func handleTaskUnclaim(args []string, baseURL, token string) {
 		doExit(exitUsage)
 	}
 
+	channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+
 	// Try daemon proxy first (Slock-aligned — uses fresh JWT)
-	statusCode, body, err := proxyRequest("task_unclaim", channel, "", "", token, number, "")
+	statusCode, body, err := proxyRequest("task_unclaim", channelID, "", "", token, number, "")
 	if err != nil {
 		// Fallback to direct API
-		url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d/claim", baseURL, channel, number)
+		url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d/claim", baseURL, channelID, number)
 		statusCode, body, err = doHTTP(http.MethodDelete, url, token, nil)
 	}
 	if err != nil {
@@ -896,6 +938,25 @@ func resolveChannelName(baseURL, token, name string) (string, error) {
 	return "", fmt.Errorf("channel %q not found", name)
 }
 
+// resolveChannelParam strips the # prefix (if present) and resolves a channel
+// name to its UUID via the server info API. UUIDs are returned as-is (URL-encoded).
+// Returns an error if the channel name cannot be resolved to a UUID.
+func resolveChannelParam(baseURL, token, channel string) (string, error) {
+	// Strip # prefix and dm:@ prefix
+	channel = strings.TrimPrefix(channel, "#")
+	channel = strings.TrimPrefix(channel, "dm:@")
+	// UUID check: 36 chars with 4 dashes
+	if len(channel) == 36 && strings.Count(channel, "-") == 4 {
+		return url.PathEscape(channel), nil
+	}
+	// Resolve name to UUID via server info
+	id, err := resolveChannelName(baseURL, token, channel)
+	if err != nil {
+		return "", fmt.Errorf("channel %q not found — use a channel ID (UUID) or check the channel name", channel)
+	}
+	return url.PathEscape(id), nil
+}
+
 func resolveTaskNumberToID(baseURL, token, channelID string, taskNumber int) (string, error) {
 	url := fmt.Sprintf("%s/api/v1/channels/%s/tasks", baseURL, channelID)
 	statusCode, body, err := doHTTP(http.MethodGet, url, token, nil)
@@ -927,7 +988,8 @@ func resolveTaskNumberToID(baseURL, token, channelID string, taskNumber int) (st
 // ---------------------------------------------------------------------------
 
 // extractErrorMessage tries to pull a human-readable message from a JSON error
-// response body. Falls back to the raw body string.
+// response body. Falls back to the raw body string. Returns a fallback message
+// with the HTTP status if the body is empty.
 func extractErrorMessage(body []byte) string {
 	var errResp struct {
 		Error   string `json:"error"`
@@ -940,6 +1002,9 @@ func extractErrorMessage(body []byte) string {
 		if errResp.Error != "" {
 			return errResp.Error
 		}
+	}
+	if len(body) == 0 {
+		return "(empty response body)"
 	}
 	return string(body)
 }

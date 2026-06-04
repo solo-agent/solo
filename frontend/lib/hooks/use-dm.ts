@@ -48,6 +48,7 @@ interface DMMessageResponse {
   task_title?: string;
   task_status?: string;
   task_claimer_name?: string;
+  reply_count?: number;
   /** SOLO-249-F: attachments on the message */
   attachments?: Attachment[];
 }
@@ -96,6 +97,7 @@ function mapDMMessageResponse(resp: DMMessageResponse): Message {
     task_title: resp.task_title,
     task_status: resp.task_status,
     task_claimer_name: resp.task_claimer_name,
+    reply_count: resp.reply_count ?? 0,
     attachments: resp.attachments,
   };
 }
@@ -356,6 +358,7 @@ export function useDM() {
       // ---- dm.message.new (DM-specific event, redundant with message.new but handled for safety) ----
       if (event.type === 'dm.message.new') {
         if (event.dm_id !== did) return;
+        if (event.thread_id) return; // thread replies handled by thread hook
 
         setMessages((prev) => {
           const existing = prev.find((m) => m.id === event.id);
@@ -626,12 +629,14 @@ export function useDM() {
         setMessages((prev) => {
           if (isTaskResponse) {
             const taskResp = confirmed as unknown as Record<string, unknown>;
+            const creatorName = (taskResp.creator_name as string) || undefined;
             return prev.map((m) => {
               if (m.id === tempId) {
                 return {
                   ...m,
                   id: realMessageId,
                   status: 'sent' as const,
+                  ...(creatorName && { display_name: creatorName }),
                   task_number: taskResp.task_number as number | undefined,
                   task_status: taskResp.status as string | undefined,
                   task_claimer_name: taskResp.claimer_name as string | undefined,

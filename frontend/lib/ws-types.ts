@@ -70,7 +70,7 @@ export type WSServerEvent =
   | { type: 'task.updated'; id: string; task_number: number; channel_id: string; title: string; description?: string; status: string; claimer_id?: string; claimer_name?: string; priority?: string; due_date?: string; message_id?: string; parent_task_id?: string; subtask_count?: number; done_subtask_count?: number; updated_at: string }
   | { type: 'task.deleted'; id: string; channel_id: string; task_number: number }
   // ---- DM 事件 ----
-  | { type: 'dm.message.new'; id: string; dm_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; created_at: string; attachments?: Attachment[] }
+  | { type: 'dm.message.new'; id: string; dm_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; created_at: string; attachments?: Attachment[]; thread_id?: string }
   | { type: 'dm.updated'; dm_id: string; last_message?: { content: string; sender_id: string; sender_name: string; created_at: string }; last_reply_at?: string; unread_count: number };
 
 /** 客户端发送的 WebSocket 命令 */

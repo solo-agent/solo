@@ -340,26 +340,28 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	// Helper to forward the request with a given token.
 	forwardRequest := func(tok string) (*http.Response, []byte, error) {
 		serverURL := h.serverURL + serverPath
-		httpReq, err := http.NewRequestWithContext(r.Context(), "GET", serverURL, nil)
-		if serverBody != nil {
-			httpReq, err = http.NewRequestWithContext(r.Context(), "POST", serverURL, bytes.NewReader(serverBody))
-			if err != nil {
-				return nil, nil, err
+		method := "GET"
+		var fwdBody io.Reader
+		switch req.Action {
+		case "task_claim":
+			method = "POST"
+		case "task_update":
+			method = "PATCH"
+			fwdBody = bytes.NewReader(serverBody)
+		case "task_unclaim":
+			method = "DELETE"
+		default:
+			if serverBody != nil {
+				method = "POST"
+				fwdBody = bytes.NewReader(serverBody)
 			}
-			httpReq.Header.Set("Content-Type", "application/json")
 		}
-		if req.Action == "task_update" {
-			httpReq, err = http.NewRequestWithContext(r.Context(), "PATCH", serverURL, bytes.NewReader(serverBody))
-			if err != nil {
-				return nil, nil, err
-			}
-			httpReq.Header.Set("Content-Type", "application/json")
+		httpReq, err := http.NewRequestWithContext(r.Context(), method, serverURL, fwdBody)
+		if err != nil {
+			return nil, nil, err
 		}
-		if req.Action == "task_unclaim" {
-			httpReq, err = http.NewRequestWithContext(r.Context(), "DELETE", serverURL, nil)
-			if err != nil {
-				return nil, nil, err
-			}
+		if serverBody != nil || req.Action == "task_update" {
+			httpReq.Header.Set("Content-Type", "application/json")
 		}
 		httpReq.Header.Set("Authorization", "Bearer "+tok)
 

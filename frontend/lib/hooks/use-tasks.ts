@@ -112,7 +112,14 @@ export function useTasks(filters?: TaskFilters) {
 
   // ---- WebSocket subscription for real-time task events ----
   const channelFilter = filters?.channel_id;
-  const { onEvent } = useWebSocket();
+  const { subscribe, unsubscribe, onEvent } = useWebSocket();
+
+  // Ensure the client is subscribed to the channel so task events arrive.
+  useEffect(() => {
+    if (!channelFilter) return;
+    subscribe(channelFilter);
+    return () => { unsubscribe(channelFilter); };
+  }, [channelFilter, subscribe, unsubscribe]);
 
   useEffect(() => {
     const unsub = onEvent((event) => {
@@ -211,8 +218,8 @@ export function useTasks(filters?: TaskFilters) {
     return task;
   }, []);
 
-  const updateTask = useCallback(async (id: string, input: UpdateTaskInput): Promise<Task> => {
-    const res = await apiClient.patch<TaskResponse>(`/api/v1/tasks/${id}`, {
+  const updateTask = useCallback(async (channelId: string, taskId: string, input: UpdateTaskInput): Promise<Task> => {
+    const res = await apiClient.patch<TaskResponse>(`/api/v1/channels/${channelId}/tasks/${taskId}`, {
       title: input.title,
       description: input.description,
       status: input.status,
@@ -222,7 +229,7 @@ export function useTasks(filters?: TaskFilters) {
       due_date: input.due_date,
     });
     const updated = mapTask(res);
-    setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
     return updated;
   }, []);
 
@@ -364,6 +371,76 @@ export function useDMTasks(dmId: string | null) {
     return () => { mountedRef.current = false; };
   }, [loadTasks]);
 
+  // ---- WebSocket subscription for real-time DM task events ----
+  const { subscribeDM, unsubscribeDM, onEvent: dmOnEvent } = useWebSocket();
+
+  // Ensure the client is subscribed to the DM so task events arrive.
+  useEffect(() => {
+    if (!dmId) return;
+    subscribeDM(dmId);
+    return () => { unsubscribeDM(dmId); };
+  }, [dmId, subscribeDM, unsubscribeDM]);
+
+  useEffect(() => {
+    const unsub = dmOnEvent((event) => {
+      if (!dmId) return;
+
+      if (event.type === 'task.created') {
+        if (event.channel_id !== dmId) return;
+        setTasks((prev) => {
+          if (prev.find((t) => t.id === event.id)) return prev;
+          return [mapDMTask({
+            id: event.id,
+            task_number: event.task_number,
+            dm_id: event.channel_id,
+            creator_id: event.creator_id,
+            creator_name: (event as { creator_name?: string }).creator_name || undefined,
+            title: event.title,
+            description: event.description ?? '',
+            status: event.status,
+            claimer_id: event.claimer_id ?? '',
+            claimer_name: (event as { claimer_name?: string }).claimer_name || undefined,
+            priority: event.priority ?? 'normal',
+            due_date: event.due_date ?? '',
+            message_id: event.message_id ?? '',
+            created_at: event.created_at,
+            updated_at: event.updated_at,
+          }), ...prev];
+        });
+        return;
+      }
+
+      if (event.type === 'task.updated') {
+        console.log('[useDMTasks] task.updated received:', { eventChannelId: event.channel_id, dmId, match: event.channel_id === dmId, eventId: event.id, eventStatus: event.status });
+        if (event.channel_id !== dmId) return;
+        setTasks((prev) => {
+          const existing = prev.find((t) => t.id === event.id);
+          console.log('[useDMTasks] task.updated existing:', !!existing, 'prevCount:', prev.length);
+          if (!existing) return prev;
+          const updated = { ...existing };
+          updated.title = event.title;
+          if (event.description !== undefined) updated.description = event.description;
+          updated.status = (event.status === 'cancelled' ? 'closed' : event.status) as Task['status'];
+          updated.task_number = event.task_number;
+          if (event.claimer_id !== undefined) updated.claimer_id = event.claimer_id || undefined;
+          if (event.claimer_name !== undefined) updated.claimer_name = event.claimer_name;
+          if (event.priority !== undefined) updated.priority = event.priority as Task['priority'];
+          if (event.due_date !== undefined) updated.due_date = event.due_date || undefined;
+          if (event.message_id !== undefined) updated.message_id = event.message_id || undefined;
+          updated.updated_at = event.updated_at;
+          return prev.map((t) => (t.id === event.id ? updated : t));
+        });
+        return;
+      }
+
+      if (event.type === 'task.deleted') {
+        if (event.channel_id !== dmId) return;
+        setTasks((prev) => prev.filter((t) => t.id !== event.id));
+      }
+    });
+    return unsub;
+  }, [dmId, dmOnEvent]);
+
   const createTask = useCallback(async (input: CreateTaskInput & { dm_id: string }): Promise<Task> => {
     const res = await apiClient.post<DMTaskResponse>(`/api/v1/dm/${input.dm_id}/tasks`, {
       title: input.title,
@@ -383,7 +460,7 @@ export function useDMTasks(dmId: string | null) {
   }, []);
 
   const updateTask = useCallback(async (id: string, input: UpdateTaskInput): Promise<Task> => {
-    // DM tasks don't have their own PATCH endpoint; use the shared /api/v1/tasks/:id
+    // DM tasks go through the global endpoint since they exist in a DM scope
     const res = await apiClient.patch<TaskResponse>(`/api/v1/tasks/${id}`, {
       title: input.title,
       description: input.description,

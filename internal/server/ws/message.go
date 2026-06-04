@@ -267,6 +267,7 @@ type DMMessageNewPayload struct {
 	Content       string   `json:"content"`
 	ContentType   string   `json:"content_type"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	ThreadID      string   `json:"thread_id,omitempty"`
 	CreatedAt     string   `json:"created_at"`
 }
 

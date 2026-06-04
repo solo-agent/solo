@@ -842,6 +842,7 @@ func (h *MessageHandler) broadcastDMIfNeeded(channelID string, msg ws.MessageNew
 		Content:       msg.Content,
 		ContentType:   msg.ContentType,
 		AttachmentIDs: msg.AttachmentIDs,
+		ThreadID:      msg.ThreadID,
 		CreatedAt:     msg.CreatedAt,
 	}
 	h.hub.BroadcastToChannel(channelID, ws.Envelope(ws.EventDMMessageNew, dmPayload))

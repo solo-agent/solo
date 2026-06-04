@@ -262,13 +262,20 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
     // If not found yet, it will be caught when messages load (via the next effect)
   }, [initialThreadMessageId, channel, messages, channelTasks]);
 
-  // Sync threadTask when channelTasks change
+  // Sync threadTask when channelTasks change (e.g. after WS task.updated)
   useEffect(() => {
-    if (threadMessage && !threadTask) {
-      const task = channelTasks.find((t) => t.message_id === threadMessage.id);
-      if (task) setThreadTask(task);
+    if (!threadMessage) return;
+    const task = channelTasks.find((t) => t.message_id === threadMessage.id);
+    if (task) {
+      setThreadTask((prev) => {
+        // Only update if actually changed to avoid re-render loops
+        if (!prev || prev.status !== task.status || prev.claimer_id !== task.claimer_id) {
+          return task;
+        }
+        return prev;
+      });
     }
-  }, [channelTasks, threadMessage, threadTask]);
+  }, [channelTasks, threadMessage]);
 
   // ---- Task click in tasks tab: open ThreadPanel with the parent message ----
   const handleTaskClickInTab = useCallback(
@@ -345,7 +352,8 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
 
   const handleClaim = async (task: Task) => {
     try {
-      await claimTask(task.channel_id, task.id);
+      const updated = await claimTask(task.channel_id, task.id);
+      setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
       showToast(`已认领任务 #${task.task_number ?? '?'}`, 'success');
     } catch {
       // 409: silent — per spec, no error toast
@@ -354,7 +362,8 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
 
   const handleUnclaim = async (task: Task) => {
     try {
-      await unclaimTask(task.channel_id, task.id);
+      const updated = await unclaimTask(task.channel_id, task.id);
+      setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
       showToast(`已释放任务 #${task.task_number ?? '?'}`, 'info');
     } catch {
       // Errors handled silently for claim/unclaim
@@ -389,7 +398,8 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
 
   const handleStatusChange = async (task: Task, newStatus: TaskStatus) => {
     try {
-      await updateTask(task.id, { status: newStatus });
+      const updated = await updateTask(task.channel_id, task.id, { status: newStatus });
+      setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
     } catch {
       // handled by hook
     }
