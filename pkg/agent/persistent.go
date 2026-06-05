@@ -10,8 +10,11 @@ import (
 )
 
 // persistentRunner manages the shared subprocess lifecycle for persistent
-// agent backends (Claude, OpenCode, Codex). Each backend wraps this with
-// protocol-specific message formatting and output parsing.
+// agent backends (hermes, openclaw, opencode, codex). Each backend wraps this
+// with protocol-specific message formatting and output parsing.
+//
+// This is the shared infrastructure that Claude will migrate onto — it
+// mirrors ClaudeBackend.Start's env and process setup exactly.
 type persistentRunner struct {
 	cmd        *exec.Cmd
 	stdin      io.WriteCloser
@@ -53,13 +56,15 @@ func (r *persistentRunner) close() error {
 }
 
 // startPersistent creates a new persistent subprocess for the given CLI.
-// Returns the runner and any error from process creation or initial prompt write.
+// It uses buildEnvAt to inject the workspace directory into PATH, aligning
+// with ClaudeBackend.Start's behaviour. extraEnv carries backend-specific
+// variables merged on top of the process environment.
 func startPersistent(
 	ctx context.Context,
 	execPath string,
 	args []string,
 	dir string,
-	env []string,
+	extraEnv map[string]string,
 	logger *slog.Logger,
 ) (*persistentRunner, error) {
 	if logger == nil {
@@ -73,7 +78,7 @@ func startPersistent(
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	cmd.Env = env
+	cmd.Env = buildEnvAt(dir, extraEnv)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -94,7 +99,7 @@ func startPersistent(
 		return nil, fmt.Errorf("persistent: start: %w", err)
 	}
 
-	logger.Info("persistent: session started", "pid", cmd.Process.Pid, "exec", execPath)
+	logger.Info("persistent: session started", "pid", cmd.Process.Pid, "exec", execPath, "cwd", cmd.Dir)
 
 	return &persistentRunner{
 		cmd:        cmd,

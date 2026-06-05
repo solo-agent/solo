@@ -35,6 +35,7 @@ interface MessageResponse {
   task_status?: string;
   task_claimer_name?: string;
   has_unread_thread?: boolean;
+  sender_active?: boolean;
   created_at: string;
   /** SOLO-249-F: attachments on the message */
   attachments?: Attachment[];
@@ -59,6 +60,7 @@ function mapMessageResponse(resp: MessageResponse): Message {
     thread_id: resp.thread_id,
     reply_count: resp.reply_count,
     sender_type: resp.sender_type as 'user' | 'agent' | 'system' | undefined,
+    sender_active: resp.sender_active,
     task_number: resp.task_number,
     task_title: resp.task_title,
     task_status: resp.task_status,

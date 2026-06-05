@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -206,6 +207,12 @@ func registerWithServer(ctx context.Context) error {
 	}
 
 	host := getOutboundIP()
+	// When the server is on localhost, register with 127.0.0.1 so the
+	// server always reaches the daemon via loopback — avoids firewall /
+	// NAT issues with the outbound IP.
+	if strings.Contains(serverURL, "localhost") || strings.Contains(serverURL, "127.0.0.1") {
+		host = "127.0.0.1"
+	}
 	portStr := os.Getenv("DAEMON_PORT")
 	port := 8081
 	if p, err := strconv.Atoi(portStr); err == nil && p > 0 {

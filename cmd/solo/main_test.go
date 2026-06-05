@@ -194,7 +194,7 @@ func TestHandleTaskListWithChannel(t *testing.T) {
 	defer server.Close()
 
 	code, stdout, _ := captureAndRun(t, func() {
-		handleTaskList([]string{"-c", "ch-abc"}, server.URL, "test-token")
+		handleTaskList([]string{"-c", "550e8400-e29b-41d4-a716-446655440001"}, server.URL, "test-token")
 	})
 
 	if code != 0 {
@@ -203,8 +203,8 @@ func TestHandleTaskListWithChannel(t *testing.T) {
 	if capturedMethod != http.MethodGet {
 		t.Errorf("expected GET, got %s", capturedMethod)
 	}
-	if capturedPath != "/api/v1/channels/ch-abc/tasks" {
-		t.Errorf("expected path /api/v1/channels/ch-abc/tasks, got %s", capturedPath)
+	if capturedPath != "/api/v1/channels/550e8400-e29b-41d4-a716-446655440001/tasks" {
+		t.Errorf("expected path /api/v1/channels/550e8400-e29b-41d4-a716-446655440001/tasks, got %s", capturedPath)
 	}
 	if capturedAuth != "Bearer test-token" {
 		t.Errorf("expected Bearer token, got %q", capturedAuth)
@@ -226,7 +226,7 @@ func TestHandleTaskListOutputJSON(t *testing.T) {
 	defer server.Close()
 
 	code, stdout, _ := captureAndRun(t, func() {
-		handleTaskList([]string{"-c", "ch-1", "--output", "json"}, server.URL, "test-token")
+		handleTaskList([]string{"-c", "550e8400-e29b-41d4-a716-446655440002", "--output", "json"}, server.URL, "test-token")
 	})
 
 	if code != 0 {
@@ -235,8 +235,8 @@ func TestHandleTaskListOutputJSON(t *testing.T) {
 	if capturedMethod != http.MethodGet {
 		t.Errorf("expected GET, got %s", capturedMethod)
 	}
-	if capturedPath != "/api/v1/channels/ch-1/tasks" {
-		t.Errorf("expected path /api/v1/channels/ch-1/tasks, got %s", capturedPath)
+	if capturedPath != "/api/v1/channels/550e8400-e29b-41d4-a716-446655440002/tasks" {
+		t.Errorf("expected path /api/v1/channels/550e8400-e29b-41d4-a716-446655440002/tasks, got %s", capturedPath)
 	}
 
 	// Verify JSON envelope: {"ok":true,"data":...}
@@ -288,7 +288,7 @@ func TestHandleTaskListWithStatusFilter(t *testing.T) {
 	defer server.Close()
 
 	code, _, _ := captureAndRun(t, func() {
-		handleTaskList([]string{"-c", "ch-1", "--status", "in_progress"}, server.URL, "test-token")
+		handleTaskList([]string{"-c", "550e8400-e29b-41d4-a716-446655440002", "--status", "in_progress"}, server.URL, "test-token")
 	})
 
 	if code != 0 {
@@ -319,7 +319,7 @@ func TestHandleTaskClaimSuccess(t *testing.T) {
 	defer server.Close()
 
 	code, stdout, _ := captureAndRun(t, func() {
-		handleTaskClaim([]string{"-n", "1", "-c", "ch-abc"}, server.URL, "test-token")
+		handleTaskClaim([]string{"-n", "1", "-c", "550e8400-e29b-41d4-a716-446655440001"}, server.URL, "test-token")
 	})
 
 	if code != 0 {
@@ -328,8 +328,8 @@ func TestHandleTaskClaimSuccess(t *testing.T) {
 	if capturedMethod != http.MethodPost {
 		t.Errorf("expected POST, got %s", capturedMethod)
 	}
-	if capturedPath != "/api/v1/channels/ch-abc/tasks/1/claim" {
-		t.Errorf("expected path /api/v1/channels/ch-abc/tasks/1/claim, got %s", capturedPath)
+	if capturedPath != "/api/v1/channels/550e8400-e29b-41d4-a716-446655440001/tasks/1/claim" {
+		t.Errorf("expected path /api/v1/channels/550e8400-e29b-41d4-a716-446655440001/tasks/1/claim, got %s", capturedPath)
 	}
 	if capturedAuth != "Bearer test-token" {
 		t.Errorf("expected Bearer token, got %q", capturedAuth)
@@ -357,7 +357,7 @@ func TestHandleTaskClaimConflict(t *testing.T) {
 	defer server.Close()
 
 	code, stdout, stderr := captureAndRun(t, func() {
-		handleTaskClaim([]string{"-n", "1", "-c", "ch-abc"}, server.URL, "test-token")
+		handleTaskClaim([]string{"-n", "1", "-c", "550e8400-e29b-41d4-a716-446655440001"}, server.URL, "test-token")
 	})
 
 	if code != 1 {
@@ -397,7 +397,7 @@ func TestHandleTaskUpdate(t *testing.T) {
 	defer server.Close()
 
 	code, stdout, _ := captureAndRun(t, func() {
-		handleTaskUpdate([]string{"-n", "1", "-c", "ch-abc", "-s", "in_review"}, server.URL, "test-token")
+		handleTaskUpdate([]string{"-n", "1", "-c", "550e8400-e29b-41d4-a716-446655440001", "-s", "in_review"}, server.URL, "test-token")
 	})
 
 	if code != 0 {
@@ -406,8 +406,8 @@ func TestHandleTaskUpdate(t *testing.T) {
 	if capturedMethod != http.MethodPatch {
 		t.Errorf("expected PATCH, got %s", capturedMethod)
 	}
-	if capturedPath != "/api/v1/channels/ch-abc/tasks/1" {
-		t.Errorf("expected path /api/v1/channels/ch-abc/tasks/1, got %s", capturedPath)
+	if capturedPath != "/api/v1/channels/550e8400-e29b-41d4-a716-446655440001/tasks/1" {
+		t.Errorf("expected path /api/v1/channels/550e8400-e29b-41d4-a716-446655440001/tasks/1, got %s", capturedPath)
 	}
 	if !strings.Contains(stdout, "in_review") {
 		t.Errorf("expected stdout to contain in_review, got %q", stdout)
@@ -441,7 +441,7 @@ func TestHandleTaskCreate(t *testing.T) {
 	defer server.Close()
 
 	code, stdout, _ := captureAndRun(t, func() {
-		handleTaskCreate([]string{"-c", "ch-abc", "--title", "test"}, server.URL, "test-token")
+		handleTaskCreate([]string{"-c", "550e8400-e29b-41d4-a716-446655440001", "--title", "test"}, server.URL, "test-token")
 	})
 
 	if code != 0 {
@@ -450,8 +450,8 @@ func TestHandleTaskCreate(t *testing.T) {
 	if capturedMethod != http.MethodPost {
 		t.Errorf("expected POST, got %s", capturedMethod)
 	}
-	if capturedPath != "/api/v1/channels/ch-abc/tasks" {
-		t.Errorf("expected path /api/v1/channels/ch-abc/tasks, got %s", capturedPath)
+	if capturedPath != "/api/v1/channels/550e8400-e29b-41d4-a716-446655440001/tasks" {
+		t.Errorf("expected path /api/v1/channels/550e8400-e29b-41d4-a716-446655440001/tasks, got %s", capturedPath)
 	}
 	if !strings.Contains(stdout, "test") {
 		t.Errorf("expected stdout to contain 'test', got %q", stdout)
@@ -482,7 +482,7 @@ func TestHandleTaskUnclaim(t *testing.T) {
 	defer server.Close()
 
 	code, stdout, _ := captureAndRun(t, func() {
-		handleTaskUnclaim([]string{"-n", "1", "-c", "ch-abc"}, server.URL, "test-token")
+		handleTaskUnclaim([]string{"-n", "1", "-c", "550e8400-e29b-41d4-a716-446655440001"}, server.URL, "test-token")
 	})
 
 	if code != 0 {
@@ -491,8 +491,8 @@ func TestHandleTaskUnclaim(t *testing.T) {
 	if capturedMethod != http.MethodDelete {
 		t.Errorf("expected DELETE, got %s", capturedMethod)
 	}
-	if capturedPath != "/api/v1/channels/ch-abc/tasks/1/claim" {
-		t.Errorf("expected path /api/v1/channels/ch-abc/tasks/1/claim, got %s", capturedPath)
+	if capturedPath != "/api/v1/channels/550e8400-e29b-41d4-a716-446655440001/tasks/1/claim" {
+		t.Errorf("expected path /api/v1/channels/550e8400-e29b-41d4-a716-446655440001/tasks/1/claim, got %s", capturedPath)
 	}
 	if !strings.Contains(stdout, "unclaimed") {
 		t.Errorf("expected stdout to contain 'unclaimed', got %q", stdout)
@@ -509,7 +509,7 @@ func TestHandleMessageSend(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/server/info" {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"channels":[{"id":"ch-abc","name":"ch-abc"}]}`))
+			w.Write([]byte(`{"channels":[{"id":"550e8400-e29b-41d4-a716-446655440001","name":"ch-abc"}]}`))
 			return
 		}
 		capturedMethod = r.Method
@@ -522,7 +522,7 @@ func TestHandleMessageSend(t *testing.T) {
 	defer server.Close()
 
 	code, stdout, _ := captureAndRun(t, func() {
-		handleMessageSend([]string{"-c", "hello", "--target", "#ch-abc"}, server.URL, "test-token")
+		handleMessageSend([]string{"-c", "hello", "--target", "#550e8400-e29b-41d4-a716-446655440001"}, server.URL, "test-token")
 	})
 
 	if code != 0 {
@@ -531,8 +531,8 @@ func TestHandleMessageSend(t *testing.T) {
 	if capturedMethod != http.MethodPost {
 		t.Errorf("expected POST, got %s", capturedMethod)
 	}
-	if capturedPath != "/api/v1/channels/ch-abc/messages" {
-		t.Errorf("expected path /api/v1/channels/ch-abc/messages, got %s", capturedPath)
+	if capturedPath != "/api/v1/channels/550e8400-e29b-41d4-a716-446655440001/messages" {
+		t.Errorf("expected path /api/v1/channels/550e8400-e29b-41d4-a716-446655440001/messages, got %s", capturedPath)
 	}
 	// Phase 5 Slock-aligned output: formatted send confirmation (not raw JSON).
 	if !strings.Contains(stdout, "Message sent") {
@@ -559,7 +559,7 @@ func TestHandleMessageSendWithThread(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/server/info" {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"channels":[{"id":"ch-abc","name":"ch-abc"}]}`))
+			w.Write([]byte(`{"channels":[{"id":"550e8400-e29b-41d4-a716-446655440001","name":"ch-abc"}]}`))
 			return
 		}
 		capturedBody, _ = io.ReadAll(r.Body)
@@ -605,7 +605,7 @@ func TestHandleChannelMembers(t *testing.T) {
 	defer server.Close()
 
 	code, stdout, _ := captureAndRun(t, func() {
-		handleChannelMembers([]string{"-c", "ch-abc"}, server.URL, "test-token")
+		handleChannelMembers([]string{"-c", "550e8400-e29b-41d4-a716-446655440001"}, server.URL, "test-token")
 	})
 
 	if code != 0 {
@@ -614,8 +614,8 @@ func TestHandleChannelMembers(t *testing.T) {
 	if capturedMethod != http.MethodGet {
 		t.Errorf("expected GET, got %s", capturedMethod)
 	}
-	if capturedPath != "/api/v1/channels/ch-abc/members" {
-		t.Errorf("expected path /api/v1/channels/ch-abc/members, got %s", capturedPath)
+	if capturedPath != "/api/v1/channels/550e8400-e29b-41d4-a716-446655440001/members" {
+		t.Errorf("expected path /api/v1/channels/550e8400-e29b-41d4-a716-446655440001/members, got %s", capturedPath)
 	}
 	if !strings.Contains(stdout, "Alice") || !strings.Contains(stdout, "Bob") {
 		t.Errorf("expected stdout to contain Alice and Bob, got %q", stdout)
@@ -631,7 +631,7 @@ func TestHandleChannelMembersOutputJSON(t *testing.T) {
 	defer server.Close()
 
 	code, stdout, _ := captureAndRun(t, func() {
-		handleChannelMembers([]string{"-c", "ch-1", "--output", "json"}, server.URL, "test-token")
+		handleChannelMembers([]string{"-c", "550e8400-e29b-41d4-a716-446655440002", "--output", "json"}, server.URL, "test-token")
 	})
 
 	if code != 0 {
@@ -667,14 +667,16 @@ func TestHandleTaskClaimLongFlags(t *testing.T) {
 	}))
 	defer server.Close()
 
+	channelUUID := "550e8400-e29b-41d4-a716-446655440001"
 	code, _, _ := captureAndRun(t, func() {
-		handleTaskClaim([]string{"--number", "42", "--channel", "ch-long"}, server.URL, "test-token")
+		handleTaskClaim([]string{"--number", "42", "--channel", channelUUID}, server.URL, "test-token")
 	})
 
 	if code != 0 {
 		t.Errorf("expected exit 0, got %d", code)
 	}
-	if capturedPath != "/api/v1/channels/ch-long/tasks/42/claim" {
+	expectedPath := "/api/v1/channels/" + channelUUID + "/tasks/42/claim"
+	if capturedPath != expectedPath {
 		t.Errorf("expected path with long flags, got %s", capturedPath)
 	}
 }
@@ -691,8 +693,9 @@ func TestHandleTaskUpdateLongFlags(t *testing.T) {
 	}))
 	defer server.Close()
 
+	channelUUID := "550e8400-e29b-41d4-a716-446655440002"
 	code, _, _ := captureAndRun(t, func() {
-		handleTaskUpdate([]string{"--number", "7", "--channel", "ch-1", "--status", "done"}, server.URL, "test-token")
+		handleTaskUpdate([]string{"--number", "7", "--channel", channelUUID, "--status", "done"}, server.URL, "test-token")
 	})
 
 	if code != 0 {
@@ -715,7 +718,7 @@ func TestHandleMessageSendLongFlags(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/server/info" {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"channels":[{"id":"ch-1","name":"ch-1"}]}`))
+			w.Write([]byte(`{"channels":[{"id":"550e8400-e29b-41d4-a716-446655440002","name":"ch-1"}]}`))
 			return
 		}
 		capturedPath = r.URL.Path
@@ -953,7 +956,7 @@ func TestHandleTaskClaimMissingChannel(t *testing.T) {
 
 func TestHandleTaskClaimMissingNumber(t *testing.T) {
 	code, _, stderr := captureAndRun(t, func() {
-		handleTaskClaim([]string{"-c", "ch-1"}, "http://localhost", "tok")
+		handleTaskClaim([]string{"-c", "550e8400-e29b-41d4-a716-446655440002"}, "http://localhost", "tok")
 	})
 	if code != 2 {
 		t.Errorf("expected exit 2 for missing -n, got %d", code)
@@ -965,7 +968,7 @@ func TestHandleTaskClaimMissingNumber(t *testing.T) {
 
 func TestHandleTaskUpdateMissingStatus(t *testing.T) {
 	code, _, stderr := captureAndRun(t, func() {
-		handleTaskUpdate([]string{"-n", "1", "-c", "ch-1"}, "http://localhost", "tok")
+		handleTaskUpdate([]string{"-n", "1", "-c", "550e8400-e29b-41d4-a716-446655440002"}, "http://localhost", "tok")
 	})
 	if code != 2 {
 		t.Errorf("expected exit 2 for missing -s, got %d", code)
@@ -989,7 +992,7 @@ func TestHandleTaskCreateMissingChannel(t *testing.T) {
 
 func TestHandleTaskCreateMissingTitle(t *testing.T) {
 	code, _, stderr := captureAndRun(t, func() {
-		handleTaskCreate([]string{"-c", "ch-1"}, "http://localhost", "tok")
+		handleTaskCreate([]string{"-c", "550e8400-e29b-41d4-a716-446655440002"}, "http://localhost", "tok")
 	})
 	if code != 2 {
 		t.Errorf("expected exit 2 for missing --title, got %d", code)
@@ -1001,7 +1004,7 @@ func TestHandleTaskCreateMissingTitle(t *testing.T) {
 
 func TestHandleMessageSendMissingContent(t *testing.T) {
 	code, _, stderr := captureAndRun(t, func() {
-		handleMessageSend([]string{"-C", "ch-1"}, "http://localhost", "tok")
+		handleMessageSend([]string{"-C", "550e8400-e29b-41d4-a716-446655440002"}, "http://localhost", "tok")
 	})
 	if code != 2 {
 		t.Errorf("expected exit 2 for missing -c, got %d", code)

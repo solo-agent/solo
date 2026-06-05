@@ -152,7 +152,7 @@ export function ChannelSearch({ channelId, channelName, onResultClick }: Channel
         </button>
       ) : (
         /* Search dropdown */
-        <div className="absolute right-0 top-1/2 z-50 w-80 -translate-y-1/2 border-2 border-black bg-white shadow-brutal">
+        <div className="absolute right-0 top-full z-50 mt-1 w-80 border-2 border-black bg-white shadow-brutal">
           {/* Search input */}
           <div className="flex items-center gap-2 border-b-2 border-black px-3 py-2">
             <Search className="h-4 w-4 flex-shrink-0 text-muted-foreground" />

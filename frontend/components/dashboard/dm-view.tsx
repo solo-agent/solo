@@ -10,19 +10,24 @@
 
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
 import { Bot, User, AlertCircle, RefreshCw, MessageSquare, Circle, ClipboardList, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useStreamingMessages } from '@/lib/hooks/use-streaming-messages';
 import { MessageList } from './message-list';
 import { MessageInput } from './message-input';
 import { TaskBoard } from '@/components/tasks/task-board';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog,
   DialogHeader,
   DialogTitle,
   DialogCloseButton,
 } from '@/components/ui/dialog';
+
+const ThreadPanel = lazy(() =>
+  import('./thread-panel').then((m) => ({ default: m.ThreadPanel })),
+);
 import type { DMChannel, ChannelMember, Message, Task, TaskStatus } from '@/lib/types';
 
 interface DMViewProps {
@@ -46,10 +51,12 @@ interface DMViewProps {
   tasksLoading?: boolean;
   tasksError?: string | null;
   refetchTasks?: () => void;
-  onTaskStatusChange?: (task: Task, newStatus: TaskStatus) => Promise<void>;
+  onTaskStatusChange?: (task: Task, newStatus: TaskStatus) => Promise<Task | void>;
   onClaimTask?: (task: Task) => void;
   onUnclaimTask?: (task: Task) => void;
   onCreateTask?: (title: string) => Promise<void>;
+  onConvertToTask?: (channelId: string, messageId: string, title?: string) => Promise<Task>;
+  onTaskCreated?: () => void;
 }
 
 // ---- Helpers ----
@@ -62,6 +69,10 @@ function getDisplayName(dm: DMChannel): string {
 
 function isAgentDM(dm: DMChannel): boolean {
   return !!dm.other_agent;
+}
+
+function isAgentDeleted(dm: DMChannel): boolean {
+  return isAgentDM(dm) && dm.other_agent?.is_active === false;
 }
 
 export function DMView({
@@ -88,13 +99,38 @@ export function DMView({
   onClaimTask,
   onUnclaimTask,
   onCreateTask,
+  onConvertToTask,
+  onTaskCreated,
 }: DMViewProps) {
   const name = getDisplayName(dm);
   const isAgent = isAgentDM(dm);
+  const deleted = isAgentDeleted(dm);
   const [viewTab, setViewTab] = useState<'messages' | 'tasks'>('messages');
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
   const [createTaskTitle, setCreateTaskTitle] = useState('');
   const [isCreatingTask, setIsCreatingTask] = useState(false);
+  const [threadMessage, setThreadMessage] = useState<Message | null>(null);
+  const [threadTask, setThreadTask] = useState<Task | null>(null);
+  const [threadPanelWidth, setThreadPanelWidth] = useState(400);
+
+  // Refetch tasks when switching to tasks tab
+  useEffect(() => {
+    if (viewTab === 'tasks') refetchTasks?.();
+  }, [viewTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync threadTask when tasks list changes (align with channel-view pattern)
+  useEffect(() => {
+    if (!threadMessage) return;
+    const task = tasks?.find((t) => t.message_id === threadMessage.id || t.id === threadMessage.id);
+    if (task) {
+      setThreadTask((prev) => {
+        if (!prev || prev.status !== task.status || prev.claimer_id !== task.claimer_id) {
+          return task;
+        }
+        return prev;
+      });
+    }
+  }, [tasks, threadMessage]);
 
   const { activeStreamingAgentIds } = useStreamingMessages(dm.id);
 
@@ -142,6 +178,87 @@ export function DMView({
   const handleRetry = useCallback(() => {
     refetch();
   }, [refetch]);
+
+  const handleStatusChange = useCallback(
+    async (task: Task, newStatus: TaskStatus) => {
+      const updated = await onTaskStatusChange?.(task, newStatus);
+      if (updated) {
+        setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
+      }
+    },
+    [onTaskStatusChange],
+  );
+
+  // ---- ThreadPanel handlers ----
+
+  const handleThreadClose = useCallback(() => {
+    setThreadMessage(null);
+    setThreadTask(null);
+  }, []);
+
+  const handleMessageClick = useCallback(
+    (message: Message) => {
+      if (message.task_number != null) {
+        refetchTasks?.();
+        const task = tasks?.find((t) => t.message_id === message.id || t.id === message.id);
+        setThreadMessage({
+          ...message,
+          display_name: task?.creator_name || message.display_name,
+        });
+        setThreadTask(task ?? null);
+      }
+    },
+    [tasks, refetchTasks],
+  );
+
+  const handleTaskClickFromBoard = useCallback(
+    (task: Task) => {
+      if (!task.message_id) return;
+      refetchTasks?.();
+      // Use task.message_id to find the original message
+      const existingMsg = messages.find((m) => m.id === task.message_id);
+      if (existingMsg) {
+        setThreadMessage({
+          ...existingMsg,
+          display_name: task.creator_name || existingMsg.display_name,
+        });
+      } else {
+        // Construct a minimal message for ThreadPanel
+        setThreadMessage({
+          id: task.message_id,
+          channel_id: task.channel_id,
+          user_id: task.creator_id,
+          display_name: task.creator_name || task.creator_id.slice(0, 8),
+          content: task.description || task.title,
+          created_at: task.created_at,
+          status: 'sent',
+          sender_type: 'user',
+          task_number: task.task_number,
+          task_status: task.status,
+          task_claimer_name: task.claimer_name || task.assignee_name,
+        });
+      }
+      setThreadTask(task);
+    },
+    [messages, refetchTasks],
+  );
+
+  const handleAsTask = useCallback(
+    async (message: Message) => {
+      if (!onConvertToTask) return;
+      try {
+        const task = await onConvertToTask(dm.id, message.id);
+        setThreadMessage({
+          ...message,
+          display_name: task?.creator_name || message.display_name,
+        });
+        setThreadTask(task);
+      } catch {
+        // handled silently
+      }
+    },
+    [dm.id, onConvertToTask],
+  );
 
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -245,7 +362,8 @@ export function DMView({
                 onCancel={cancelMessage}
                 onEdit={editMessage}
                 onDelete={deleteMessage}
-                onAsTask={onAsTask}
+                onAsTask={handleAsTask}
+                onReply={handleMessageClick}
                 hasMore={hasMore}
                 isLoadingMore={isLoadingMore}
                 loadMoreError={loadMoreError}
@@ -254,14 +372,29 @@ export function DMView({
               />
             )}
 
-            {/* Input */}
-            <MessageInput
-              onSend={(content, mentionedAgentIds, asTask, _taskTitle, attachmentIds) =>
-                sendMessage(content, mentionedAgentIds, asTask, attachmentIds)
-              }
-              members={members}
-              placeholder={`发送消息给 ${name}...`}
-            />
+            {/* Input — hidden for deleted agents */}
+            {!deleted && (
+              <MessageInput
+                onSend={async (content, mentionedAgentIds, asTask, _taskTitle, attachmentIds) => {
+                  const result = await sendMessage(content, mentionedAgentIds, asTask, attachmentIds);
+                  if (asTask && result?.task_number) onTaskCreated?.();
+                  return result;
+                }}
+                members={members}
+                placeholder={`发送消息给 ${name}...`}
+                showAsTaskToggle
+              />
+            )}
+            {deleted && (
+              <div className="border-t-2 border-black bg-brutal-stone/20 px-4 py-3 text-center">
+                <span className="badge-brutal bg-brutal-stone text-black">
+                  DELETED
+                </span>
+                <p className="mt-2 font-body text-xs text-muted-foreground">
+                  此 Agent 已被删除，无法发送消息
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -296,8 +429,8 @@ export function DMView({
                 tasks={tasks ?? []}
                 isLoading={tasksLoading ?? false}
                 error={tasksError ?? null}
-                onTaskClick={() => {}}
-                onStatusChange={(task, newStatus) => onTaskStatusChange?.(task, newStatus) ?? Promise.resolve()}
+                onTaskClick={handleTaskClickFromBoard}
+                onStatusChange={handleStatusChange}
                 onRefetch={refetchTasks ?? (() => {})}
                 onClaim={onClaimTask}
                 onUnclaim={onUnclaimTask}
@@ -374,6 +507,49 @@ export function DMView({
           </div>
         </div>
       </Dialog>
+
+      {/* ThreadPanel — opens when a task message is clicked */}
+      {threadMessage && (
+        <div
+          className="flex-shrink-0 bg-brutal-cream overflow-hidden relative border-l-2 border-black"
+          style={{ width: threadPanelWidth }}
+        >
+          <div
+            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-pink/50 transition-colors z-10"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              const startX = e.clientX;
+              const startWidth = threadPanelWidth;
+              const onMove = (ev: MouseEvent) => {
+                const newWidth = Math.max(280, Math.min(800, startWidth + startX - ev.clientX));
+                setThreadPanelWidth(newWidth);
+              };
+              const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+              };
+              document.addEventListener('mousemove', onMove);
+              document.addEventListener('mouseup', onUp);
+            }}
+          />
+          <Suspense
+            fallback={
+              <div className="flex h-full w-[400px] items-center justify-center">
+                <Skeleton className="h-8 w-32" />
+              </div>
+            }
+          >
+            <ThreadPanel
+              parentMessage={threadMessage}
+              task={threadTask ?? undefined}
+              onClose={handleThreadClose}
+              onClaimTask={onClaimTask}
+              onUnclaimTask={onUnclaimTask}
+              replyCount={threadMessage.reply_count ?? 0}
+            />
+          </Suspense>
+        </div>
+      )}
     </div>
   );
 }

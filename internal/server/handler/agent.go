@@ -102,9 +102,6 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	modelProvider := req.ModelProvider
 
 	modelName := req.ModelName
-	if modelName == "" {
-		modelName = "claude-sonnet-4-20250514"
-	}
 
 	temperature := 0.7
 	if req.Temperature != nil {
@@ -395,7 +392,15 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.pool.Exec(r.Context(),
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		slog.Error("failed to begin transaction", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete agent")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	result, err := tx.Exec(r.Context(),
 		`UPDATE agents SET is_active = false, updated_at = now()
 		 WHERE id = $1 AND owner_id = $2 AND is_active = true`,
 		agentID, userID,
@@ -408,6 +413,28 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	if result.RowsAffected() == 0 {
 		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+
+	// Remove agent from non-DM channel members (DM channel memberships are kept
+	// so the DM list still shows the conversation, with a "deleted" indicator)
+	_, err = tx.Exec(r.Context(),
+		`DELETE FROM channel_members
+		 WHERE member_type = 'agent' AND member_id = $1
+		 AND channel_id NOT IN (
+			 SELECT id FROM channels WHERE type = 'dm'
+		 )`,
+		agentID,
+	)
+	if err != nil {
+		slog.Error("failed to remove agent from channels", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete agent")
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Error("failed to commit transaction", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete agent")
 		return
 	}
 

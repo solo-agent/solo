@@ -178,9 +178,6 @@ func (b *PiBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *Exec
 						if model == "" {
 							model = opts.Model
 						}
-						if model == "" {
-							model = "unknown"
-						}
 						u := usage[model]
 						u.InputTokens += m.Usage.Input
 						u.OutputTokens += m.Usage.Output

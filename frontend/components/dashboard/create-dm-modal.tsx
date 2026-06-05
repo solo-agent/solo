@@ -20,6 +20,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar } from '@/components/ui/avatar';
+import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import type { CreateDMInput, DMChannel } from '@/lib/types';
 
 // ---- Types ----
@@ -140,13 +141,11 @@ export function CreateDMModal({
       </DialogHeader>
 
       {/* Search input */}
-      <div className="relative mb-4">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <div className="mb-4">
         <Input
           placeholder="搜索用户或 Agent..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-9"
           autoFocus
         />
       </div>
@@ -180,14 +179,13 @@ export function CreateDMModal({
                 >
                   {/* Avatar */}
                   <div className="relative flex-shrink-0">
-                    <Avatar
-                      name={participant.display_name}
-                      className="h-8 w-8 text-xs"
-                    />
-                    {isAgent && (
-                      <div className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-green-500">
-                        <Bot className="h-2.5 w-2.5 text-white" />
-                      </div>
+                    {isAgent ? (
+                      <PixelAvatar agentId={participant.id} size="md" />
+                    ) : (
+                      <Avatar
+                        name={participant.display_name}
+                        className="h-8 w-8 text-xs"
+                      />
                     )}
                   </div>
 

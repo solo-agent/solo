@@ -2,7 +2,7 @@
 
 # ── 0. 公共：等 PostgreSQL 就绪（30s 超时即失败） ────────────────────────────
 pg-ready:
-	@docker compose up -d postgres >/dev/null
+	@docker compose up -d --remove-orphans postgres >/dev/null
 	@for i in $$(seq 1 30); do \
 		docker exec solo-postgres pg_isready -U solo -d solo >/dev/null 2>&1 && exit 0; \
 		sleep 1; \
@@ -113,5 +113,6 @@ stop:
 	@-lsof -ti :8080 | xargs kill 2>/dev/null && echo "Server stopped" || echo "Server not running"
 	@-lsof -ti :8081 | xargs kill 2>/dev/null && echo "Daemon stopped" || echo "Daemon not running"
 	@-lsof -ti :3000 | xargs kill 2>/dev/null && echo "Frontend stopped" || echo "Frontend not running"
-	@rm -rf .pids/
+	@rm -f .pids/*.pid
+	@sleep 1
 	@echo "=== 全部关闭 ==="

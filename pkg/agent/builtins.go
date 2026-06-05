@@ -7,8 +7,8 @@ import (
 
 // init registers all built-in backend adapters into the global registry
 // when the agent package is imported. Each adapter carries its metadata
-// (display name, binary requirements, protocols, model lists) and a
-// factory function that constructs Backend instances from BackendConfig.
+// (display name, binary requirements, protocols) and a factory function
+// that constructs Backend instances from BackendConfig.
 func init() {
 	r := GlobalRegistry()
 
@@ -25,8 +25,6 @@ func init() {
 		RequiresBinary: "codex",
 		DetectCommand:  "--version",
 		Protocols:      []string{"json-rpc"},
-		DefaultModel:   "gpt-5.1-codex",
-		Models:         codexModels(),
 	}, codexFactory)
 
 	// ── opencode — OpenCode CLI via stream-json ─────────────────────
@@ -36,8 +34,6 @@ func init() {
 		RequiresBinary: "opencode",
 		DetectCommand:  "--version",
 		Protocols:      []string{"stream-json"},
-		DefaultModel:   "gpt-5",
-		Models:         opencodeModels(),
 	}, opencodeFactory)
 
 	// ── cursor — Cursor Agent CLI via stream-json ───────────────────
@@ -47,8 +43,6 @@ func init() {
 		RequiresBinary: "cursor-agent",
 		DetectCommand:  "--version",
 		Protocols:      []string{"stream-json"},
-		DefaultModel:   "cursor",
-		Models:         singleModel("cursor"),
 	}, cursorFactory)
 
 	// ── gemini — Google Gemini CLI via stream-json ──────────────────
@@ -58,8 +52,6 @@ func init() {
 		RequiresBinary: "gemini",
 		DetectCommand:  "--version",
 		Protocols:      []string{"stream-json"},
-		DefaultModel:   "gemini",
-		Models:         singleModel("gemini"),
 	}, geminiFactory)
 
 	// ── kimi — Kimi CLI via ACP ─────────────────────────────────────
@@ -69,8 +61,6 @@ func init() {
 		RequiresBinary: "kimi",
 		DetectCommand:  "--version",
 		Protocols:      []string{"acp"},
-		DefaultModel:   "kimi",
-		Models:         singleModel("kimi"),
 	}, kimiFactory)
 
 	// ── kiro — Kiro CLI via ACP ─────────────────────────────────────
@@ -80,8 +70,6 @@ func init() {
 		RequiresBinary: "kiro-cli",
 		DetectCommand:  "--version",
 		Protocols:      []string{"acp"},
-		DefaultModel:   "kiro",
-		Models:         singleModel("kiro"),
 	}, kiroFactory)
 
 	// ── copilot — GitHub Copilot CLI via JSONL ──────────────────────
@@ -91,8 +79,6 @@ func init() {
 		RequiresBinary: "copilot",
 		DetectCommand:  "--version",
 		Protocols:      []string{"jsonl"},
-		DefaultModel:   "copilot",
-		Models:         singleModel("copilot"),
 	}, copilotFactory)
 
 	// ── openclaw — OpenClaw Agent CLI via stream-json ───────────────
@@ -102,8 +88,6 @@ func init() {
 		RequiresBinary: "openclaw",
 		DetectCommand:  "--version",
 		Protocols:      []string{"stream-json"},
-		DefaultModel:   "openclaw",
-		Models:         singleModel("openclaw"),
 	}, openclawFactory)
 
 	// ── hermes — Hermes CLI via ACP ─────────────────────────────────
@@ -113,8 +97,6 @@ func init() {
 		RequiresBinary: "hermes",
 		DetectCommand:  "--version",
 		Protocols:      []string{"acp"},
-		DefaultModel:   "hermes",
-		Models:         singleModel("hermes"),
 	}, hermesFactory)
 
 	// ── pi — Pi CLI via JSONL ───────────────────────────────────────
@@ -124,42 +106,7 @@ func init() {
 		RequiresBinary: "pi",
 		DetectCommand:  "--version",
 		Protocols:      []string{"jsonl"},
-		DefaultModel:   "pi",
-		Models:         singleModel("pi"),
 	}, piFactory)
-}
-
-// ── Static model lists ───────────────────────────────────────────────────────
-
-func claudeModels() []ModelInfo {
-	return []ModelInfo{
-		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "claude", Default: true},
-		{ID: "claude-opus-4-7", Label: "Claude Opus 4.7", Provider: "claude", Default: false},
-		{ID: "claude-haiku-4-5", Label: "Claude Haiku 4.5", Provider: "claude", Default: false},
-	}
-}
-
-func codexModels() []ModelInfo {
-	return []ModelInfo{
-		{ID: "gpt-5.1-codex", Label: "GPT-5.1 Codex", Provider: "codex", Default: true},
-		{ID: "gpt-5.1", Label: "GPT-5.1", Provider: "codex", Default: false},
-	}
-}
-
-func opencodeModels() []ModelInfo {
-	return []ModelInfo{
-		{ID: "gpt-5", Label: "GPT-5", Provider: "opencode", Default: true},
-		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "opencode", Default: false},
-	}
-}
-
-// singleModel returns a single-element model list for backends that
-// do not yet have a known model catalog. The type name doubles as the
-// model ID until more information is available.
-func singleModel(typ string) []ModelInfo {
-	return []ModelInfo{
-		{ID: typ, Label: typ, Provider: typ, Default: true},
-	}
 }
 
 // claudeMeta builds an AdapterMeta for the claude and local backends.
@@ -171,8 +118,6 @@ func claudeMeta(typ, displayName string) AdapterMeta {
 		RequiresBinary: "claude",
 		DetectCommand:  "--version",
 		Protocols:      []string{"stream-json"},
-		DefaultModel:   "claude-sonnet-4-6",
-		Models:         claudeModels(),
 	}
 }
 

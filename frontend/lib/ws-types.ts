@@ -18,6 +18,8 @@ export interface WSMessage {
   sender_type: WSMessageSource;
   sender_id: string;
   sender_name?: string;
+  /** 发送者是否活跃（agent 被删除后为 false） */
+  sender_active?: boolean;
   /** 前端渲染别名 */
   display_name?: string;
   user_id?: string;
@@ -59,6 +61,8 @@ export type WSServerEvent =
   | { type: 'agent.typing'; channel_id: string; agent_id: string; status: string; detail?: string }
   | { type: 'agent.status'; channel_id: string; agent_id: string; status: string; detail?: string }
   | { type: 'agent.error'; channel_id: string; agent_id: string; status: string; detail?: string }
+  // ---- Agent chunk events (agent view) ----
+  | { type: 'agent.chunk'; channel_id: string; agent_id: string; agent_name: string; chunk_type: string; content: string; tool?: { name: string; input?: string; output?: string; call_id?: string }; timestamp: string }
   // ---- 流式消息事件 (SOLO-51-F, SOLO-52-F) ----
   | { type: 'message.agent_typing'; id: string; channel_id: string; thread_id?: string; sender_id: string; sender_name?: string; content: string; created_at: string }
   // ---- 任务事件 (SOLO-122-B) ----
@@ -66,7 +70,7 @@ export type WSServerEvent =
   | { type: 'task.updated'; id: string; task_number: number; channel_id: string; title: string; description?: string; status: string; claimer_id?: string; claimer_name?: string; priority?: string; due_date?: string; message_id?: string; parent_task_id?: string; subtask_count?: number; done_subtask_count?: number; updated_at: string }
   | { type: 'task.deleted'; id: string; channel_id: string; task_number: number }
   // ---- DM 事件 ----
-  | { type: 'dm.message.new'; id: string; dm_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; created_at: string; attachments?: Attachment[] }
+  | { type: 'dm.message.new'; id: string; dm_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; created_at: string; attachments?: Attachment[]; thread_id?: string }
   | { type: 'dm.updated'; dm_id: string; last_message?: { content: string; sender_id: string; sender_name: string; created_at: string }; last_reply_at?: string; unread_count: number };
 
 /** 客户端发送的 WebSocket 命令 */

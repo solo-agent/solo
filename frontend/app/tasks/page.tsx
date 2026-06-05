@@ -84,6 +84,15 @@ export default function TasksPage() {
     [],
   );
 
+  // Sync threadTask when the tasks list changes (e.g. after WS task.updated)
+  useEffect(() => {
+    if (!threadTask) return;
+    const updated = tasks.find((t) => t.id === threadTask.id);
+    if (updated && (updated.status !== threadTask.status || updated.claimer_id !== threadTask.claimer_id)) {
+      setThreadTask(updated);
+    }
+  }, [tasks, threadTask]);
+
   const handleThreadClose = useCallback(() => {
     setThreadMessage(null);
     setThreadTask(null);
@@ -93,7 +102,8 @@ export default function TasksPage() {
   const handleBoardStatusChange = useCallback(
     async (task: Task, newStatus: TaskStatus) => {
       try {
-        await updateTask(task.id, { status: newStatus });
+        const updated = await updateTask(task.channel_id, task.id, { status: newStatus });
+        setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
       } catch {
         // Error handled by hook
       }
@@ -105,7 +115,8 @@ export default function TasksPage() {
   const handleClaim = useCallback(
     async (task: Task) => {
       try {
-        await claimTask(task.channel_id, task.id);
+        const updated = await claimTask(task.channel_id, task.id);
+        setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
         showToast(`已认领任务 #${task.task_number ?? '?'}`, 'success');
       } catch {
         // 409: silent — per spec
@@ -117,7 +128,8 @@ export default function TasksPage() {
   const handleUnclaim = useCallback(
     async (task: Task) => {
       try {
-        await unclaimTask(task.channel_id, task.id);
+        const updated = await unclaimTask(task.channel_id, task.id);
+        setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
         showToast(`已释放任务 #${task.task_number ?? '?'}`, 'info');
       } catch {
         // handled silently

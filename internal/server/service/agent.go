@@ -280,6 +280,12 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 	// Broadcast thinking event immediately
 	s.broadcastAgentThinking(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "Processing request...")
 
+	// Broadcast user trigger message as context for agent view
+	if len(taskReq.Messages) > 0 {
+		lastMsg := taskReq.Messages[len(taskReq.Messages)-1]
+		s.broadcastAgentChunk(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "context", lastMsg.Content, nil)
+	}
+
 	// Send via SSE streaming
 	eventCh, err := s.dm.StreamTask(streamCtx, daemon, taskReq)
 	if err != nil {
@@ -306,6 +312,51 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 			}
 			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
 				s.broadcastAgentThinking(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, data.Thought)
+			s.broadcastAgentChunk(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "thinking", data.Thought, nil)
+			}
+
+
+		case "text":
+			var data struct {
+				AgentID   string `json:"agent_id"`
+				AgentName string `json:"agent_name"`
+				Content   string `json:"content"`
+			}
+			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
+				s.broadcastAgentChunk(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "text", data.Content, nil)
+			}
+
+		case "tool_use":
+			var data struct {
+				AgentID   string `json:"agent_id"`
+				AgentName string `json:"agent_name"`
+				ToolName  string `json:"tool_name"`
+				ToolInput string `json:"tool_input"`
+				CallID    string `json:"call_id"`
+			}
+			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
+				s.broadcastAgentChunk(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "tool_use", "", map[string]interface{}{
+					"name":    data.ToolName,
+					"input":   data.ToolInput,
+					"call_id": data.CallID,
+				})
+			}
+
+		case "tool_result":
+			var data struct {
+				AgentID   string `json:"agent_id"`
+				AgentName string `json:"agent_name"`
+				ToolName  string `json:"tool_name"`
+				Output    string `json:"output"`
+				CallID    string `json:"call_id"`
+				IsError   bool   `json:"is_error"`
+			}
+			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
+				s.broadcastAgentChunk(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "tool_result", data.Output, map[string]interface{}{
+					"name":   data.ToolName,
+					"output": data.Output,
+					"call_id": data.CallID,
+				})
 			}
 
 		case "complete":
@@ -517,13 +568,24 @@ func (s *AgentService) broadcastThreadMessage(threadID, channelID, agentID, agen
 	})
 	s.hub.BroadcastToScope(realtime.ScopeThread, threadID, envelope)
 
-	// Also broadcast thread.reply to channel scope
+	// Update thread reply_count and read root_message_id for thread.reply broadcast.
+	now := time.Now().UTC()
+	var rootMessageID string
+	var replyCount int
+	_, _ = s.pool.Exec(context.Background(),
+		`UPDATE threads SET reply_count = reply_count + 1, last_reply_at = $1
+		 WHERE id = $2`, now, threadID)
+	_ = s.pool.QueryRow(context.Background(),
+		`SELECT root_message_id, reply_count FROM threads WHERE id = $1`, threadID,
+	).Scan(&rootMessageID, &replyCount)
+
+	// Broadcast thread.reply to channel scope so DM message list updates reply_count.
 	replyPayload := map[string]interface{}{
-		"thread_id":   threadID,
-		"channel_id":  channelID,
-		"message_id":  messageID,
-		"sender_id":   agentID,
-		"sender_name": agentName,
+		"thread_id":       threadID,
+		"channel_id":      channelID,
+		"root_message_id": rootMessageID,
+		"reply_count":     replyCount,
+		"last_reply_at":   now.Format(time.RFC3339),
 	}
 	replyData, _ := json.Marshal(replyPayload)
 	replyEnvelope, _ := json.Marshal(map[string]interface{}{
@@ -532,6 +594,45 @@ func (s *AgentService) broadcastThreadMessage(threadID, channelID, agentID, agen
 	})
 	s.hub.BroadcastToChannel(channelID, replyEnvelope)
 }
+
+func (s *AgentService) broadcastAgentChunk(threadID, channelID, agentID, agentName, chunkType, content string, tool map[string]interface{}) {
+	if threadID != "" {
+		payload := map[string]interface{}{
+			"channel_id": channelID,
+			"agent_id":   agentID,
+			"agent_name": agentName,
+			"chunk_type": chunkType,
+			"content":    content,
+		}
+		if tool != nil {
+			payload["tool"] = tool
+		}
+		data, _ := json.Marshal(payload)
+		envelope, _ := json.Marshal(map[string]interface{}{
+			"type":    "agent.chunk",
+			"payload": json.RawMessage(data),
+		})
+		s.hub.BroadcastToScope(realtime.ScopeThread, threadID, envelope)
+	} else {
+		payload := map[string]interface{}{
+			"channel_id": channelID,
+			"agent_id":   agentID,
+			"agent_name": agentName,
+			"chunk_type": chunkType,
+			"content":    content,
+		}
+		if tool != nil {
+			payload["tool"] = tool
+		}
+		data, _ := json.Marshal(payload)
+		envelope, _ := json.Marshal(map[string]interface{}{
+			"type":    "agent.chunk",
+			"payload": json.RawMessage(data),
+		})
+		s.hub.BroadcastToChannel(channelID, envelope)
+	}
+}
+
 
 func (s *AgentService) HandleTaskComplete(ctx context.Context, req *TaskCompleteRequest) error {
 	// Remove from pending task tracking
@@ -646,22 +747,29 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 		slog.Info("mentions found but none resolved to active agents in thread, skipping", "channel_id", channelID, "thread_id", threadID)
 		return
 	} else {
-		// No @mentions — only trigger agents that have already replied in this thread.
-		threadAgentIDs, err := s.getThreadParticipantAgents(ctx, threadID)
-		if err != nil {
-			slog.Error("failed to get thread participant agents for follow-up", "thread_id", threadID, "error", err)
-			return
+		// No @mentions — prefer agents that have already replied in this thread.
+		threadAgentIDs, _ := s.getThreadParticipantAgents(ctx, threadID)
+		if len(threadAgentIDs) > 0 {
+			threadAgentSet := make(map[string]bool, len(threadAgentIDs))
+			for _, id := range threadAgentIDs {
+				threadAgentSet[id] = true
+			}
+			for _, ag := range agents {
+				if threadAgentSet[ag.ID] {
+					targetAgents = append(targetAgents, ag)
+				}
+			}
 		}
-		if len(threadAgentIDs) == 0 {
-			return
-		}
-		threadAgentSet := make(map[string]bool, len(threadAgentIDs))
-		for _, id := range threadAgentIDs {
-			threadAgentSet[id] = true
-		}
-		for _, ag := range agents {
-			if threadAgentSet[ag.ID] {
-				targetAgents = append(targetAgents, ag)
+		// Fallback: if nobody has replied in this thread yet, trigger the
+		// agent whose message was replied to (the root message sender).
+		if len(targetAgents) == 0 {
+			if rootSenderID := s.getThreadRootAgentSender(ctx, threadID); rootSenderID != "" {
+				for _, ag := range agents {
+					if ag.ID == rootSenderID {
+						targetAgents = append(targetAgents, ag)
+						break
+					}
+				}
 			}
 		}
 	}
@@ -894,15 +1002,40 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 		}
 	}
 
-	// P25-05-B: If no thread could be resolved for the task, do not fall back
-	// to channel-level broadcast. The agent response MUST go to a thread.
+	// P25-05-B: If no thread could be resolved for the task, create a system
+	// message and thread so agent responses can be routed properly.
 	if threadID == "" {
-		slog.Error("TriggerAgentForTask: no thread_id resolved, skipping agent trigger",
-			"task_id", taskID,
-			"agent_id", agentID,
-			"channel_id", channelID,
+		msgID := uuid.New().String()
+		now := time.Now()
+		sysContent := fmt.Sprintf("Task #%d: %s", taskNumber, taskTitle)
+		_, dbErr := s.pool.Exec(ctx,
+			`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, created_at, updated_at)
+			 VALUES ($1, $2, 'system', '00000000-0000-0000-0000-000000000000', $3, 'system', $4, $4)`,
+			msgID, channelID, sysContent, now,
 		)
-		return
+		if dbErr != nil {
+			slog.Error("TriggerAgentForTask: failed to create system message for task",
+				"task_id", taskID, "error", dbErr,
+			)
+			return
+		}
+		_, _ = s.pool.Exec(ctx,
+			`UPDATE tasks SET message_id = $1 WHERE id = $2`,
+			msgID, taskID,
+		)
+		threadSvc := NewThreadService(s.pool)
+		tid, _, tErr := threadSvc.GetOrCreateThread(ctx, channelID, msgID)
+		if tErr != nil {
+			slog.Error("TriggerAgentForTask: failed to create thread for task",
+				"task_id", taskID, "error", tErr,
+			)
+			return
+		}
+		threadID = tid
+		messageID = msgID
+		slog.Info("TriggerAgentForTask: created thread for task",
+			"task_id", taskID, "thread_id", threadID,
+		)
 	}
 
 	// Select daemon
@@ -968,9 +1101,10 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 
 	taskContent := fmt.Sprintf("New message received:\n\n[target=%s msg=%s time=%s type=%s] @%s: %s",
 		target, shortMsgID, msgCreatedAt, senderType, senderName, msgContent)
-	taskContent += fmt.Sprintf(" [task #%d status=todo]", taskNumber)
+	taskContent += fmt.Sprintf(" [task #%d status=todo channel=%s]", taskNumber, channelID)
 	taskContent += "\n\nRespond as appropriate. Complete all your work before stopping."
-	taskContent += "\nReply in the channel or create/reply in a thread as appropriate; use each message's `target` and `msg` fields to choose the exact target."
+	taskContent += "\n- To reply to this message, use the `target` and `msg` fields above."
+	taskContent += "\n- To claim or update this task, use the `channel` field above (e.g. `solo task claim -n N -c <channel>`)."
 
 	contextMsgs := []agent.Message{
 		{Role: agent.RoleUser, Content: taskContent, SenderID: ""},
@@ -1078,6 +1212,19 @@ func (s *AgentService) getThreadParticipantAgents(ctx context.Context, threadID 
 		return nil, err
 	}
 	return agentIDs, nil
+}
+
+// getThreadRootAgentSender returns the agent ID of the root message sender
+// in a thread, or empty string if the root message was sent by a human.
+func (s *AgentService) getThreadRootAgentSender(ctx context.Context, threadID string) string {
+	var senderID string
+	_ = s.pool.QueryRow(ctx,
+		`SELECT m.sender_id FROM messages m
+		 JOIN threads t ON t.root_message_id = m.id
+		 WHERE t.id = $1 AND m.sender_type = 'agent'`,
+		threadID,
+	).Scan(&senderID)
+	return senderID
 }
 
 // getRecentMessages returns the most recent N messages in a channel as agent messages.

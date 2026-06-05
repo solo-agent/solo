@@ -123,11 +123,12 @@ function DashboardContent() {
       try {
         const task = await dmCreateTask({ dm_id: selectedDmId, title, channel_id: '' });
         showToast(`已创建任务 #${task.task_number ?? '?'}`, 'success');
+        dmRefetchTasks();
       } catch {
         showToast('创建任务失败，请稍后再试', 'error');
       }
     },
-    [selectedDmId, dmCreateTask, showToast],
+    [selectedDmId, dmCreateTask, showToast, dmRefetchTasks],
   );
 
   const handleDMTaskClaim = useCallback(
@@ -157,9 +158,9 @@ function DashboardContent() {
   );
 
   const handleDMTaskStatusChange = useCallback(
-    async (task: Task, newStatus: TaskStatus) => {
+    async (task: Task, newStatus: TaskStatus): Promise<Task | void> => {
       try {
-        await dmUpdateTask(task.id, { status: newStatus });
+        return await dmUpdateTask(task.id, { status: newStatus });
       } catch {
         // handled by hook
       }
@@ -175,13 +176,19 @@ function DashboardContent() {
       try {
         const task = await dmConvertMessageToTask(selectedDmId, message.id, title);
         showToast(`已转为任务 #${task.task_number ?? '?'}`, 'success');
-        // Refetch DM tasks to show the new task in the board
         dmRefetchTasks();
       } catch {
         showToast('转换任务失败，请稍后再试', 'error');
       }
     },
     [selectedDmId, dmConvertMessageToTask, dmRefetchTasks, showToast],
+  );
+
+  const handleDMConvertToTask = useCallback(
+    async (dmId: string, messageId: string, title?: string): Promise<Task> => {
+      return dmConvertMessageToTask(dmId, messageId, title || '');
+    },
+    [dmConvertMessageToTask],
   );
 
   // ---- URL param: auto-select channel ----
@@ -345,6 +352,8 @@ function DashboardContent() {
           onClaimTask={handleDMTaskClaim}
           onUnclaimTask={handleDMTaskUnclaim}
           onCreateTask={handleDMCreateTask}
+          onConvertToTask={handleDMConvertToTask}
+          onTaskCreated={dmRefetchTasks}
         />
       );
     }

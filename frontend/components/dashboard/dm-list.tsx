@@ -10,8 +10,8 @@
 
 'use client';
 
-import { useMemo } from 'react';
-import { MessageSquare, Plus } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { MessageSquare, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -35,6 +35,10 @@ function getDisplayName(dm: DMChannel): string {
 
 function isAgentDM(dm: DMChannel): boolean {
   return !!dm.other_agent;
+}
+
+function isAgentDeleted(dm: DMChannel): boolean {
+  return isAgentDM(dm) && dm.other_agent?.is_active === false;
 }
 
 /** Truncate text to maxLen characters */
@@ -84,13 +88,16 @@ function DMItem({
   dm,
   isSelected,
   onSelect,
+  onClose,
 }: {
   dm: DMChannel;
   isSelected: boolean;
   onSelect: () => void;
+  onClose: () => void;
 }) {
   const name = getDisplayName(dm);
   const isAgent = isAgentDM(dm);
+  const deleted = isAgentDeleted(dm);
   const hasUnread = dm.unread_count > 0;
   const lastMessageText = dm.last_message?.content ?? null;
 
@@ -129,7 +136,12 @@ function DMItem({
           >
             {name}
           </span>
-          {isAgent && (
+          {deleted && (
+            <span className="badge-brutal bg-brutal-stone text-black flex-shrink-0">
+              DELETED
+            </span>
+          )}
+          {!deleted && isAgent && (
             <span className="badge-brutal bg-brutal-pink text-black text-[10px]">
               Agent
             </span>
@@ -152,8 +164,39 @@ function DMItem({
           </p>
         )}
       </div>
+
+      {/* Close button — visible on hover */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+        className="hidden group-hover:flex items-center justify-center rounded-none p-1 hover:bg-brutal-pink-light transition-colors flex-shrink-0"
+        aria-label="关闭私信"
+      >
+        <X className="h-4 w-4" />
+      </button>
     </div>
   );
+}
+
+// ---- Constants ----
+
+const CLOSED_DM_STORAGE_KEY = 'solo-closed-dm-ids';
+
+function loadClosedDmIds(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const stored = localStorage.getItem(CLOSED_DM_STORAGE_KEY);
+    if (stored) return new Set(JSON.parse(stored));
+  } catch { /* ignore corrupt data */ }
+  return new Set();
+}
+
+function saveClosedDmIds(ids: Set<string>) {
+  try {
+    localStorage.setItem(CLOSED_DM_STORAGE_KEY, JSON.stringify([...ids]));
+  } catch { /* ignore quota errors */ }
 }
 
 // ---- Main component ----
@@ -165,14 +208,25 @@ export function DMList({
   onSelectDM,
   onCreateDM,
 }: DMListProps) {
-  // Sort by last_reply_at descending (most recent first)
+  const [closedDmIds, setClosedDmIds] = useState<Set<string>>(loadClosedDmIds);
+
+  // Re-sync when createOrGetDM clears a DM from the closed list
+  useEffect(() => {
+    const handler = () => setClosedDmIds(loadClosedDmIds());
+    window.addEventListener('dm-closed-changed', handler);
+    return () => window.removeEventListener('dm-closed-changed', handler);
+  }, []);
+
+  // Sort by last_reply_at descending (most recent first), exclude closed DMs
   const sortedDMs = useMemo(() => {
-    return [...dms].sort((a, b) => {
-      const aTime = a.last_reply_at ? new Date(a.last_reply_at).getTime() : 0;
-      const bTime = b.last_reply_at ? new Date(b.last_reply_at).getTime() : 0;
-      return bTime - aTime;
-    });
-  }, [dms]);
+    return [...dms]
+      .filter((dm) => !closedDmIds.has(dm.id))
+      .sort((a, b) => {
+        const aTime = a.last_reply_at ? new Date(a.last_reply_at).getTime() : 0;
+        const bTime = b.last_reply_at ? new Date(b.last_reply_at).getTime() : 0;
+        return bTime - aTime;
+      });
+  }, [dms, closedDmIds]);
 
   return (
     <div>
@@ -203,6 +257,11 @@ export function DMList({
               dm={dm}
               isSelected={dm.id === selectedDmId}
               onSelect={() => onSelectDM(dm.id)}
+              onClose={() => setClosedDmIds((prev) => {
+                const next = new Set(prev).add(dm.id);
+                saveClosedDmIds(next);
+                return next;
+              })}
             />
           ))}
         </div>

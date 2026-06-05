@@ -350,16 +350,7 @@ export default function AgentDetailPage() {
 
             {/* Metadata */}
             <div className="space-y-2">
-              {/* Model info */}
-              <div className="flex items-center gap-2">
-                <div className="badge-brutal bg-brutal-pink text-black">
-                  {agent.model_provider}
-                </div>
-                <span className="truncate font-mono text-[11px] text-muted-foreground">
-                  {agent.model_name}
-                </span>
-              </div>
-
+  
               {/* Created date */}
               <div className="flex items-center gap-2">
                 <Calendar className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />

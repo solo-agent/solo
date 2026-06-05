@@ -113,7 +113,7 @@ func (s *ChannelService) AddMember(ctx context.Context, channelID, requesterID, 
 	var requesterRole string
 	err = s.pool.QueryRow(ctx,
 		`SELECT role FROM channel_members
-		 WHERE channel_id = $1 AND member_type = 'user' AND member_id = $2`,
+		 WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2`,
 		channelID, requesterID,
 	).Scan(&requesterRole)
 	if err != nil {
@@ -203,7 +203,7 @@ func (s *ChannelService) RemoveMember(ctx context.Context, channelID, requesterI
 		var requesterRole string
 		err = s.pool.QueryRow(ctx,
 			`SELECT role FROM channel_members
-			 WHERE channel_id = $1 AND member_type = 'user' AND member_id = $2`,
+			 WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2`,
 			channelID, requesterID,
 		).Scan(&requesterRole)
 		if err != nil {
@@ -237,7 +237,7 @@ func (s *ChannelService) ListMembers(ctx context.Context, channelID, requesterID
 	err := s.pool.QueryRow(ctx,
 		`SELECT EXISTS(
 			SELECT 1 FROM channel_members
-			WHERE channel_id = $1 AND member_type = 'user' AND member_id = $2
+			WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2
 		)`, channelID, requesterID,
 	).Scan(&isMember)
 	if err != nil {
@@ -290,8 +290,18 @@ func (s *ChannelService) IsChannelMember(ctx context.Context, channelID, userID 
 	err := s.pool.QueryRow(ctx,
 		`SELECT EXISTS(
 			SELECT 1 FROM channel_members
-			WHERE channel_id = $1 AND member_type = 'user' AND member_id = $2
+			WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2
 		)`, channelID, userID,
 	).Scan(&exists)
 	return exists, err
+}
+
+// ResolveChannelName looks up a channel ID by its name.
+func (s *ChannelService) ResolveChannelName(ctx context.Context, name string) (string, bool) {
+	var id string
+	err := s.pool.QueryRow(ctx, `SELECT id FROM channels WHERE name = $1`, name).Scan(&id)
+	if err != nil {
+		return "", false
+	}
+	return id, true
 }

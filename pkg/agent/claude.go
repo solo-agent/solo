@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,6 +46,55 @@ func NewClaudeBackend(executablePath string, logger *slog.Logger) *ClaudeBackend
 
 // Name returns "claude".
 func (b *ClaudeBackend) Name() string { return "claude" }
+
+// minClaudeVersion is the lowest Claude Code version that supports
+// --output-format stream-json for programmatic usage.
+const minClaudeVersion = "2.0.0"
+
+var claudeVersionPattern = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
+
+func checkClaudeVersion(ctx context.Context, execPath string) error {
+	versionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(versionCtx, execPath, "--version").Output()
+	if err != nil {
+		return fmt.Errorf("claude --version failed: %w", err)
+	}
+	matches := claudeVersionPattern.FindStringSubmatch(string(out))
+	if len(matches) != 4 {
+		return fmt.Errorf("claude --version: cannot parse version from %q", strings.TrimSpace(string(out)))
+	}
+	detected := matches[1] + "." + matches[2] + "." + matches[3]
+	if compareVersion(detected, minClaudeVersion) < 0 {
+		return fmt.Errorf("claude %s is below the minimum supported version %s. Run `claude update` to upgrade.", detected, minClaudeVersion)
+	}
+	return nil
+}
+
+// compareVersion returns -1 if a < b, 0 if equal, 1 if a > b.
+func compareVersion(a, b string) int {
+	parse := func(v string) [3]int {
+		parts := strings.Split(v, ".")
+		var nums [3]int
+		for i, p := range parts {
+			if i >= 3 {
+				break
+			}
+			nums[i], _ = strconv.Atoi(p)
+		}
+		return nums
+	}
+	va, vb := parse(a), parse(b)
+	for i := 0; i < 3; i++ {
+		if va[i] < vb[i] {
+			return -1
+		}
+		if va[i] > vb[i] {
+			return 1
+		}
+	}
+	return 0
+}
 
 // Execute launches the claude CLI subprocess, sends the prompt, streams
 // output events through Session.Messages, and delivers the final result
@@ -196,6 +247,9 @@ func (b *ClaudeBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 	execPath := b.executablePath
 	if _, err := exec.LookPath(execPath); err != nil {
 		return nil, fmt.Errorf("claude executable not found at %q: %w", execPath, err)
+	}
+	if err := checkClaudeVersion(ctx, execPath); err != nil {
+		return nil, err
 	}
 
 	timeout := 20 * time.Minute
@@ -752,6 +806,8 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"--output-format":   blockedWithValue,
 	"--input-format":    blockedWithValue,
 	"--permission-mode": blockedWithValue,
+	"--disallowedTools": blockedWithValue,
+	"--max-turns":       blockedWithValue,
 }
 
 // buildClaudeArgs constructs the CLI arguments for spawning Claude Code.
@@ -765,10 +821,17 @@ func buildClaudeArgs(req *ExecuteRequest, opts *ExecuteOptions) []string {
 		"--input-format", "stream-json",
 		"--verbose",
 		"--permission-mode", "bypassPermissions",
+		"--disallowedTools", "AskUserQuestion",
 	}
 
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
+	}
+	if opts.Effort != "" {
+		args = append(args, "--effort", opts.Effort)
+	}
+	if opts.MaxTurns > 0 {
+		args = append(args, "--max-turns", strconv.Itoa(opts.MaxTurns))
 	}
 	if opts.SystemPrompt != "" {
 		// Write system prompt to .solo/system-prompt.md (Slock-aligned).

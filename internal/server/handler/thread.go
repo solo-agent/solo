@@ -61,6 +61,7 @@ type ThreadReplyResponse struct {
 	SenderType    string           `json:"sender_type"`
 	SenderID      string           `json:"sender_id"`
 	SenderName    string           `json:"sender_name,omitempty"`
+	SenderActive  bool             `json:"sender_active"`
 	Content       string           `json:"content"`
 	ContentType   string           `json:"content_type"`
 	AttachmentIDs []string         `json:"attachment_ids,omitempty"`
@@ -71,6 +72,30 @@ type ThreadReplyResponse struct {
 type ThreadMessageListResponse struct {
 	Messages []ThreadReplyResponse `json:"messages"`
 	HasMore  bool                  `json:"has_more"`
+	ThreadID string                `json:"thread_id,omitempty"`
+}
+
+
+// isChannelOrDMMember checks membership for both regular channels and DMs.
+func (h *ThreadHandler) isChannelOrDMMember(ctx context.Context, channelID, userID string) (bool, error) {
+	var channelType string
+	err := h.pool.QueryRow(ctx, `SELECT type FROM channels WHERE id = $1`, channelID).Scan(&channelType)
+	if err != nil {
+		return false, err
+	}
+	var isMember bool
+	if channelType == "dm" {
+		err = h.pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM dm_members WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2)`,
+			channelID, userID,
+		).Scan(&isMember)
+	} else {
+		err = h.pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2)`,
+			channelID, userID,
+		).Scan(&isMember)
+	}
+	return isMember, err
 }
 
 // CreateThreadReply handles POST /api/v1/channels/{channelID}/messages/{messageID}/thread
@@ -106,14 +131,8 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Verify user is a member of the channel
-	var isMember bool
-	err := h.pool.QueryRow(r.Context(),
-		`SELECT EXISTS(
-			SELECT 1 FROM channel_members
-			WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2
-		)`, channelID, userID,
-	).Scan(&isMember)
+	// Verify user is a member of the channel (or DM)
+	isMember, err := h.isChannelOrDMMember(r.Context(), channelID, userID)
 	if err != nil {
 		slog.Error("failed to check membership", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
@@ -246,7 +265,7 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Update thread reply count and last_reply_at
+	// Update thread reply count and last_reply_at, then read the new count
 	_, err = tx.Exec(r.Context(),
 		`UPDATE threads SET reply_count = reply_count + 1, last_reply_at = $1
 		 WHERE id = $2`,
@@ -276,6 +295,11 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		displayName = "Unknown"
 	}
+	// Read the new reply_count for WS broadcasts
+	var replyCount int
+	_ = h.pool.QueryRow(r.Context(),
+		`SELECT reply_count FROM threads WHERE id = $1`, threadID,
+	).Scan(&replyCount)
 
 	slog.Info("thread reply created",
 		"reply_id", replyID,
@@ -299,6 +323,42 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 		// when @mentions were intended but failed to resolve.
 		hasMentions := mentionHasMentions || len(mentionedAgentIDs) > 0
 		go h.agentSvc.TriggerAgentResponseInThread(context.Background(), channelID, threadID, senderType, userID, mentionedAgentIDs, hasMentions, nil)
+	}
+
+	// Broadcast WS events for real-time thread updates
+	if h.hub != nil {
+		slog.Info("ws: broadcasting thread.reply and thread.message.new",
+		"thread_id", threadID, "channel_id", channelID, "reply_count", replyCount,
+		)
+		// Update parent message reply_count via thread.reply notification
+		h.hub.BroadcastToChannel(channelID, ws.Envelope("thread.reply", map[string]interface{}{
+			"channel_id":      channelID,
+			"thread_id":       threadID,
+			"root_message_id": messageID,
+			"reply_count":     replyCount,
+			"last_reply_at":   now.UTC().Format(time.RFC3339),
+		}))
+
+		// Broadcast thread.message.new for Thread Panel subscribers
+		threadMsg := ws.ThreadMessageNewPayload{
+			Message: ws.ThreadMessageItem{
+				ID:          replyID,
+				ChannelID:   channelID,
+			ThreadID:    threadID,
+				SenderType:  senderType,
+				SenderID:    userID,
+				SenderName:  displayName,
+				Content:     content,
+				ContentType: "text",
+				CreatedAt:   now.UTC().Format(time.RFC3339),
+			},
+			Thread: ws.ThreadMetadataItem{
+			ThreadID:    threadID,
+				ReplyCount:  replyCount,
+				LastReplyAt: now.UTC().Format(time.RFC3339),
+			},
+		}
+		h.hub.BroadcastToThread(threadID, ws.Envelope(ws.EventThreadMessageNew, threadMsg))
 	}
 
 	writeJSON(w, http.StatusCreated, ThreadReplyResponse{
@@ -349,7 +409,6 @@ func (h *ThreadHandler) ListThreadMessages(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Verify user is a member of the channel and channel is not archived
-	var isMember bool
 	var isArchived bool
 
 	// Guard against nil pool (tests may construct handler without DB).
@@ -358,12 +417,7 @@ func (h *ThreadHandler) ListThreadMessages(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	err := h.pool.QueryRow(r.Context(),
-		`SELECT EXISTS(
-			SELECT 1 FROM channel_members
-			WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2
-		)`, channelID, userID,
-	).Scan(&isMember)
+	isMember, err := h.isChannelOrDMMember(r.Context(), channelID, userID)
 	if err != nil {
 		slog.Error("failed to check membership", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
@@ -416,6 +470,7 @@ func (h *ThreadHandler) ListThreadMessages(w http.ResponseWriter, r *http.Reques
 	// then reversed to ASC for natural reading order.
 	query := `SELECT m.id, m.channel_id, m.thread_id, m.sender_type, m.sender_id,
 	                 COALESCE(u.display_name, a.name, '') as sender_name,
+	                 COALESCE(a.is_active, false) AS sender_active,
 	                 m.content, m.content_type, COALESCE(m.attachment_ids, '{}') as attachment_ids,
                  m.created_at
 	          FROM messages m
@@ -449,6 +504,7 @@ func (h *ThreadHandler) ListThreadMessages(w http.ResponseWriter, r *http.Reques
 		var createdAt time.Time
 		err := rows.Scan(&msg.ID, &msg.ChannelID, &msg.ThreadID,
 			&msg.SenderType, &msg.SenderID, &msg.SenderName,
+			&msg.SenderActive,
 			&msg.Content, &msg.ContentType, &msg.AttachmentIDs, &createdAt)
 		if err != nil {
 			slog.Error("failed to scan thread message row", "error", err)
@@ -493,6 +549,7 @@ func (h *ThreadHandler) ListThreadMessages(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, ThreadMessageListResponse{
 		Messages: messages,
 		HasMore:  hasMore,
+		ThreadID: threadID,
 	})
 }
 
@@ -528,13 +585,7 @@ func (h *ThreadHandler) MarkThreadRead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify user is a member of the channel the thread belongs to
-	var isMember bool
-	err = h.pool.QueryRow(r.Context(),
-		`SELECT EXISTS(
-			SELECT 1 FROM channel_members
-			WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2
-		)`, channelID, userID,
-	).Scan(&isMember)
+	isMember, err := h.isChannelOrDMMember(r.Context(), channelID, userID)
 	if err != nil {
 		slog.Error("failed to check membership", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")

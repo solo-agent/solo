@@ -103,3 +103,17 @@ func BroadcastAgentError(hub realtime.Broadcaster, channelID, agentID, agentName
 		"error", errMsg,
 	)
 }
+
+// BroadcastAgentChunk broadcasts an agent.chunk event to channel subscribers.
+func BroadcastAgentChunk(hub realtime.Broadcaster, channelID, agentID, agentName, chunkType, content string, tool *ToolRef) {
+	payload := AgentChunkPayload{
+		ChannelID: channelID,
+		AgentID:   agentID,
+		AgentName: agentName,
+		ChunkType: chunkType,
+		Content:   content,
+		Tool:      tool,
+	}
+	envelope := Envelope(EventAgentChunk, payload)
+	hub.BroadcastToChannel(channelID, envelope)
+}

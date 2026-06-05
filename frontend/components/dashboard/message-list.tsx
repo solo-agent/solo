@@ -298,6 +298,11 @@ const MessageItem = memo(function MessageItem({
           <span className="font-heading text-sm font-bold text-foreground">
             {message.display_name}
           </span>
+          {message.sender_type === 'agent' && message.sender_active === false && (
+            <span className="badge-brutal bg-brutal-stone text-black">
+              DELETED
+            </span>
+          )}
           <span className="font-mono text-[11px] text-muted-foreground">
             {time}
           </span>

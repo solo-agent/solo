@@ -70,8 +70,7 @@ func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 	if opts.WorkspaceDir != "" {
 		cmd.Dir = opts.WorkspaceDir
 	}
-	cmd.Env = buildEnv(opts.Env)
-	// Enable yolo mode so Hermes auto-approves all tool executions.
+	cmd.Env = buildEnvAt(opts.WorkspaceDir, opts.Env)
 	cmd.Env = append(cmd.Env, "HERMES_YOLO_MODE=1")
 
 	stdout, err := cmd.StdoutPipe()
@@ -196,24 +195,34 @@ func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 			return
 		}
 
-		// 2. Create a new session.
+		// 2. Create or resume session.
 		cwd := opts.WorkspaceDir
 		if cwd == "" {
 			cwd = "."
 		}
-		result, err := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model))
-		if err != nil {
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("hermes session/new failed: %v", err)
-			resCh <- &Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
-			return
+		if opts.ResumeSessionID != "" {
+			result, err := c.request(runCtx, "session/resume", map[string]any{
+				"sessionId": opts.ResumeSessionID,
+			})
+			if err == nil {
+				sessionID, _ = resolveResumedSessionID(opts.ResumeSessionID, result)
+			}
 		}
-		sessionID = extractACPSessionID(result)
 		if sessionID == "" {
-			finalStatus = "failed"
-			finalError = "hermes session/new returned no session ID"
-			resCh <- &Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
-			return
+			result, err := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model))
+			if err != nil {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("hermes session/new failed: %v", err)
+				resCh <- &Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
+			sessionID = extractACPSessionID(result)
+			if sessionID == "" {
+				finalStatus = "failed"
+				finalError = "hermes session/new returned no session ID"
+				resCh <- &Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
 		}
 
 		c.sessionID = sessionID
@@ -302,11 +311,7 @@ func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 
 		var usageMap map[string]TokenUsage
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 {
-			model := opts.Model
-			if model == "" {
-				model = "unknown"
-			}
-			usageMap = map[string]TokenUsage{model: u}
+			usageMap = map[string]TokenUsage{opts.Model: u}
 		}
 
 		resCh <- &Result{
@@ -915,10 +920,13 @@ func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 	hermesArgs := append([]string{"acp"}, filterCustomArgs(opts.ExtraArgs, hermesBlockedArgs)...)
 	hermesArgs = append(hermesArgs, filterCustomArgs(opts.CustomArgs, hermesBlockedArgs)...)
 
-	env := buildEnv(opts.Env)
-	env = append(env, "HERMES_YOLO_MODE=1")
+	extraEnv := make(map[string]string, len(opts.Env)+1)
+		for k, v := range opts.Env {
+			extraEnv[k] = v
+		}
+	extraEnv["HERMES_YOLO_MODE"] = "1"
 
-	runner, err := startPersistent(ctx, execPath, hermesArgs, opts.WorkspaceDir, env, b.logger)
+	runner, err := startPersistent(ctx, execPath, hermesArgs, opts.WorkspaceDir, extraEnv, b.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -981,10 +989,11 @@ func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 	// Drive the initial handshake and prompt synchronously.
 	startTime := time.Now()
 	handleError := func(errMsg string) {
-		resCh <- &Result{Status: "failed", Error: errMsg, DurationMs: time.Since(startTime).Milliseconds()}
-		close(msgCh)
-		close(resCh)
-		state.turnFin.Store(true)
+		if state.turnFin.CompareAndSwap(false, true) {
+			resCh <- &Result{Status: "failed", Error: errMsg, DurationMs: time.Since(startTime).Milliseconds()}
+			close(msgCh)
+			close(resCh)
+		}
 	}
 
 	// 1. Initialize handshake.
@@ -1002,22 +1011,33 @@ func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
 	}
 
-	// 2. Create session.
+	// 2. Create or resume session.
 	cwd := opts.WorkspaceDir
 	if cwd == "" {
 		cwd = "."
 	}
-	result, err := cl.request(ctx, "session/new", buildHermesSessionParams(cwd, opts.Model))
-	if err != nil {
-		runner.close()
-		handleError(fmt.Sprintf("hermes session/new failed: %v", err))
-		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+	var sessionID string
+	if opts.ResumeSessionID != "" {
+		result, err := cl.request(ctx, "session/resume", map[string]any{
+			"sessionId": opts.ResumeSessionID,
+		})
+		if err == nil {
+			sessionID, _ = resolveResumedSessionID(opts.ResumeSessionID, result)
+		}
 	}
-	sessionID := extractACPSessionID(result)
 	if sessionID == "" {
-		runner.close()
-		handleError("hermes session/new returned no session ID")
-		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		result, err := cl.request(ctx, "session/new", buildHermesSessionParams(cwd, opts.Model))
+		if err != nil {
+			runner.close()
+			handleError(fmt.Sprintf("hermes session/new failed: %v", err))
+			return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		}
+		sessionID = extractACPSessionID(result)
+		if sessionID == "" {
+			runner.close()
+			handleError("hermes session/new returned no session ID")
+			return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		}
 	}
 	cl.sessionID = sessionID
 	state.sessionID = sessionID
@@ -1034,18 +1054,21 @@ func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 		}
 	}
 
-	// 4. Build prompt content with system prompt prepended.
-	userText := prompt
+	// 4. Build prompt blocks with role-based format so the agent
+	// treats system instructions as authoritative.
+	promptBlocks := []map[string]any{
+		{"type": "text", "text": prompt, "role": "user"},
+	}
 	if opts.SystemPrompt != "" {
-		userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
+		promptBlocks = append([]map[string]any{
+			{"type": "text", "text": opts.SystemPrompt, "role": "system"},
+		}, promptBlocks...)
 	}
 
 	// 5. Send the initial prompt.
 	_, err = cl.request(ctx, "session/prompt", map[string]any{
-		"sessionId": sessionID,
-		"prompt": []map[string]any{
-			{"type": "text", "text": userText},
-		},
+		"sessionId":  sessionID,
+		"prompt":     promptBlocks,
 	})
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -1140,7 +1163,7 @@ func (b *HermesBackend) Send(ctx context.Context, ps *PersistentSession, message
 	_, err := state.client.request(ctx, "session/prompt", map[string]any{
 		"sessionId": state.sessionID,
 		"prompt": []map[string]any{
-			{"type": "text", "text": prompt},
+			{"type": "text", "text": prompt, "role": "user"},
 		},
 	})
 	if err != nil {
@@ -1166,7 +1189,7 @@ func (b *HermesBackend) Send(ctx context.Context, ps *PersistentSession, message
 		Status:     "completed",
 		Output:     finalOutput,
 		DurationMs: duration.Milliseconds(),
-		Usage:      buildHermesUsageMap(usage, "unknown"),
+		Usage:      buildHermesUsageMap(usage, ""),
 	}
 	close(msgCh)
 	close(resCh)
@@ -1203,9 +1226,6 @@ func (b *HermesBackend) Close(ps *PersistentSession) error {
 func buildHermesUsageMap(usage TokenUsage, model string) map[string]TokenUsage {
 	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 {
 		return nil
-	}
-	if model == "" {
-		model = "unknown"
 	}
 	return map[string]TokenUsage{model: usage}
 }

@@ -4,7 +4,7 @@
 
 'use client';
 
-import { Hash, Plus, Trash2 } from 'lucide-react';
+import { Hash, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Channel } from '@/lib/types';
@@ -96,10 +96,10 @@ function ChannelItem({
             e.stopPropagation();
             onDelete();
           }}
-          className="flex h-5 w-5 items-center justify-center rounded-none opacity-0 hover:bg-sidebar-border group-hover:opacity-100 transition-opacity"
-          aria-label={`删除 #${channel.name}`}
+          className="hidden group-hover:flex items-center justify-center rounded-none p-1 hover:bg-brutal-pink-light transition-colors flex-shrink-0"
+          aria-label={`关闭 #${channel.name}`}
         >
-          <Trash2 className="h-3 w-3" />
+          <X className="h-4 w-4" />
         </button>
       </div>
     </div>

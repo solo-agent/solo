@@ -44,12 +44,15 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 	args := buildCodexArgs(opts)
 	b.logger.Info("codex: starting persistent session", "args", args)
 
-	runner, err := startPersistent(ctx, execPath, args, opts.WorkspaceDir, buildEnv(opts.Env), b.logger)
+	runner, err := startPersistent(ctx, execPath, args, opts.WorkspaceDir, opts.Env, b.logger)
 	if err != nil {
 		return nil, err
 	}
 
 	prompt := buildPrompt(req, opts)
+	if opts.SystemPrompt != "" {
+		prompt = opts.SystemPrompt + "\n\n---\n\n" + prompt
+	}
 
 	msgCh := make(chan OutputChunk, 256)
 	resCh := make(chan *Result, 1)
@@ -88,6 +91,7 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 		runner.close()
 		return nil, fmt.Errorf("codex persistent initialize: %w", err)
 	}
+	c.notify("initialized")
 
 	// Start thread.
 	threadID, err := c.startThread(ctx, opts)
@@ -238,7 +242,7 @@ func (b *CodexBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *E
 	if opts.WorkspaceDir != "" {
 		cmd.Dir = opts.WorkspaceDir
 	}
-	cmd.Env = buildEnv(opts.Env)
+	cmd.Env = buildEnvAt(opts.WorkspaceDir, opts.Env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -456,11 +460,7 @@ func (b *CodexBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *E
 
 		var usageMap map[string]TokenUsage
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-			model := opts.Model
-			if model == "" {
-				model = "unknown"
-			}
-			usageMap = map[string]TokenUsage{model: u}
+			usageMap = map[string]TokenUsage{opts.Model: u}
 		}
 
 		if finalError != "" {
@@ -485,8 +485,18 @@ func (b *CodexBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *E
 	}, nil
 }
 
-// startThread calls thread/start to create a fresh codex thread.
+// startThread creates or resumes a codex thread.
 func (c *codexClient) startThread(ctx context.Context, opts *ExecuteOptions) (string, error) {
+	if opts.ResumeSessionID != "" {
+		result, err := c.request(ctx, "thread/resume", map[string]any{
+			"threadId": opts.ResumeSessionID,
+		})
+		if err == nil {
+			if threadID := extractCodexThreadID(result); threadID != "" {
+				return threadID, nil
+			}
+		}
+	}
 	startResult, err := c.request(ctx, "thread/start", map[string]any{
 		"model":                  nilIfEmpty(opts.Model),
 		"modelProvider":          nil,
@@ -500,7 +510,6 @@ func (c *codexClient) startThread(ctx context.Context, opts *ExecuteOptions) (st
 		"compactPrompt":          nil,
 		"includeApplyPatchTool":  nil,
 		"experimentalRawEvents":  false,
-		"persistExtendedHistory": true,
 	})
 	if err != nil {
 		return "", fmt.Errorf("codex thread/start failed: %w", err)
@@ -569,10 +578,9 @@ func (c *codexClient) request(ctx context.Context, method string, params any) (j
 	c.mu.Unlock()
 
 	msg := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      id,
-		"method":  method,
-		"params":  params,
+		"id":     id,
+		"method": method,
+		"params": params,
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -602,8 +610,7 @@ func (c *codexClient) request(ctx context.Context, method string, params any) (j
 
 func (c *codexClient) notify(method string) {
 	msg := map[string]any{
-		"jsonrpc": "2.0",
-		"method":  method,
+		"method": method,
 	}
 	data, _ := json.Marshal(msg)
 	data = append(data, '\n')
@@ -612,9 +619,8 @@ func (c *codexClient) notify(method string) {
 
 func (c *codexClient) respond(id int, result any) {
 	msg := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      id,
-		"result":  result,
+		"id":     id,
+		"result": result,
 	}
 	data, _ := json.Marshal(msg)
 	data = append(data, '\n')
@@ -623,8 +629,7 @@ func (c *codexClient) respond(id int, result any) {
 
 func (c *codexClient) respondError(id int, code int, message string) {
 	msg := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      id,
+		"id": id,
 		"error": map[string]any{
 			"code":    code,
 			"message": message,

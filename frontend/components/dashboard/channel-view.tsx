@@ -5,7 +5,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
-import { Hash, Users, Loader2, ClipboardList, MessageSquare, Plus } from 'lucide-react';
+import { Hash, Users, Loader2, ClipboardList, MessageSquare, Plus, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
 import { useChannelMembers } from '@/lib/hooks/use-channel-members';
@@ -33,6 +33,8 @@ import type { Channel, CreateTaskInput, Message, Task, TaskStatus } from '@/lib/
 const ThreadPanel = lazy(() =>
   import('./thread-panel').then((m) => ({ default: m.ThreadPanel })),
 );
+
+import { AgentViewPanel } from './agent-view-panel';
 
 // ---- Inline quick-create task form ----
 
@@ -122,6 +124,7 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
     agents,
     isLoading: membersLoading,
     addAgentToChannel,
+    removeMember,
     updateMemberStatus,
   } = useChannelMembers(channel.id);
 
@@ -134,6 +137,10 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
 
   // ---- Thread panel width ----
   const [threadPanelWidth, setThreadPanelWidth] = useState(400);
+
+  // ---- Agent View panel state ----
+  const [showAgentView, setShowAgentView] = useState(false);
+  const [agentViewWidth, setAgentViewWidth] = useState(320);
 
   // ---- Tasks tab state (SOLO-128-F) ----
   const [channelViewTab, setChannelViewTab] = useState<'messages' | 'tasks'>('messages');
@@ -165,6 +172,16 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
     convertMessageToTask,
     refetch: refetchTasks,
   } = useTasks({ channel_id: channel.id });
+
+  // Refetch tasks when switching to tasks tab
+  useEffect(() => {
+    if (channelViewTab === 'tasks') refetchTasks();
+  }, [channelViewTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Refetch tasks when ThreadPanel opens via reply click
+  useEffect(() => {
+    if (threadMessage?.id) refetchTasks();
+  }, [threadMessage?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Agent thinking/typing/streaming status tracking (SOLO-47-F, SOLO-52-F) ----
   const [thinkingAgentNames, setThinkingAgentNames] = useState<string[]>([]);
@@ -255,24 +272,34 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
     // If not found yet, it will be caught when messages load (via the next effect)
   }, [initialThreadMessageId, channel, messages, channelTasks]);
 
-  // Sync threadTask when channelTasks change
+  // Sync threadTask when channelTasks change (e.g. after WS task.updated)
   useEffect(() => {
-    if (threadMessage && !threadTask) {
-      const task = channelTasks.find((t) => t.message_id === threadMessage.id);
-      if (task) setThreadTask(task);
+    if (!threadMessage) return;
+    const task = channelTasks.find((t) => t.message_id === threadMessage.id);
+    if (task) {
+      setThreadTask((prev) => {
+        // Only update if actually changed to avoid re-render loops
+        if (!prev || prev.status !== task.status || prev.claimer_id !== task.claimer_id) {
+          return task;
+        }
+        return prev;
+      });
     }
-  }, [channelTasks, threadMessage, threadTask]);
+  }, [channelTasks, threadMessage]);
 
   // ---- Task click in tasks tab: open ThreadPanel with the parent message ----
   const handleTaskClickInTab = useCallback(
     (task: Task) => {
-      // If task has no message_id, can't open thread
       if (!task.message_id) return;
+      refetchTasks();
 
       // Find message in the already-loaded channel messages
       const existingMsg = messages.find((m) => m.id === task.message_id);
       if (existingMsg) {
-        setThreadMessage(existingMsg);
+        setThreadMessage({
+          ...existingMsg,
+          display_name: task.creator_name || existingMsg.display_name,
+        });
         setThreadTask(task);
         return;
       }
@@ -297,7 +324,7 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
         task_claimer_name: task.claimer_name || task.assignee_name,
       });
     },
-    [channel.id, messages],
+    [channel.id, messages, refetchTasks],
   );
 
   const handleThreadClose = useCallback(() => {
@@ -338,7 +365,8 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
 
   const handleClaim = async (task: Task) => {
     try {
-      await claimTask(task.channel_id, task.id);
+      const updated = await claimTask(task.channel_id, task.id);
+      setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
       showToast(`已认领任务 #${task.task_number ?? '?'}`, 'success');
     } catch {
       // 409: silent — per spec, no error toast
@@ -347,7 +375,8 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
 
   const handleUnclaim = async (task: Task) => {
     try {
-      await unclaimTask(task.channel_id, task.id);
+      const updated = await unclaimTask(task.channel_id, task.id);
+      setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
       showToast(`已释放任务 #${task.task_number ?? '?'}`, 'info');
     } catch {
       // Errors handled silently for claim/unclaim
@@ -382,7 +411,8 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
 
   const handleStatusChange = async (task: Task, newStatus: TaskStatus) => {
     try {
-      await updateTask(task.id, { status: newStatus });
+      const updated = await updateTask(task.channel_id, task.id, { status: newStatus });
+      setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
     } catch {
       // handled by hook
     }
@@ -451,6 +481,20 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
             </div>
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowAgentView(prev => !prev)}
+              className={cn(
+                'flex h-8 w-8 items-center justify-center border-2 border-black shadow-brutal-sm transition-colors',
+                showAgentView
+                  ? 'bg-brutal-pink text-black'
+                  : 'bg-white hover:bg-brutal-cream',
+              )}
+              aria-label="Agent View"
+              title="Agent View"
+            >
+              <Eye className="h-4 w-4" />
+            </button>
             {/* SOLO-237-F: Channel-internal search */}
             {channelViewTab === 'messages' && (
               <ChannelSearch
@@ -546,6 +590,15 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
           </div>
         )}
       </div>
+
+      {/* Agent View panel — conditionally mounted to avoid running hooks when hidden */}
+      {showAgentView && (
+        <AgentViewPanel
+          channelId={channel.id}
+          width={agentViewWidth}
+          onWidthChange={setAgentViewWidth}
+        />
+      )}
 
       {/* Thread panel (lazy-loaded, SOLO-63-F) */}
       {threadMessage && (
@@ -698,6 +751,7 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
               setIsMemberPopoverOpen(false);
               setIsAddAgentModalOpen(true);
             }}
+            onRemoveAgent={(memberId) => removeMember('agent', memberId)}
           />
         </div>
       </Dialog>

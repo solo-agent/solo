@@ -81,7 +81,7 @@ const agentFormSchema = z.object({
     .max(50, '名称不能超过 50 个字符'),
   description: z.string().max(200, '描述不能超过 200 个字符').optional(),
   model_provider: z.string().min(1, '请选择 Runtime'),
-  model_name: z.string().min(1, '请选择一个模型'),
+  model_name: z.string().optional(),
   system_prompt: z.string().optional(),
   // v1.4: custom_env and custom_args are managed via controlled components,
   // not validated by zod (they use their own UI validation)
@@ -143,15 +143,7 @@ export function AgentForm({
     defaultValues?.custom_args || [],
   );
 
-  // v1.4: runtime change handler — auto-set model_name from backend metadata
   const runtimeReg = register('model_provider');
-  const handleRuntimeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    runtimeReg.onChange(e);
-    const type = e.target.value;
-    const meta = backendMeta[type];
-    const defaultModel = meta?.default_model || meta?.models?.[0]?.id || type;
-    setValue('model_name', defaultModel, { shouldValidate: true, shouldDirty: true });
-  };
 
   const handleTemplateSelect = useCallback(
     (template: RoleTemplate) => {
@@ -260,7 +252,7 @@ export function AgentForm({
             ref={runtimeReg.ref}
             onBlur={runtimeReg.onBlur}
             value={selectedRuntime}
-            onChange={handleRuntimeChange}
+            onChange={runtimeReg.onChange}
             className="input-brutal h-10 appearance-none bg-white pr-8 font-body text-sm"
             style={{
               backgroundImage:

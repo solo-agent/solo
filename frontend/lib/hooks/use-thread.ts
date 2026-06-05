@@ -22,6 +22,7 @@ interface ThreadReplyResponse {
   sender_type: string;
   sender_id: string;
   sender_name?: string;
+  sender_active?: boolean;
   content: string;
   content_type: string;
   created_at: string;
@@ -30,6 +31,7 @@ interface ThreadReplyResponse {
 interface ThreadMessageListResponse {
   messages: ThreadReplyResponse[];
   has_more: boolean;
+  thread_id?: string;
 }
 
 // ---- 转换工具 ----
@@ -41,6 +43,7 @@ function toWSMessage(r: ThreadReplyResponse): WSMessage {
     sender_type: r.sender_type as WSMessageSource,
     sender_id: r.sender_id,
     sender_name: r.sender_name || (r.sender_type === 'system' ? 'Solo' : undefined),
+    sender_active: r.sender_active,
     display_name: r.sender_name || (r.sender_type === 'system' ? 'Solo' : undefined),
     content: r.content,
     content_type: r.content_type,
@@ -103,12 +106,9 @@ export function useThread(): UseThreadReturn {
         const threadMsgs = res.messages;
         setMessages(threadMsgs.map(toWSMessage));
 
-        // 从第一条消息中提取实际的 thread_id
-        if (threadMsgs.length > 0 && threadMsgs[0].thread_id) {
-          setThreadId(threadMsgs[0].thread_id);
-        } else {
-          setThreadId(null);
-        }
+        // Get thread_id from response (works even with 0 messages) or fall back to first message
+        const tid = res.thread_id || (threadMsgs.length > 0 ? threadMsgs[0].thread_id : null);
+        setThreadId(tid || null);
       } catch {
         // 线程不存在（还没有回复）时返回空列表
         setMessages([]);
@@ -178,35 +178,25 @@ export function useThread(): UseThreadReturn {
         // Replace streaming placeholder if one exists, otherwise append
         setMessages((prev) => {
           const hasStreaming = prev.some((m) => m.id === event.message.id && m.status === 'streaming');
-          return prev.map((m) =>
-            m.id === event.message.id
-              ? {
-                  id: event.message.id,
-                  channel_id: event.message.channel_id,
-                  sender_type: event.message.sender_type as WSMessageSource,
-                  sender_id: event.message.sender_id,
-                  sender_name: event.message.sender_name,
-                  display_name: event.message.sender_name,
-                  content: event.message.content,
-                  content_type: event.message.content_type,
-                  thread_parent_id: event.message.thread_id,
-                  created_at: event.message.created_at,
-                }
-              : m,
+          const exists = prev.some((m) => m.id === event.message.id);
+          const newMsg = {
+            id: event.message.id,
+            channel_id: event.message.channel_id,
+            sender_type: event.message.sender_type as WSMessageSource,
+            sender_id: event.message.sender_id,
+            sender_name: event.message.sender_name,
+            display_name: event.message.sender_name,
+            content: event.message.content,
+            content_type: event.message.content_type,
+            thread_parent_id: event.message.thread_id,
+            created_at: event.message.created_at,
+          };
+          const result = prev.map((m) =>
+            m.id === event.message.id ? newMsg : m,
           ).concat(
-            hasStreaming ? [] : [{
-              id: event.message.id,
-              channel_id: event.message.channel_id,
-              sender_type: event.message.sender_type as WSMessageSource,
-              sender_id: event.message.sender_id,
-              sender_name: event.message.sender_name,
-              display_name: event.message.sender_name,
-              content: event.message.content,
-              content_type: event.message.content_type,
-              thread_parent_id: event.message.thread_id,
-              created_at: event.message.created_at,
-            }],
+            hasStreaming ? [] : [newMsg],
           );
+          return result;
         });
       }
     });

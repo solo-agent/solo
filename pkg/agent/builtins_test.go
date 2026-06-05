@@ -56,9 +56,6 @@ func TestBuiltins_ListMeta(t *testing.T) {
 		if m.DisplayName == "" {
 			t.Errorf("ListMeta: Type %q has empty DisplayName", m.Type)
 		}
-		if len(m.Models) == 0 {
-			t.Errorf("ListMeta: Type %q has no models", m.Type)
-		}
 		typeSet[m.Type] = true
 	}
 
@@ -203,61 +200,6 @@ func TestBuiltins_FactoryReceivesConfig(t *testing.T) {
 		t.Errorf("expected ExecPath /explicit/codex, got %q", cb3.executablePath)
 	}
 }
-
-// ── Model lists are non-empty for well-known types ────────────────────────────
-
-func TestBuiltins_ModelLists(t *testing.T) {
-	metas := GlobalRegistry().ListMeta()
-	metaByType := make(map[string]AdapterMeta, len(metas))
-	for _, m := range metas {
-		metaByType[m.Type] = m
-	}
-
-	// Claude has 3 known models.
-	if m, ok := metaByType["claude"]; ok {
-		if len(m.Models) != 3 {
-			t.Errorf("claude: expected 3 models, got %d", len(m.Models))
-		}
-		// Check default model.
-		if m.DefaultModel != "claude-sonnet-4-6" {
-			t.Errorf("claude: expected default model claude-sonnet-4-6, got %q", m.DefaultModel)
-		}
-		hasDefault := false
-		for _, mi := range m.Models {
-			if mi.Default {
-				hasDefault = true
-				if mi.ID != m.DefaultModel {
-					t.Errorf("claude: default model marker on %q but DefaultModel is %q", mi.ID, m.DefaultModel)
-				}
-			}
-		}
-		if !hasDefault {
-			t.Error("claude: no model marked as Default")
-		}
-	}
-
-	// Codex has 2 known models.
-	if m, ok := metaByType["codex"]; ok {
-		if len(m.Models) != 2 {
-			t.Errorf("codex: expected 2 models, got %d", len(m.Models))
-		}
-		if m.DefaultModel != "gpt-5.1-codex" {
-			t.Errorf("codex: expected default model gpt-5.1-codex, got %q", m.DefaultModel)
-		}
-	}
-
-	// OpenCode has 2 known models.
-	if m, ok := metaByType["opencode"]; ok {
-		if len(m.Models) != 2 {
-			t.Errorf("opencode: expected 2 models, got %d", len(m.Models))
-		}
-		if m.DefaultModel != "gpt-5" {
-			t.Errorf("opencode: expected default model gpt-5, got %q", m.DefaultModel)
-		}
-	}
-}
-
-// ── local is a true alias of claude ──────────────────────────────────────────
 
 func TestBuiltins_LocalIsaClaudeAlias(t *testing.T) {
 	reg := GlobalRegistry()

@@ -27,12 +27,6 @@ interface AgentCardProps {
   onClick?: (agentId: string) => void;
 }
 
-const PROVIDER_LABELS: Record<string, string> = {
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
-  ollama: 'Ollama',
-  local: '本地 CLI',
-};
 
 export function AgentCard({ agent, onEdit, onDelete, onClick }: AgentCardProps) {
   // Status color: lime=online, yellow=thinking, gray=offline
@@ -85,9 +79,7 @@ export function AgentCard({ agent, onEdit, onDelete, onClick }: AgentCardProps) 
                 {agent.name}
               </CardTitle>
               <p className="font-mono text-[11px] text-muted-foreground mt-0.5">
-                {PROVIDER_LABELS[agent.model_provider] ?? agent.model_provider}
-                {' — '}
-                {agent.model_name}
+                {agent.model_provider}
               </p>
             </div>
           </div>

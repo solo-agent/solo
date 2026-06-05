@@ -19,6 +19,8 @@ type AgentConfig struct {
 	Provider     string            `json:"provider"`
 	MaxTokens    int               `json:"max_tokens"`
 	Temperature  float64           `json:"temperature"`
+	Effort       string            `json:"effort,omitempty"`
+	MaxTurns     int               `json:"max_turns,omitempty"`
 	Env          map[string]string `json:"env,omitempty"`
 	CustomArgs   []string          `json:"custom_args,omitempty"`
 	// Runtime context for system prompt (Slock-aligned).

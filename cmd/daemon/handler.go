@@ -326,7 +326,7 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	case "message_read":
 		serverPath = fmt.Sprintf("/api/v1/channels/%s/messages", req.ChannelID)
 	case "message_check":
-		serverPath = fmt.Sprintf("/api/v1/channels/%s/messages?limit=5", req.ChannelID)
+		serverPath = fmt.Sprintf("/api/v1/messages/check?channel_id=%s", req.ChannelID)
 	case "channel_join":
 		serverPath = "/api/v1/channels/join"
 		serverBody, _ = json.Marshal(map[string]string{"target": req.Content})
@@ -340,26 +340,28 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	// Helper to forward the request with a given token.
 	forwardRequest := func(tok string) (*http.Response, []byte, error) {
 		serverURL := h.serverURL + serverPath
-		httpReq, err := http.NewRequestWithContext(r.Context(), "GET", serverURL, nil)
-		if serverBody != nil {
-			httpReq, err = http.NewRequestWithContext(r.Context(), "POST", serverURL, bytes.NewReader(serverBody))
-			if err != nil {
-				return nil, nil, err
+		method := "GET"
+		var fwdBody io.Reader
+		switch req.Action {
+		case "task_claim":
+			method = "POST"
+		case "task_update":
+			method = "PATCH"
+			fwdBody = bytes.NewReader(serverBody)
+		case "task_unclaim":
+			method = "DELETE"
+		default:
+			if serverBody != nil {
+				method = "POST"
+				fwdBody = bytes.NewReader(serverBody)
 			}
-			httpReq.Header.Set("Content-Type", "application/json")
 		}
-		if req.Action == "task_update" {
-			httpReq, err = http.NewRequestWithContext(r.Context(), "PATCH", serverURL, bytes.NewReader(serverBody))
-			if err != nil {
-				return nil, nil, err
-			}
-			httpReq.Header.Set("Content-Type", "application/json")
+		httpReq, err := http.NewRequestWithContext(r.Context(), method, serverURL, fwdBody)
+		if err != nil {
+			return nil, nil, err
 		}
-		if req.Action == "task_unclaim" {
-			httpReq, err = http.NewRequestWithContext(r.Context(), "DELETE", serverURL, nil)
-			if err != nil {
-				return nil, nil, err
-			}
+		if serverBody != nil || req.Action == "task_update" {
+			httpReq.Header.Set("Content-Type", "application/json")
 		}
 		httpReq.Header.Set("Authorization", "Bearer "+tok)
 
@@ -487,10 +489,6 @@ func (h *daemonHandler) Run(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ChannelID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channel_id is required"})
-		return
-	}
-	if req.ModelConfig.Model == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model_config.model is required"})
 		return
 	}
 	if req.ModelConfig.MaxTokens <= 0 {
@@ -743,10 +741,16 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	// Fetch channel name for context
 	channelName, _ := h.fetchChannelName(ctx, req.ChannelID)
 
-	// Determine trigger type
+	// Determine trigger type.
 	triggerType := agent.TriggerChat
 	if req.ThreadID != "" {
 		triggerType = agent.TriggerThread
+	}
+	for _, name := range req.MentionedNames {
+		if strings.EqualFold(name, agentInfo.Name) {
+			triggerType = agent.TriggerMention
+			break
+		}
 	}
 
 	// Build channel context
@@ -764,7 +768,10 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	if err != nil {
 		slog.Warn("task: failed to generate agent token — agent cannot call APIs", "agent_id", req.AgentID, "error", err)
 	}
-	agentEnv := make(map[string]string)
+	agentEnv := map[string]string{
+		"SOLO_AGENT_ID":   req.AgentID,
+		"SOLO_AGENT_NAME": agentInfo.Name,
+	}
 	if agentToken != "" {
 		agentEnv["SOLO_AUTH_TOKEN"] = agentToken
 	}
@@ -779,6 +786,11 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		AgentID:       req.AgentID,
 		Name:          agentInfo.Name,
 		SystemPrompt:  req.SystemPrompt,
+		Model:         req.ModelConfig.Model,
+		Provider:      req.ModelConfig.Provider,
+		MaxTokens:     req.ModelConfig.MaxTokens,
+		Temperature:   req.ModelConfig.Temperature,
+		CustomArgs:    agentInfo.CustomArgs,
 		Env:           agentEnv,
 		WorkspacePath: ws.WorkDir,
 		ServerID:      h.serverURL,
@@ -866,7 +878,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		} else {
 			_, _ = h.refreshToken(ctx, req.AgentID)
 			slog.Info("task: creating persistent session", "agent_id", req.AgentID)
-			ps, psErr := h.getSessionManager(req.ModelConfig.Provider).GetOrCreateSession(ctx, req.AgentID, agentCfg, channelCtx, msgs)
+			ps, psErr := h.getSessionManager(req.ModelConfig.Provider).GetOrCreateSession(ctx, req.AgentID, agentCfg, channelCtx, msgs, req.MentionedNames)
 			if psErr == nil {
 				session = &agent.Session{Messages: ps.Messages, Result: ps.Result, Stop: ps.Stop}
 			} else {
@@ -898,9 +910,14 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		switch chunk.Type {
 		case string(agent.MessageText):
 			// v1.3: Slock-aligned — text output is internal thinking.
-			// Do NOT stream to frontend. Only solo message send (proxy→API)
+			// Forward as SSE for agent view. Chat messages via solo message send (proxy→API)
 			// delivers visible messages via message.new WebSocket events.
 			fullContent += chunk.Content
+			h.pushEventJSON(req.TaskID, "text", map[string]interface{}{
+				"agent_id":   req.AgentID,
+				"agent_name": agentInfo.Name,
+				"content":    chunk.Content,
+			})
 
 		case string(agent.MessageThinking):
 			h.pushEventJSON(req.TaskID, "thinking", map[string]interface{}{
@@ -919,14 +936,37 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 			return
 
 		case string(agent.MessageToolUse):
-			if chunk.Tool != nil && chunk.Tool.Name == "Bash" {
-				if input, ok := chunk.Tool.Input["command"].(string); ok {
-					if strings.Contains(input, "solo message send") {
-						messageSentViaCLI = true
+			if chunk.Tool != nil {
+				// Detect solo message send for Slock-aligned routing
+				if chunk.Tool.Name == "Bash" {
+					if input, ok := chunk.Tool.Input["command"].(string); ok {
+						if strings.Contains(input, "solo message send") {
+							messageSentViaCLI = true
+						}
 					}
 				}
+				// Forward tool_use as SSE for agent view
+				inputJSON, _ := json.Marshal(chunk.Tool.Input)
+				h.pushEventJSON(req.TaskID, "tool_use", map[string]interface{}{
+					"agent_id":   req.AgentID,
+					"agent_name": agentInfo.Name,
+					"tool_name":  chunk.Tool.Name,
+					"tool_input": string(inputJSON),
+					"call_id":    chunk.Tool.CallID,
+				})
 			}
-		case string(agent.MessageToolResult), string(agent.MessageStatus):
+
+		case string(agent.MessageToolResult):
+			if chunk.Tool != nil {
+				h.pushEventJSON(req.TaskID, "tool_result", map[string]interface{}{
+					"agent_id":   req.AgentID,
+					"agent_name": agentInfo.Name,
+					"tool_name":  chunk.Tool.Name,
+					"output":     chunk.Tool.Output,
+					"call_id":    chunk.Tool.CallID,
+					"is_error":   chunk.Tool.IsError,
+				})
+			}
 		}
 	}
 

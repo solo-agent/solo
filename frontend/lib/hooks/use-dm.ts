@@ -27,6 +27,7 @@ interface DMChannelResponse {
   other_member_type: string;
   other_member_id: string;
   other_member_name: string;
+  other_member_active?: boolean;
   last_message?: string;
   last_message_at?: string;
   created_at: string;
@@ -38,6 +39,7 @@ interface DMMessageResponse {
   sender_type: string;
   sender_id: string;
   sender_name: string;
+  sender_active?: boolean;
   content: string;
   content_type: string;
   created_at: string;
@@ -46,6 +48,7 @@ interface DMMessageResponse {
   task_title?: string;
   task_status?: string;
   task_claimer_name?: string;
+  reply_count?: number;
   /** SOLO-249-F: attachments on the message */
   attachments?: Attachment[];
 }
@@ -73,6 +76,7 @@ function mapDMChannel(resp: DMChannelResponse): DMChannel {
     channel.other_agent = {
       id: resp.other_member_id,
       name: resp.other_member_name,
+      is_active: resp.other_member_active,
     };
   }
   return channel;
@@ -88,10 +92,12 @@ function mapDMMessageResponse(resp: DMMessageResponse): Message {
     created_at: resp.created_at,
     status: 'sent',
     sender_type: resp.sender_type as 'user' | 'agent' | 'system' | undefined,
+    sender_active: resp.sender_active,
     task_number: resp.task_number,
     task_title: resp.task_title,
     task_status: resp.task_status,
     task_claimer_name: resp.task_claimer_name,
+    reply_count: resp.reply_count ?? 0,
     attachments: resp.attachments,
   };
 }
@@ -263,6 +269,18 @@ export function useDM() {
         const exists = prev.find((c) => c.id === channel.id);
         return exists ? prev : [...prev, channel];
       });
+      // Remove from closed DMs so it reappears in the sidebar
+      try {
+        const key = 'solo-closed-dm-ids';
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          const ids = new Set<string>(JSON.parse(stored));
+          if (ids.delete(channel.id)) {
+            localStorage.setItem(key, JSON.stringify([...ids]));
+            window.dispatchEvent(new CustomEvent('dm-closed-changed'));
+          }
+        }
+      } catch { /* ignore */ }
       return channel;
     },
     [],
@@ -340,6 +358,7 @@ export function useDM() {
       // ---- dm.message.new (DM-specific event, redundant with message.new but handled for safety) ----
       if (event.type === 'dm.message.new') {
         if (event.dm_id !== did) return;
+        if (event.thread_id) return; // thread replies handled by thread hook
 
         setMessages((prev) => {
           const existing = prev.find((m) => m.id === event.id);
@@ -403,6 +422,7 @@ export function useDM() {
                     task_title: event.task_title ?? m.task_title,
                     task_status: event.task_status ?? m.task_status,
                     task_claimer_name: event.task_claimer_name ?? m.task_claimer_name,
+                    reply_count: event.reply_count ?? m.reply_count,
                   }
                 : m,
             ),
@@ -610,12 +630,14 @@ export function useDM() {
         setMessages((prev) => {
           if (isTaskResponse) {
             const taskResp = confirmed as unknown as Record<string, unknown>;
+            const creatorName = (taskResp.creator_name as string) || undefined;
             return prev.map((m) => {
               if (m.id === tempId) {
                 return {
                   ...m,
                   id: realMessageId,
                   status: 'sent' as const,
+                  ...(creatorName && { display_name: creatorName }),
                   task_number: taskResp.task_number as number | undefined,
                   task_status: taskResp.status as string | undefined,
                   task_claimer_name: taskResp.claimer_name as string | undefined,

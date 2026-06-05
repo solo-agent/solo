@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+// failedStartRetryInterval is how long to wait before retrying after a process
+// exits immediately (indicating a CLI misconfiguration, not a transient failure).
+const failedStartRetryInterval = 30 * time.Second
+
 // AgentSessionManager manages a pool of agent sessions aligned with Slock:
 // processes stay alive indefinitely (no idle timeout), crash recovery is
 // automatic via --resume, and concurrent starts are rate-limited.
@@ -32,6 +36,11 @@ type AgentSessionManager struct {
 	// startSlots limits concurrent agent process starts to prevent CPU
 	// spikes when multiple agents are triggered at once (Slock-aligned).
 	startSlots chan struct{}
+
+	// failedStarts tracks timestamps of recent failed session creations
+	// to prevent retry storms when the CLI is misconfigured or missing.
+	failedStarts   map[string]time.Time
+	failedStartsMu sync.Mutex
 }
 
 // agentSessionEntry wraps a session with lifetime metadata.
@@ -61,12 +70,13 @@ func NewAgentSessionManager(backend PersistentBackend, workspaceMgr *WorkspaceMa
 		activeTurns:     make(map[string]chan struct{}),
 		pendingMessages: make(map[string][]Message),
 		startSlots:      slots,
+		failedStarts:    make(map[string]time.Time),
 	}
 }
 
 // GetOrCreateSession returns an existing session or creates one.
 // Asleep sessions are automatically woken via --resume.
-func (m *AgentSessionManager) GetOrCreateSession(ctx context.Context, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, initialMessages []Message) (*PersistentSession, error) {
+func (m *AgentSessionManager) GetOrCreateSession(ctx context.Context, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, initialMessages []Message, mentionedNames []string) (*PersistentSession, error) {
 	m.mu.RLock()
 	entry, exists := m.sessions[agentID]
 	m.mu.RUnlock()
@@ -75,10 +85,16 @@ func (m *AgentSessionManager) GetOrCreateSession(ctx context.Context, agentID st
 		if m.isSessionAlive(entry) {
 			return m.deliverToSession(ctx, agentID, entry, initialMessages)
 		}
-	return m.createSession(ctx, agentID, agentCfg, channelCtx, initialMessages, entry.sessionID)
+		return m.createSession(ctx, agentID, agentCfg, channelCtx, initialMessages, entry.sessionID, mentionedNames)
 	}
 
-	return m.createSession(ctx, agentID, agentCfg, channelCtx, initialMessages, "")
+	// Check retry cooldown for agents with recent failed starts.
+	if m.inFailedCooldown(agentID) {
+		m.logger.Warn("session: skipping start, in cooldown after recent failure", "agent_id", agentID)
+		return nil, fmt.Errorf("session start cooldown for agent %s", agentID)
+	}
+
+	return m.createSession(ctx, agentID, agentCfg, channelCtx, initialMessages, "", mentionedNames)
 }
 
 // DeliverMessage sends a message to an active session.
@@ -228,7 +244,7 @@ func (m *AgentSessionManager) deliverToSession(ctx context.Context, agentID stri
 }
 
 
-func (m *AgentSessionManager) createSession(ctx context.Context, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, messages []Message, prevSessionID string) (*PersistentSession, error) {
+func (m *AgentSessionManager) createSession(ctx context.Context, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, messages []Message, prevSessionID string, mentionedNames []string) (*PersistentSession, error) {
 	release := m.acquireTurn(agentID)
 	defer release()
 
@@ -251,7 +267,7 @@ func (m *AgentSessionManager) createSession(ctx context.Context, agentID string,
 		memoryContent, _ = m.memoryMgr.Load(agentID)
 	}
 
-	systemPrompt := BuildSystemPrompt(agentCfg, channelCtx, memoryContent, nil)
+	systemPrompt := BuildSystemPrompt(agentCfg, channelCtx, memoryContent, mentionedNames)
 
 	executeReq := &ExecuteRequest{
 		AgentID:  agentID,
@@ -260,10 +276,15 @@ func (m *AgentSessionManager) createSession(ctx context.Context, agentID string,
 	executeOpts := &ExecuteOptions{
 		SystemPrompt: systemPrompt,
 		WorkspaceDir: ws.WorkDir,
+		Model:        agentCfg.Model,
+		MaxTokens:    agentCfg.MaxTokens,
+		Temperature:  agentCfg.Temperature,
 		Env:          agentCfg.Env,
+		CustomArgs:   agentCfg.CustomArgs,
 	}
 	if prevSessionID != "" {
-		executeOpts.CustomArgs = []string{"--resume", prevSessionID}
+		executeOpts.CustomArgs = append(executeOpts.CustomArgs, "--resume", prevSessionID)
+		executeOpts.ResumeSessionID = prevSessionID
 	}
 
 	// v1.3: Rate-limit concurrent starts to prevent CPU spikes when
@@ -300,8 +321,33 @@ func (m *AgentSessionManager) createSession(ctx context.Context, agentID string,
 
 	go m.watchCrash(agentID, agentCfg, channelCtx, entry)
 
+	// If the process died immediately (CLI broken/missing), record failure
+	// to prevent retry storms on the next trigger.
+	if !m.isSessionAlive(entry) {
+		m.failedStartsMu.Lock()
+		m.failedStarts[agentID] = time.Now()
+		m.failedStartsMu.Unlock()
+		m.logger.Warn("session: created but process died immediately, cooling down", "agent_id", agentID)
+	}
+
 	m.logger.Info("session: created", "agent_id", agentID)
 	return ps, nil
+}
+
+// inFailedCooldown returns true if this agent had a failed start recently
+// and should not be retried yet.
+func (m *AgentSessionManager) inFailedCooldown(agentID string) bool {
+	m.failedStartsMu.Lock()
+	defer m.failedStartsMu.Unlock()
+	t, ok := m.failedStarts[agentID]
+	if !ok {
+		return false
+	}
+	if time.Since(t) > failedStartRetryInterval {
+		delete(m.failedStarts, agentID)
+		return false
+	}
+	return true
 }
 
 // watchCrash monitors a session. On unexpected exit (crash, not sleep),
@@ -340,7 +386,7 @@ func (m *AgentSessionManager) watchCrash(agentID string, agentCfg AgentConfig, c
 		Content: "Your session has been restored after a restart. Context is preserved via --resume. Continue from where you left off.",
 	}
 
-	_, err := m.createSession(context.Background(), agentID, agentCfg, channelCtx, []Message{restartMsg}, resumeID)
+	_, err := m.createSession(context.Background(), agentID, agentCfg, channelCtx, []Message{restartMsg}, resumeID, nil)
 	if err != nil {
 		m.logger.Error("session: crash recovery failed", "agent_id", agentID, "error", err)
 	}

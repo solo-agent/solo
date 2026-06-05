@@ -49,6 +49,8 @@ export interface Message {
   has_unread_thread?: boolean;
   /** 附件列表 (SOLO-249-F) */
   attachments?: Attachment[];
+  /** 发送者是否活跃（agent 被删除后为 false） */
+  sender_active?: boolean;
 }
 
 export interface CreateChannelInput {
@@ -86,7 +88,7 @@ export interface CreateAgentInput {
   name: string;
   description?: string;
   model_provider: AgentModelProvider;
-  model_name: string;
+  model_name?: string;
   system_prompt?: string;
   temperature?: number;
   max_tokens?: number;
@@ -115,39 +117,6 @@ export const AVAILABLE_TOOLS: AgentToolDef[] = [
   { id: 'list_files', name: 'List Files', description: '列出目录中的文件' },
   { id: 'search_files', name: 'Search Files', description: '搜索文件内容' },
 ];
-
-/** @deprecated v1.4 — use AgentBackendMeta.models from /api/v1/agent-backends instead. Kept for backward compatibility. */
-export const MODEL_OPTIONS: Record<string, { label: string; models: { value: string; label: string }[] }> = {
-  anthropic: {
-    label: 'Anthropic',
-    models: [
-      { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
-      { value: 'claude-haiku-3-5-20241022', label: 'Claude Haiku 3.5' },
-    ],
-  },
-  openai: {
-    label: 'OpenAI',
-    models: [
-      { value: 'gpt-4o', label: 'GPT-4o' },
-      { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-    ],
-  },
-  ollama: {
-    label: 'Ollama',
-    models: [
-      { value: 'llama3', label: 'Llama 3' },
-      { value: 'mistral', label: 'Mistral' },
-    ],
-  },
-  local: {
-    label: '本地 CLI',
-    models: [
-      { value: 'claude', label: 'Claude Code CLI (默认)' },
-      { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
-      { value: 'claude-opus-4-20250514', label: 'Claude Opus 4' },
-    ],
-  },
-};
 
 // ---- Channel Member types ----
 
@@ -253,6 +222,7 @@ export interface DMChannel {
     id: string;
     name: string;
     avatar_url?: string;
+    is_active?: boolean;
   };
   last_message?: {
     content: string;
@@ -325,8 +295,6 @@ export interface AgentBackendMeta {
   display_name: string;
   requires_binary: string;
   protocols: string[];
-  default_model: string;
-  models: { id: string; label: string; default: boolean }[];
 }
 
 /** CLI detection item from GET /api/v1/agent-backends/detect */
