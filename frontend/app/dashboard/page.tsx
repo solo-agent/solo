@@ -110,28 +110,12 @@ function DashboardContent() {
     tasks: dmTasks,
     isLoading: dmTasksLoading,
     error: dmTasksError,
-    createTask: dmCreateTask,
     updateTask: dmUpdateTask,
     claimTask: dmClaimTask,
     unclaimTask: dmUnclaimTask,
     convertMessageToTask: dmConvertMessageToTask,
     refetch: dmRefetchTasks,
   } = useDMTasks(selectedDmId);
-
-  // ---- DM Task handlers ----
-  const handleDMCreateTask = useCallback(
-    async (title: string) => {
-      if (!selectedDmId) return;
-      try {
-        const task = await dmCreateTask({ dm_id: selectedDmId, title, channel_id: '' });
-        showToast(`已创建任务 #${task.task_number ?? '?'}`, 'success');
-        dmRefetchTasks();
-      } catch {
-        showToast('创建任务失败，请稍后再试', 'error');
-      }
-    },
-    [selectedDmId, dmCreateTask, showToast, dmRefetchTasks],
-  );
 
   const handleDMTaskClaim = useCallback(
     async (task: Task) => {
@@ -362,7 +346,6 @@ function DashboardContent() {
           onTaskStatusChange={handleDMTaskStatusChange}
           onClaimTask={handleDMTaskClaim}
           onUnclaimTask={handleDMTaskUnclaim}
-          onCreateTask={handleDMCreateTask}
           onConvertToTask={handleDMConvertToTask}
           onTaskCreated={dmRefetchTasks}
           onThreadChange={handleDMThreadChange}

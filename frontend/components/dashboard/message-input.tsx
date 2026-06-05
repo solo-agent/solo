@@ -106,9 +106,7 @@ export function MessageInput({
   const [isSending, setIsSending] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
   const [asTask, setAsTask] = useState(false);
-  const [taskTitle, setTaskTitle] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const titleInputRef = useRef<HTMLInputElement>(null);
   const isSendingRef = useRef(false);
 
   // ---- Upload state ----
@@ -353,11 +351,10 @@ export function MessageInput({
         trimmed,
         mentionedAgentIds,
         asTask,
-        taskTitle.trim() || undefined,
+        undefined,
         attachmentIds,
       );
       setContent('');
-      setTaskTitle('');
       setAsTask(false);
       setUploads([]);
       resetMention();
@@ -369,7 +366,7 @@ export function MessageInput({
       setIsSending(false);
       textareaRef.current?.focus();
     }
-  }, [canSend, trimmed, onSend, mentionedAgentIds, asTask, taskTitle, doneUploads, resetMention]);
+  }, [canSend, trimmed, onSend, mentionedAgentIds, asTask, doneUploads, resetMention]);
 
   // ---- Keyboard handling ----
 
@@ -588,15 +585,7 @@ export function MessageInput({
           <div className="mb-2 flex items-center">
             <button
               type="button"
-              onClick={() => {
-                const next = !asTask;
-                setAsTask(next);
-                if (next) {
-                  setTimeout(() => titleInputRef.current?.focus(), 0);
-                } else {
-                  setTaskTitle('');
-                }
-              }}
+              onClick={() => setAsTask((prev) => !prev)}
               className={cn(
                 'flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] font-bold transition-all',
                 'border-2 border-black shadow-brutal-sm',
@@ -610,31 +599,6 @@ export function MessageInput({
               <ClipboardList className="h-3.5 w-3.5" />
               {asTask ? '取消任务' : '创建为任务'}
             </button>
-          </div>
-        )}
-
-        {/* Title input — visible only in asTask mode */}
-        {showAsTaskToggle && asTask && (
-          <div className="mb-2">
-            <input
-              ref={titleInputRef}
-              type="text"
-              value={taskTitle}
-              onChange={(e) => setTaskTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  textareaRef.current?.focus();
-                }
-              }}
-              placeholder="任务标题（可选，留空则使用消息前100字符）"
-              disabled={isSending}
-              className={cn(
-                'input-brutal w-full font-mono text-sm',
-                asTask && 'border-brutal-pink',
-              )}
-              aria-label="任务标题"
-            />
           </div>
         )}
 

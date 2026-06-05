@@ -5,7 +5,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
-import { Hash, Users, Loader2, ClipboardList, MessageSquare, Plus, Eye } from 'lucide-react';
+import { Hash, Users, Loader2, ClipboardList, MessageSquare, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
 import { useChannelMembers } from '@/lib/hooks/use-channel-members';
@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast';
 import type { AgentActivity } from './typing-indicator';
-import type { Channel, CreateTaskInput, Message, Task, TaskStatus } from '@/lib/types';
+import type { Channel, Message, Task, TaskStatus } from '@/lib/types';
 
 // SOLO-63-F: Lazy-load ThreadPanel (only rendered when a thread is open)
 const ThreadPanel = lazy(() =>
@@ -35,65 +35,6 @@ const ThreadPanel = lazy(() =>
 );
 
 import { AgentViewPanel } from './agent-view-panel';
-
-// ---- Inline quick-create task form ----
-
-function CreateTaskInline({
-  channelId,
-  isSubmitting,
-  onSubmit,
-}: {
-  channelId: string;
-  isSubmitting: boolean;
-  onSubmit: (input: CreateTaskInput) => Promise<void>;
-}) {
-  const [title, setTitle] = useState('');
-
-  const handleSubmit = async () => {
-    if (!title.trim() || isSubmitting) return;
-    await onSubmit({
-      channel_id: channelId,
-      title: title.trim(),
-    });
-    setTitle('');
-  };
-
-  return (
-    <div className="space-y-3">
-      <label
-        htmlFor="quick-create-title"
-        className="block font-heading text-sm font-bold text-foreground"
-      >
-        任务标题
-      </label>
-      <input
-        id="quick-create-title"
-        type="text"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            handleSubmit();
-          }
-        }}
-        placeholder="输入任务标题..."
-        disabled={isSubmitting}
-        className="input-brutal w-full"
-      />
-      <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={isSubmitting || !title.trim()}
-          className="btn-brutal btn-brutal-sm btn-brutal-pink"
-        >
-          {isSubmitting ? '创建中...' : '创建任务'}
-        </button>
-      </div>
-    </div>
-  );
-}
 
 interface ChannelViewProps {
   channel: Channel;
@@ -146,13 +87,6 @@ export function ChannelView({ channel, initialThreadMessageId, onThreadChange }:
 
   // ---- Tasks tab state (SOLO-128-F) ----
   const [channelViewTab, setChannelViewTab] = useState<'messages' | 'tasks'>('messages');
-  const [isQuickCreateTaskOpen, setIsQuickCreateTaskOpen] = useState(false);
-  const [isCreatingTask, setIsCreatingTask] = useState(false);
-
-  // ---- AsTask dialog state ----
-  const [asTaskTarget, setAsTaskTarget] = useState<Message | null>(null);
-  const [asTaskTitle, setAsTaskTitle] = useState('');
-  const [isConvertingTask, setIsConvertingTask] = useState(false);
 
   // ---- Channel search state (SOLO-237-F) ----
   const [scrollToMessageId, setScrollToMessageId] = useState<string | undefined>(undefined);
@@ -167,7 +101,6 @@ export function ChannelView({ channel, initialThreadMessageId, onThreadChange }:
     tasks: channelTasks,
     isLoading: tasksLoading,
     error: tasksError,
-    createTask,
     updateTask,
     claimTask,
     unclaimTask,
@@ -328,13 +261,14 @@ export function ChannelView({ channel, initialThreadMessageId, onThreadChange }:
     onThreadChange?.(null);
   }, [onThreadChange]);
 
-  // v1.5: Wrap onReply to also sync thread state to URL
+  // v1.5: Wrap onReply to also sync thread state to URL + pull latest task data
   const handleReply = useCallback(
     (message: Message) => {
+      refetchTasks();
       setThreadMessage(message);
       onThreadChange?.(message.id);
     },
-    [onThreadChange],
+    [refetchTasks, onThreadChange],
   );
 
   // P25-08-F: Called by ThreadPanel after successfully marking thread as read
@@ -347,24 +281,6 @@ export function ChannelView({ channel, initialThreadMessageId, onThreadChange }:
   const existingAgentIds = agents.map((a) => a.member_id);
 
   // ---- Task quick-create handler (SOLO-128-F) ----
-
-  const handleQuickCreateTask = async (input: CreateTaskInput) => {
-    setIsCreatingTask(true);
-    try {
-      await createTask({
-        channel_id: channel.id,
-        title: input.title,
-        description: input.description,
-        priority: input.priority,
-        assignee_id: input.assignee_id,
-        assignee_type: input.assignee_type,
-        due_date: input.due_date,
-      });
-      setIsQuickCreateTaskOpen(false);
-    } finally {
-      setIsCreatingTask(false);
-    }
-  };
 
   // ---- Claim / Unclaim handlers ----
 
@@ -388,31 +304,23 @@ export function ChannelView({ channel, initialThreadMessageId, onThreadChange }:
     }
   };
 
-  // ---- AsTask handler ----
-
-  const handleAsTaskOpen = (message: Message) => {
-    setAsTaskTarget(message);
-    setAsTaskTitle(message.content.slice(0, 200));
-  };
-
-  const handleAsTaskConfirm = async () => {
-    if (!asTaskTarget || !asTaskTitle.trim()) return;
-    setIsConvertingTask(true);
-    try {
-      const task = await convertMessageToTask(
-        asTaskTarget.channel_id,
-        asTaskTarget.id,
-        asTaskTitle.trim(),
-      );
-      showToast(`已转为任务 #${task.task_number ?? '?'}`, 'success');
-      setAsTaskTarget(null);
-      setAsTaskTitle('');
-    } catch {
-      showToast('转换任务失败，请稍后再试', 'error');
-    } finally {
-      setIsConvertingTask(false);
-    }
-  };
+  // ---- AsTask handler: convert directly, no dialog ----
+  const handleAsTaskOpen = useCallback(
+    async (message: Message) => {
+      const title = message.content.slice(0, 200);
+      try {
+        const task = await convertMessageToTask(
+          message.channel_id,
+          message.id,
+          title,
+        );
+        showToast(`已转为任务 #${task.task_number ?? '?'}`, 'success');
+      } catch {
+        showToast('转换任务失败，请稍后再试', 'error');
+      }
+    },
+    [convertMessageToTask, showToast],
+  );
 
   const handleStatusChange = async (task: Task, newStatus: TaskStatus) => {
     try {
@@ -568,19 +476,9 @@ export function ChannelView({ channel, initialThreadMessageId, onThreadChange }:
         {channelViewTab === 'tasks' && (
           <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream">
             <div className="flex-1 overflow-y-auto px-4 py-4">
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="font-heading text-sm font-bold text-foreground">
+              <h3 className="mb-4 font-heading text-sm font-bold text-foreground">
                   #{channel.name} 的任务
                 </h3>
-                <button
-                  type="button"
-                  onClick={() => setIsQuickCreateTaskOpen(true)}
-                  className="btn-brutal btn-brutal-sm"
-                >
-                  <Plus className="mr-1 h-3.5 w-3.5" />
-                  快速创建
-                </button>
-              </div>
               <TaskBoard
                 tasks={channelTasks}
                 isLoading={tasksLoading}
@@ -607,7 +505,7 @@ export function ChannelView({ channel, initialThreadMessageId, onThreadChange }:
 
       {/* Thread panel (lazy-loaded, SOLO-63-F) — always mounted for smooth width transition */}
       <div
-        className="flex-shrink-0 bg-brutal-cream overflow-hidden relative transition-all duration-300 ease-out border-l-2 border-transparent"
+        className="flex-shrink-0 bg-brutal-cream overflow-hidden relative transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] border-l-2 border-transparent"
         style={{ width: threadMessage ? threadPanelWidth : 0, borderLeftColor: threadMessage ? 'var(--color-border, #000)' : 'transparent' }}
       >
         {/* Resize handle — only interactive when panel is open */}
@@ -661,79 +559,6 @@ export function ChannelView({ channel, initialThreadMessageId, onThreadChange }:
         onAdd={addAgentToChannel}
       />
 
-      {/* Quick-create task dialog (SOLO-128-F) */}
-      <Dialog
-        open={isQuickCreateTaskOpen}
-        onOpenChange={setIsQuickCreateTaskOpen}
-      >
-        <DialogHeader>
-          <DialogTitle>快速创建任务</DialogTitle>
-          <DialogCloseButton onClick={() => setIsQuickCreateTaskOpen(false)} />
-        </DialogHeader>
-        <div className="mt-4 px-5 pb-5">
-          <CreateTaskInline
-            channelId={channel.id}
-            isSubmitting={isCreatingTask}
-            onSubmit={handleQuickCreateTask}
-          />
-        </div>
-      </Dialog>
-
-      {/* AsTask confirm dialog */}
-      <Dialog
-        open={!!asTaskTarget}
-        onOpenChange={() => setAsTaskTarget(null)}
-      >
-        <DialogHeader>
-          <DialogTitle>转为任务</DialogTitle>
-          <DialogCloseButton onClick={() => setAsTaskTarget(null)} />
-        </DialogHeader>
-        <div className="mt-4 px-5 pb-5">
-          <label
-            htmlFor="as-task-title"
-            className="mb-2 block font-heading text-sm font-bold text-foreground"
-          >
-            任务标题
-          </label>
-          <input
-            id="as-task-title"
-            type="text"
-            value={asTaskTitle}
-            onChange={(e) => setAsTaskTitle(e.target.value)}
-            placeholder="输入任务标题..."
-            className="input-brutal w-full"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleAsTaskConfirm();
-              }
-            }}
-          />
-          {asTaskTarget && (
-            <p className="mt-2 font-mono text-[11px] text-muted-foreground">
-              来源: {asTaskTarget.display_name} 的消息
-            </p>
-          )}
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setAsTaskTarget(null)}
-              disabled={isConvertingTask}
-              className="btn-brutal btn-brutal-sm"
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              onClick={handleAsTaskConfirm}
-              disabled={isConvertingTask || !asTaskTitle.trim()}
-              className="btn-brutal btn-brutal-sm btn-brutal-pink"
-            >
-              {isConvertingTask ? '创建中...' : '转为任务'}
-            </button>
-          </div>
-        </div>
-      </Dialog>
 
       {/* Member popover */}
       <Dialog open={isMemberPopoverOpen} onOpenChange={setIsMemberPopoverOpen}>

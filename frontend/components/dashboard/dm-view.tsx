@@ -11,20 +11,13 @@
 'use client';
 
 import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
-import { Bot, User, AlertCircle, RefreshCw, MessageSquare, Circle, ClipboardList, Plus } from 'lucide-react';
+import { Bot, User, AlertCircle, RefreshCw, MessageSquare, Circle, ClipboardList } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useStreamingMessages } from '@/lib/hooks/use-streaming-messages';
 import { MessageList } from './message-list';
 import { MessageInput } from './message-input';
 import { TaskBoard } from '@/components/tasks/task-board';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Dialog,
-  DialogHeader,
-  DialogTitle,
-  DialogCloseButton,
-} from '@/components/ui/dialog';
-
 const ThreadPanel = lazy(() =>
   import('./thread-panel').then((m) => ({ default: m.ThreadPanel })),
 );
@@ -54,7 +47,6 @@ interface DMViewProps {
   onTaskStatusChange?: (task: Task, newStatus: TaskStatus) => Promise<Task | void>;
   onClaimTask?: (task: Task) => void;
   onUnclaimTask?: (task: Task) => void;
-  onCreateTask?: (title: string) => Promise<void>;
   onConvertToTask?: (channelId: string, messageId: string, title?: string) => Promise<Task>;
   onTaskCreated?: () => void;
   /** v1.5: Called when thread opens/closes so the parent can sync to URL */
@@ -102,7 +94,6 @@ export function DMView({
   onTaskStatusChange,
   onClaimTask,
   onUnclaimTask,
-  onCreateTask,
   onConvertToTask,
   onTaskCreated,
   onThreadChange,
@@ -112,9 +103,6 @@ export function DMView({
   const isAgent = isAgentDM(dm);
   const deleted = isAgentDeleted(dm);
   const [viewTab, setViewTab] = useState<'messages' | 'tasks'>('messages');
-  const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
-  const [createTaskTitle, setCreateTaskTitle] = useState('');
-  const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [threadMessage, setThreadMessage] = useState<Message | null>(null);
   const [threadTask, setThreadTask] = useState<Task | null>(null);
   const [threadPanelWidth, setThreadPanelWidth] = useState(400);
@@ -429,19 +417,6 @@ export function DMView({
                     与 <strong className="text-foreground">{name}</strong> 的任务
                   </span>
                 </div>
-                {onCreateTask && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCreateTaskTitle('');
-                      setIsCreateTaskOpen(true);
-                    }}
-                    className="btn-brutal btn-brutal-sm flex items-center gap-1"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    快速创建
-                  </button>
-                )}
               </div>
             </div>
             <div className="flex-1 overflow-y-auto px-4 py-4">
@@ -460,77 +435,9 @@ export function DMView({
         )}
       </div>
 
-      {/* Quick-create task dialog (SOLO-231-F) */}
-      <Dialog
-        open={isCreateTaskOpen}
-        onOpenChange={setIsCreateTaskOpen}
-      >
-        <DialogHeader>
-          <DialogTitle>快速创建任务</DialogTitle>
-          <DialogCloseButton onClick={() => setIsCreateTaskOpen(false)} />
-        </DialogHeader>
-        <div className="mt-4 px-5 pb-5">
-          <label
-            htmlFor="dm-create-task-title"
-            className="mb-2 block font-heading text-sm font-bold text-foreground"
-          >
-            任务标题
-          </label>
-          <input
-            id="dm-create-task-title"
-            type="text"
-            value={createTaskTitle}
-            onChange={(e) => setCreateTaskTitle(e.target.value)}
-            onKeyDown={async (e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                if (!createTaskTitle.trim() || isCreatingTask) return;
-                setIsCreatingTask(true);
-                try {
-                  await onCreateTask?.(createTaskTitle.trim());
-                  setIsCreateTaskOpen(false);
-                } finally {
-                  setIsCreatingTask(false);
-                }
-              }
-            }}
-            placeholder={`为与 ${name} 的对话创建任务...`}
-            disabled={isCreatingTask}
-            className="input-brutal w-full"
-          />
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setIsCreateTaskOpen(false)}
-              disabled={isCreatingTask}
-              className="btn-brutal btn-brutal-sm"
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                if (!createTaskTitle.trim() || isCreatingTask) return;
-                setIsCreatingTask(true);
-                try {
-                  await onCreateTask?.(createTaskTitle.trim());
-                  setIsCreateTaskOpen(false);
-                } finally {
-                  setIsCreatingTask(false);
-                }
-              }}
-              disabled={isCreatingTask || !createTaskTitle.trim()}
-              className="btn-brutal btn-brutal-sm btn-brutal-pink"
-            >
-              {isCreatingTask ? '创建中...' : '创建任务'}
-            </button>
-          </div>
-        </div>
-      </Dialog>
-
       {/* ThreadPanel — always mounted for smooth width transition */}
       <div
-        className="flex-shrink-0 bg-brutal-cream overflow-hidden relative transition-all duration-300 ease-out border-l-2 border-transparent"
+        className="flex-shrink-0 bg-brutal-cream overflow-hidden relative transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] border-l-2 border-transparent"
         style={{ width: threadMessage ? threadPanelWidth : 0, borderLeftColor: threadMessage ? '#000' : 'transparent' }}
       >
         {/* Resize handle — only interactive when panel is open */}

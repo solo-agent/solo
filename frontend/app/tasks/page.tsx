@@ -18,8 +18,7 @@ import { useChannels } from '@/lib/hooks/use-channels';
 import { useToast } from '@/components/ui/toast';
 import { AppFrame } from '@/components/layout/app-frame';
 import { TaskBoard } from '@/components/tasks/task-board';
-import { CreateTaskModal } from '@/components/tasks/create-task-modal';
-import type { Task, TaskStatus, CreateTaskInput, Message } from '@/lib/types';
+import type { Task, TaskStatus, Message } from '@/lib/types';
 
 // SOLO-63-F: Lazy-load ThreadPanel
 const ThreadPanel = lazy(() =>
@@ -57,7 +56,6 @@ export default function TasksPage() {
     tasks: allTasks,
     isLoading: tasksLoading,
     error: tasksError,
-    createTask,
     updateTask,
     claimTask,
     unclaimTask,
@@ -136,10 +134,6 @@ export default function TasksPage() {
     setFilterCreator('');
     router.push('/tasks');
   }, [router]);
-
-  // ---- Modal state ----
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
 
   // Thread panel state
   const [threadMessage, setThreadMessage] = useState<Message | null>(null);
@@ -232,22 +226,6 @@ export default function TasksPage() {
     [unclaimTask, showToast],
   );
 
-  // ---- Create task ----
-  const handleCreateTask = useCallback(
-    async (input: CreateTaskInput) => {
-      setIsCreating(true);
-      try {
-        if (!input.channel_id && channels.length > 0) {
-          input.channel_id = channels[0].id;
-        }
-        await createTask(input);
-      } finally {
-        setIsCreating(false);
-      }
-    },
-    [createTask, channels],
-  );
-
   // ---- Auth loading ----
   if (authLoading || !isAuthenticated) {
     return (
@@ -271,23 +249,10 @@ export default function TasksPage() {
         {/* Main content area — unaffected by ThreadPanel */}
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Page header */}
-          <div className="flex h-14 flex-shrink-0 items-center justify-between border-b-2 border-black px-6">
-            <div>
-              <h1 className="font-heading text-lg font-bold text-foreground">
-                任务看板
-              </h1>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setIsCreateModalOpen(true)}
-                className="btn-brutal btn-brutal-sm btn-brutal-pink flex items-center gap-1.5"
-              >
-                <Plus className="h-4 w-4" />
-                创建任务
-              </button>
-            </div>
+          <div className="flex h-14 flex-shrink-0 items-center border-b-2 border-black px-6">
+            <h1 className="font-heading text-lg font-bold text-foreground">
+              任务看板
+            </h1>
           </div>
 
           {/* Filter bar */}
@@ -372,19 +337,12 @@ export default function TasksPage() {
                 </button>
               </div>
             ) : !tasksLoading && !tasksError && tasks.length === 0 && allTasks.length === 0 ? (
-              // No tasks in channel at all
+              // No tasks at all
               <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
                 <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-cream">
                   <Plus className="h-6 w-6 text-muted-foreground" />
                 </div>
-                <p className="font-body text-sm text-muted-foreground">该频道还没有任务</p>
-                <button
-                  type="button"
-                  onClick={() => setIsCreateModalOpen(true)}
-                  className="btn-brutal btn-brutal-sm mt-4"
-                >
-                  创建第一个任务
-                </button>
+                <p className="font-body text-sm text-muted-foreground">还没有任务</p>
               </div>
             ) : (
               <TaskBoard
@@ -404,7 +362,7 @@ export default function TasksPage() {
 
         {/* Thread panel — absolute overlay, doesn't shift main content */}
         <div
-          className="absolute right-0 top-0 bottom-0 z-20 bg-brutal-cream overflow-hidden transition-all duration-300 ease-out border-l-2 border-black shadow-brutal-lg"
+          className="absolute right-0 top-0 bottom-0 z-20 bg-brutal-cream overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] border-l-2 border-black shadow-brutal-lg"
           style={{ width: threadMessage ? 400 : 0, opacity: threadMessage ? 1 : 0 }}
         >
           {threadMessage && (
@@ -427,14 +385,6 @@ export default function TasksPage() {
         </div>
       </div>
 
-      {/* Create task modal */}
-      <CreateTaskModal
-        open={isCreateModalOpen}
-        onOpenChange={setIsCreateModalOpen}
-        channelId={channels.length > 0 ? channels[0].id : undefined}
-        onSubmit={handleCreateTask}
-        isSubmitting={isCreating}
-      />
     </AppFrame>
   );
 }
