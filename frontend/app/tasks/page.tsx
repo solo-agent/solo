@@ -191,14 +191,6 @@ export default function TasksPage() {
     [updateTask, showToast],
   );
 
-  // ---- Illegal transition from DnD ----
-  const handleIllegalTransition = useCallback(
-    (_from: TaskStatus, _to: TaskStatus) => {
-      showToast('不支持此状态转换', 'error');
-    },
-    [showToast],
-  );
-
   // ---- Claim / Unclaim ----
   const handleClaim = useCallback(
     async (task: Task) => {
@@ -352,9 +344,6 @@ export default function TasksPage() {
                 onTaskClick={handleTaskClick}
                 onStatusChange={handleBoardStatusChange}
                 onRefetch={refetchTasks}
-                onClaim={handleClaim}
-                onUnclaim={handleUnclaim}
-                onIllegalTransition={handleIllegalTransition}
               />
             )}
           </div>

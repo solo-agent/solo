@@ -1,20 +1,27 @@
 // ============================================================================
-// TaskColumn — single kanban column for a given status (v1.5: DnD support)
+// TaskColumn — single kanban column for a given status
 // - Column header with status label + task count
 // - Task cards: #number + title + status badge + reply count + last activity + claim/unclaim
 // - Empty state: "暂无任务" hint
 // - Neubrutalist styling: card-brutal, border-2
-// - Droppable area for drag-and-drop + Sortable cards
 // ============================================================================
 
 'use client';
 
-import { useDroppable } from '@dnd-kit/core';
-import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
+import { useState, useRef, useEffect } from 'react';
 import { cn } from '@/lib/utils';
-import { MessageSquare, Clock, ChevronRight } from 'lucide-react';
+import { Clock, ChevronRight, ChevronDown } from 'lucide-react';
 import type { Task, TaskStatus } from '@/lib/types';
+
+// ---- Valid status transitions ----
+
+const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
+  todo: ['in_progress', 'closed'],
+  in_progress: ['in_review', 'closed'],
+  in_review: ['done', 'in_progress', 'closed'],
+  done: ['closed'],
+  closed: ['todo'],
+};
 
 // ---- Status display config ----
 
@@ -82,45 +89,97 @@ function formatRelativeTime(iso?: string): string {
   }
 }
 
-// ---- Sortable mini card for column (v1.5: DnD) ----
+// ---- Status badge with dropdown ----
 
-interface SortableTaskCardProps {
+const STATUS_LABELS: Record<TaskStatus, string> = {
+  todo: 'TODO',
+  in_progress: 'IN PROGRESS',
+  in_review: 'IN REVIEW',
+  done: 'DONE',
+  closed: 'CLOSED',
+};
+
+function StatusBadge({
+  status,
+  onChange,
+}: {
+  status: TaskStatus;
+  onChange: (newStatus: TaskStatus) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  const transitions = VALID_TRANSITIONS[status] ?? [];
+  const config = STATUS_COLUMN_CONFIG[status];
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  return (
+    <span ref={ref} className="relative inline-flex">
+      <span
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className={cn(
+          'badge-brutal cursor-pointer hover:opacity-80 transition-opacity inline-flex items-center gap-0.5',
+          config.bgClass,
+          config.textClass,
+        )}
+        aria-label={`状态: ${config.label}`}
+        tabIndex={0}
+      >
+        {config.label}
+        <ChevronDown className="h-3 w-3" />
+      </span>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-30 min-w-[140px] border-2 border-black bg-white shadow-brutal py-1">
+          {transitions.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange(s);
+                setOpen(false);
+              }}
+              className="block w-full text-left px-3 py-1.5 font-heading text-xs font-bold hover:bg-brutal-cream transition-colors"
+            >
+              {STATUS_LABELS[s]}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
+// ---- Task card ----
+
+interface TaskCardProps {
   task: Task;
   onClick: (task: Task) => void;
-  onStatusClick: (task: Task) => void;
-  onClaim?: (task: Task) => void;
-  onUnclaim?: (task: Task) => void;
+  onStatusChange: (task: Task, newStatus: TaskStatus) => void;
   parentTaskNumber?: number;
   onParentClick?: (taskId: string) => void;
 }
 
-function SortableTaskCard({
+function TaskCard({
   task,
   onClick,
-  onStatusClick,
-  onClaim,
-  onUnclaim,
+  onStatusChange,
   parentTaskNumber,
   onParentClick,
-}: SortableTaskCardProps) {
-  const {
-    setNodeRef,
-    attributes,
-    listeners,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({
-    id: task.id,
-    data: { status: task.status },
-  });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.4 : 1,
-  };
-
+}: TaskCardProps) {
   const statusConf = STATUS_COLUMN_CONFIG[task.status];
   const taskNum = task.task_number ? `#${task.task_number}` : null;
   const isClaimed = !!task.claimer_id;
@@ -133,15 +192,10 @@ function SortableTaskCard({
     task.assignee_name ||
     (task.claimer_id ? task.claimer_id.slice(0, 8) : null);
 
-  const replyCount = task.reply_count ?? 0;
   const lastActivity = task.updated_at || task.created_at;
 
   return (
     <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      {...listeners}
       role="button"
       tabIndex={0}
       onClick={() => onClick(task)}
@@ -152,10 +206,9 @@ function SortableTaskCard({
         }
       }}
       className={cn(
-        'card-brutal w-full cursor-pointer text-left touch-none',
-        'hover:-translate-y-[1px] hover:shadow-brutal-lg',
+        'card-brutal w-full cursor-pointer text-left',
+        'hover:shadow-brutal-lg',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-pink focus-visible:ring-offset-2',
-        isDragging && 'opacity-40',
       )}
     >
       <div className="p-3">
@@ -202,32 +255,11 @@ function SortableTaskCard({
           </div>
         )}
 
-        {/* Status badge — clickable for non-terminal only */}
-        <span
-          onClick={(e) => {
-            if (isTerminal) return;
-            e.stopPropagation();
-            onStatusClick(task);
-          }}
-          onKeyDown={(e) => {
-            if (isTerminal) return;
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              e.stopPropagation();
-              onStatusClick(task);
-            }
-          }}
-          className={cn(
-            'badge-brutal',
-            isTerminal ? '' : 'cursor-pointer hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-pink',
-            statusConf.bgClass,
-            statusConf.textClass,
-          )}
-          aria-label={`状态: ${statusConf?.label || task.status}`}
-          tabIndex={isTerminal ? undefined : 0}
-        >
-          {statusConf.label}
-        </span>
+        {/* Status badge — with dropdown for non-terminal */}
+        <StatusBadge
+          status={task.status}
+          onChange={(newStatus) => onStatusChange(task, newStatus)}
+        />
 
         {/* Terminal state marker */}
         {isTerminal ? (
@@ -237,7 +269,7 @@ function SortableTaskCard({
             </span>
           </div>
         ) : (
-          /* Claimer info + claim/unclaim buttons */
+          /* Claimer info — display only, no claim/unclaim buttons */
           <div className="mt-2 flex items-center gap-2">
             {isClaimed ? (
               <>
@@ -250,48 +282,11 @@ function SortableTaskCard({
                 <span className="flex-shrink-0 badge-brutal bg-brutal-lime text-black text-[10px]">
                   已认领
                 </span>
-                {onUnclaim && (
-                  <span
-                    tabIndex={0}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onUnclaim(task);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onUnclaim(task);
-                      }
-                    }}
-                    className="btn-brutal btn-brutal-sm flex-shrink-0 text-[11px] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-pink"
-                    aria-label="释放任务"
-                  >
-                    释放
-                  </span>
-                )}
               </>
             ) : (
-              onClaim && (
-                <span
-                  tabIndex={0}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onClaim(task);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onClaim(task);
-                    }
-                  }}
-                  className="btn-brutal btn-brutal-sm flex-shrink-0 text-[11px] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-pink"
-                  aria-label="认领任务"
-                >
-                  认领
-                </span>
-              )
+              <span className="font-body text-[11px] text-muted-foreground">
+                待认领
+              </span>
             )}
           </div>
         )}
@@ -312,16 +307,10 @@ function SortableTaskCard({
           </div>
         )}
 
-        {/* Footer: reply count + last activity */}
-        <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <MessageSquare className="h-3 w-3" />
-            {replyCount > 0 ? `${replyCount}` : '0'}
-          </span>
-          <span className="flex items-center gap-1">
-            <Clock className="h-3 w-3" />
-            {formatRelativeTime(lastActivity)}
-          </span>
+        {/* Footer: last activity */}
+        <div className="mt-2 flex items-center text-[11px] text-muted-foreground">
+          <Clock className="mr-1 h-3 w-3" />
+          {formatRelativeTime(lastActivity)}
         </div>
       </div>
     </div>
@@ -356,12 +345,9 @@ function ColumnSkeleton({ status }: { status: TaskStatus }) {
 interface TaskColumnProps {
   status: TaskStatus;
   tasks: Task[];
-  taskIds: string[];
   isLoading: boolean;
   onTaskClick: (task: Task) => void;
-  onStatusClick: (task: Task) => void;
-  onClaim?: (task: Task) => void;
-  onUnclaim?: (task: Task) => void;
+  onStatusChange: (task: Task, newStatus: TaskStatus) => void;
   parentTaskMap?: Map<string, number>;
   onParentClick?: (taskId: string) => void;
 }
@@ -371,23 +357,14 @@ interface TaskColumnProps {
 export function TaskColumn({
   status,
   tasks,
-  taskIds,
   isLoading,
   onTaskClick,
-  onStatusClick,
-  onClaim,
-  onUnclaim,
+  onStatusChange,
   parentTaskMap,
   onParentClick,
 }: TaskColumnProps) {
   const label = COLUMN_HEADERS[status];
   const count = tasks.length;
-
-  // Make the column body a drop target
-  const { setNodeRef: setDropRef, isOver } = useDroppable({
-    id: status,
-    data: { status },
-  });
 
   if (isLoading) {
     return <ColumnSkeleton status={status} />;
@@ -411,28 +388,18 @@ export function TaskColumn({
         </span>
       </div>
 
-      {/* Card list — droppable area */}
-      <div
-        ref={setDropRef}
-        className={cn(
-          'flex-1 space-y-3 min-h-[100px] p-1 transition-colors',
-          isOver && 'bg-brutal-cyan-light/30',
-        )}
-      >
-        <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
-          {tasks.map((task) => (
-            <SortableTaskCard
-              key={task.id}
-              task={task}
-              onClick={onTaskClick}
-              onStatusClick={onStatusClick}
-              onClaim={onClaim}
-              onUnclaim={onUnclaim}
-              parentTaskNumber={task.parent_task_id ? parentTaskMap?.get(task.parent_task_id) : undefined}
-              onParentClick={onParentClick}
-            />
-          ))}
-        </SortableContext>
+      {/* Card list */}
+      <div className="flex-1 space-y-3 min-h-[100px]">
+        {tasks.map((task) => (
+          <TaskCard
+            key={task.id}
+            task={task}
+            onClick={onTaskClick}
+            onStatusChange={onStatusChange}
+            parentTaskNumber={task.parent_task_id ? parentTaskMap?.get(task.parent_task_id) : undefined}
+            onParentClick={onParentClick}
+          />
+        ))}
 
         {/* Empty state */}
         {count === 0 && (

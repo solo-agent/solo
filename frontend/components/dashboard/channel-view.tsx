@@ -486,8 +486,6 @@ export function ChannelView({ channel, initialThreadMessageId, onThreadChange }:
                 onTaskClick={handleTaskClickInTab}
                 onStatusChange={handleStatusChange}
                 onRefetch={refetchTasks}
-                onClaim={handleClaim}
-                onUnclaim={handleUnclaim}
               />
             </div>
           </div>

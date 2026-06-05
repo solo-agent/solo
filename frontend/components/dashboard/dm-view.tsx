@@ -427,8 +427,6 @@ export function DMView({
                 onTaskClick={handleTaskClickFromBoard}
                 onStatusChange={handleStatusChange}
                 onRefetch={refetchTasks ?? (() => {})}
-                onClaim={onClaimTask}
-                onUnclaim={onUnclaimTask}
               />
             </div>
           </div>
