@@ -272,7 +272,8 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Route("/api/v1/inbox", func(r chi.Router) {
 			r.Get("/", inboxHandler.List)
 			r.Get("/unread-count", inboxHandler.UnreadCount)
-			r.Post("/mark-read", inboxHandler.MarkRead)
+			r.Post("/dismiss-all", inboxHandler.DismissAll)
+			r.Post("/{messageId}/dismiss", inboxHandler.Dismiss)
 		})
 
 		// Thread read-status routes (P25-02-B)

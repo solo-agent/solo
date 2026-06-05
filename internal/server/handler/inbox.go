@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/solo-ai/solo/internal/server/middleware"
 	"github.com/solo-ai/solo/internal/server/service"
 )
@@ -21,7 +22,6 @@ func NewInboxHandler(svc *service.InboxService) *InboxHandler {
 }
 
 // List handles GET /api/v1/inbox
-// Returns inbox items for the authenticated user with cursor pagination.
 func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
@@ -31,7 +31,6 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	reqID := middleware.GetRequestID(r.Context())
 
-	// Parse before parameter (cursor)
 	before := time.Now()
 	if b := r.URL.Query().Get("before"); b != "" {
 		if parsed, err := time.Parse(time.RFC3339, b); err == nil {
@@ -39,7 +38,6 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Parse limit parameter
 	limit := 30
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 50 {
@@ -61,7 +59,6 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 // UnreadCount handles GET /api/v1/inbox/unread-count
-// Returns per-category unread counts for the authenticated user.
 func (h *InboxHandler) UnreadCount(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
@@ -81,9 +78,33 @@ func (h *InboxHandler) UnreadCount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, counts)
 }
 
-// MarkRead handles POST /api/v1/inbox/mark-read
-// Updates the user's last_read_at timestamp to now.
-func (h *InboxHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
+// Dismiss handles POST /api/v1/inbox/{messageId}/dismiss
+func (h *InboxHandler) Dismiss(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	messageID := chi.URLParam(r, "messageId")
+	if messageID == "" {
+		writeError(w, http.StatusBadRequest, "missing messageId")
+		return
+	}
+
+	reqID := middleware.GetRequestID(r.Context())
+
+	if err := h.svc.Dismiss(r.Context(), userID, messageID); err != nil {
+		slog.Error("inbox dismiss: failed", "request_id", reqID, "user_id", userID, "message_id", messageID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to dismiss inbox item")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DismissAll handles POST /api/v1/inbox/dismiss-all
+func (h *InboxHandler) DismissAll(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
@@ -92,9 +113,9 @@ func (h *InboxHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 
 	reqID := middleware.GetRequestID(r.Context())
 
-	if err := h.svc.MarkRead(r.Context(), userID); err != nil {
-		slog.Error("inbox mark read: query failed", "request_id", reqID, "user_id", userID, "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to mark inbox as read")
+	if err := h.svc.DismissAll(r.Context(), userID); err != nil {
+		slog.Error("inbox dismiss-all: failed", "request_id", reqID, "user_id", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to dismiss all inbox items")
 		return
 	}
 

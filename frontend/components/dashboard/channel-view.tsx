@@ -40,11 +40,13 @@ interface ChannelViewProps {
   channel: Channel;
   /** Optional message ID to open ThreadPanel for on mount */
   initialThreadMessageId?: string;
+  /** Optional message ID to scroll to on mount */
+  initialScrollToMessageId?: string;
   /** v1.5: Called when thread opens/closes so the parent can sync to URL */
   onThreadChange?: (threadId: string | null) => void;
 }
 
-export function ChannelView({ channel, initialThreadMessageId, onThreadChange }: ChannelViewProps) {
+export function ChannelView({ channel, initialThreadMessageId, initialScrollToMessageId, onThreadChange }: ChannelViewProps) {
   const {
     messages,
     isLoading,
@@ -201,6 +203,17 @@ export function ChannelView({ channel, initialThreadMessageId, onThreadChange }:
     }
     // If not found yet, it will be caught when messages load (via the next effect)
   }, [initialThreadMessageId, channel, messages, channelTasks]);
+
+  // Handle initialScrollToMessageId: scroll to a specific message on mount or URL change.
+  // Waits for isLoading to become false so the message DOM exists.
+  const lastScrollTarget = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!initialScrollToMessageId || !channel || isLoading) return;
+    if (lastScrollTarget.current === initialScrollToMessageId) return;
+    lastScrollTarget.current = initialScrollToMessageId;
+    setScrollToMessageId(initialScrollToMessageId);
+    setScrollMsgKey((k) => k + 1);
+  }, [initialScrollToMessageId, channel, isLoading]);
 
   // Sync threadTask when channelTasks change (e.g. after WS task.updated)
   useEffect(() => {

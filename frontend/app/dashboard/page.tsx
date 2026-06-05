@@ -37,6 +37,7 @@ const DMView = dynamic(
     ),
   },
 );
+import { InboxView } from "@/components/inbox/inbox-view";
 import type { Channel, DMChannel, CreateChannelInput, CreateDMInput, Message, Task, TaskStatus } from "@/lib/types";
 import { useToast } from "@/components/ui/toast";
 
@@ -65,9 +66,11 @@ function DashboardContent() {
   const channelFromUrl = searchParams.get('channel');
   const dmFromUrl = searchParams.get('dm');
   const threadFromUrl = searchParams.get('thread');
+  const messageFromUrl = searchParams.get('message');
+  const inboxFromUrl = searchParams.has('inbox');
 
   // Derive view mode entirely from URL
-  const viewMode = channelFromUrl ? 'channel' as const : dmFromUrl ? 'dm' as const : null;
+  const viewMode = channelFromUrl ? 'channel' as const : dmFromUrl ? 'dm' as const : inboxFromUrl ? 'inbox' as const : null;
   const selectedChannelId = channelFromUrl;
   const selectedDmId = dmFromUrl;
 
@@ -207,6 +210,11 @@ function DashboardContent() {
     markAsRead(dmId);
   }, [router, selectDM, markAsRead]);
 
+  // ---- URL-driven Inbox selection ----
+  const handleSelectInbox = useCallback(() => {
+    router.push('/dashboard?inbox');
+  }, [router]);
+
   // ---- Thread URL management ----
   const handleChannelThreadChange = useCallback(
     (threadId: string | null) => {
@@ -307,6 +315,7 @@ function DashboardContent() {
           key={`chan-${selectedChannel.id}`}
           channel={selectedChannel}
           initialThreadMessageId={threadFromUrl ?? undefined}
+          initialScrollToMessageId={messageFromUrl ?? undefined}
           onThreadChange={handleChannelThreadChange}
         />
       );
@@ -325,6 +334,7 @@ function DashboardContent() {
           key={`dm-${selectedDM.id}`}
           dm={selectedDM}
           initialThreadMessageId={threadFromUrl ?? undefined}
+          initialScrollToMessageId={messageFromUrl ?? undefined}
           messages={dmMessages}
           isLoading={dmMessagesLoading}
           error={dmMessagesError}
@@ -351,6 +361,10 @@ function DashboardContent() {
           onThreadChange={handleDMThreadChange}
         />
       );
+    }
+
+    if (viewMode === 'inbox') {
+      return <InboxView />;
     }
 
     // Empty/no-selection state (default: no URL params)
@@ -412,6 +426,8 @@ function DashboardContent() {
         selectedDmId={selectedDmId}
         onSelectDM={handleSelectDM}
         onCreateDM={() => setIsCreateDMModalOpen(true)}
+        inboxSelected={inboxFromUrl}
+        onSelectInbox={handleSelectInbox}
       />
 
       {/* Main content area */}

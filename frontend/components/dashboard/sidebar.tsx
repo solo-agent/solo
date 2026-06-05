@@ -4,11 +4,9 @@
 
 'use client';
 
-import { useState, useCallback } from 'react';
 import { ChannelList } from './channel-list';
 import { DMList } from './dm-list';
 import { InboxBadge } from '@/components/inbox/inbox-badge';
-import { InboxPanel } from '@/components/inbox/inbox-panel';
 import { useInboxUnread } from '@/lib/hooks/use-inbox-unread';
 import type { Channel, DMChannel } from '@/lib/types';
 
@@ -25,6 +23,9 @@ interface SidebarProps {
   selectedDmId: string | null;
   onSelectDM: (dmId: string) => void;
   onCreateDM: () => void;
+  /** Inbox props */
+  inboxSelected: boolean;
+  onSelectInbox: () => void;
   /** Route context for header */
   routeIcon?: React.ElementType;
   routeTitle?: string;
@@ -42,20 +43,12 @@ export function Sidebar({
   selectedDmId,
   onSelectDM,
   onCreateDM,
+  inboxSelected,
+  onSelectInbox,
   routeIcon: Icon,
   routeTitle = 'Solo',
 }: SidebarProps) {
-  const [inboxOpen, setInboxOpen] = useState(false);
   const { unreadCount, isLoading: unreadLoading } = useInboxUnread();
-
-  const handleToggleInbox = useCallback(() => {
-    setInboxOpen((prev) => !prev);
-  }, []);
-
-  const handleMarkRead = useCallback(() => {
-    // Trigger a refetch of unread count — the panel's POST already happened
-    setInboxOpen(false);
-  }, []);
 
   return (
     <aside className="flex w-50 flex-col bg-sidebar text-sidebar-foreground border-r-2 border-sidebar-border flex-shrink-0">
@@ -67,22 +60,12 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* Inbox badge — above channel list */}
+      {/* Inbox badge — above channel list, navigates to ?inbox */}
       <InboxBadge
         unreadCount={unreadLoading ? 0 : unreadCount.total}
-        isOpen={inboxOpen}
-        onClick={handleToggleInbox}
+        isSelected={inboxSelected}
+        onClick={onSelectInbox}
       />
-
-      {/* Inbox panel — shown below badge when open */}
-      {inboxOpen && (
-        <div className="border-b-2 border-sidebar-border">
-          <InboxPanel
-            onClose={() => setInboxOpen(false)}
-            onMarkRead={handleMarkRead}
-          />
-        </div>
-      )}
 
       {/* Scrollable channel + DM area */}
       <div className="flex-1 overflow-y-auto px-2 py-3">

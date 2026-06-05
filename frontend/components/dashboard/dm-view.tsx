@@ -10,7 +10,7 @@
 
 'use client';
 
-import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { Bot, User, AlertCircle, RefreshCw, MessageSquare, Circle, ClipboardList } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useStreamingMessages } from '@/lib/hooks/use-streaming-messages';
@@ -53,6 +53,8 @@ interface DMViewProps {
   onThreadChange?: (threadId: string | null) => void;
   /** v1.5: Initial thread message ID from URL — opens ThreadPanel on mount or on change */
   initialThreadMessageId?: string;
+  /** Optional message ID to scroll to on mount or URL change */
+  initialScrollToMessageId?: string;
 }
 
 // ---- Helpers ----
@@ -98,6 +100,7 @@ export function DMView({
   onTaskCreated,
   onThreadChange,
   initialThreadMessageId,
+  initialScrollToMessageId,
 }: DMViewProps) {
   const name = getDisplayName(dm);
   const isAgent = isAgentDM(dm);
@@ -106,6 +109,19 @@ export function DMView({
   const [threadMessage, setThreadMessage] = useState<Message | null>(null);
   const [threadTask, setThreadTask] = useState<Task | null>(null);
   const [threadPanelWidth, setThreadPanelWidth] = useState(400);
+  const [scrollToMessageId, setScrollToMessageId] = useState<string | undefined>(undefined);
+  const [scrollMsgKey, setScrollMsgKey] = useState(0);
+
+  // Handle initialScrollToMessageId: scroll to a specific message on mount or URL change.
+  // Waits for isLoading to become false so the message DOM exists.
+  const lastScrollTarget = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!initialScrollToMessageId || !dm || isLoading) return;
+    if (lastScrollTarget.current === initialScrollToMessageId) return;
+    lastScrollTarget.current = initialScrollToMessageId;
+    setScrollToMessageId(initialScrollToMessageId);
+    setScrollMsgKey((k) => k + 1);
+  }, [initialScrollToMessageId, dm, isLoading]);
 
   // Refetch tasks when switching to tasks tab
   useEffect(() => {
@@ -377,6 +393,8 @@ export function DMView({
                 loadMoreError={loadMoreError}
                 onLoadMore={loadMore}
                 agentActivities={agentActivities}
+                scrollToMessageId={scrollToMessageId}
+                scrollKey={scrollMsgKey}
               />
             )}
 

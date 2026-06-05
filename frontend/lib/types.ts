@@ -342,7 +342,6 @@ export interface InboxItem {
   sender_avatar?: string | null;
   content_preview: string;
   is_mention: boolean;
-  is_unread: boolean;
   created_at: string;
 }
 

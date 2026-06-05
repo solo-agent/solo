@@ -89,6 +89,28 @@ export function useInbox() {
     return unsub;
   }, [onEvent, fetchInbox]);
 
+  const dismissItem = useCallback(async (messageId: string) => {
+    // Optimistic removal
+    setItems((prev) => prev.filter((item) => item.message_id !== messageId));
+    try {
+      await apiClient.post(`/api/v1/inbox/${messageId}/dismiss`);
+    } catch {
+      // Refetch on failure to restore correct state
+      fetchInbox();
+    }
+  }, [fetchInbox]);
+
+  const dismissAll = useCallback(async () => {
+    // Optimistic clear
+    setItems([]);
+    setHasMore(false);
+    try {
+      await apiClient.post('/api/v1/inbox/dismiss-all');
+    } catch {
+      fetchInbox();
+    }
+  }, [fetchInbox]);
+
   return {
     items,
     hasMore,
@@ -96,5 +118,7 @@ export function useInbox() {
     isLoadingMore,
     loadMore,
     refetch: fetchInbox,
+    dismissItem,
+    dismissAll,
   } as const;
 }

@@ -12,11 +12,11 @@ import { cn } from '@/lib/utils';
 
 interface InboxBadgeProps {
   unreadCount: number;
-  isOpen: boolean;
+  isSelected: boolean;
   onClick: () => void;
 }
 
-export function InboxBadge({ unreadCount, isOpen, onClick }: InboxBadgeProps) {
+export function InboxBadge({ unreadCount, isSelected, onClick }: InboxBadgeProps) {
   return (
     <button
       type="button"
@@ -24,12 +24,11 @@ export function InboxBadge({ unreadCount, isOpen, onClick }: InboxBadgeProps) {
       className={cn(
         'flex items-center justify-between w-full px-2 py-2 text-sm font-body',
         'border-b-2 border-sidebar-border transition-colors',
-        isOpen
+        isSelected
           ? 'bg-brutal-pink text-black'
           : 'text-black hover:bg-brutal-pink/40',
       )}
       aria-label={`收件箱${unreadCount > 0 ? `，${unreadCount} 条未读` : ''}`}
-      aria-expanded={isOpen}
     >
       <span className="flex items-center gap-2">
         <Mail className="h-4 w-4" />
