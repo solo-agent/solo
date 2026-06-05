@@ -296,7 +296,10 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
       // Find message in the already-loaded channel messages
       const existingMsg = messages.find((m) => m.id === task.message_id);
       if (existingMsg) {
-        setThreadMessage(existingMsg);
+        setThreadMessage({
+          ...existingMsg,
+          display_name: task.creator_name || existingMsg.display_name,
+        });
         setThreadTask(task);
         return;
       }

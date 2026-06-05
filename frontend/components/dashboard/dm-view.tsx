@@ -201,7 +201,10 @@ export function DMView({
       if (message.task_number != null) {
         refetchTasks?.();
         const task = tasks?.find((t) => t.message_id === message.id || t.id === message.id);
-        setThreadMessage(message);
+        setThreadMessage({
+          ...message,
+          display_name: task?.creator_name || message.display_name,
+        });
         setThreadTask(task ?? null);
       }
     },
@@ -215,7 +218,10 @@ export function DMView({
       // Use task.message_id to find the original message
       const existingMsg = messages.find((m) => m.id === task.message_id);
       if (existingMsg) {
-        setThreadMessage(existingMsg);
+        setThreadMessage({
+          ...existingMsg,
+          display_name: task.creator_name || existingMsg.display_name,
+        });
       } else {
         // Construct a minimal message for ThreadPanel
         setThreadMessage({
@@ -242,7 +248,10 @@ export function DMView({
       if (!onConvertToTask) return;
       try {
         const task = await onConvertToTask(dm.id, message.id);
-        setThreadMessage(message);
+        setThreadMessage({
+          ...message,
+          display_name: task?.creator_name || message.display_name,
+        });
         setThreadTask(task);
       } catch {
         // handled silently

@@ -986,14 +986,19 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve sender name for broadcast
-	var senderName string
-	_ = h.pool.QueryRow(r.Context(),
+	senderName := userID
+	if err := h.pool.QueryRow(r.Context(),
 		`SELECT COALESCE(
 			(SELECT display_name FROM users WHERE id = $1),
 			(SELECT name FROM agents WHERE id = $1),
 			$1
 		)`, userID,
-	).Scan(&senderName)
+	).Scan(&senderName); err != nil {
+		slog.Warn("failed to resolve sender name for task message",
+			"user_id", userID,
+			"error", err,
+		)
+	}
 
 	// Broadcast message.new (user message, appears in channel)
 	if h.hub != nil {

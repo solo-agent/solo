@@ -51,8 +51,9 @@ interface ThreadPanelProps {
 
 // ---- Parent message display ----
 
-function ParentMessageBlock({ message }: { message: Message }) {
+function ParentMessageBlock({ message, task }: { message: Message; task?: Task }) {
   const isAgent = message.sender_type === 'agent';
+  const displayName = task?.creator_name || message.display_name;
   const time = new Date(message.created_at).toLocaleString('zh-CN', {
     hour: '2-digit',
     minute: '2-digit',
@@ -64,14 +65,14 @@ function ParentMessageBlock({ message }: { message: Message }) {
         <PixelAvatar agentId={message.user_id || message.id} size="md" />
       ) : (
         <Avatar
-          name={message.display_name}
+          name={displayName}
           className="mt-0.5 h-8 w-8 flex-shrink-0"
         />
       )}
       <div className="min-w-0 flex-1">
         <div className="mb-1.5 flex items-baseline gap-2">
           <span className="font-heading text-sm font-bold text-foreground">
-            {message.display_name}
+            {displayName}
           </span>
           <span className="font-mono text-[11px] text-muted-foreground">
             {time}
@@ -757,7 +758,7 @@ export function ThreadPanel({
         ) : null}
 
         {/* Parent message */}
-        <ParentMessageBlock message={parentMessage} />
+        <ParentMessageBlock message={parentMessage} task={task} />
 
         {/* Divider */}
         <div className="divider-brutal mx-6" />

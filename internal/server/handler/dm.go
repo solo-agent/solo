@@ -1183,15 +1183,20 @@ func (h *DMHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		senderType = "agent"
 	}
 
-	var senderName string
-	_ = h.pool.QueryRow(r.Context(),
+	senderName := userID
+	if err := h.pool.QueryRow(r.Context(),
 		`SELECT COALESCE(
 			(SELECT display_name FROM users WHERE id = $1),
 			(SELECT name FROM agents WHERE id = $1),
 			$1
 		)`,
 		userID,
-	).Scan(&senderName)
+	).Scan(&senderName); err != nil {
+		slog.Warn("failed to resolve sender name for DM task message",
+			"user_id", userID,
+			"error", err,
+		)
+	}
 
 	_, msgErr := h.pool.Exec(r.Context(),
 		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, created_at, updated_at)
