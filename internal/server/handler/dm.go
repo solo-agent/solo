@@ -806,6 +806,11 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	})
 	h.hub.BroadcastToChannel(dmID, dmMsgPayload)
 
+	// Broadcast inbox.updated to other DM participants (v1.5).
+	if h.hub != nil {
+		go h.notifyInboxForDMParticipants(context.Background(), dmID, userID)
+	}
+
 	// Trigger agent auto-response for DM (SOLO-58-B)
 	// In DM, the agent responds to all messages (no @mention needed)
 	if h.agentSvc != nil {
@@ -1671,6 +1676,30 @@ func (h *DMHandler) isDMParticipant(ctx context.Context, dmID, userID string) bo
 		return false
 	}
 	return exists
+}
+
+// notifyInboxForDMParticipants sends inbox.updated to all DM participants except the sender.
+func (h *DMHandler) notifyInboxForDMParticipants(ctx context.Context, dmID, senderID string) {
+	if h.hub == nil || h.pool == nil {
+		return
+	}
+	rows, err := h.pool.Query(ctx,
+		`SELECT member_id FROM dm_members
+		 WHERE channel_id = $1 AND member_type = 'user' AND member_id != $2`,
+		dmID, senderID,
+	)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			continue
+		}
+		ws.BroadcastInboxUpdated(h.hub, userID)
+	}
 }
 
 // broadcastDMTaskSystemMessage sends a system message to the DM channel via WebSocket.

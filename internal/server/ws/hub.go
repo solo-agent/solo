@@ -705,6 +705,9 @@ func (h *Hub) handleThreadReply(client *Client, payload ThreadReplyPayload) {
 	}
 	h.BroadcastToChannel(payload.ChannelID, Envelope(EventThreadReplyNotify, notifyPayload))
 
+	// Broadcast inbox.updated to all user participants of this thread (v1.5).
+	go h.notifyInboxForThread(context.Background(), payload.ThreadID, payload.ChannelID, client.userID)
+
 	// Trigger agent auto-response in thread with @mention support
 	if h.agentSvc != nil {
 		go h.agentSvc.TriggerAgentResponseInThread(
@@ -717,5 +720,34 @@ func (h *Hub) handleThreadReply(client *Client, payload ThreadReplyPayload) {
 			hasMentions,
 			nil,
 		)
+	}
+}
+
+// notifyInboxForThread sends an inbox.updated event to every user participant
+// of a thread, except the message sender. Called after a new thread reply is
+// persisted, both via WS and REST paths.
+func (h *Hub) notifyInboxForThread(ctx context.Context, threadID, channelID, senderID string) {
+	if h.pool == nil {
+		return
+	}
+	rows, err := h.pool.Query(ctx,
+		`SELECT DISTINCT m.sender_id
+		 FROM messages m
+		 WHERE m.thread_id = $1
+		   AND m.sender_type = 'user'
+		   AND m.sender_id != $2`,
+		threadID, senderID,
+	)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			continue
+		}
+		h.SendToUser(userID, Envelope(EventInboxUpdated, struct{}{}))
 	}
 }

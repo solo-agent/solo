@@ -119,6 +119,8 @@ type TaskUpdateRequest struct {
 type TaskFilter struct {
 	Status       string
 	ClaimerID    string
+	CreatorID    string
+	ChannelID    string
 	ParentTaskID string
 }
 
@@ -537,6 +539,11 @@ func (s *TaskService) ListTasks(ctx context.Context, channelID, userID string, f
 		args = append(args, filter.ClaimerID)
 		argIdx++
 	}
+	if filter.CreatorID != "" {
+		query += ` AND t.creator_id = $` + strconv.Itoa(argIdx)
+		args = append(args, filter.CreatorID)
+		argIdx++
+	}
 	if filter.ParentTaskID != "" {
 		query += ` AND t.parent_task_id = $` + strconv.Itoa(argIdx)
 		args = append(args, filter.ParentTaskID)
@@ -831,7 +838,7 @@ func (s *TaskService) GetTaskGlobal(ctx context.Context, taskID, userID string) 
 }
 
 // ListAllUserTasks returns all tasks across channels the user is a member of.
-func (s *TaskService) ListAllUserTasks(ctx context.Context, userID string, channelID string, status string, claimerID string) ([]Task, error) {
+func (s *TaskService) ListAllUserTasks(ctx context.Context, userID string, channelID string, status string, claimerID string, creatorID string) ([]Task, error) {
 	query := `SELECT t.id, t.task_number, t.channel_id, t.creator_id, COALESCE(u_creator.display_name, a_creator.name, '') as creator_name, t.title, COALESCE(t.description, ''),
 		t.status, COALESCE(t.claimer_id::text, ''), t.priority, t.due_date, COALESCE(t.message_id::text, ''), t.created_at, t.updated_at,
 		COALESCE(u_claimer.display_name, a_claimer.name, '') AS claimer_name
@@ -859,6 +866,11 @@ func (s *TaskService) ListAllUserTasks(ctx context.Context, userID string, chann
 	if claimerID != "" {
 		query += fmt.Sprintf(" AND t.claimer_id = $%d", argIdx)
 		args = append(args, claimerID)
+		argIdx++
+	}
+	if creatorID != "" {
+		query += fmt.Sprintf(" AND t.creator_id = $%d", argIdx)
+		args = append(args, creatorID)
 		argIdx++
 	}
 	query += " ORDER BY t.created_at DESC LIMIT 100"

@@ -1,13 +1,17 @@
 // ============================================================================
-// TaskColumn — single kanban column for a given status
+// TaskColumn — single kanban column for a given status (v1.5: DnD support)
 // - Column header with status label + task count
 // - Task cards: #number + title + status badge + reply count + last activity + claim/unclaim
 // - Empty state: "暂无任务" hint
 // - Neubrutalist styling: card-brutal, border-2
+// - Droppable area for drag-and-drop + Sortable cards
 // ============================================================================
 
 'use client';
 
+import { useDroppable } from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { cn } from '@/lib/utils';
 import { MessageSquare, Clock, ChevronRight } from 'lucide-react';
 import type { Task, TaskStatus } from '@/lib/types';
@@ -78,21 +82,19 @@ function formatRelativeTime(iso?: string): string {
   }
 }
 
-// ---- Mini card for column ----
+// ---- Sortable mini card for column (v1.5: DnD) ----
 
-interface TaskCardMiniProps {
+interface SortableTaskCardProps {
   task: Task;
   onClick: (task: Task) => void;
   onStatusClick: (task: Task) => void;
   onClaim?: (task: Task) => void;
   onUnclaim?: (task: Task) => void;
-  /** Parent task number lookup (key = task id, value = task_number) */
   parentTaskNumber?: number;
-  /** Called when the parent badge is clicked */
   onParentClick?: (taskId: string) => void;
 }
 
-function TaskCardMini({
+function SortableTaskCard({
   task,
   onClick,
   onStatusClick,
@@ -100,7 +102,25 @@ function TaskCardMini({
   onUnclaim,
   parentTaskNumber,
   onParentClick,
-}: TaskCardMiniProps) {
+}: SortableTaskCardProps) {
+  const {
+    setNodeRef,
+    attributes,
+    listeners,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: task.id,
+    data: { status: task.status },
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+
   const statusConf = STATUS_COLUMN_CONFIG[task.status];
   const taskNum = task.task_number ? `#${task.task_number}` : null;
   const isClaimed = !!task.claimer_id;
@@ -108,20 +128,20 @@ function TaskCardMini({
   const hasSubtasks = (task.subtask_count ?? 0) > 0;
   const isChild = !!task.parent_task_id;
 
-  // Compute claimer display: claimer_name > assignee_name > claimer_id (truncated)
   const claimerDisplay =
     task.claimer_name ||
     task.assignee_name ||
     (task.claimer_id ? task.claimer_id.slice(0, 8) : null);
 
-  // Reply count: from task if available (backend may return reply_count)
   const replyCount = task.reply_count ?? 0;
-
-  // Last activity: use updated_at as fallback for created_at
   const lastActivity = task.updated_at || task.created_at;
 
   return (
     <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
       role="button"
       tabIndex={0}
       onClick={() => onClick(task)}
@@ -132,9 +152,10 @@ function TaskCardMini({
         }
       }}
       className={cn(
-        'card-brutal w-full cursor-pointer text-left',
+        'card-brutal w-full cursor-pointer text-left touch-none',
         'hover:-translate-y-[1px] hover:shadow-brutal-lg',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-pink focus-visible:ring-offset-2',
+        isDragging && 'opacity-40',
       )}
     >
       <div className="p-3">
@@ -220,14 +241,12 @@ function TaskCardMini({
           <div className="mt-2 flex items-center gap-2">
             {isClaimed ? (
               <>
-                {/* Claimer avatar */}
                 <span className="flex h-5 w-5 items-center justify-center border-2 border-black bg-brutal-lime font-heading text-[10px] font-bold text-black">
                   {(claimerDisplay || '?').charAt(0).toUpperCase()}
                 </span>
                 <span className="flex-1 truncate font-body text-[11px] text-foreground font-medium">
                   {claimerDisplay}
                 </span>
-                {/* Claimed badge */}
                 <span className="flex-shrink-0 badge-brutal bg-brutal-lime text-black text-[10px]">
                   已认领
                 </span>
@@ -337,14 +356,13 @@ function ColumnSkeleton({ status }: { status: TaskStatus }) {
 interface TaskColumnProps {
   status: TaskStatus;
   tasks: Task[];
+  taskIds: string[];
   isLoading: boolean;
   onTaskClick: (task: Task) => void;
   onStatusClick: (task: Task) => void;
   onClaim?: (task: Task) => void;
   onUnclaim?: (task: Task) => void;
-  /** Parent task number lookup map */
   parentTaskMap?: Map<string, number>;
-  /** Called when a child task's parent badge is clicked */
   onParentClick?: (taskId: string) => void;
 }
 
@@ -353,6 +371,7 @@ interface TaskColumnProps {
 export function TaskColumn({
   status,
   tasks,
+  taskIds,
   isLoading,
   onTaskClick,
   onStatusClick,
@@ -363,6 +382,12 @@ export function TaskColumn({
 }: TaskColumnProps) {
   const label = COLUMN_HEADERS[status];
   const count = tasks.length;
+
+  // Make the column body a drop target
+  const { setNodeRef: setDropRef, isOver } = useDroppable({
+    id: status,
+    data: { status },
+  });
 
   if (isLoading) {
     return <ColumnSkeleton status={status} />;
@@ -386,20 +411,28 @@ export function TaskColumn({
         </span>
       </div>
 
-      {/* Card list */}
-      <div className="flex-1 space-y-3 min-h-[100px]">
-        {tasks.map((task) => (
-          <TaskCardMini
-            key={task.id}
-            task={task}
-            onClick={onTaskClick}
-            onStatusClick={onStatusClick}
-            onClaim={onClaim}
-            onUnclaim={onUnclaim}
-            parentTaskNumber={task.parent_task_id ? parentTaskMap?.get(task.parent_task_id) : undefined}
-            onParentClick={onParentClick}
-          />
-        ))}
+      {/* Card list — droppable area */}
+      <div
+        ref={setDropRef}
+        className={cn(
+          'flex-1 space-y-3 min-h-[100px] p-1 transition-colors',
+          isOver && 'bg-brutal-cyan-light/30',
+        )}
+      >
+        <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
+          {tasks.map((task) => (
+            <SortableTaskCard
+              key={task.id}
+              task={task}
+              onClick={onTaskClick}
+              onStatusClick={onStatusClick}
+              onClaim={onClaim}
+              onUnclaim={onUnclaim}
+              parentTaskNumber={task.parent_task_id ? parentTaskMap?.get(task.parent_task_id) : undefined}
+              onParentClick={onParentClick}
+            />
+          ))}
+        </SortableContext>
 
         {/* Empty state */}
         {count === 0 && (

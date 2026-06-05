@@ -52,6 +52,9 @@ const (
 	EventTaskCreated = "task.created"
 	EventTaskUpdated = "task.updated"
 	EventTaskDeleted = "task.deleted"
+
+	// Inbox events (v1.5)
+	EventInboxUpdated = "inbox.updated"
 )
 
 // WSMessage is the envelope for all WebSocket messages.

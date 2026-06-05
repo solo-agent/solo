@@ -390,6 +390,11 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		go h.broadcastDMIfNeeded(channelID, msgData)
 	}
 
+	// Broadcast inbox.updated to thread participants (v1.5).
+	if threadID != "" && h.hub != nil {
+		go h.notifyInboxForThread(context.Background(), threadID, channelID, userID)
+	}
+
 	// Trigger agent auto-response (skip if asTask — agents triggered by task creation above).
 	// P25-05-B: Route to thread-scoped or channel-scoped trigger based on threadID.
 	// Thread messages must use TriggerAgentResponseInThread so agents receive
@@ -846,6 +851,34 @@ func (h *MessageHandler) broadcastDMIfNeeded(channelID string, msg ws.MessageNew
 		CreatedAt:     msg.CreatedAt,
 	}
 	h.hub.BroadcastToChannel(channelID, ws.Envelope(ws.EventDMMessageNew, dmPayload))
+}
+
+// notifyInboxForThread sends inbox.updated to all user participants of a thread
+// except the message sender. This is called after a new thread reply is created.
+func (h *MessageHandler) notifyInboxForThread(ctx context.Context, threadID, channelID, senderID string) {
+	if h.hub == nil || h.pool == nil {
+		return
+	}
+	rows, err := h.pool.Query(ctx,
+		`SELECT DISTINCT m.sender_id
+		 FROM messages m
+		 WHERE m.thread_id = $1
+		   AND m.sender_type = 'user'
+		   AND m.sender_id != $2`,
+		threadID, senderID,
+	)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			continue
+		}
+		ws.BroadcastInboxUpdated(h.hub, userID)
+	}
 }
 
 // collectAttachmentIDs gathers all attachment IDs from a slice of message responses.

@@ -25,6 +25,14 @@ func BroadcastTaskDeleted(hub realtime.Broadcaster, payload TaskDeletedPayload) 
 	hub.BroadcastToChannel(payload.ChannelID, envelope)
 }
 
+// BroadcastInboxUpdated sends an inbox.updated event to all connections of a
+// specific user. Called after a new message is created that may trigger an
+// inbox update for thread participants, DM recipients, or @mentioned users.
+func BroadcastInboxUpdated(hub realtime.Broadcaster, userID string) {
+	envelope := Envelope(EventInboxUpdated, struct{}{})
+	hub.SendToUser(userID, envelope)
+}
+
 // BroadcastAgentThinking broadcasts an agent.thinking event to channel subscribers.
 func BroadcastAgentThinking(hub realtime.Broadcaster, channelID, agentID, agentName, thought string) {
 	payload := AgentThinkingPayload{

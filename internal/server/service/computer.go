@@ -25,8 +25,18 @@ type Computer struct {
 	Status        string     `json:"status"`
 	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
 	AgentIDs      []string   `json:"agent_ids,omitempty"`
+	OS            string     `json:"os"`
+	Hostname      string     `json:"hostname"`
+	IP            string     `json:"ip"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
+}
+
+// ComputerSystemInfo carries OS, hostname and IP reported by a daemon.
+type ComputerSystemInfo struct {
+	OS       string `json:"os"`
+	Hostname string `json:"hostname"`
+	IP       string `json:"ip"`
 }
 
 // NewComputerService creates a new ComputerService.
@@ -56,12 +66,12 @@ func (s *ComputerService) GetComputer(ctx context.Context, id, userID string) (*
 	var lastHeartbeat *time.Time
 
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, owner_id, daemon_id, daemon_url, status, last_heartbeat, agent_ids, created_at, updated_at
+		`SELECT id, name, owner_id, daemon_id, daemon_url, status, last_heartbeat, agent_ids, os, hostname, ip, created_at, updated_at
 		 FROM computers
 		 WHERE id = $1 AND owner_id = $2`,
 		id, userID,
 	).Scan(&c.ID, &c.Name, &c.OwnerID, &daemonID, &daemonURL, &c.Status,
-		&lastHeartbeat, &c.AgentIDs, &c.CreatedAt, &c.UpdatedAt)
+		&lastHeartbeat, &c.AgentIDs, &c.OS, &c.Hostname, &c.IP, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ErrNotFound
@@ -84,7 +94,7 @@ func (s *ComputerService) GetComputer(ctx context.Context, id, userID string) (*
 func (s *ComputerService) ListComputers(ctx context.Context, userID string) ([]Computer, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, name, owner_id, COALESCE(daemon_id, ''), COALESCE(daemon_url, ''),
-		        status, last_heartbeat, agent_ids, created_at, updated_at
+		        status, last_heartbeat, agent_ids, COALESCE(os, ''), COALESCE(hostname, ''), COALESCE(ip, ''), created_at, updated_at
 		 FROM computers
 		 WHERE owner_id = $1
 		 ORDER BY created_at DESC`,
@@ -101,7 +111,7 @@ func (s *ComputerService) ListComputers(ctx context.Context, userID string) ([]C
 		var daemonID, daemonURL string
 		var lastHeartbeat *time.Time
 		if err := rows.Scan(&c.ID, &c.Name, &c.OwnerID, &daemonID, &daemonURL,
-			&c.Status, &lastHeartbeat, &c.AgentIDs, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			&c.Status, &lastHeartbeat, &c.AgentIDs, &c.OS, &c.Hostname, &c.IP, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan computer row: %w", err)
 		}
 		c.DaemonID = daemonID
@@ -128,10 +138,10 @@ func (s *ComputerService) UpdateComputer(ctx context.Context, id, userID, name s
 	err := s.pool.QueryRow(ctx,
 		`UPDATE computers SET name = $1, updated_at = now()
 		 WHERE id = $2 AND owner_id = $3
-		 RETURNING id, name, owner_id, daemon_id, daemon_url, status, last_heartbeat, agent_ids, created_at, updated_at`,
+		 RETURNING id, name, owner_id, daemon_id, daemon_url, status, last_heartbeat, agent_ids, os, hostname, ip, created_at, updated_at`,
 		name, id, userID,
 	).Scan(&c.ID, &c.Name, &c.OwnerID, &daemonID, &daemonURL, &c.Status,
-		&lastHeartbeat, &c.AgentIDs, &c.CreatedAt, &c.UpdatedAt)
+		&lastHeartbeat, &c.AgentIDs, &c.OS, &c.Hostname, &c.IP, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ErrNotFound
@@ -167,7 +177,7 @@ func (s *ComputerService) DeleteComputer(ctx context.Context, id, userID string)
 
 // UpsertComputerByDaemonID creates or updates a computer record based on the
 // daemon_id. This is called during daemon registration.
-func (s *ComputerService) UpsertComputerByDaemonID(ctx context.Context, daemonID, daemonURL, ownerID string) error {
+func (s *ComputerService) UpsertComputerByDaemonID(ctx context.Context, daemonID, daemonURL, ownerID string, sysinfo ComputerSystemInfo) error {
 	// Use 'solo-server' as default owner if not specified — the first user
 	// in the system will be used for auto-registered computers.
 	if ownerID == "" {
@@ -183,11 +193,11 @@ func (s *ComputerService) UpsertComputerByDaemonID(ctx context.Context, daemonID
 
 	now := time.Now()
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO computers (name, owner_id, daemon_id, daemon_url, status, last_heartbeat, updated_at)
-		 VALUES ($1, $2, $3, $4, 'online', $5, $5)
+		`INSERT INTO computers (name, owner_id, daemon_id, daemon_url, status, os, hostname, ip, last_heartbeat, updated_at)
+		 VALUES ($1, $2, $3, $4, 'online', $5, $6, $7, $8, $8)
 		 ON CONFLICT (daemon_id) WHERE daemon_id IS NOT NULL
-		 DO UPDATE SET daemon_url = $4, status = 'online', last_heartbeat = $5, updated_at = $5`,
-		daemonID, ownerID, daemonID, daemonURL, now,
+		 DO UPDATE SET daemon_url = $4, status = 'online', os = $5, hostname = $6, ip = $7, last_heartbeat = $8, updated_at = $8`,
+		daemonID, ownerID, daemonID, daemonURL, sysinfo.OS, sysinfo.Hostname, sysinfo.IP, now,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert computer: %w", err)
@@ -203,13 +213,13 @@ func (s *ComputerService) UpsertComputerByDaemonID(ctx context.Context, daemonID
 
 // UpdateHeartbeat updates the last_heartbeat time and status for a computer
 // identified by daemon_id. Called on daemon heartbeat.
-func (s *ComputerService) UpdateHeartbeat(ctx context.Context, daemonID, daemonURL string, agentIDs []string) error {
+func (s *ComputerService) UpdateHeartbeat(ctx context.Context, daemonID, daemonURL string, agentIDs []string, sysinfo ComputerSystemInfo) error {
 	now := time.Now()
 	_, err := s.pool.Exec(ctx,
 		`UPDATE computers SET status = 'online', last_heartbeat = $1, daemon_url = $2,
-		        agent_ids = $3, updated_at = $1
-		 WHERE daemon_id = $4`,
-		now, daemonURL, agentIDs, daemonID,
+		        agent_ids = $3, os = $4, hostname = $5, ip = $6, updated_at = $1
+		 WHERE daemon_id = $7`,
+		now, daemonURL, agentIDs, sysinfo.OS, sysinfo.Hostname, sysinfo.IP, daemonID,
 	)
 	if err != nil {
 		return fmt.Errorf("update heartbeat: %w", err)

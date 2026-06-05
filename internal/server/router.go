@@ -47,6 +47,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	// Initialize services
 	taskSvc := service.NewTaskService(pool)
 	computerSvc := service.NewComputerService(pool)
+	inboxSvc := service.NewInboxService(pool)
 
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(pool)
@@ -60,7 +61,8 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	mentionSvc := service.NewMentionService(pool)
 	taskHandler := handler.NewTaskHandler(pool, hub, agentSvc, taskSvc, mentionSvc)
 	searchHandler := handler.NewSearchHandler(pool)
-	computerHandler := handler.NewComputerHandler(computerSvc)
+	computerHandler := handler.NewComputerHandler(computerSvc, dm, pool)
+	inboxHandler := handler.NewInboxHandler(inboxSvc)
 
 	// Attachment handler
 	uploadDir := os.Getenv("ATTACHMENTS_DIR")
@@ -191,6 +193,9 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 				r.Get("/", agentHandler.Get)
 				r.Patch("/", agentHandler.Update)
 				r.Delete("/", agentHandler.Delete)
+
+				// Agent workspace files (v1.5)
+				r.Get("/workspace", agentHandler.Workspace)
 			})
 		})
 
@@ -257,7 +262,17 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 				r.Get("/", computerHandler.Get)
 				r.Patch("/", computerHandler.Update)
 				r.Delete("/", computerHandler.Delete)
+
+				// Computer agents (v1.5)
+				r.Get("/agents", computerHandler.ListAgents)
 			})
+		})
+
+		// Inbox routes (v1.5)
+		r.Route("/api/v1/inbox", func(r chi.Router) {
+			r.Get("/", inboxHandler.List)
+			r.Get("/unread-count", inboxHandler.UnreadCount)
+			r.Post("/mark-read", inboxHandler.MarkRead)
 		})
 
 		// Thread read-status routes (P25-02-B)

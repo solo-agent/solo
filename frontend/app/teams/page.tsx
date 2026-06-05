@@ -13,6 +13,7 @@ import { AppFrame } from '@/components/layout/app-frame';
 import { useAgents } from '@/lib/hooks/use-agents';
 import { AgentCard } from '@/components/agents/agent-card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useToast } from '@/components/ui/toast';
 import {
   Dialog,
   DialogHeader,
@@ -22,6 +23,7 @@ import {
   DialogCloseButton,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { AgentDetailPanel } from '@/components/agents/agent-detail-panel';
 import type { Agent } from '@/lib/types';
 
 // ---- Group inference ----
@@ -67,7 +69,8 @@ function inferAgentGroup(systemPrompt: string): TeamGroup {
 export default function TeamsPage() {
   const router = useRouter();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { agents, isLoading, error, refetch, deleteAgent } = useAgents();
+  const { agents, isLoading, error, refetch, deleteAgent, createAgent } = useAgents();
+  const { showToast } = useToast();
 
   // Which groups are collapsed. All expanded by default.
   const [collapsedGroups, setCollapsedGroups] = useState<Set<TeamGroup>>(new Set());
@@ -79,8 +82,17 @@ export default function TeamsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // v1.5: Create Agent modal state
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createDescription, setCreateDescription] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+
   // Expanded groups in structure view
   const [expandedInStructure, setExpandedInStructure] = useState<Set<TeamGroup>>(new Set());
+
+  // v1.5: Agent detail panel state
+  const [panelAgentId, setPanelAgentId] = useState<string | null>(null);
 
   // Auth guard
   useEffect(() => {
@@ -126,6 +138,27 @@ export default function TeamsPage() {
     }
   }, [deleteTarget, deleteAgent]);
 
+  // v1.5: Create Agent modal handler
+  const handleCreateAgent = useCallback(async () => {
+    if (!createName.trim() || isCreating) return;
+    setIsCreating(true);
+    try {
+      await createAgent({
+        name: createName.trim(),
+        description: createDescription.trim() || undefined,
+        model_provider: '', // Will be set via detail panel
+      });
+      showToast('Agent 创建成功', 'success');
+      setIsCreateModalOpen(false);
+      setCreateName('');
+      setCreateDescription('');
+    } catch {
+      showToast('创建 Agent 失败，请稍后再试', 'error');
+    } finally {
+      setIsCreating(false);
+    }
+  }, [createName, createDescription, isCreating, createAgent, showToast]);
+
   if (authLoading || !isAuthenticated) {
     return (
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
@@ -152,7 +185,7 @@ export default function TeamsPage() {
         </div>
         <button
           type="button"
-          onClick={() => router.push('/agents/new')}
+          onClick={() => setIsCreateModalOpen(true)}
           className="btn-brutal btn-brutal-pink"
         >
           <Plus className="mr-1.5 h-4 w-4" />
@@ -263,7 +296,7 @@ export default function TeamsPage() {
           <button
             type="button"
             className="btn-brutal mt-6"
-            onClick={() => router.push('/agents/new')}
+            onClick={() => setIsCreateModalOpen(true)}
           >
             创建第一个 Agent
           </button>
@@ -312,10 +345,8 @@ export default function TeamsPage() {
                           <AgentCard
                             key={agent.id}
                             agent={agent}
-                            onClick={(id) => router.push(`/agents/${id}`)}
-                            onEdit={(id) =>
-                              router.push(`/agents/${id}/edit`)
-                            }
+                            onClick={(id) => setPanelAgentId(id)}
+                            onEdit={(id) => setPanelAgentId(id)}
                             onDelete={(_id) => {
                               const a = groupAgents.find((g) => g.id === _id);
                               if (a) setDeleteTarget(a);
@@ -330,7 +361,7 @@ export default function TeamsPage() {
                         </p>
                         <button
                           type="button"
-                          onClick={() => router.push('/agents/new')}
+                          onClick={() => setIsCreateModalOpen(true)}
                           className="btn-brutal btn-brutal-sm mt-3"
                         >
                           <Plus className="mr-1 h-3.5 w-3.5" />
@@ -375,6 +406,91 @@ export default function TeamsPage() {
               className="btn-brutal btn-brutal-sm bg-brutal-red-light"
             >
               {isDeleting ? '删除中...' : '确认删除'}
+            </button>
+          </DialogFooter>
+        </div>
+      </Dialog>
+
+      {/* v1.5: Create Agent Modal */}
+      <Dialog
+        open={isCreateModalOpen}
+        onOpenChange={(opened) => {
+          if (!opened) {
+            setIsCreateModalOpen(false);
+            setCreateName('');
+            setCreateDescription('');
+          }
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>创建 Agent</DialogTitle>
+          <DialogCloseButton onClick={() => {
+            setIsCreateModalOpen(false);
+            setCreateName('');
+            setCreateDescription('');
+          }} />
+        </DialogHeader>
+        <div className="mt-4 px-5 pb-5">
+          <DialogDescription>
+            创建新的 AI Agent，之后可在详情中配置 Runtime、System Prompt 等。
+          </DialogDescription>
+          <div className="mt-4 space-y-4">
+            <div>
+              <label htmlFor="create-name" className="block font-heading text-sm font-bold mb-1">
+                名称 <span className="text-brutal-red">*</span>
+              </label>
+              <input
+                id="create-name"
+                type="text"
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleCreateAgent();
+                  }
+                }}
+                placeholder="例如：代码审查员"
+                disabled={isCreating}
+                className="input-brutal w-full"
+                autoFocus
+              />
+            </div>
+            <div>
+              <label htmlFor="create-description" className="block font-heading text-sm font-bold mb-1">
+                描述 <span className="text-xs text-muted-foreground font-normal">(可选)</span>
+              </label>
+              <input
+                id="create-description"
+                type="text"
+                value={createDescription}
+                onChange={(e) => setCreateDescription(e.target.value)}
+                placeholder="简要描述 Agent 的职责"
+                disabled={isCreating}
+                className="input-brutal w-full"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => {
+                setIsCreateModalOpen(false);
+                setCreateName('');
+                setCreateDescription('');
+              }}
+              disabled={isCreating}
+              className="btn-brutal btn-brutal-sm"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={handleCreateAgent}
+              disabled={isCreating || !createName.trim()}
+              className="btn-brutal btn-brutal-sm btn-brutal-pink"
+            >
+              {isCreating ? '创建中...' : '创建 Agent'}
             </button>
           </DialogFooter>
         </div>
@@ -464,10 +580,8 @@ export default function TeamsPage() {
                         <AgentCard
                           key={agent.id}
                           agent={agent}
-                          onClick={(id) => router.push(`/agents/${id}`)}
-                          onEdit={(id) =>
-                            router.push(`/agents/${id}/edit`)
-                          }
+                          onClick={(id) => setPanelAgentId(id)}
+                          onEdit={(id) => setPanelAgentId(id)}
                           onDelete={(_id) => {
                                     const a = groupAgents.find((g) => g.id === _id);
                                     if (a) setDeleteTarget(a);
@@ -483,6 +597,14 @@ export default function TeamsPage() {
         </div>
       )}
       </div>
+
+      {/* v1.5: Agent Detail Panel */}
+      {panelAgentId && (
+        <AgentDetailPanel
+          agentId={panelAgentId}
+          onClose={() => setPanelAgentId(null)}
+        />
+      )}
     </AppFrame>
   );
 }

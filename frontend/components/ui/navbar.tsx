@@ -6,7 +6,6 @@ import {
   Hash,
   ClipboardList,
   Users,
-  Bot,
   Monitor,
   Settings,
 } from 'lucide-react';
@@ -18,7 +17,6 @@ const NAV_ITEMS = [
   { href: '/dashboard', icon: Hash, label: '频道' },
   { href: '/tasks', icon: ClipboardList, label: '任务看板' },
   { href: '/teams', icon: Users, label: '团队' },
-  { href: '/agents', icon: Bot, label: 'Agent 管理' },
   { href: '/computers', icon: Monitor, label: '电脑管理' },
 ] as const;
 

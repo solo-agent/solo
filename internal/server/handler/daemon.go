@@ -68,7 +68,12 @@ func (h *DaemonHandler) Register(w http.ResponseWriter, r *http.Request) {
 	// Persist computer record via ComputerService
 	if h.computerSvc != nil {
 		daemonURL := fmt.Sprintf("http://%s:%d", req.Host, req.Port)
-		if err := h.computerSvc.UpsertComputerByDaemonID(r.Context(), req.DaemonID, daemonURL, ""); err != nil {
+		sysinfo := service.ComputerSystemInfo{
+			OS:       req.SystemInfo.OS,
+			Hostname: req.SystemInfo.Hostname,
+			IP:       req.SystemInfo.IP,
+		}
+		if err := h.computerSvc.UpsertComputerByDaemonID(r.Context(), req.DaemonID, daemonURL, "", sysinfo); err != nil {
 			slog.Error("failed to upsert computer on register",
 				"request_id", reqID,
 				"daemon_id", req.DaemonID,
@@ -124,7 +129,12 @@ func (h *DaemonHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		info, found := h.dm.GetDaemon(req.DaemonID)
 		if found {
 			daemonURL := fmt.Sprintf("http://%s:%d", info.Host, info.Port)
-			if err := h.computerSvc.UpdateHeartbeat(r.Context(), req.DaemonID, daemonURL, req.AgentIDs); err != nil {
+			sysinfo := service.ComputerSystemInfo{
+				OS:       req.SystemInfo.OS,
+				Hostname: req.SystemInfo.Hostname,
+				IP:       req.SystemInfo.IP,
+			}
+			if err := h.computerSvc.UpdateHeartbeat(r.Context(), req.DaemonID, daemonURL, req.AgentIDs, sysinfo); err != nil {
 				slog.Error("failed to update computer heartbeat in DB",
 					"request_id", reqID,
 					"daemon_id", req.DaemonID,

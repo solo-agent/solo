@@ -1,11 +1,15 @@
 // ============================================================================
-// Sidebar — channel list + DM list sidebar (nav links moved to NavBar)
+// Sidebar — channel list + DM list sidebar (v1.5: + Inbox)
 // ============================================================================
 
 'use client';
 
+import { useState, useCallback } from 'react';
 import { ChannelList } from './channel-list';
 import { DMList } from './dm-list';
+import { InboxBadge } from '@/components/inbox/inbox-badge';
+import { InboxPanel } from '@/components/inbox/inbox-panel';
+import { useInboxUnread } from '@/lib/hooks/use-inbox-unread';
 import type { Channel, DMChannel } from '@/lib/types';
 
 interface SidebarProps {
@@ -41,6 +45,18 @@ export function Sidebar({
   routeIcon: Icon,
   routeTitle = 'Solo',
 }: SidebarProps) {
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const { unreadCount, isLoading: unreadLoading } = useInboxUnread();
+
+  const handleToggleInbox = useCallback(() => {
+    setInboxOpen((prev) => !prev);
+  }, []);
+
+  const handleMarkRead = useCallback(() => {
+    // Trigger a refetch of unread count — the panel's POST already happened
+    setInboxOpen(false);
+  }, []);
+
   return (
     <aside className="flex w-50 flex-col bg-sidebar text-sidebar-foreground border-r-2 border-sidebar-border flex-shrink-0">
       {/* Route-aware header */}
@@ -50,6 +66,23 @@ export function Sidebar({
           <span className="font-heading font-bold text-sidebar-foreground text-sm truncate">{routeTitle}</span>
         </div>
       </div>
+
+      {/* Inbox badge — above channel list */}
+      <InboxBadge
+        unreadCount={unreadLoading ? 0 : unreadCount.total}
+        isOpen={inboxOpen}
+        onClick={handleToggleInbox}
+      />
+
+      {/* Inbox panel — shown below badge when open */}
+      {inboxOpen && (
+        <div className="border-b-2 border-sidebar-border">
+          <InboxPanel
+            onClose={() => setInboxOpen(false)}
+            onMarkRead={handleMarkRead}
+          />
+        </div>
+      )}
 
       {/* Scrollable channel + DM area */}
       <div className="flex-1 overflow-y-auto px-2 py-3">

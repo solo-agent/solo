@@ -60,8 +60,16 @@ export default function DashboardPage() {
 function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  // ---- URL params drive the entire view ----
   const channelFromUrl = searchParams.get('channel');
-  const messageFromUrl = searchParams.get('message');
+  const dmFromUrl = searchParams.get('dm');
+  const threadFromUrl = searchParams.get('thread');
+
+  // Derive view mode entirely from URL
+  const viewMode = channelFromUrl ? 'channel' as const : dmFromUrl ? 'dm' as const : null;
+  const selectedChannelId = channelFromUrl;
+  const selectedDmId = dmFromUrl;
 
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const {
@@ -80,7 +88,6 @@ function DashboardContent() {
     createOrGetDM,
     markAsRead,
     refetchDMs,
-    activeDMId,
     selectDM,
     messages: dmMessages,
     isLoadingMessages: dmMessagesLoading,
@@ -97,11 +104,6 @@ function DashboardContent() {
   } = useDM();
 
   const { showToast } = useToast();
-
-  // --- View mode: 'channel' | 'dm' | null ---
-  const [viewMode, setViewMode] = useState<'channel' | 'dm' | null>(null);
-  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
-  const [selectedDmId, setSelectedDmId] = useState<string | null>(null);
 
   // ---- DM Tasks (v1.2 Phase 2+3) ----
   const {
@@ -191,41 +193,15 @@ function DashboardContent() {
     [dmConvertMessageToTask],
   );
 
-  // ---- URL param: auto-select channel ----
-  const [urlChannelLoaded, setUrlChannelLoaded] = useState(false);
-
-  // When channel param is present in URL, select it
+  // ---- Select DM (URL-driven) ----
   useEffect(() => {
-    if (channelFromUrl && channels.length > 0 && !urlChannelLoaded) {
-      const found = channels.find((c) => c.id === channelFromUrl);
-      if (found) {
-        setViewMode('channel');
-        setSelectedChannelId(channelFromUrl);
-        setUrlChannelLoaded(true);
-      }
+    if (dmFromUrl) {
+      selectDM(dmFromUrl);
+      markAsRead(dmFromUrl);
     }
-  }, [channelFromUrl, channels, urlChannelLoaded]);
-
-  // Auto-select first channel when channels load (if no URL param)
-  useEffect(() => {
-    if (!channelsLoading && channels.length > 0 && viewMode === null) {
-      // If URL has channel param, wait for it to be handled
-      if (channelFromUrl && !urlChannelLoaded) return;
-
-      const stillExists = channels.some((c) => c.id === selectedChannelId);
-      if (!stillExists) {
-        setViewMode('channel');
-        setSelectedChannelId(channelFromUrl && channels.some((c) => c.id === channelFromUrl)
-          ? channelFromUrl
-          : channels[0].id);
-      }
-    }
-    if (!channelsLoading && channels.length === 0 && dmChannels.length === 0) {
-      setViewMode(null);
-      setSelectedChannelId(null);
-      setSelectedDmId(null);
-    }
-  }, [channels, channelsLoading, dmChannels, viewMode, selectedChannelId]);
+    // Only run when dmFromUrl changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dmFromUrl]);
 
   const selectedChannel: Channel | undefined = channels.find(
     (c) => c.id === selectedChannelId,
@@ -235,21 +211,42 @@ function DashboardContent() {
     (dm) => dm.id === selectedDmId,
   );
 
-  // --- Channel selection ---
+  // ---- URL-driven channel selection ----
   const handleSelectChannel = useCallback((channelId: string) => {
-    setViewMode('channel');
-    setSelectedChannelId(channelId);
-  }, []);
+    router.push(`/dashboard?channel=${channelId}`);
+  }, [router]);
 
-  // --- DM selection ---
+  // ---- URL-driven DM selection ----
   const handleSelectDM = useCallback((dmId: string) => {
-    setViewMode('dm');
-    setSelectedDmId(dmId);
+    router.push(`/dashboard?dm=${dmId}`);
     selectDM(dmId);
     markAsRead(dmId);
-  }, [selectDM, markAsRead]);
+  }, [router, selectDM, markAsRead]);
 
-  // --- create channel modal ---
+  // ---- Thread URL management ----
+  const handleChannelThreadChange = useCallback(
+    (threadId: string | null) => {
+      if (threadId && channelFromUrl) {
+        router.push(`/dashboard?channel=${channelFromUrl}&thread=${threadId}`);
+      } else if (channelFromUrl) {
+        router.push(`/dashboard?channel=${channelFromUrl}`);
+      }
+    },
+    [router, channelFromUrl],
+  );
+
+  const handleDMThreadChange = useCallback(
+    (threadId: string | null) => {
+      if (threadId && dmFromUrl) {
+        router.push(`/dashboard?dm=${dmFromUrl}&thread=${threadId}`);
+      } else if (dmFromUrl) {
+        router.push(`/dashboard?dm=${dmFromUrl}`);
+      }
+    },
+    [router, dmFromUrl],
+  );
+
+  // ---- create channel modal ----
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   const handleCreateChannel = useCallback(
@@ -260,7 +257,7 @@ function DashboardContent() {
     [createChannel, handleSelectChannel],
   );
 
-  // --- create DM modal ---
+  // ---- create DM modal ----
   const [isCreateDMModalOpen, setIsCreateDMModalOpen] = useState(false);
 
   const handleCreateDM = useCallback(
@@ -272,28 +269,27 @@ function DashboardContent() {
     [createOrGetDM, handleSelectDM],
   );
 
-  // --- delete channel dialog ---
+  // ---- delete channel dialog ----
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const deleteTarget = channels.find((c) => c.id === deleteTargetId);
 
   const handleDeleteChannel = useCallback(
     async (channelId: string) => {
       if (viewMode === 'channel' && selectedChannelId === channelId) {
-        // If the deleted channel is currently selected, try to select another
+        // If the deleted channel is currently selected, navigate away
         const remaining = channels.filter((c) => c.id !== channelId);
         if (remaining.length > 0) {
           handleSelectChannel(remaining[0].id);
         } else {
-          setViewMode(null);
-          setSelectedChannelId(null);
+          router.push('/dashboard');
         }
       }
       await deleteChannel(channelId);
     },
-    [viewMode, selectedChannelId, channels, handleSelectChannel, deleteChannel],
+    [viewMode, selectedChannelId, channels, handleSelectChannel, deleteChannel, router],
   );
 
-  // --- auth guard ---
+  // ---- auth guard ----
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
       router.push("/auth/login");
@@ -313,23 +309,38 @@ function DashboardContent() {
 
   // Determine which view to show
   const renderMainContent = () => {
-    if (viewMode === 'channel' && selectedChannel) {
-      const threadMsgId =
-        selectedChannel.id === channelFromUrl ? messageFromUrl : null;
+    if (viewMode === 'channel') {
+      // Channel is selected via URL but may not be loaded yet
+      if (!selectedChannel) {
+        return (
+          <div className="flex flex-1 items-center justify-center">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          </div>
+        );
+      }
       return (
         <ChannelView
-          key={selectedChannel.id}
+          key={`chan-${selectedChannel.id}`}
           channel={selectedChannel}
-          initialThreadMessageId={threadMsgId ?? undefined}
+          initialThreadMessageId={threadFromUrl ?? undefined}
+          onThreadChange={handleChannelThreadChange}
         />
       );
     }
 
-    if (viewMode === 'dm' && selectedDM) {
+    if (viewMode === 'dm') {
+      if (!selectedDM) {
+        return (
+          <div className="flex flex-1 items-center justify-center">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          </div>
+        );
+      }
       return (
         <DMView
-          key={selectedDM.id}
+          key={`dm-${selectedDM.id}`}
           dm={selectedDM}
+          initialThreadMessageId={threadFromUrl ?? undefined}
           messages={dmMessages}
           isLoading={dmMessagesLoading}
           error={dmMessagesError}
@@ -354,11 +365,12 @@ function DashboardContent() {
           onCreateTask={handleDMCreateTask}
           onConvertToTask={handleDMConvertToTask}
           onTaskCreated={dmRefetchTasks}
+          onThreadChange={handleDMThreadChange}
         />
       );
     }
 
-    // Empty/no-selection state
+    // Empty/no-selection state (default: no URL params)
     return (
       <div className="flex flex-1 items-center justify-center bg-muted/5">
         <div className="text-center">

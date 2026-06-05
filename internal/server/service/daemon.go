@@ -509,15 +509,23 @@ func hasCapability(caps []string, cap string) bool {
 
 // --- Daemon Register/Heartbeat request types ---
 
+// DaemonSystemInfo is the system info reported by the daemon.
+type DaemonSystemInfo struct {
+	OS       string `json:"os"`
+	Hostname string `json:"hostname"`
+	IP       string `json:"ip"`
+}
+
 type DaemonRegisterRequest struct {
-	DaemonID      string   `json:"daemon_id"`
-	Host          string   `json:"host"`
-	Port          int      `json:"port"`
-	Version       string   `json:"version"`
-	Capabilities  []string `json:"capabilities"`
-	MaxConcurrent int      `json:"max_concurrent"`
-	CurrentLoad   int32    `json:"current_load"`
-	AgentTypes    []string `json:"agent_types"`
+	DaemonID      string           `json:"daemon_id"`
+	Host          string           `json:"host"`
+	Port          int              `json:"port"`
+	Version       string           `json:"version"`
+	Capabilities  []string         `json:"capabilities"`
+	MaxConcurrent int              `json:"max_concurrent"`
+	CurrentLoad   int32            `json:"current_load"`
+	AgentTypes    []string         `json:"agent_types"`
+	SystemInfo    DaemonSystemInfo `json:"system_info"`
 }
 
 type DaemonRegisterResponse struct {
@@ -526,12 +534,13 @@ type DaemonRegisterResponse struct {
 }
 
 type DaemonHeartbeatRequest struct {
-	DaemonID    string   `json:"daemon_id"`
-	Load        int32    `json:"load"`
-	MaxLoad     int      `json:"max_load"`
-	UptimeSec   int64    `json:"uptime_seconds"`
-	ActiveTasks []string `json:"active_tasks"`
-	AgentIDs    []string `json:"agent_ids,omitempty"`
+	DaemonID    string           `json:"daemon_id"`
+	Load        int32            `json:"load"`
+	MaxLoad     int              `json:"max_load"`
+	UptimeSec   int64            `json:"uptime_seconds"`
+	ActiveTasks []string         `json:"active_tasks"`
+	AgentIDs    []string         `json:"agent_ids,omitempty"`
+	SystemInfo  DaemonSystemInfo `json:"system_info"`
 }
 
 type DaemonHeartbeatResponse struct {

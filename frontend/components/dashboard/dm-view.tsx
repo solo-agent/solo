@@ -57,6 +57,10 @@ interface DMViewProps {
   onCreateTask?: (title: string) => Promise<void>;
   onConvertToTask?: (channelId: string, messageId: string, title?: string) => Promise<Task>;
   onTaskCreated?: () => void;
+  /** v1.5: Called when thread opens/closes so the parent can sync to URL */
+  onThreadChange?: (threadId: string | null) => void;
+  /** v1.5: Initial thread message ID from URL — opens ThreadPanel on mount or on change */
+  initialThreadMessageId?: string;
 }
 
 // ---- Helpers ----
@@ -101,6 +105,8 @@ export function DMView({
   onCreateTask,
   onConvertToTask,
   onTaskCreated,
+  onThreadChange,
+  initialThreadMessageId,
 }: DMViewProps) {
   const name = getDisplayName(dm);
   const isAgent = isAgentDM(dm);
@@ -117,6 +123,17 @@ export function DMView({
   useEffect(() => {
     if (viewTab === 'tasks') refetchTasks?.();
   }, [viewTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // v1.5: Handle initialThreadMessageId — open thread panel when URL param changes
+  useEffect(() => {
+    if (!initialThreadMessageId || !dm) return;
+    const found = messages.find((m) => m.id === initialThreadMessageId);
+    if (found) {
+      setThreadMessage(found);
+      const task = tasks?.find((t) => t.message_id === initialThreadMessageId || t.id === initialThreadMessageId);
+      if (task) setThreadTask(task);
+    }
+  }, [initialThreadMessageId, dm, messages, tasks]);
 
   // Sync threadTask when tasks list changes (align with channel-view pattern)
   useEffect(() => {
@@ -194,7 +211,8 @@ export function DMView({
   const handleThreadClose = useCallback(() => {
     setThreadMessage(null);
     setThreadTask(null);
-  }, []);
+    onThreadChange?.(null);
+  }, [onThreadChange]);
 
   const handleMessageClick = useCallback(
     (message: Message) => {
@@ -206,15 +224,15 @@ export function DMView({
           display_name: task?.creator_name || message.display_name,
         });
         setThreadTask(task ?? null);
+        onThreadChange?.(message.id);
       }
     },
-    [tasks, refetchTasks],
+    [tasks, refetchTasks, onThreadChange],
   );
 
   const handleTaskClickFromBoard = useCallback(
     (task: Task) => {
       if (!task.message_id) return;
-      refetchTasks?.();
       // Use task.message_id to find the original message
       const existingMsg = messages.find((m) => m.id === task.message_id);
       if (existingMsg) {
@@ -239,8 +257,9 @@ export function DMView({
         });
       }
       setThreadTask(task);
+      onThreadChange?.(task.message_id);
     },
-    [messages, refetchTasks],
+    [messages, refetchTasks, onThreadChange],
   );
 
   const handleAsTask = useCallback(
@@ -253,11 +272,12 @@ export function DMView({
           display_name: task?.creator_name || message.display_name,
         });
         setThreadTask(task);
+        onThreadChange?.(message.id);
       } catch {
         // handled silently
       }
     },
-    [dm.id, onConvertToTask],
+    [dm.id, onConvertToTask, onThreadChange],
   );
 
   return (
@@ -508,12 +528,13 @@ export function DMView({
         </div>
       </Dialog>
 
-      {/* ThreadPanel — opens when a task message is clicked */}
-      {threadMessage && (
-        <div
-          className="flex-shrink-0 bg-brutal-cream overflow-hidden relative border-l-2 border-black"
-          style={{ width: threadPanelWidth }}
-        >
+      {/* ThreadPanel — always mounted for smooth width transition */}
+      <div
+        className="flex-shrink-0 bg-brutal-cream overflow-hidden relative transition-all duration-300 ease-out border-l-2 border-transparent"
+        style={{ width: threadMessage ? threadPanelWidth : 0, borderLeftColor: threadMessage ? '#000' : 'transparent' }}
+      >
+        {/* Resize handle — only interactive when panel is open */}
+        {threadMessage && (
           <div
             className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-pink/50 transition-colors z-10"
             onMouseDown={(e) => {
@@ -532,6 +553,8 @@ export function DMView({
               document.addEventListener('mouseup', onUp);
             }}
           />
+        )}
+        {threadMessage && (
           <Suspense
             fallback={
               <div className="flex h-full w-[400px] items-center justify-center">
@@ -548,8 +571,8 @@ export function DMView({
               replyCount={threadMessage.reply_count ?? 0}
             />
           </Suspense>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

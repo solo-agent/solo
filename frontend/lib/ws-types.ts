@@ -71,7 +71,9 @@ export type WSServerEvent =
   | { type: 'task.deleted'; id: string; channel_id: string; task_number: number }
   // ---- DM 事件 ----
   | { type: 'dm.message.new'; id: string; dm_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; created_at: string; attachments?: Attachment[]; thread_id?: string }
-  | { type: 'dm.updated'; dm_id: string; last_message?: { content: string; sender_id: string; sender_name: string; created_at: string }; last_reply_at?: string; unread_count: number };
+  | { type: 'dm.updated'; dm_id: string; last_message?: { content: string; sender_id: string; sender_name: string; created_at: string }; last_reply_at?: string; unread_count: number }
+  // ---- Inbox events (v1.5) ----
+  | { type: 'inbox.updated'; };
 
 /** 客户端发送的 WebSocket 命令 */
 export type WSClientCommand =

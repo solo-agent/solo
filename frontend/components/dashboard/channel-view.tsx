@@ -99,9 +99,11 @@ interface ChannelViewProps {
   channel: Channel;
   /** Optional message ID to open ThreadPanel for on mount */
   initialThreadMessageId?: string;
+  /** v1.5: Called when thread opens/closes so the parent can sync to URL */
+  onThreadChange?: (threadId: string | null) => void;
 }
 
-export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProps) {
+export function ChannelView({ channel, initialThreadMessageId, onThreadChange }: ChannelViewProps) {
   const {
     messages,
     isLoading,
@@ -177,11 +179,6 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
   useEffect(() => {
     if (channelViewTab === 'tasks') refetchTasks();
   }, [channelViewTab]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Refetch tasks when ThreadPanel opens via reply click
-  useEffect(() => {
-    if (threadMessage?.id) refetchTasks();
-  }, [threadMessage?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Agent thinking/typing/streaming status tracking (SOLO-47-F, SOLO-52-F) ----
   const [thinkingAgentNames, setThinkingAgentNames] = useState<string[]>([]);
@@ -291,7 +288,6 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
   const handleTaskClickInTab = useCallback(
     (task: Task) => {
       if (!task.message_id) return;
-      refetchTasks();
 
       // Find message in the already-loaded channel messages
       const existingMsg = messages.find((m) => m.id === task.message_id);
@@ -301,15 +297,13 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
           display_name: task.creator_name || existingMsg.display_name,
         });
         setThreadTask(task);
+        onThreadChange?.(task.message_id);
         return;
       }
 
-      // Message not in current loaded set — switch to messages tab
-      // and the message may be loaded via pagination
-      setChannelViewTab('messages');
+      // Message not in current loaded set — ThreadPanel loads its own
+      // data via useThread so a synthetic parent message is sufficient
       setThreadTask(task);
-      // Construct a minimal message object for the ThreadPanel
-      // The useThread hook will load the actual thread messages
       setThreadMessage({
         id: task.message_id,
         channel_id: channel.id,
@@ -323,14 +317,25 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
         task_status: task.status,
         task_claimer_name: task.claimer_name || task.assignee_name,
       });
+      onThreadChange?.(task.message_id);
     },
-    [channel.id, messages, refetchTasks],
+    [channel.id, messages, onThreadChange],
   );
 
   const handleThreadClose = useCallback(() => {
     setThreadMessage(null);
     setThreadTask(null);
-  }, []);
+    onThreadChange?.(null);
+  }, [onThreadChange]);
+
+  // v1.5: Wrap onReply to also sync thread state to URL
+  const handleReply = useCallback(
+    (message: Message) => {
+      setThreadMessage(message);
+      onThreadChange?.(message.id);
+    },
+    [onThreadChange],
+  );
 
   // P25-08-F: Called by ThreadPanel after successfully marking thread as read
   const handleThreadMarkRead = useCallback(() => {
@@ -527,7 +532,7 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
               error={error}
               onRetry={(id, content) => retryMessage(id, content)}
               onCancel={(id) => cancelMessage(id)}
-              onReply={setThreadMessage}
+              onReply={handleReply}
               onEdit={(id, content) => editMessage(id, content)}
               onDelete={(id) => deleteMessage(id)}
               onAsTask={handleAsTaskOpen}
@@ -600,13 +605,13 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
         />
       )}
 
-      {/* Thread panel (lazy-loaded, SOLO-63-F) */}
-      {threadMessage && (
-        <div
-          className="flex-shrink-0 bg-brutal-cream overflow-hidden relative"
-          style={{ width: threadPanelWidth }}
-        >
-          {/* Resize handle */}
+      {/* Thread panel (lazy-loaded, SOLO-63-F) — always mounted for smooth width transition */}
+      <div
+        className="flex-shrink-0 bg-brutal-cream overflow-hidden relative transition-all duration-300 ease-out border-l-2 border-transparent"
+        style={{ width: threadMessage ? threadPanelWidth : 0, borderLeftColor: threadMessage ? 'var(--color-border, #000)' : 'transparent' }}
+      >
+        {/* Resize handle — only interactive when panel is open */}
+        {threadMessage && (
           <div
             className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-pink/50 transition-colors z-10"
             onMouseDown={(e) => {
@@ -625,6 +630,8 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
               document.addEventListener('mouseup', onUp);
             }}
           />
+        )}
+        {threadMessage && (
           <Suspense
             fallback={
               <div className="flex h-full items-center justify-center">
@@ -643,8 +650,8 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
               onMarkRead={handleThreadMarkRead}
             />
           </Suspense>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Add Agent to Channel modal */}
       <AddAgentModal

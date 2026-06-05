@@ -273,6 +273,7 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 	filter := service.TaskFilter{
 		Status:       r.URL.Query().Get("status"),
 		ClaimerID:    r.URL.Query().Get("claimer_id"),
+		CreatorID:    r.URL.Query().Get("creator_id"),
 		ParentTaskID: r.URL.Query().Get("parent_id"),
 	}
 
@@ -930,8 +931,9 @@ func (h *TaskHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	claimerID := r.URL.Query().Get("claimer_id")
 	channelID := r.URL.Query().Get("channel_id")
+	creatorID := r.URL.Query().Get("creator_id")
 
-	tasks, err := h.svc.ListAllUserTasks(r.Context(), userID, channelID, status, claimerID)
+	tasks, err := h.svc.ListAllUserTasks(r.Context(), userID, channelID, status, claimerID, creatorID)
 	if err != nil {
 		slog.Error("failed to list all tasks", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list tasks")

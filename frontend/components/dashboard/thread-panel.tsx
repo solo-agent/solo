@@ -18,8 +18,7 @@ import {
   useState,
   useCallback,
 } from 'react';
-import { useRouter } from 'next/navigation';
-import { X, AlertCircle, RefreshCw, Send, ExternalLink, MessageSquare } from 'lucide-react';
+import { X, AlertCircle, RefreshCw, Send, MessageSquare } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -543,7 +542,6 @@ function TaskMetaBar({
   onClaim?: (task: Task) => void;
   onUnclaim?: (task: Task) => void;
 }) {
-  const router = useRouter();
   const badgeClass = STATUS_BADGE_COLORS[task.status] ?? STATUS_BADGE_COLORS.todo;
   const statusLabel = STATUS_LABELS[task.status] ?? task.status;
   const priorityLabel = PRIORITY_LABELS[task.priority] ?? task.priority;
@@ -556,7 +554,7 @@ function TaskMetaBar({
 
   return (
     <div className="border-b-2 border-black bg-brutal-cream px-6 py-3">
-      {/* Line 1: task number + title + status badge + "View in Kanban" link */}
+      {/* Line 1: task number + title + status badge */}
       <div className="flex items-center gap-2 flex-wrap mb-1.5">
         {taskNum && (
           <span className="font-mono text-xs font-bold text-muted-foreground">
@@ -569,14 +567,6 @@ function TaskMetaBar({
         <span className={cn('border-2 px-2 py-0.5 text-xs font-bold shadow-brutal-sm', badgeClass)}>
           {statusLabel}
         </span>
-        <a
-          href={`/dashboard?channel=${task.channel_id}&tab=tasks`}
-          className="ml-auto flex items-center gap-1 font-mono text-[11px] text-brutal-pink hover:text-brutal-pink/80 transition-colors flex-shrink-0"
-          title="在任务看板中查看"
-        >
-          <ExternalLink className="h-3 w-3" />
-          看板
-        </a>
       </div>
 
       {/* Line 2: priority + claimer + claim/unclaim */}
