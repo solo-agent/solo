@@ -75,7 +75,7 @@ function DMListEmpty({ onCreateDM }: { onCreateDM: () => void }) {
       <p className="text-sm text-sidebar-muted-foreground">还没有私信</p>
       <button
         onClick={onCreateDM}
-        className="inline-flex items-center gap-1 rounded-md bg-sidebar-accent px-3 py-1 text-sm font-medium text-sidebar-accent-foreground hover:bg-sidebar-accent/80 transition-colors"
+        className="inline-flex items-center gap-1 border-2 border-black bg-brutal-pink px-3 py-1 text-sm font-medium text-black shadow-brutal-sm hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
       >
         <Plus className="h-3.5 w-3.5" />
         发起私信
@@ -256,7 +256,7 @@ export function DMList({
         </button>
         <button
           onClick={onCreateDM}
-          className="mr-2 flex h-5 w-5 items-center justify-center rounded-sm text-sidebar-muted-foreground group-hover:text-black hover:bg-brutal-pink/40 active:bg-brutal-pink active:text-black active:ring-2 active:ring-black transition-all cursor-pointer"
+          className="mr-2 flex h-5 w-5 items-center justify-center border-2 border-transparent text-sidebar-muted-foreground group-hover:border-black group-hover:text-black hover:bg-brutal-pink/40 active:bg-brutal-pink active:text-black active:ring-2 active:ring-black transition-all cursor-pointer"
           aria-label="发起私信"
         >
           <Plus className="h-3.5 w-3.5" />

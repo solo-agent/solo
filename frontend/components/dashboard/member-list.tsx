@@ -22,11 +22,11 @@ function MemberItem({ member, onRemove }: { member: ChannelMember; onRemove?: (i
   const isAgent = member.member_type === 'agent';
   const [confirming, setConfirming] = useState(false);
   const statusColor = {
-    online: 'fill-green-500 text-green-500',
-    offline: 'fill-gray-300 text-gray-300',
-    thinking: 'fill-yellow-500 text-yellow-500',
-    typing: 'fill-blue-500 text-blue-500',
-  }[member.status] || 'fill-gray-300 text-gray-300';
+    online: 'fill-brutal-lime text-brutal-lime',
+    offline: 'fill-brutal-stone text-brutal-stone',
+    thinking: 'fill-brutal-yellow text-brutal-yellow',
+    typing: 'fill-brutal-cyan text-brutal-cyan',
+  }[member.status] || 'fill-brutal-stone text-brutal-stone';
 
   const statusLabel = {
     online: '在线',
@@ -36,7 +36,7 @@ function MemberItem({ member, onRemove }: { member: ChannelMember; onRemove?: (i
   }[member.status] || '离线';
 
   return (
-    <div className="group flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-accent/50">
+    <div className="group flex items-center gap-2 border-2 border-transparent px-2 py-1.5 transition-colors hover:border-black hover:bg-brutal-pink/20">
       {/* Icon / Avatar */}
       {isAgent ? (
         <PixelAvatar agentId={member.member_id} size="sm" />
