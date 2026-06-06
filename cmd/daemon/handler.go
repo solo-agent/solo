@@ -1334,7 +1334,8 @@ func (h *daemonHandler) HandleWorkspaceList(w http.ResponseWriter, r *http.Reque
 
 	workspaceDir := h.workspaceManager.WorkspaceDir(agentID)
 	fullPath := filepath.Clean(filepath.Join(workspaceDir, relPath))
-	if !strings.HasPrefix(fullPath, workspaceDir) {
+	rel, err := filepath.Rel(workspaceDir, fullPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path traversal not allowed"})
 		return
 	}
@@ -1357,7 +1358,8 @@ func (h *daemonHandler) HandleWorkspaceList(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path resolution failed"})
 		return
 	}
-	if !strings.HasPrefix(resolvedPath, workspaceDir) {
+	resolvedRel, err := filepath.Rel(workspaceDir, resolvedPath)
+	if err != nil || strings.HasPrefix(resolvedRel, "..") {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path traversal not allowed"})
 		return
 	}
@@ -1393,7 +1395,8 @@ func (h *daemonHandler) HandleWorkspaceRead(w http.ResponseWriter, r *http.Reque
 
 	workspaceDir := h.workspaceManager.WorkspaceDir(agentID)
 	fullPath := filepath.Clean(filepath.Join(workspaceDir, relPath))
-	if !strings.HasPrefix(fullPath, workspaceDir) {
+	rel, err := filepath.Rel(workspaceDir, fullPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path traversal not allowed"})
 		return
 	}
@@ -1416,7 +1419,8 @@ func (h *daemonHandler) HandleWorkspaceRead(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path resolution failed"})
 		return
 	}
-	if !strings.HasPrefix(resolvedPath, workspaceDir) {
+	resolvedRel, err := filepath.Rel(workspaceDir, resolvedPath)
+	if err != nil || strings.HasPrefix(resolvedRel, "..") {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path traversal not allowed"})
 		return
 	}
@@ -1472,7 +1476,10 @@ func buildFileTree(dirPath, basePath string, depth int) (workspaceNode, error) {
 		name = "."
 	}
 
-	relPath, _ := filepath.Rel(basePath, dirPath)
+	relPath, err := filepath.Rel(basePath, dirPath)
+	if err != nil {
+		relPath = filepath.Base(dirPath)
+	}
 	node := workspaceNode{
 		Type:     "directory",
 		Name:     name,
@@ -1524,7 +1531,10 @@ func buildFileNode(filePath, basePath string) (workspaceNode, error) {
 		return workspaceNode{}, err
 	}
 
-	relPath, _ := filepath.Rel(basePath, filePath)
+	relPath, err := filepath.Rel(basePath, filePath)
+	if err != nil {
+		relPath = filepath.Base(filePath)
+	}
 	node := workspaceNode{
 		Type: "file",
 		Name: info.Name(),
