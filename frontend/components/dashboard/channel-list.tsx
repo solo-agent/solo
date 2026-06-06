@@ -77,7 +77,7 @@ function ChannelItem({
         }
       }}
       className={cn(
-        'group flex cursor-pointer items-center justify-between px-2 py-1.5 text-sm transition-all',
+        'group flex cursor-pointer items-center justify-between px-3 py-1.5 text-sm transition-all',
         isSelected
           ? 'bg-brutal-pink text-black border-2 border-black shadow-brutal-sm'
           : 'text-black hover:bg-brutal-pink/60 border-2 border-transparent',
@@ -121,12 +121,12 @@ export function ChannelList({
 }: ChannelListProps) {
   return (
     <div>
-      {/* Section header */}
-      <div className="mb-2 flex items-center justify-between">
+      {/* Section header — matches TeamsLeftColumn (px-3 py-2, no mb) */}
+      <div className="flex items-center justify-between">
         <button
           type="button"
           onClick={onToggleExpand}
-          className="flex flex-1 items-center gap-1.5 px-2 py-2 text-left text-xs font-bold uppercase tracking-wider text-sidebar-muted-foreground font-heading hover:bg-brutal-pink/40"
+          className="flex flex-1 items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider text-sidebar-muted-foreground font-heading hover:bg-brutal-pink/40"
           aria-label="展开或折叠 频道"
           aria-expanded={isExpanded}
         >

@@ -22,15 +22,15 @@ export function InboxBadge({ unreadCount, isSelected, onClick }: InboxBadgeProps
       type="button"
       onClick={onClick}
       className={cn(
-        'flex items-center justify-between w-full px-2 py-2 text-sm font-body transition-colors',
+        'flex items-center justify-between w-full px-3 py-2 text-sm font-body transition-colors',
         isSelected
           ? 'bg-brutal-pink text-black'
-          : 'text-black hover:bg-brutal-pink/40',
+          : 'text-muted-foreground hover:bg-brutal-pink/40',
       )}
       aria-label={`收件箱${unreadCount > 0 ? `，${unreadCount} 条未读` : ''}`}
     >
-      <span className="flex items-center gap-2">
-        <Mail className="h-4 w-4" />
+      <span className="flex items-center gap-1.5">
+        <Mail className="h-3.5 w-3.5" />
         <span className="font-heading text-xs font-bold uppercase tracking-wider">
           Inbox
         </span>

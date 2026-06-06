@@ -69,8 +69,9 @@ export function Sidebar({
         onClick={onSelectInbox}
       />
 
-      {/* Scrollable channel + DM area */}
-      <div className="flex-1 overflow-y-auto px-2 py-3">
+      {/* Scrollable channel + DM area — matches TeamsLeftColumn's scroll
+          container: py-2 only, no horizontal padding (rows pad themselves) */}
+      <div className="flex-1 overflow-y-auto py-2">
         <ChannelList
           channels={channels}
           isLoading={isLoading}
@@ -82,18 +83,15 @@ export function Sidebar({
           onToggleExpand={toggleChannels}
         />
 
-        {/* DM section */}
-        <div className="mt-6">
-          <DMList
-            dms={dms}
-            isLoading={dmsLoading}
-            selectedDmId={selectedDmId}
-            onSelectDM={onSelectDM}
-            onCreateDM={onCreateDM}
-            isExpanded={dmsExpanded}
-            onToggleExpand={toggleDMs}
-          />
-        </div>
+        <DMList
+          dms={dms}
+          isLoading={dmsLoading}
+          selectedDmId={selectedDmId}
+          onSelectDM={onSelectDM}
+          onCreateDM={onCreateDM}
+          isExpanded={dmsExpanded}
+          onToggleExpand={toggleDMs}
+        />
       </div>
 
     </aside>
