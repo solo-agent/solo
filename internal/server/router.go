@@ -272,13 +272,15 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Route("/api/v1/inbox", func(r chi.Router) {
 			r.Get("/", inboxHandler.List)
 			r.Get("/unread-count", inboxHandler.UnreadCount)
-			r.Post("/dismiss-all", inboxHandler.DismissAll)
-			r.Post("/{messageId}/dismiss", inboxHandler.Dismiss)
+			r.Post("/mark-all-read", inboxHandler.MarkAllRead)
+			r.Post("/clear-all", inboxHandler.ClearAll)
+			r.Post("/{messageId}/mark-read", inboxHandler.MarkRead)
 		})
 
 		// Thread read-status routes (P25-02-B)
 		r.Route("/api/v1/threads", func(r chi.Router) {
 			r.Post("/{threadID}/mark-read", threadHandler.MarkThreadRead)
+			r.Post("/unfollow", threadHandler.UnfollowThread)
 		})
 
 		// Attachment routes (SOLO-243-B)

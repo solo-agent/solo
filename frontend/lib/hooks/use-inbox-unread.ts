@@ -65,5 +65,14 @@ export function useInboxUnread() {
     return () => window.removeEventListener('focus', handleFocus);
   }, [fetchUnread]);
 
-  return { unreadCount, isLoading } as const;
+  // Refetch on custom event (dispatched by InboxView after markRead/dismiss)
+  useEffect(() => {
+    const handleRefresh = () => {
+      fetchUnread();
+    };
+    window.addEventListener('inbox-refresh-unread', handleRefresh);
+    return () => window.removeEventListener('inbox-refresh-unread', handleRefresh);
+  }, [fetchUnread]);
+
+  return { unreadCount, isLoading, refetch: fetchUnread } as const;
 }

@@ -342,7 +342,12 @@ export interface InboxItem {
   sender_avatar?: string | null;
   content_preview: string;
   is_mention: boolean;
+  is_unread: boolean;
   created_at: string;
+  parent_sender_name?: string | null;
+  parent_sender_type?: string | null;
+  parent_sender_id?: string | null;
+  parent_content?: string | null;
 }
 
 export interface UnreadCount {

@@ -1,8 +1,5 @@
 // ============================================================================
-// useInbox — fetch inbox list with cursor pagination (v1.5)
-// - GET /api/v1/inbox?before=&limit=30
-// - Auto-refetch on WS 'inbox.updated' event
-// - Support load more (cursor pagination with `before` param)
+// useInbox — fetch inbox list with cursor pagination and filters (v1.5)
 // ============================================================================
 
 'use client';
@@ -24,6 +21,8 @@ export function useInbox() {
   const [hasMore, setHasMore] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<string[]>([]);
+  const [senderFilter, setSenderFilter] = useState('');
   const mountedRef = useRef(true);
   const { onEvent } = useWebSocket();
 
@@ -38,6 +37,8 @@ export function useInbox() {
     try {
       const params: Record<string, string> = { limit: String(DEFAULT_LIMIT) };
       if (before) params.before = before;
+      if (typeFilter.length > 0) params.types = typeFilter.join(',');
+      if (senderFilter) params.sender = senderFilter;
 
       const query = new URLSearchParams(params).toString();
       const res = await apiClient.get<InboxResponse>(`/api/v1/inbox?${query}`);
@@ -52,7 +53,6 @@ export function useInbox() {
         setHasMore(res.has_more ?? false);
       }
     } catch (err) {
-      // Silently handle — user can retry with load more
       if (err instanceof ApiError && !append) {
         // Only set empty on initial load error
       }
@@ -62,7 +62,7 @@ export function useInbox() {
         setIsLoadingMore(false);
       }
     }
-  }, []);
+  }, [typeFilter, senderFilter]);
 
   const loadMore = useCallback(() => {
     if (isLoadingMore || !hasMore || items.length === 0) return;
@@ -72,7 +72,7 @@ export function useInbox() {
     }
   }, [items, hasMore, isLoadingMore, fetchInbox]);
 
-  // Initial fetch
+  // Initial fetch + refetch when filters change
   useEffect(() => {
     mountedRef.current = true;
     fetchInbox();
@@ -89,23 +89,34 @@ export function useInbox() {
     return unsub;
   }, [onEvent, fetchInbox]);
 
-  const dismissItem = useCallback(async (messageId: string) => {
-    // Optimistic removal
-    setItems((prev) => prev.filter((item) => item.message_id !== messageId));
+  const markRead = useCallback(async (messageId: string) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.message_id === messageId ? { ...item, is_unread: false } : item,
+      ),
+    );
     try {
-      await apiClient.post(`/api/v1/inbox/${messageId}/dismiss`);
+      await apiClient.post(`/api/v1/inbox/${messageId}/mark-read`);
     } catch {
-      // Refetch on failure to restore correct state
       fetchInbox();
     }
   }, [fetchInbox]);
 
-  const dismissAll = useCallback(async () => {
-    // Optimistic clear
+  const markAllRead = useCallback(async () => {
+    try {
+      await apiClient.post('/api/v1/inbox/mark-all-read');
+      fetchInbox();
+    } catch {
+      // silently handle
+    }
+  }, [fetchInbox]);
+
+  const clearAll = useCallback(async () => {
     setItems([]);
     setHasMore(false);
     try {
-      await apiClient.post('/api/v1/inbox/dismiss-all');
+      await apiClient.post('/api/v1/inbox/clear-all');
+      fetchInbox();
     } catch {
       fetchInbox();
     }
@@ -118,7 +129,12 @@ export function useInbox() {
     isLoadingMore,
     loadMore,
     refetch: fetchInbox,
-    dismissItem,
-    dismissAll,
+    markRead,
+    markAllRead,
+    clearAll,
+    typeFilter,
+    setTypeFilter,
+    senderFilter,
+    setSenderFilter,
   } as const;
 }

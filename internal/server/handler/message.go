@@ -393,6 +393,20 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Broadcast inbox.updated to thread participants (v1.5).
 	if threadID != "" && h.hub != nil {
 		go h.notifyInboxForThread(context.Background(), threadID, channelID, userID)
+
+		// Resolve user @mentions and broadcast inbox.updated to mentioned users (v1.5).
+		if h.mentionSvc != nil && h.hub != nil && !req.AsTask {
+			go func() {
+				mentionedUsers, err := h.mentionSvc.ResolveUserMentions(context.Background(), content, messageID)
+				if err != nil {
+					slog.Warn("failed to resolve user mentions", "request_id", "unknown", "error", err)
+					return
+				}
+				for _, uid := range mentionedUsers {
+					ws.BroadcastInboxUpdated(h.hub, uid)
+				}
+			}()
+		}
 	}
 
 	// Trigger agent auto-response (skip if asTask — agents triggered by task creation above).

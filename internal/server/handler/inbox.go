@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -11,17 +12,14 @@ import (
 	"github.com/solo-ai/solo/internal/server/service"
 )
 
-// InboxHandler handles inbox API endpoints.
 type InboxHandler struct {
 	svc *service.InboxService
 }
 
-// NewInboxHandler creates a new InboxHandler.
 func NewInboxHandler(svc *service.InboxService) *InboxHandler {
 	return &InboxHandler{svc: svc}
 }
 
-// List handles GET /api/v1/inbox
 func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
@@ -45,7 +43,20 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	items, hasMore, err := h.svc.List(r.Context(), userID, before, limit)
+	// Parse optional type filter (comma-separated: thread_reply,dm,mention)
+	types := []string{}
+	if t := r.URL.Query().Get("types"); t != "" {
+		for _, s := range strings.Split(t, ",") {
+			s = strings.TrimSpace(s)
+			if s == "thread_reply" || s == "dm" || s == "mention" {
+				types = append(types, s)
+			}
+		}
+	}
+
+	senderFilter := r.URL.Query().Get("sender")
+
+	items, hasMore, err := h.svc.List(r.Context(), userID, before, limit, types, senderFilter)
 	if err != nil {
 		slog.Error("inbox list: query failed", "request_id", reqID, "user_id", userID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list inbox items")
@@ -58,7 +69,6 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// UnreadCount handles GET /api/v1/inbox/unread-count
 func (h *InboxHandler) UnreadCount(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
@@ -78,8 +88,7 @@ func (h *InboxHandler) UnreadCount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, counts)
 }
 
-// Dismiss handles POST /api/v1/inbox/{messageId}/dismiss
-func (h *InboxHandler) Dismiss(w http.ResponseWriter, r *http.Request) {
+func (h *InboxHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
@@ -94,17 +103,16 @@ func (h *InboxHandler) Dismiss(w http.ResponseWriter, r *http.Request) {
 
 	reqID := middleware.GetRequestID(r.Context())
 
-	if err := h.svc.Dismiss(r.Context(), userID, messageID); err != nil {
-		slog.Error("inbox dismiss: failed", "request_id", reqID, "user_id", userID, "message_id", messageID, "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to dismiss inbox item")
+	if err := h.svc.MarkRead(r.Context(), userID, messageID); err != nil {
+		slog.Error("inbox mark read: failed", "request_id", reqID, "user_id", userID, "message_id", messageID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to mark inbox item as read")
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// DismissAll handles POST /api/v1/inbox/dismiss-all
-func (h *InboxHandler) DismissAll(w http.ResponseWriter, r *http.Request) {
+func (h *InboxHandler) ClearAll(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
@@ -113,9 +121,27 @@ func (h *InboxHandler) DismissAll(w http.ResponseWriter, r *http.Request) {
 
 	reqID := middleware.GetRequestID(r.Context())
 
-	if err := h.svc.DismissAll(r.Context(), userID); err != nil {
-		slog.Error("inbox dismiss-all: failed", "request_id", reqID, "user_id", userID, "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to dismiss all inbox items")
+	if err := h.svc.ClearAll(r.Context(), userID); err != nil {
+		slog.Error("inbox clear all: failed", "request_id", reqID, "user_id", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to clear inbox")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *InboxHandler) MarkAllRead(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	reqID := middleware.GetRequestID(r.Context())
+
+	if err := h.svc.MarkAllRead(r.Context(), userID); err != nil {
+		slog.Error("inbox mark all read: failed", "request_id", reqID, "user_id", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to mark all as read")
 		return
 	}
 

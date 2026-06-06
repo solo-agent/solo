@@ -1,17 +1,9 @@
-// ============================================================================
-// InboxItem — single inbox entry (v1.5)
-// Neo-brutalist style matching channel message items.
-// ============================================================================
-
 'use client';
 
-import { useState } from 'react';
 import { cn } from '@/lib/utils';
-import { Hash, AtSign, MessageCircle, Check } from 'lucide-react';
+import { Hash, AtSign, MessageCircle } from 'lucide-react';
 import { relativeTime } from '@/lib/utils/time';
 import type { InboxItem as InboxItemType } from '@/lib/types';
-
-// ---- Type label config ----
 
 const typeConfig: Record<InboxItemType['type'], { icon: React.ReactNode; label: string; bgClass: string }> = {
   thread_reply: {
@@ -31,19 +23,13 @@ const typeConfig: Record<InboxItemType['type'], { icon: React.ReactNode; label: 
   },
 };
 
-// ---- Props ----
-
 interface InboxItemProps {
   item: InboxItemType;
   onClick: (item: InboxItemType) => void;
-  onDismiss: (messageId: string) => void;
 }
 
-// ---- Component ----
-
-export function InboxItem({ item, onClick, onDismiss }: InboxItemProps) {
+export function InboxItem({ item, onClick }: InboxItemProps) {
   const config = typeConfig[item.type];
-  const [isHovered, setIsHovered] = useState(false);
 
   return (
     <div
@@ -56,37 +42,22 @@ export function InboxItem({ item, onClick, onDismiss }: InboxItemProps) {
           onClick(item);
         }
       }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
       className={cn(
         'group relative flex gap-3 px-6 py-2.5 cursor-pointer transition-colors border-b border-black/10',
         'hover:bg-brutal-stone/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-pink focus-visible:ring-inset',
+        item.is_unread && 'border-l-[3px] border-l-brutal-pink bg-brutal-pink-light/30',
       )}
     >
-      {/* Done button — visible on hover */}
-      <div className="flex-shrink-0 mt-0.5">
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDismiss(item.message_id);
-          }}
-          className={cn(
-            'flex h-5 w-5 items-center justify-center border-2 border-black transition-all',
-            isHovered
-              ? 'opacity-100 bg-brutal-lime hover:bg-brutal-pink'
-              : 'opacity-0 bg-transparent',
-          )}
-          aria-label="完成"
-          title="Done"
-        >
-          <Check className="h-3 w-3" />
-        </button>
+      {/* Unread dot */}
+      <div className="flex-shrink-0 mt-1.5">
+        {item.is_unread ? (
+          <span className="block h-2.5 w-2.5 rounded-full bg-brutal-pink border-2 border-black" />
+        ) : (
+          <span className="block h-2.5 w-2.5" />
+        )}
       </div>
 
-      {/* Content */}
       <div className="flex-1 min-w-0">
-        {/* Sender name + time */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="font-heading text-xs font-bold text-foreground truncate">
@@ -98,7 +69,6 @@ export function InboxItem({ item, onClick, onDismiss }: InboxItemProps) {
           </span>
         </div>
 
-        {/* Context line */}
         <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground truncate font-body">
           {item.type === 'dm'
             ? `与 ${item.sender_name} 的私信`
@@ -108,12 +78,10 @@ export function InboxItem({ item, onClick, onDismiss }: InboxItemProps) {
           }
         </p>
 
-        {/* Content preview */}
         <p className="mt-0.5 text-[12px] leading-snug text-foreground/80 line-clamp-2 font-body">
           {item.content_preview}
         </p>
 
-        {/* Type badge */}
         <div className="mt-1.5 flex items-center gap-1.5">
           <span className={cn('inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-heading font-bold', config.bgClass)}>
             {config.icon}

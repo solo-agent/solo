@@ -331,7 +331,8 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		serverPath = "/api/v1/channels/join"
 		serverBody, _ = json.Marshal(map[string]string{"target": req.Content})
 	case "thread_unfollow":
-		serverPath = fmt.Sprintf("/api/v1/threads/%s/mark-read", req.Content)
+		serverPath = "/api/v1/threads/unfollow"
+		serverBody, _ = json.Marshal(map[string]string{"target": req.Content})
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown action: " + req.Action})
 		return

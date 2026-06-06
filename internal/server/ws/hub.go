@@ -449,6 +449,21 @@ func (h *Hub) handleMessageSend(client *Client, payload MessageSendPayload) {
 	// Also broadcast dm.message.new if the channel is a DM (SOLO-57-B)
 	go h.broadcastDMMessageIfNeeded(payload.ChannelID, msgNewPayload)
 
+		// Resolve user @mentions and broadcast inbox.updated to mentioned users (v1.5).
+		if h.mentionSvc != nil {
+			go func() {
+				mentionedUsers, err := h.mentionSvc.ResolveUserMentions(context.Background(), payload.Content, messageID)
+				if err != nil {
+					slog.Warn("failed to resolve user mentions in WS", "error", err)
+					return
+				}
+				for _, uid := range mentionedUsers {
+					env := Envelope(EventInboxUpdated, struct{}{})
+					h.SendToUser(uid, env)
+				}
+			}()
+		}
+
 	// Trigger agent auto-response with @mention support
 	if h.agentSvc != nil {
 		go h.agentSvc.TriggerAgentResponse(
@@ -707,6 +722,21 @@ func (h *Hub) handleThreadReply(client *Client, payload ThreadReplyPayload) {
 
 	// Broadcast inbox.updated to all user participants of this thread (v1.5).
 	go h.notifyInboxForThread(context.Background(), payload.ThreadID, payload.ChannelID, client.userID)
+
+		// Resolve user @mentions and broadcast inbox.updated to mentioned users (v1.5).
+		if h.mentionSvc != nil {
+			go func() {
+				mentionedUsers, err := h.mentionSvc.ResolveUserMentions(context.Background(), payload.Content, messageID)
+				if err != nil {
+					slog.Warn("failed to resolve user mentions in thread reply", "error", err)
+					return
+				}
+				for _, uid := range mentionedUsers {
+					env := Envelope(EventInboxUpdated, struct{}{})
+					h.SendToUser(uid, env)
+				}
+			}()
+		}
 
 	// Trigger agent auto-response in thread with @mention support
 	if h.agentSvc != nil {

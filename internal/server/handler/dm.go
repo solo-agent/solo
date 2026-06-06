@@ -811,6 +811,20 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		go h.notifyInboxForDMParticipants(context.Background(), dmID, userID)
 	}
 
+		// Resolve user @mentions and broadcast inbox.updated to mentioned users (v1.5).
+		if h.mentionSvc != nil && h.hub != nil {
+			go func() {
+				mentionedUsers, err := h.mentionSvc.ResolveUserMentions(context.Background(), content, messageID)
+				if err != nil {
+					slog.Warn("failed to resolve user mentions in DM", "error", err)
+					return
+				}
+				for _, uid := range mentionedUsers {
+					ws.BroadcastInboxUpdated(h.hub, uid)
+				}
+			}()
+		}
+
 	// Trigger agent auto-response for DM (SOLO-58-B)
 	// In DM, the agent responds to all messages (no @mention needed)
 	if h.agentSvc != nil {

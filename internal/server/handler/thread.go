@@ -633,24 +633,30 @@ func (h *ThreadHandler) UnfollowThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse target: "#channel:shortid" or "#channel"
+	// Parse target: "#channel:shortid"
+	// Only the short message ID suffix is used for resolving the thread;
+	// the channel prefix is informational for the user.
 	parts := strings.SplitN(req.Target, ":", 2)
-	channelRef := parts[0]
 	threadSuffix := ""
 	if len(parts) == 2 {
 		threadSuffix = parts[1]
 	}
+	if threadSuffix == "" {
+		writeError(w, http.StatusBadRequest, "target must include a thread short ID suffix (e.g. '#general:abc123')")
+		return
+	}
 
 	// Resolve the thread from the short ID suffix.
+	// We look up by the root message ID pattern (short message ID) without
+	// relying on channel name resolution, since channel names may not be unique.
 	var threadID string
 	var channelID string
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT t.id, t.channel_id FROM threads t
-		 JOIN messages m ON m.id = t.parent_message_id
-		 WHERE m.channel_id = (SELECT id FROM channels WHERE name = $1 OR id = $1)
-		 AND m.id::text LIKE $2 || '%'
+		 JOIN messages m ON m.id = t.root_message_id
+		 WHERE m.id::text LIKE $1 || '%'
 		 LIMIT 1`,
-		strings.TrimPrefix(channelRef, "#"), threadSuffix+"%",
+		threadSuffix+"%",
 	).Scan(&threadID, &channelID)
 	if err != nil {
 		if isNotFound(err) {
