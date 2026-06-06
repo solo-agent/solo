@@ -98,7 +98,7 @@ export function TasksLeftColumn({
           />
           <Hash className="h-4 w-4" />
           <span>Channels</span>
-          <span className="ml-auto border border-black bg-brutal-yellow px-1.5 py-0.5 font-mono text-[10px]">
+          <span className="ml-auto border border-black bg-brutal-yellow px-1.5 py-0.5 font-mono text-[10px] text-black">
             {channels.length}
           </span>
         </button>
