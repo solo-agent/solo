@@ -357,6 +357,16 @@ export interface UnreadCount {
   dm: number;
 }
 
+// ---- Workspace types (v1.5) ----
+
+export interface WorkspaceFileNode {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  size?: number;
+  children?: WorkspaceFileNode[];
+}
+
 // ---- Computer Agent types (v1.5) ----
 
 export interface ComputerAgent {

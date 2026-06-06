@@ -8,14 +8,9 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
+import type { WorkspaceFileNode } from '@/lib/types';
 
-export interface WorkspaceFileNode {
-  name: string;
-  path: string;
-  type: 'file' | 'directory';
-  size?: number;
-  children?: WorkspaceFileNode[];
-}
+export type { WorkspaceFileNode };
 
 interface WorkspaceListResponse {
   entries: WorkspaceFileNode[];
