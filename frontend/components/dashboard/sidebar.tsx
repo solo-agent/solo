@@ -4,6 +4,7 @@
 
 'use client';
 
+import { useState, useCallback } from 'react';
 import { ChannelList } from './channel-list';
 import { DMList } from './dm-list';
 import { InboxBadge } from '@/components/inbox/inbox-badge';
@@ -49,6 +50,8 @@ export function Sidebar({
   routeTitle = 'Solo',
 }: SidebarProps) {
   const { unreadCount, isLoading: unreadLoading } = useInboxUnread();
+  const [channelsExpanded, setChannelsExpanded] = useState(true);
+  const toggleChannels = useCallback(() => setChannelsExpanded((v) => !v), []);
 
   return (
     <aside className="flex w-50 flex-col bg-sidebar text-sidebar-foreground border-r-2 border-sidebar-border flex-shrink-0">
@@ -76,6 +79,8 @@ export function Sidebar({
           onSelectChannel={onSelectChannel}
           onCreateChannel={onCreateChannel}
           onDeleteChannel={onDeleteChannel}
+          isExpanded={channelsExpanded}
+          onToggleExpand={toggleChannels}
         />
 
         {/* DM section */}

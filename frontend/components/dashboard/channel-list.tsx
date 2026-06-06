@@ -4,7 +4,7 @@
 
 'use client';
 
-import { Hash, Plus, X } from 'lucide-react';
+import { Hash, Plus, X, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Channel } from '@/lib/types';
@@ -16,6 +16,8 @@ interface ChannelListProps {
   onSelectChannel: (channelId: string) => void;
   onCreateChannel: () => void;
   onDeleteChannel: (channelId: string) => void;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
 }
 
 // ---- Loading skeleton ----
@@ -115,17 +117,31 @@ export function ChannelList({
   onSelectChannel,
   onCreateChannel,
   onDeleteChannel,
+  isExpanded,
+  onToggleExpand,
 }: ChannelListProps) {
   return (
     <div>
       {/* Section header */}
-      <div className="mb-2 flex items-center justify-between px-2 pb-2 border-b-2 border-sidebar-border">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-sidebar-muted-foreground font-heading">
+      <div className="mb-2 flex items-center justify-between border-b-2 border-sidebar-border">
+        <button
+          type="button"
+          onClick={onToggleExpand}
+          className="flex flex-1 items-center gap-1.5 px-2 py-2 text-left text-xs font-bold uppercase tracking-wider text-sidebar-muted-foreground font-heading hover:bg-brutal-pink/40"
+          aria-label="展开或折叠 频道"
+          aria-expanded={isExpanded}
+        >
+          <ChevronDown
+            className={cn(
+              'h-3 w-3 transition-transform',
+              isExpanded ? 'rotate-0' : '-rotate-90',
+            )}
+          />
           频道
-        </h3>
+        </button>
         <button
           onClick={onCreateChannel}
-          className="flex h-5 w-5 items-center justify-center text-sidebar-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+          className="mr-2 flex h-5 w-5 items-center justify-center text-sidebar-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
           aria-label="创建频道"
         >
           <Plus className="h-3.5 w-3.5" />
@@ -133,22 +149,24 @@ export function ChannelList({
       </div>
 
       {/* Content */}
-      {isLoading ? (
-        <ChannelListSkeleton />
-      ) : channels.length === 0 ? (
-        <ChannelListEmpty onCreateChannel={onCreateChannel} />
-      ) : (
-        <div className="space-y-0.5">
-          {channels.map((channel) => (
-            <ChannelItem
-              key={channel.id}
-              channel={channel}
-              isSelected={channel.id === selectedChannelId}
-              onSelect={() => onSelectChannel(channel.id)}
-              onDelete={() => onDeleteChannel(channel.id)}
-            />
-          ))}
-        </div>
+      {isExpanded && (
+        isLoading ? (
+          <ChannelListSkeleton />
+        ) : channels.length === 0 ? (
+          <ChannelListEmpty onCreateChannel={onCreateChannel} />
+        ) : (
+          <div className="space-y-0.5">
+            {channels.map((channel) => (
+              <ChannelItem
+                key={channel.id}
+                channel={channel}
+                isSelected={channel.id === selectedChannelId}
+                onSelect={() => onSelectChannel(channel.id)}
+                onDelete={() => onDeleteChannel(channel.id)}
+              />
+            ))}
+          </div>
+        )
       )}
     </div>
   );
