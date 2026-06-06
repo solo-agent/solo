@@ -239,7 +239,7 @@ export default function TasksPage() {
     );
   }
 
-  // Determine empty state message
+  // Determine empty state messages
   const emptyMessage = hasFilters
     ? '没有符合筛选条件的任务'
     : '该频道没有任务';
@@ -318,7 +318,22 @@ export default function TasksPage() {
             {/* Board content — scrollable */}
             <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-6">
               {!sourceIsLoading && !sourceError && tasks.length === 0 && sourceTasks.length > 0 ? (
-                // Filtered empty state
+                // Filtered empty — tasks exist but our filters excluded them all
+                <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-cream">
+                    <Filter className="h-6 w-6 text-muted-foreground" />
+                  </div>
+                  <p className="font-body text-sm text-muted-foreground">没有符合筛选条件的任务</p>
+                  <button
+                    type="button"
+                    onClick={handleClearFilters}
+                    className="btn-brutal btn-brutal-sm mt-4"
+                  >
+                    清除筛选
+                  </button>
+                </div>
+              ) : !sourceIsLoading && !sourceError && tasks.length === 0 && hasFilters ? (
+                // Selected channel/DM has no tasks
                 <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
                   <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-cream">
                     <Filter className="h-6 w-6 text-muted-foreground" />
@@ -332,7 +347,7 @@ export default function TasksPage() {
                     清除筛选
                   </button>
                 </div>
-              ) : !sourceIsLoading && !sourceError && tasks.length === 0 && sourceTasks.length === 0 ? (
+              ) : !sourceIsLoading && !sourceError && tasks.length === 0 ? (
                 // No tasks at all
                 <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
                   <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-cream">
