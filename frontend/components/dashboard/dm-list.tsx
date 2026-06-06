@@ -235,7 +235,7 @@ export function DMList({
   return (
     <div>
       {/* Section header */}
-      <div className="mb-2 flex items-center justify-between border-b-2 border-sidebar-border">
+      <div className="mb-2 flex items-center justify-between">
         <button
           type="button"
           onClick={onToggleExpand}
