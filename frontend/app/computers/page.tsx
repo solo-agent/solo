@@ -11,8 +11,7 @@
 
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   Monitor,
   Plus,
@@ -31,12 +30,13 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
-import { AppFrame } from '@/components/layout/app-frame';
 import { useComputers } from '@/lib/hooks/use-computers';
 import { useComputerAgents } from '@/lib/hooks/use-computer-agents';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/toast';
+import { NavBar } from '@/components/ui/navbar';
+import { ComputersLeftColumn } from '@/components/computers/computers-left-column';
 import { relativeTime, formatDateTime } from '@/lib/utils/time';
 import { cn } from '@/lib/utils';
 import {
@@ -94,7 +94,6 @@ function AgentStatusDot({ status }: { status: string }) {
 }
 
 export default function ComputersPage() {
-  const router = useRouter();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { computers, isLoading, error, updateComputer, deleteComputer, refetch } = useComputers();
   const { showToast } = useToast();
@@ -116,6 +115,20 @@ export default function ComputersPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const deleteTargetName =
     deleteTargetId ? computers.find((c) => c.id === deleteTargetId)?.name : null;
+
+  // Selected computer (driven by ComputersLeftColumn)
+  const [selectedComputerId, setSelectedComputerId] = useState<string | null>(null);
+  const selectedComputer = useMemo(
+    () => (selectedComputerId ? computers.find((c) => c.id === selectedComputerId) : undefined),
+    [computers, selectedComputerId],
+  );
+
+  // Left-column click: re-click clears selection; switching resets edit/expand
+  const handleComputerClick = useCallback((id: string) => {
+    setSelectedComputerId((prev) => (prev === id ? null : id));
+    setEditingId(null);
+    setExpandedId(null);
+  }, []);
 
   // Focus edit input when editing starts
   useEffect(() => {
@@ -171,6 +184,10 @@ export default function ComputersPage() {
     setIsDeleting(true);
     try {
       await deleteComputer(deleteTargetId);
+      // If the deleted computer was selected, clear the selection so the
+      // left-column click can re-select it later (rather than the toggle
+      // seeing it as already-selected and clearing).
+      setSelectedComputerId((prev) => (prev === deleteTargetId ? null : prev));
       setExpandedId(null);
       showToast('电脑已移除', 'success');
     } catch (err) {
@@ -195,108 +212,121 @@ export default function ComputersPage() {
   }
 
   return (
-    <AppFrame>
-      <div className="mx-auto w-full max-w-5xl px-6 py-8 overflow-y-auto flex-1">
-      {/* Page header */}
-      <div className="mb-8 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-heading font-bold text-foreground">
-            电脑管理
-          </h1>
-          <p className="mt-1 font-body text-sm text-muted-foreground">
-            管理已连接的电脑和 Daemon 实例
-          </p>
-        </div>
-        <Button onClick={() => setShowAddDialog(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          添加电脑
-        </Button>
+    <div className="flex h-screen min-w-[1024px] overflow-hidden bg-brutal-cream">
+      <NavBar />
+      <div className="w-[220px] flex-shrink-0">
+        <ComputersLeftColumn
+          computers={computers}
+          isLoading={isLoading}
+          error={error}
+          onRetry={refetch}
+          selectedComputerId={selectedComputerId}
+          onComputerClick={handleComputerClick}
+        />
       </div>
 
-      {/* Error state */}
-      {error && (
-        <div className="mb-6 flex items-center gap-3 border-2 border-brutal-orange bg-brutal-orange-light p-4 shadow-brutal-sm">
-          <AlertCircle className="h-5 w-5 flex-shrink-0 text-brutal-orange" />
-          <span className="flex-1 font-body text-sm text-foreground">
-            {error}
-          </span>
-          <button
-            type="button"
-            onClick={refetch}
-            className="btn-brutal btn-brutal-sm"
-          >
-            重试
-          </button>
-        </div>
-      )}
-
-      {/* Loading skeleton */}
-      {isLoading && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {[1, 2, 3, 4].map((i) => (
-            <div
-              key={i}
-              className="border-2 border-black bg-white p-6 shadow-brutal"
-            >
-              <div className="flex items-center gap-3">
-                <Skeleton className="h-10 w-10 rounded-none" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-28 rounded-none" />
-                  <Skeleton className="h-3 w-20 rounded-none" />
-                </div>
-                <Skeleton className="h-3 w-3 rounded-full" />
-              </div>
-              <div className="mt-4 space-y-2">
-                <Skeleton className="h-3 w-40 rounded-none" />
-                <Skeleton className="h-3 w-32 rounded-none" />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!isLoading && !error && computers.length === 0 && (
-        <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
-          <div className="mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-cyan shadow-brutal">
-            <Monitor className="h-8 w-8 text-white" />
-          </div>
-          <h2 className="text-xl font-heading font-bold text-foreground">
-            还没有连接的电脑
-          </h2>
-          <p className="mt-2 font-body text-sm text-muted-foreground">
-            启动 Daemon 并注册后，电脑将出现在这里
-          </p>
-          <Button className="mt-6" onClick={() => setShowAddDialog(true)}>
+      <main className="flex flex-1 flex-col overflow-hidden">
+        {/* Top bar — add button only (page label lives in the left column) */}
+        <div className="flex flex-shrink-0 items-center justify-end border-b-2 border-black px-6 py-3">
+          <Button onClick={() => setShowAddDialog(true)}>
             <Plus className="mr-2 h-4 w-4" />
-            查看接入指引
+            添加电脑
           </Button>
         </div>
-      )}
+        <div className="flex-1 overflow-y-auto px-6 py-6">
+          <div className="mx-auto w-full max-w-3xl">
+            {/* Error state */}
+            {error && (
+              <div className="mb-6 flex items-center gap-3 border-2 border-brutal-orange bg-brutal-orange-light p-4 shadow-brutal-sm">
+                <AlertCircle className="h-5 w-5 flex-shrink-0 text-brutal-orange" />
+                <span className="flex-1 font-body text-sm text-foreground">
+                  {error}
+                </span>
+                <button
+                  type="button"
+                  onClick={refetch}
+                  className="btn-brutal btn-brutal-sm"
+                >
+                  重试
+                </button>
+              </div>
+            )}
 
-      {/* Computer cards grid */}
-      {!isLoading && !error && computers.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {computers.map((computer) => (
-            <ComputerCard
-              key={computer.id}
-              computer={computer}
-              isExpanded={expandedId === computer.id}
-              editingId={editingId}
-              editName={editName}
-              isSaving={isSaving}
-              editInputRef={editInputRef}
-              onToggleExpand={handleToggleExpand}
-              onStartEdit={handleStartEdit}
-              onCancelEdit={handleCancelEdit}
-              onSaveName={handleSaveName}
-              onEditKeyDown={handleEditKeyDown}
-              onEditNameChange={setEditName}
-              onDeleteClick={setDeleteTargetId}
-            />
-          ))}
+            {/* Loading skeleton */}
+            {isLoading && (
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {[1, 2, 3, 4].map((i) => (
+                  <div
+                    key={i}
+                    className="border-2 border-black bg-white p-6 shadow-brutal"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Skeleton className="h-10 w-10 rounded-none" />
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-4 w-28 rounded-none" />
+                        <Skeleton className="h-3 w-20 rounded-none" />
+                      </div>
+                      <Skeleton className="h-3 w-3 rounded-full" />
+                    </div>
+                    <div className="mt-4 space-y-2">
+                      <Skeleton className="h-3 w-40 rounded-none" />
+                      <Skeleton className="h-3 w-32 rounded-none" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Empty state — no computers at all */}
+            {!isLoading && !error && computers.length === 0 && (
+              <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
+                <div className="mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-cyan shadow-brutal">
+                  <Monitor className="h-8 w-8 text-white" />
+                </div>
+                <h2 className="text-xl font-heading font-bold text-foreground">
+                  还没有连接的电脑
+                </h2>
+                <p className="mt-2 font-body text-sm text-muted-foreground">
+                  启动 Daemon 并注册后，电脑将出现在这里
+                </p>
+                <Button className="mt-6" onClick={() => setShowAddDialog(true)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  查看接入指引
+                </Button>
+              </div>
+            )}
+
+            {/* Empty state — computers exist, none selected */}
+            {!isLoading && !error && computers.length > 0 && !selectedComputer && (
+              <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
+                <p className="font-body text-sm text-muted-foreground">
+                  请从左侧选择一台电脑
+                </p>
+              </div>
+            )}
+
+            {/* Computer detail card */}
+            {!isLoading && !error && selectedComputer && (
+              <ComputerCard
+                key={selectedComputer.id}
+                computer={selectedComputer}
+                isExpanded={expandedId === selectedComputer.id}
+                editingId={editingId}
+                editName={editName}
+                isSaving={isSaving}
+                editInputRef={editInputRef}
+                onToggleExpand={handleToggleExpand}
+                onStartEdit={handleStartEdit}
+                onCancelEdit={handleCancelEdit}
+                onSaveName={handleSaveName}
+                onEditKeyDown={handleEditKeyDown}
+                onEditNameChange={setEditName}
+                onDeleteClick={setDeleteTargetId}
+              />
+            )}
+          </div>
         </div>
-      )}
+      </main>
 
       {/* Add computer instruction dialog */}
       <Dialog
@@ -373,7 +403,6 @@ export default function ComputersPage() {
         </DialogFooter>
       </Dialog>
     </div>
-    </AppFrame>
   );
 }
 
