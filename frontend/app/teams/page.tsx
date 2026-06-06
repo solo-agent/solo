@@ -151,7 +151,7 @@ export default function TeamsPage() {
         {/* Agent detail with header + tabs */}
         {selection?.kind === 'agent' && selectedAgent && (
           <>
-            <div className="flex items-center gap-3 border-b-2 border-black bg-white px-5 py-3">
+            <div className="flex items-center gap-3 border-b border-black bg-brutal-cream px-5 py-3">
               <div className="flex h-9 w-9 items-center justify-center border-2 border-black bg-brutal-yellow font-bold">
                 {selectedAgent.name.charAt(0).toUpperCase()}
               </div>
@@ -159,9 +159,6 @@ export default function TeamsPage() {
                 <h1 className="truncate font-heading text-base font-bold">
                   {selectedAgent.name}
                 </h1>
-                <p className="truncate font-mono text-[11px] text-muted-foreground">
-                  @{selectedAgent.name}
-                </p>
               </div>
               <button
                 onClick={handleMessage}
@@ -172,13 +169,13 @@ export default function TeamsPage() {
                 {isDMLoading ? '跳转中...' : 'Message'}
               </button>
             </div>
-            <div className="flex border-b-2 border-black bg-white">
+            <div className="flex border-b border-black bg-brutal-cream">
               <button
                 type="button"
                 onClick={() => setAgentTab('profile')}
                 className={`border-r-2 border-black px-5 py-2 font-heading text-xs font-bold ${
                   agentTab === 'profile'
-                    ? 'bg-brutal-pink text-black shadow-brutal-sm'
+                    ? 'bg-brutal-pink text-black'
                     : 'bg-white text-foreground hover:bg-brutal-pink/40'
                 }`}
                 aria-selected={agentTab === 'profile'}
@@ -191,7 +188,7 @@ export default function TeamsPage() {
                 onClick={() => setAgentTab('workspace')}
                 className={`border-r-2 border-black px-5 py-2 font-heading text-xs font-bold ${
                   agentTab === 'workspace'
-                    ? 'bg-brutal-pink text-black shadow-brutal-sm'
+                    ? 'bg-brutal-pink text-black'
                     : 'bg-white text-foreground hover:bg-brutal-pink/40'
                 }`}
                 aria-selected={agentTab === 'workspace'}
