@@ -25,6 +25,11 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
   const [isContentLoading, setIsContentLoading] = useState(false);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
 
+  // Initial load: trigger the hook to fetch the root directory
+  useEffect(() => {
+    void loadTree();
+  }, [loadTree, agentId]);
+
   // Persist expanded paths per agent
   useEffect(() => {
     try {
