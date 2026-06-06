@@ -11,7 +11,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { MessageSquare, Plus, X } from 'lucide-react';
+import { MessageSquare, Plus, X, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -23,6 +23,8 @@ interface DMListProps {
   selectedDmId: string | null;
   onSelectDM: (dmId: string) => void;
   onCreateDM: () => void;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
 }
 
 // ---- Helpers ----
@@ -207,6 +209,8 @@ export function DMList({
   selectedDmId,
   onSelectDM,
   onCreateDM,
+  isExpanded,
+  onToggleExpand,
 }: DMListProps) {
   const [closedDmIds, setClosedDmIds] = useState<Set<string>>(loadClosedDmIds);
 
@@ -231,13 +235,25 @@ export function DMList({
   return (
     <div>
       {/* Section header */}
-      <div className="mb-2 flex items-center justify-between px-2 pb-2 border-b-2 border-sidebar-border">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-sidebar-muted-foreground font-heading">
+      <div className="mb-2 flex items-center justify-between border-b-2 border-sidebar-border">
+        <button
+          type="button"
+          onClick={onToggleExpand}
+          className="flex flex-1 items-center gap-1.5 px-2 py-2 text-left text-xs font-bold uppercase tracking-wider text-sidebar-muted-foreground font-heading hover:bg-brutal-pink/40"
+          aria-label="展开或折叠 直接消息"
+          aria-expanded={isExpanded}
+        >
+          <ChevronDown
+            className={cn(
+              'h-3 w-3 transition-transform',
+              isExpanded ? 'rotate-0' : '-rotate-90',
+            )}
+          />
           直接消息
-        </h3>
+        </button>
         <button
           onClick={onCreateDM}
-          className="flex h-5 w-5 items-center justify-center text-sidebar-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+          className="mr-2 flex h-5 w-5 items-center justify-center text-sidebar-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
           aria-label="发起私信"
         >
           <Plus className="h-3.5 w-3.5" />
@@ -245,26 +261,28 @@ export function DMList({
       </div>
 
       {/* Content */}
-      {isLoading ? (
-        <DMListSkeleton />
-      ) : sortedDMs.length === 0 ? (
-        <DMListEmpty onCreateDM={onCreateDM} />
-      ) : (
-        <div className="space-y-0.5">
-          {sortedDMs.map((dm) => (
-            <DMItem
-              key={dm.id}
-              dm={dm}
-              isSelected={dm.id === selectedDmId}
-              onSelect={() => onSelectDM(dm.id)}
-              onClose={() => setClosedDmIds((prev) => {
-                const next = new Set(prev).add(dm.id);
-                saveClosedDmIds(next);
-                return next;
-              })}
-            />
-          ))}
-        </div>
+      {isExpanded && (
+        isLoading ? (
+          <DMListSkeleton />
+        ) : sortedDMs.length === 0 ? (
+          <DMListEmpty onCreateDM={onCreateDM} />
+        ) : (
+          <div className="space-y-0.5">
+            {sortedDMs.map((dm) => (
+              <DMItem
+                key={dm.id}
+                dm={dm}
+                isSelected={dm.id === selectedDmId}
+                onSelect={() => onSelectDM(dm.id)}
+                onClose={() => setClosedDmIds((prev) => {
+                  const next = new Set(prev).add(dm.id);
+                  saveClosedDmIds(next);
+                  return next;
+                })}
+              />
+            ))}
+          </div>
+        )
       )}
     </div>
   );

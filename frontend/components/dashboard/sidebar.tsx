@@ -52,6 +52,8 @@ export function Sidebar({
   const { unreadCount, isLoading: unreadLoading } = useInboxUnread();
   const [channelsExpanded, setChannelsExpanded] = useState(true);
   const toggleChannels = useCallback(() => setChannelsExpanded((v) => !v), []);
+  const [dmsExpanded, setDmsExpanded] = useState(true);
+  const toggleDMs = useCallback(() => setDmsExpanded((v) => !v), []);
 
   return (
     <aside className="flex w-50 flex-col bg-sidebar text-sidebar-foreground border-r-2 border-sidebar-border flex-shrink-0">
@@ -91,6 +93,8 @@ export function Sidebar({
             selectedDmId={selectedDmId}
             onSelectDM={onSelectDM}
             onCreateDM={onCreateDM}
+            isExpanded={dmsExpanded}
+            onToggleExpand={toggleDMs}
           />
         </div>
       </div>
