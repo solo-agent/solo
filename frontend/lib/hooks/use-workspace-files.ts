@@ -12,8 +12,13 @@ import type { WorkspaceFileNode } from '@/lib/types';
 
 export type { WorkspaceFileNode };
 
-interface WorkspaceListResponse {
-  entries: WorkspaceFileNode[];
+interface WorkspaceNodeResponse {
+  type: string;
+  name: string;
+  path?: string;
+  content?: string;
+  size?: number;
+  children?: WorkspaceFileNode[];
 }
 
 export function useWorkspaceFiles(agentId: string) {
@@ -29,15 +34,14 @@ export function useWorkspaceFiles(agentId: string) {
     try {
       const params: Record<string, string> = {};
       if (dirPath) params.path = dirPath;
-      const res = await apiClient.get<WorkspaceListResponse>(
+      const res = await apiClient.get<WorkspaceNodeResponse>(
         `/api/v1/agents/${agentId}/workspace`,
         Object.keys(params).length > 0 ? params : undefined,
       );
       if (dirPath) {
-        // Partial update: replace children of the directory
-        setTree((prev) => replaceChildrenInTree(prev, dirPath, res.entries ?? []));
+        setTree((prev) => replaceChildrenInTree(prev, dirPath, res.children ?? []));
       } else {
-        setTree(res.entries ?? []);
+        setTree(res.children ?? []);
       }
       loadedRef.current = true;
     } catch (err) {
@@ -55,9 +59,9 @@ export function useWorkspaceFiles(agentId: string) {
   }, [agentId]);
 
   const fetchFileContent = useCallback(async (filePath: string): Promise<string> => {
-    const res = await apiClient.get<{ content: string }>(
+    const res = await apiClient.get<WorkspaceNodeResponse>(
       `/api/v1/agents/${agentId}/workspace`,
-      { path: filePath },
+      { path: filePath, content: 'true' },
     );
     return res.content ?? '';
   }, [agentId]);

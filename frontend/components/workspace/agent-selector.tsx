@@ -1,6 +1,13 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { apiClient } from '@/lib/api-client';
+
+interface AgentSummary {
+  id: string;
+  name: string;
+}
 
 interface AgentSelectorProps {
   agentId: string | null;
@@ -9,6 +16,13 @@ interface AgentSelectorProps {
 export function AgentSelector({ agentId }: AgentSelectorProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [agents, setAgents] = useState<AgentSummary[]>([]);
+
+  useEffect(() => {
+    apiClient.get<AgentSummary[]>('/api/v1/agents')
+      .then(setAgents)
+      .catch(() => setAgents([]));
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newId = e.target.value;
@@ -28,6 +42,9 @@ export function AgentSelector({ agentId }: AgentSelectorProps) {
       className="bg-black border-2 border-black text-white px-3 py-1.5 font-mono text-xs rounded-none focus:outline-none focus:border-brutal-pink"
     >
       <option value="">选择一个 Agent...</option>
+      {agents.map((a) => (
+        <option key={a.id} value={a.id}>{a.name}</option>
+      ))}
     </select>
   );
 }
