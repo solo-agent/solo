@@ -16,6 +16,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Spinner } from '@/components/ui/spinner';
+import { BrutalAlert } from '@/components/ui/brutal-alert';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -55,7 +57,7 @@ export default function SettingsPage() {
     return (
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-brutal-pink border-t-transparent" />
+          <Spinner size="lg" />
           <p className="font-mono text-sm text-muted-foreground">加载中...</p>
         </div>
       </div>
@@ -96,19 +98,17 @@ export default function SettingsPage() {
 
       {/* Error banner */}
       {userError && (
-        <div className="mb-6 flex items-center gap-3 border-2 border-brutal-red bg-brutal-red-light p-4 shadow-brutal-sm">
-          <AlertCircle className="h-5 w-5 flex-shrink-0 text-brutal-red" />
-          <span className="flex-1 font-body text-sm text-foreground">
-            {userError}
-          </span>
-          <button
-            type="button"
-            onClick={refetch}
-            className="btn-brutal btn-brutal-sm"
-          >
-            重试
-          </button>
-        </div>
+        <BrutalAlert
+          variant="error"
+          className="mb-6 p-4"
+          action={
+            <Button variant="outline" size="sm" onClick={refetch}>
+              重试
+            </Button>
+          }
+        >
+          {userError}
+        </BrutalAlert>
       )}
 
       {/* Loading state */}
@@ -165,7 +165,7 @@ export default function SettingsPage() {
                   className="max-w-sm"
                 />
               </div>
-              <button
+              <Button
                 type="button"
                 onClick={handleSave}
                 disabled={
@@ -173,10 +173,10 @@ export default function SettingsPage() {
                   !displayName.trim() ||
                   displayName.trim() === user.display_name
                 }
-                className="btn-brutal btn-brutal-pink"
+                variant="default"
               >
                 {isUpdating ? '保存中...' : '保存'}
-              </button>
+              </Button>
             </div>
 
             {/* Feedback messages */}
