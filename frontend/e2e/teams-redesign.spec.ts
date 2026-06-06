@@ -28,8 +28,13 @@ test.describe('Teams page redesign', () => {
   test('1. default load shows left column + first agent selected', async ({ page }) => {
     await page.goto(`${BASE}/teams`);
 
-    // First agent is auto-selected -> Profile h2 is rendered
-    await expect(page.getByRole('heading', { name: /Profile/i }).first()).toBeVisible();
+    // First agent is auto-selected -> the right-panel header h1 shows its name
+    // (asserting on h1 rather than the Profile h2 ensures the empty-state branch
+    // is not what we're seeing).
+    const firstAgentRow = page.locator('[aria-label^="查看"][aria-label$="详情"]').first();
+    const ariaLabel = (await firstAgentRow.getAttribute('aria-label')) ?? '';
+    const agentName = ariaLabel.replace(/^查看 (.+) 详情$/, '$1');
+    await expect(page.locator('h1').filter({ hasText: agentName })).toBeVisible();
 
     // Graph header is always visible (collapsed by default; no body items)
     await expect(page.getByRole('button', { name: /进入 Graph 视图/i })).toBeVisible();
@@ -50,9 +55,12 @@ test.describe('Teams page redesign', () => {
   test('3. clicking an agent row selects it', async ({ page }) => {
     await page.goto(`${BASE}/teams`);
 
-    // Read agent name from aria-label (format: "查看 <name> 详情") to avoid
-    // picking up extra text like the trailing "DM" button label.
-    const firstAgentButton = page.locator('[aria-label^="查看"][aria-label$="详情"]').first();
+    // Scope to rows that have a DM button (agent rows); the same aria-label
+    // prefix is used on human rows, which have no DM button.
+    const firstAgentButton = page
+      .locator('[aria-label^="查看"][aria-label$="详情"]')
+      .filter({ has: page.locator('button[aria-label*="发起私信"]') })
+      .first();
     const ariaLabel = (await firstAgentButton.getAttribute('aria-label')) ?? '';
     const agentName = ariaLabel.replace(/^查看 (.+) 详情$/, '$1');
 
