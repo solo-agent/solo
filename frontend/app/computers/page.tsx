@@ -27,13 +27,14 @@ import {
   Cpu,
   ChevronDown,
   ChevronUp,
-  Loader2,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useComputers } from '@/lib/hooks/use-computers';
 import { useComputerAgents } from '@/lib/hooks/use-computer-agents';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { Skeleton } from '@/components/ui/skeleton';
+import { BrutalAlert } from '@/components/ui/brutal-alert';
 import { useToast } from '@/components/ui/toast';
 import { NavBar } from '@/components/ui/navbar';
 import { ComputersLeftColumn } from '@/components/computers/computers-left-column';
@@ -69,10 +70,10 @@ function getOsIcon(os?: string): { icon: React.ReactNode; label: string } {
 // Agent status indicator
 function AgentStatusDot({ status }: { status: string }) {
   const colorMap: Record<string, string> = {
-    online: 'bg-green-500',
+    online: 'bg-brutal-lime',
     thinking: 'bg-brutal-yellow',
     running: 'bg-brutal-cyan',
-    offline: 'bg-gray-400',
+    offline: 'bg-brutal-stone',
   };
   const labelMap: Record<string, string> = {
     online: '空闲',
@@ -85,7 +86,7 @@ function AgentStatusDot({ status }: { status: string }) {
       <span
         className={cn(
           'inline-block h-2 w-2 flex-shrink-0 rounded-full border border-black',
-          colorMap[status] || 'bg-gray-400',
+          colorMap[status] || 'bg-brutal-stone',
         )}
       />
       <span className="text-muted-foreground">{labelMap[status] || status}</span>
@@ -204,7 +205,7 @@ export default function ComputersPage() {
     return (
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-brutal-pink border-t-transparent" />
+          <Spinner size="lg" />
           <p className="font-mono text-sm text-muted-foreground">加载中...</p>
         </div>
       </div>
@@ -237,19 +238,17 @@ export default function ComputersPage() {
           <div className="mx-auto w-full max-w-3xl">
             {/* Error state */}
             {error && (
-              <div className="mb-6 flex items-center gap-3 border-2 border-brutal-orange bg-brutal-orange-light p-4 shadow-brutal-sm">
-                <AlertCircle className="h-5 w-5 flex-shrink-0 text-brutal-orange" />
-                <span className="flex-1 font-body text-sm text-foreground">
-                  {error}
-                </span>
-                <button
-                  type="button"
-                  onClick={refetch}
-                  className="btn-brutal btn-brutal-sm"
-                >
-                  重试
-                </button>
-              </div>
+              <BrutalAlert
+                variant="warning"
+                className="mb-6 p-4"
+                action={
+                  <Button variant="outline" size="sm" onClick={refetch}>
+                    重试
+                  </Button>
+                }
+              >
+                {error}
+              </BrutalAlert>
             )}
 
             {/* Loading skeleton */}
@@ -358,13 +357,9 @@ export default function ComputersPage() {
           </div>
         </div>
         <DialogFooter>
-          <button
-            type="button"
-            onClick={() => setShowAddDialog(false)}
-            className="btn-brutal btn-brutal-sm"
-          >
+          <Button variant="outline" size="sm" onClick={() => setShowAddDialog(false)}>
             知道了
-          </button>
+          </Button>
         </DialogFooter>
       </Dialog>
 
@@ -385,21 +380,17 @@ export default function ComputersPage() {
           吗？此操作不可撤销。该电脑将从系统中注销。
         </DialogDescription>
         <DialogFooter>
-          <button
-            type="button"
-            onClick={() => setDeleteTargetId(null)}
-            className="btn-brutal btn-brutal-sm"
-          >
+          <Button variant="outline" size="sm" onClick={() => setDeleteTargetId(null)}>
             取消
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
             onClick={handleDelete}
             disabled={isDeleting}
-            className="btn-brutal btn-brutal-sm bg-brutal-red text-white"
           >
             {isDeleting ? '移除中...' : '确认移除'}
-          </button>
+          </Button>
         </DialogFooter>
       </Dialog>
     </div>
@@ -559,36 +550,39 @@ function ComputerCard({
                     className="input-brutal h-8 w-48 py-1 text-sm"
                     disabled={isSaving}
                   />
-                  <button
-                    type="button"
+                  <Button
+                    variant="default"
+                    size="icon"
                     onClick={() => onSaveName(computer.id)}
                     disabled={isSaving || !editName.trim()}
-                    className="btn-brutal btn-brutal-sm h-8 w-8 p-0"
                     aria-label="保存名称"
+                    className="h-8 w-8"
                   >
                     <Check className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
                     onClick={onCancelEdit}
                     disabled={isSaving}
-                    className="btn-brutal btn-brutal-sm h-8 w-8 p-0 bg-white"
                     aria-label="取消编辑"
+                    className="h-8 w-8"
                   >
                     <X className="h-3.5 w-3.5" />
-                  </button>
+                  </Button>
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
                   <span className="font-bold">{computer.name}</span>
-                  <button
-                    type="button"
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => onStartEdit(computer)}
-                    className="btn-brutal btn-brutal-sm h-7 px-2 text-xs"
                     aria-label="编辑名称"
+                    className="h-7 px-2 text-xs"
                   >
                     <Edit3 className="h-3 w-3" />
-                  </button>
+                  </Button>
                 </div>
               )}
             </InfoRow>
@@ -636,13 +630,13 @@ function ComputerCard({
 
           {/* Remove button */}
           <div className="mt-6">
-            <button
-              type="button"
+            <Button
+              variant="destructive"
+              size="sm"
               onClick={() => onDeleteClick(computer.id)}
-              className="btn-brutal btn-brutal-sm bg-brutal-red text-white"
             >
               移除电脑
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -662,7 +656,7 @@ function ConnectedAgents({ computerId }: { computerId: string | null }) {
   if (isLoading) {
     return (
       <div className="flex items-center gap-2 py-2">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+        <Spinner size="sm" square={false} />
         <span className="text-sm text-muted-foreground">加载中...</span>
       </div>
     );
@@ -720,7 +714,7 @@ function StatusDot({ isOnline }: { isOnline: boolean }) {
     <span
       className={cn(
         'inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full border border-black',
-        isOnline ? 'bg-green-500' : 'bg-gray-400 animate-pulse',
+        isOnline ? 'bg-brutal-lime' : 'bg-brutal-stone animate-pulse',
       )}
       role="status"
       aria-label={isOnline ? '在线' : '离线'}
