@@ -244,6 +244,7 @@ export function DMList({
           aria-expanded={isExpanded}
         >
           <ChevronDown
+            aria-hidden="true"
             className={cn(
               'h-3 w-3 transition-transform',
               isExpanded ? 'rotate-0' : '-rotate-90',
