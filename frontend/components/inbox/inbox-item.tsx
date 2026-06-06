@@ -45,7 +45,7 @@ export function InboxItem({ item, onClick }: InboxItemProps) {
       }}
       className={cn(
         'group relative flex gap-3 px-6 py-2.5 cursor-pointer transition-colors border-b-2 border-black',
-        'hover:bg-brutal-muted/15 focus-visible:outline-none',
+        'hover:bg-brutal-muted/15',
         item.is_unread && 'border-l-[3px] border-l-brutal-accent bg-brutal-primary-light/30',
       )}
     >

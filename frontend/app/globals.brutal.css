@@ -40,7 +40,6 @@
      success = lime, warning = peach, danger = coral red, violet = soft purple,
      muted = warm gray. Each pairs with a `*-light` 8% tint for backgrounds. */
   --color-brutal-bg: #fffaef;
-  --color-brutal-fg: #000000;
   --color-brutal-cream: #fffaef;
   --color-brutal-black: #000000;
   --color-brutal-white: #ffffff;
@@ -260,7 +259,7 @@
   justify-content: center;
   font-family: var(--font-heading);
   font-weight: 700;
-  border: 2px solid #000;
+  border: 2px solid var(--color-brutal-black);
   background: #fff;
   color: #000;
   cursor: pointer;
@@ -284,6 +283,7 @@
 }
 
 /* Primary variant (yellow call-to-action) */
+/* v4.0: rename to .btn-brutal-primary to match the semantic token name. */
 .btn-brutal-pink {
   background: var(--color-brutal-primary);
 }
@@ -329,7 +329,7 @@
    ============================================================ */
 
 .card-brutal {
-  border: 2px solid #000;
+  border: 2px solid var(--color-brutal-black);
   background: #fff;
   box-shadow: 5px 5px 0 0 var(--color-brutal-shadow);
   transition: transform 0.15s ease, box-shadow 0.15s ease;
@@ -345,7 +345,7 @@
    ============================================================ */
 
 .input-brutal {
-  border: 2px solid #000;
+  border: 2px solid var(--color-brutal-black);
   background: #fff;
   font-family: var(--font-sans);
   padding: 0.5rem 0.75rem;
@@ -398,7 +398,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  border: 2px solid #000;
+  border: 2px solid var(--color-brutal-black);
   box-shadow: 2px 2px 0 0 var(--color-brutal-shadow);
 }
 
@@ -408,7 +408,7 @@
 
 .divider-brutal {
   border: none;
-  border-top: 2px solid #000;
+  border-top: 2px solid var(--color-brutal-black);
   margin: 1rem 0;
 }
 
@@ -444,7 +444,7 @@
   justify-content: center;
   width: 40px;
   height: 40px;
-  border: 2px solid #000;
+  border: 2px solid var(--color-brutal-black);
   background: #fff;
   box-shadow: 3px 3px 0 0 var(--color-brutal-shadow);
   cursor: pointer;
@@ -618,7 +618,7 @@
    ============================================================ */
 
 .message-bubble {
-  border: 2px solid #000;
+  border: 2px solid var(--color-brutal-black);
   background: #fff;
   box-shadow: 3px 3px 0 0 var(--color-brutal-shadow);
   padding: 0.625rem 0.75rem;
@@ -675,7 +675,7 @@
   color: #000;
   font-weight: 700;
   padding: 0 0.25rem;
-  border: 2px solid #000;
+  border: 2px solid var(--color-brutal-black);
   box-shadow: 2px 2px 0 0 var(--color-brutal-shadow);
 }
 
@@ -685,6 +685,6 @@
   color: #000;
   font-weight: 700;
   padding: 0 0.25rem;
-  border: 2px solid #000;
+  border: 2px solid var(--color-brutal-black);
   box-shadow: 2px 2px 0 0 var(--color-brutal-shadow);
 }

@@ -73,7 +73,7 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
           onClick?.(task);
         }
       }}
-      className="card-brutal w-full cursor-pointer text-left focus-visible:outline-none"
+      className="card-brutal w-full cursor-pointer text-left"
     >
       <div className="p-4">
         {/* Top row: status + priority badges */}
@@ -115,7 +115,7 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
                     onParentClick(task.parent_task_id!);
                   }
                 }}
-                className="text-xs text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2 transition-colors focus-visible:outline-none"
+                className="text-xs text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2 transition-colors"
               >
                 <ChevronRight className="inline h-3 w-3 -mt-px" />
                 {' '}子任务 of {parentTaskNumber ? `#${parentTaskNumber}` : '父任务'}
