@@ -1350,14 +1350,26 @@ func (h *daemonHandler) HandleWorkspaceList(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Resolve symlinks and re-verify containment to prevent
+	// symlink-based path traversal that would bypass the string prefix check.
+	resolvedPath, err := filepath.EvalSymlinks(fullPath)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path resolution failed"})
+		return
+	}
+	if !strings.HasPrefix(resolvedPath, workspaceDir) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path traversal not allowed"})
+		return
+	}
+
 	var node workspaceNode
 	if info.IsDir() {
-		node, err = buildFileTree(fullPath, workspaceDir, 0)
+		node, err = buildFileTree(resolvedPath, workspaceDir, 0)
 	} else {
-		node, err = buildFileNode(fullPath, workspaceDir, false)
+		node, err = buildFileNode(resolvedPath, workspaceDir)
 	}
 	if err != nil {
-		slog.Error("workspace list: build failed", "path", fullPath, "error", err)
+		slog.Error("workspace list: build failed", "path", resolvedPath, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read workspace"})
 		return
 	}
@@ -1397,6 +1409,18 @@ func (h *daemonHandler) HandleWorkspaceRead(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Resolve symlinks and re-verify containment to prevent
+	// symlink-based path traversal that would bypass the string prefix check.
+	resolvedPath, err := filepath.EvalSymlinks(fullPath)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path resolution failed"})
+		return
+	}
+	if !strings.HasPrefix(resolvedPath, workspaceDir) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path traversal not allowed"})
+		return
+	}
+
 	if info.Size() > 1*1024*1024 {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"content": "[file too large to preview]",
@@ -1406,9 +1430,9 @@ func (h *daemonHandler) HandleWorkspaceRead(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	data, err := os.ReadFile(fullPath)
+	data, err := os.ReadFile(resolvedPath)
 	if err != nil {
-		slog.Error("workspace read: read failed", "path", fullPath, "error", err)
+		slog.Error("workspace read: read failed", "path", resolvedPath, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read file"})
 		return
 	}
@@ -1437,7 +1461,10 @@ const maxWorkspaceDepth = 20
 // buildFileTree recursively builds a workspaceNode tree for a directory.
 func buildFileTree(dirPath, basePath string, depth int) (workspaceNode, error) {
 	if depth > maxWorkspaceDepth {
-		return workspaceNode{}, nil
+		return workspaceNode{
+			Type: "directory",
+			Name: filepath.Base(dirPath),
+		}, nil
 	}
 
 	name := filepath.Base(dirPath)
@@ -1445,10 +1472,11 @@ func buildFileTree(dirPath, basePath string, depth int) (workspaceNode, error) {
 		name = "."
 	}
 
+	relPath, _ := filepath.Rel(basePath, dirPath)
 	node := workspaceNode{
 		Type:     "directory",
 		Name:     name,
-		Path:     dirPath,
+		Path:     relPath,
 		Children: []workspaceNode{},
 	}
 
@@ -1462,6 +1490,12 @@ func buildFileTree(dirPath, basePath string, depth int) (workspaceNode, error) {
 			continue
 		}
 
+		// Skip symlinks to prevent recursion into directories outside
+		// the workspace via symlink-based traversal.
+		if entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+
 		fullPath := filepath.Join(dirPath, entry.Name())
 		if entry.IsDir() {
 			child, err := buildFileTree(fullPath, basePath, depth+1)
@@ -1471,7 +1505,7 @@ func buildFileTree(dirPath, basePath string, depth int) (workspaceNode, error) {
 			}
 			node.Children = append(node.Children, child)
 		} else {
-			child, err := buildFileNode(fullPath, basePath, false)
+			child, err := buildFileNode(fullPath, basePath)
 			if err != nil {
 				slog.Warn("workspace: failed to read file", "path", fullPath, "error", err)
 				continue
@@ -1484,44 +1518,18 @@ func buildFileTree(dirPath, basePath string, depth int) (workspaceNode, error) {
 }
 
 // buildFileNode creates a workspaceNode for a single file.
-func buildFileNode(filePath, basePath string, includeContent bool) (workspaceNode, error) {
+func buildFileNode(filePath, basePath string) (workspaceNode, error) {
 	info, err := os.Stat(filePath)
 	if err != nil {
 		return workspaceNode{}, err
 	}
 
+	relPath, _ := filepath.Rel(basePath, filePath)
 	node := workspaceNode{
 		Type: "file",
 		Name: info.Name(),
-		Path: filePath,
+		Path: relPath,
 		Size: info.Size(),
-	}
-
-	if includeContent {
-		if info.Size() > 1*1024*1024 {
-			node.Content = "[file too large to preview]"
-		} else {
-			data, err := os.ReadFile(filePath)
-			if err != nil {
-				return node, err
-			}
-			checkLen := len(data)
-			if checkLen > 8192 {
-				checkLen = 8192
-			}
-			isText := true
-			for _, b := range data[:checkLen] {
-				if b == 0 {
-					isText = false
-					break
-				}
-			}
-			if isText {
-				node.Content = string(data)
-			} else {
-				node.Content = "[binary file]"
-			}
-		}
 	}
 
 	return node, nil
