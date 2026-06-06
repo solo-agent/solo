@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { FolderOpen, FileText, AlertCircle, RefreshCw } from 'lucide-react';
 import { FileTree } from '@/components/workspace/file-tree';
 import { FilePreview } from '@/components/workspace/file-preview';
+import { ResizablePanel } from '@/components/workspace/resizable-panel';
 import { AgentSelector } from '@/components/workspace/agent-selector';
 import { Breadcrumb } from '@/components/workspace/breadcrumb';
 import { useWorkspaceFiles } from '@/lib/hooks/use-workspace-files';
@@ -147,41 +148,45 @@ function WorkspacePageContent() {
       {selectedPath && (
         <Breadcrumb path={selectedPath} onNavigate={(p) => handleSelect(p, 'directory')} />
       )}
-      <div className="flex flex-1 overflow-hidden">
-        <div className="w-[220px] flex-shrink-0 overflow-y-auto border-r-2 border-black bg-white">
-          <div className="border-b-2 border-black px-3 py-2">
-            <span className="font-heading text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-              文件
-            </span>
-          </div>
-          <FileTree
-            tree={tree}
-            selectedPath={selectedPath}
-            expandedPaths={expandedPaths}
-            onSelect={handleSelect}
-            onToggleExpand={handleToggleExpand}
-            onLoadDirectory={handleLoadDirectory}
-          />
-        </div>
-        <div className="flex-1 overflow-y-auto bg-brutal-cream">
-          {selectedPath ? (
-            <FilePreview
-              path={selectedPath}
-              content={fileContent}
-              isLoading={isContentLoading}
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center">
-              <div className="text-center">
-                <FileText className="mx-auto h-6 w-6 text-muted-foreground" />
-                <p className="mt-2 font-mono text-xs text-muted-foreground">
-                  选择文件以预览内容
-                </p>
-              </div>
+      <ResizablePanel
+        left={
+          <div className="h-full overflow-y-auto border-r-2 border-black bg-white">
+            <div className="border-b-2 border-black px-3 py-2">
+              <span className="font-heading text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                文件
+              </span>
             </div>
-          )}
-        </div>
-      </div>
+            <FileTree
+              tree={tree}
+              selectedPath={selectedPath}
+              expandedPaths={expandedPaths}
+              onSelect={handleSelect}
+              onToggleExpand={handleToggleExpand}
+              onLoadDirectory={handleLoadDirectory}
+            />
+          </div>
+        }
+        right={
+          <div className="h-full overflow-y-auto bg-brutal-cream">
+            {selectedPath ? (
+              <FilePreview
+                path={selectedPath}
+                content={fileContent}
+                isLoading={isContentLoading}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center">
+                <div className="text-center">
+                  <FileText className="mx-auto h-6 w-6 text-muted-foreground" />
+                  <p className="mt-2 font-mono text-xs text-muted-foreground">
+                    选择文件以预览内容
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        }
+      />
     </div>
   );
 }

@@ -8,7 +8,8 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { FolderOpen, AlertCircle, RefreshCw, FileText } from 'lucide-react';
+import Link from 'next/link';
+import { FolderOpen, AlertCircle, RefreshCw, FileText, ExternalLink } from 'lucide-react';
 import { useWorkspaceFiles } from '@/lib/hooks/use-workspace-files';
 import { FileTree } from '@/components/workspace/file-tree';
 import { FilePreview } from '@/components/workspace/file-preview';
@@ -117,10 +118,19 @@ export function AgentWorkspaceTab({ agentId }: AgentWorkspaceTabProps) {
     <div className="-mx-4 -mb-4 flex h-[calc(100vh-200px)]">
       {/* Left: File tree */}
       <div className="w-[220px] flex-shrink-0 overflow-y-auto border-r-2 border-black bg-white">
-        <div className="border-b-2 border-black px-3 py-2">
+        <div className="border-b-2 border-black px-3 py-2 flex items-center">
           <span className="font-heading text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
             文件
           </span>
+          <Link
+            href={`/workspace?agent=${agentId}`}
+            className="btn-brutal btn-brutal-xs ml-auto"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <ExternalLink className="mr-1 h-3 w-3" />
+            新页面打开
+          </Link>
         </div>
         <FileTree
           tree={tree}
