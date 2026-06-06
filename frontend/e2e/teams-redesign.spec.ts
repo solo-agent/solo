@@ -8,8 +8,8 @@
 import { test, expect, type Page } from '@playwright/test';
 
 const BASE = 'http://localhost:3000';
-const TEST_EMAIL = 'test@test.com';
-const TEST_PASSWORD = 'test12345';
+const TEST_EMAIL = 'teams-e2e@test.com';
+const TEST_PASSWORD = 'TeamsE2E12345!';
 
 async function login(page: Page) {
   await page.goto(`${BASE}/auth/login`);
