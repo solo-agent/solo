@@ -62,7 +62,7 @@ export default function LoginPage() {
     return (
       <div className="card-brutal p-12 w-full">
         <div className="flex flex-col items-center gap-3">
-          <Spinner size="lg" />
+          <Spinner size="md" />
           <p className="text-sm text-muted-foreground">检查登录状态...</p>
         </div>
       </div>

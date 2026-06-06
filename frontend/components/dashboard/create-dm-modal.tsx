@@ -9,7 +9,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Search, Bot, Circle, Loader2 } from 'lucide-react';
+import { Search, Bot, Circle } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import {
   Dialog,
@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Spinner } from '@/components/ui/spinner';
 import { Avatar } from '@/components/ui/avatar';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import type { CreateDMInput, DMChannel } from '@/lib/types';
@@ -173,7 +174,7 @@ export function CreateDMModal({
                   key={`${participant.type}-${participant.id}`}
                   onClick={() => handleSelect(participant)}
                   disabled={isCreating}
-                  className="flex w-full items-center gap-3 border-2 border-transparent p-2 text-left transition-colors hover:border-black hover:bg-brutal-pink/20 disabled:opacity-50"
+                  className="flex w-full items-center gap-3 border-2 border-transparent p-2 text-left transition-colors hover:border-black hover:bg-brutal-pink-light disabled:opacity-50"
                   role="option"
                   aria-selected={false}
                 >
@@ -239,7 +240,7 @@ export function CreateDMModal({
                   >
                     {isCreating ? (
                       <>
-                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        <Spinner size="sm" className="mr-1" />
                         处理中...
                       </>
                     ) : existing ? (

@@ -36,7 +36,7 @@ function MemberItem({ member, onRemove }: { member: ChannelMember; onRemove?: (i
   }[member.status] || '离线';
 
   return (
-    <div className="group flex items-center gap-2 border-2 border-transparent px-2 py-1.5 transition-colors hover:border-black hover:bg-brutal-pink/20">
+    <div className="group flex items-center gap-2 border-2 border-transparent px-2 py-1.5 transition-colors hover:border-black hover:bg-brutal-pink-light">
       {/* Icon / Avatar */}
       {isAgent ? (
         <PixelAvatar agentId={member.member_id} size="sm" />

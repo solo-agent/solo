@@ -97,7 +97,7 @@ export default function TeamsPage() {
     return (
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
-          <Spinner size="lg" />
+          <Spinner size="md" />
           <p className="font-mono text-sm text-muted-foreground">加载中...</p>
         </div>
       </div>
@@ -121,32 +121,30 @@ export default function TeamsPage() {
       <main className="flex flex-1 flex-col overflow-hidden">
         {/* Error banner (agents) */}
         {agentsError && (
-          <BrutalAlert
-            variant="warning"
-            className="m-4"
-            action={
-              <Button variant="outline" size="sm" onClick={() => refetchAgents()}>
-                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                重试
-              </Button>
-            }
-          >
-            {agentsError}
-          </BrutalAlert>
+          <div className="m-4 space-y-2">
+            <BrutalAlert variant="warning">{agentsError}</BrutalAlert>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetchAgents()}
+            >
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+              重试
+            </Button>
+          </div>
         )}
         {userError && !agentsError && (
-          <BrutalAlert
-            variant="warning"
-            className="m-4"
-            action={
-              <Button variant="outline" size="sm" onClick={() => refetchUser()}>
-                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                重试
-              </Button>
-            }
-          >
-            {userError}
-          </BrutalAlert>
+          <div className="m-4 space-y-2">
+            <BrutalAlert variant="warning">{userError}</BrutalAlert>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetchUser()}
+            >
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+              重试
+            </Button>
+          </div>
         )}
 
         {/* Graph view */}
@@ -171,14 +169,15 @@ export default function TeamsPage() {
                   {selectedAgent.name}
                 </h1>
               </div>
-              <button
+              <Button
+                size="sm"
+                variant="primary"
                 onClick={handleMessage}
                 disabled={isDMLoading}
-                className="btn-brutal btn-brutal-sm bg-brutal-pink text-black"
               >
                 <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
                 {isDMLoading ? '跳转中...' : 'Message'}
-              </button>
+              </Button>
             </div>
             <div className="flex border-b border-black bg-brutal-cream">
               <button
@@ -187,7 +186,7 @@ export default function TeamsPage() {
                 className={`flex items-center gap-1.5 border-r-2 border-black px-5 py-2 font-heading text-xs font-bold ${
                   agentTab === 'profile'
                     ? 'bg-brutal-pink text-black'
-                    : 'bg-white text-foreground hover:bg-brutal-pink/40'
+                    : 'bg-white text-foreground hover:bg-brutal-pink-light'
                 }`}
                 aria-selected={agentTab === 'profile'}
                 role="tab"
@@ -201,7 +200,7 @@ export default function TeamsPage() {
                 className={`flex items-center gap-1.5 border-r-2 border-black px-5 py-2 font-heading text-xs font-bold ${
                   agentTab === 'workspace'
                     ? 'bg-brutal-pink text-black'
-                    : 'bg-white text-foreground hover:bg-brutal-pink/40'
+                    : 'bg-white text-foreground hover:bg-brutal-pink-light'
                 }`}
                 aria-selected={agentTab === 'workspace'}
                 role="tab"

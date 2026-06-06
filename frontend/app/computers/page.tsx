@@ -205,7 +205,7 @@ export default function ComputersPage() {
     return (
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
-          <Spinner size="lg" />
+          <Spinner size="md" />
           <p className="font-mono text-sm text-muted-foreground">加载中...</p>
         </div>
       </div>
@@ -238,17 +238,14 @@ export default function ComputersPage() {
           <div className="mx-auto w-full max-w-3xl">
             {/* Error state */}
             {error && (
-              <BrutalAlert
-                variant="warning"
-                className="mb-6 p-4"
-                action={
-                  <Button variant="outline" size="sm" onClick={refetch}>
-                    重试
-                  </Button>
-                }
-              >
-                {error}
-              </BrutalAlert>
+              <div className="mb-6 space-y-2">
+                <BrutalAlert variant="warning" className="p-4">
+                  {error}
+                </BrutalAlert>
+                <Button variant="outline" size="sm" onClick={refetch}>
+                  重试
+                </Button>
+              </div>
             )}
 
             {/* Loading skeleton */}
@@ -656,7 +653,7 @@ function ConnectedAgents({ computerId }: { computerId: string | null }) {
   if (isLoading) {
     return (
       <div className="flex items-center gap-2 py-2">
-        <Spinner size="sm" square={false} />
+        <Spinner size="sm" />
         <span className="text-sm text-muted-foreground">加载中...</span>
       </div>
     );

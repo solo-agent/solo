@@ -260,7 +260,7 @@ export default function TasksPage() {
     return (
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
-          <Spinner size="lg" />
+          <Spinner size="md" />
           <p className="font-mono text-sm text-muted-foreground">加载中...</p>
         </div>
       </div>
@@ -302,31 +302,27 @@ export default function TasksPage() {
               <Select
                 value={filterAssignee}
                 onChange={(e) => handleFilterChange('assignee', e.target.value)}
-                className="h-8 py-0 text-xs min-w-[120px]"
+                options={[
+                  { value: '', label: '认领人: 全部' },
+                  ...assigneeOptions.map((a) => ({ value: a.id, label: a.name })),
+                ]}
+                size="sm"
+                className="min-w-[120px]"
                 aria-label="按认领人筛选"
-              >
-                <option value="">认领人: 全部</option>
-                {assigneeOptions.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </Select>
+              />
 
               {/* Creator dropdown */}
               <Select
                 value={filterCreator}
                 onChange={(e) => handleFilterChange('creator', e.target.value)}
-                className="h-8 py-0 text-xs min-w-[120px]"
+                options={[
+                  { value: '', label: '创建者: 全部' },
+                  ...creatorOptions.map((c) => ({ value: c.id, label: c.name })),
+                ]}
+                size="sm"
+                className="min-w-[120px]"
                 aria-label="按创建者筛选"
-              >
-                <option value="">创建者: 全部</option>
-                {creatorOptions.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
+              />
 
               {/* Clear filters button */}
               {hasFilters && (
@@ -406,7 +402,7 @@ export default function TasksPage() {
               <Suspense
                 fallback={
                   <div className="flex h-full items-center justify-center">
-                    <Spinner size="sm" square={false} />
+                    <Spinner size="sm" />
                   </div>
                 }
               >

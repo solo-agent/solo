@@ -17,6 +17,7 @@ import { useState, useCallback } from 'react';
 import { ChevronDown, AlertCircle, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
+import { Button } from '@/components/ui/button';
 import type { Channel, DMChannel } from '@/lib/types';
 
 interface TasksLeftColumnProps {
@@ -121,14 +122,10 @@ export function TasksLeftColumn({
                   <AlertCircle className="h-4 w-4 flex-shrink-0" />
                   <span className="font-body text-xs">{channelsError}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={onRetryChannels}
-                  className="btn-brutal btn-brutal-sm"
-                >
+                <Button size="sm" variant="outline" onClick={onRetryChannels}>
                   <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
                   重试
-                </button>
+                </Button>
               </div>
             ) : channels.length === 0 ? (
               <p className="px-6 py-2 font-mono text-[10px] italic text-muted-foreground">
@@ -188,14 +185,10 @@ export function TasksLeftColumn({
                   <AlertCircle className="h-4 w-4 flex-shrink-0" />
                   <span className="font-body text-xs">{dmsError}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={onRetryDMs}
-                  className="btn-brutal btn-brutal-sm"
-                >
+                <Button size="sm" variant="outline" onClick={onRetryDMs}>
                   <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
                   重试
-                </button>
+                </Button>
               </div>
             ) : dms.length === 0 ? (
               <p className="px-6 py-2 font-mono text-[10px] italic text-muted-foreground">

@@ -76,7 +76,7 @@ function CreateTaskForm() {
     return (
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
-          <Spinner size="lg" />
+          <Spinner size="md" />
           <p className="font-mono text-sm text-muted-foreground">加载中...</p>
         </div>
       </div>
@@ -115,16 +115,14 @@ function CreateTaskForm() {
             <Select
               value={selectedChannelId}
               onChange={(e) => setSelectedChannelId(e.target.value)}
-              className="h-10 w-full"
+              options={[
+                { value: '', label: '选择频道...' },
+                ...channels.map((ch) => ({ value: ch.id, label: `#${ch.name}` })),
+              ]}
+              size="md"
+              className="w-full"
               disabled={channelsLoading || isSubmitting}
-            >
-              <option value="">选择频道...</option>
-              {channels.map((ch) => (
-                <option key={ch.id} value={ch.id}>
-                  #{ch.name}
-                </option>
-              ))}
-            </Select>
+            />
           </div>
         )}
 
@@ -147,7 +145,7 @@ export default function CreateTaskPage() {
       fallback={
         <div className="flex h-screen items-center justify-center bg-brutal-cream">
           <div className="flex flex-col items-center gap-3">
-            <Spinner size="lg" />
+            <Spinner size="md" />
             <p className="font-mono text-sm text-muted-foreground">加载中...</p>
           </div>
         </div>

@@ -57,7 +57,7 @@ export default function SettingsPage() {
     return (
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
-          <Spinner size="lg" />
+          <Spinner size="md" />
           <p className="font-mono text-sm text-muted-foreground">加载中...</p>
         </div>
       </div>
@@ -98,17 +98,14 @@ export default function SettingsPage() {
 
       {/* Error banner */}
       {userError && (
-        <BrutalAlert
-          variant="error"
-          className="mb-6 p-4"
-          action={
-            <Button variant="outline" size="sm" onClick={refetch}>
-              重试
-            </Button>
-          }
-        >
-          {userError}
-        </BrutalAlert>
+        <div className="mb-6 space-y-2">
+          <BrutalAlert variant="error" className="p-4">
+            {userError}
+          </BrutalAlert>
+          <Button variant="outline" size="sm" onClick={refetch}>
+            重试
+          </Button>
+        </div>
       )}
 
       {/* Loading state */}

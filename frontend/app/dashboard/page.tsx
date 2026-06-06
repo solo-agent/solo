@@ -22,7 +22,7 @@ const ChannelView = dynamic(
   {
     loading: () => (
       <div className="flex flex-1 items-center justify-center">
-        <Spinner size="default" />
+        <Spinner size="md" />
       </div>
     ),
   },
@@ -33,7 +33,7 @@ const DMView = dynamic(
   {
     loading: () => (
       <div className="flex flex-1 items-center justify-center">
-        <Spinner size="default" />
+        <Spinner size="md" />
       </div>
     ),
   },
@@ -48,7 +48,7 @@ export default function DashboardPage() {
       fallback={
         <div className="flex h-screen items-center justify-center bg-brutal-cream">
           <div className="flex flex-col items-center gap-3">
-            <Spinner size="lg" />
+            <Spinner size="md" />
             <p className="font-mono text-sm text-muted-foreground">加载中...</p>
           </div>
         </div>
@@ -293,7 +293,7 @@ function DashboardContent() {
     return (
       <div className="flex h-screen items-center justify-center bg-muted/20">
         <div className="flex flex-col items-center gap-3">
-          <Spinner size="lg" />
+          <Spinner size="md" />
           <p className="text-sm text-muted-foreground">加载中...</p>
         </div>
       </div>
@@ -307,7 +307,7 @@ function DashboardContent() {
       if (!selectedChannel) {
         return (
           <div className="flex flex-1 items-center justify-center">
-            <Spinner size="default" />
+            <Spinner size="md" />
           </div>
         );
       }
@@ -326,7 +326,7 @@ function DashboardContent() {
       if (!selectedDM) {
         return (
           <div className="flex flex-1 items-center justify-center">
-            <Spinner size="default" />
+            <Spinner size="md" />
           </div>
         );
       }
