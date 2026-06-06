@@ -143,6 +143,10 @@ func main() {
 	r.Route("/internal/daemon", func(r chi.Router) {
 		r.Post("/run", h.Run)           // Server dispatches agent tasks here
 		r.Post("/proxy", h.ProxyRequest) // Agent-to-server proxy
+		r.Route("/workspace", func(r chi.Router) {
+			r.Get("/list", h.HandleWorkspaceList)
+			r.Get("/read", h.HandleWorkspaceRead)
+		})
 	})
 
 	// SSE requires long-lived connections — no write timeout.

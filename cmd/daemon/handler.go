@@ -1306,3 +1306,223 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	_, err = io.Copy(d, s)
 	return err
 }
+
+// ── Workspace file browsing endpoints ──────────────────────────────────────────
+
+// workspaceNode represents a file or directory in the workspace tree.
+type workspaceNode struct {
+	Type     string          `json:"type"`
+	Name     string          `json:"name"`
+	Path     string          `json:"path,omitempty"`
+	Content  string          `json:"content,omitempty"`
+	Size     int64           `json:"size,omitempty"`
+	Children []workspaceNode `json:"children,omitempty"`
+}
+
+// HandleWorkspaceList returns a file tree for the given agent's workspace.
+func (h *daemonHandler) HandleWorkspaceList(w http.ResponseWriter, r *http.Request) {
+	agentID := r.URL.Query().Get("agent_id")
+	if agentID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_id is required"})
+		return
+	}
+
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		relPath = "."
+	}
+
+	workspaceDir := h.workspaceManager.WorkspaceDir(agentID)
+	fullPath := filepath.Clean(filepath.Join(workspaceDir, relPath))
+	if !strings.HasPrefix(fullPath, workspaceDir) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path traversal not allowed"})
+		return
+	}
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "path not found"})
+			return
+		}
+		slog.Error("workspace list: stat failed", "path", fullPath, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	var node workspaceNode
+	if info.IsDir() {
+		node, err = buildFileTree(fullPath, workspaceDir, 0)
+	} else {
+		node, err = buildFileNode(fullPath, workspaceDir, false)
+	}
+	if err != nil {
+		slog.Error("workspace list: build failed", "path", fullPath, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read workspace"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, node)
+}
+
+// HandleWorkspaceRead returns the content of a single file in the workspace.
+func (h *daemonHandler) HandleWorkspaceRead(w http.ResponseWriter, r *http.Request) {
+	agentID := r.URL.Query().Get("agent_id")
+	if agentID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_id is required"})
+		return
+	}
+
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path is required"})
+		return
+	}
+
+	workspaceDir := h.workspaceManager.WorkspaceDir(agentID)
+	fullPath := filepath.Clean(filepath.Join(workspaceDir, relPath))
+	if !strings.HasPrefix(fullPath, workspaceDir) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path traversal not allowed"})
+		return
+	}
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
+			return
+		}
+		slog.Error("workspace read: stat failed", "path", fullPath, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	if info.Size() > 1*1024*1024 {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"content": "[file too large to preview]",
+			"name":    info.Name(),
+			"size":    info.Size(),
+		})
+		return
+	}
+
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		slog.Error("workspace read: read failed", "path", fullPath, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read file"})
+		return
+	}
+
+	content := string(data)
+	checkLen := len(data)
+	if checkLen > 8192 {
+		checkLen = 8192
+	}
+	for _, b := range data[:checkLen] {
+		if b == 0 {
+			content = "[binary file]"
+			break
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"content": content,
+		"name":    info.Name(),
+		"size":    info.Size(),
+	})
+}
+
+const maxWorkspaceDepth = 20
+
+// buildFileTree recursively builds a workspaceNode tree for a directory.
+func buildFileTree(dirPath, basePath string, depth int) (workspaceNode, error) {
+	if depth > maxWorkspaceDepth {
+		return workspaceNode{}, nil
+	}
+
+	name := filepath.Base(dirPath)
+	if dirPath == basePath {
+		name = "."
+	}
+
+	node := workspaceNode{
+		Type:     "directory",
+		Name:     name,
+		Path:     dirPath,
+		Children: []workspaceNode{},
+	}
+
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return node, err
+	}
+
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		fullPath := filepath.Join(dirPath, entry.Name())
+		if entry.IsDir() {
+			child, err := buildFileTree(fullPath, basePath, depth+1)
+			if err != nil {
+				slog.Warn("workspace: failed to read subdirectory", "path", fullPath, "error", err)
+				continue
+			}
+			node.Children = append(node.Children, child)
+		} else {
+			child, err := buildFileNode(fullPath, basePath, false)
+			if err != nil {
+				slog.Warn("workspace: failed to read file", "path", fullPath, "error", err)
+				continue
+			}
+			node.Children = append(node.Children, child)
+		}
+	}
+
+	return node, nil
+}
+
+// buildFileNode creates a workspaceNode for a single file.
+func buildFileNode(filePath, basePath string, includeContent bool) (workspaceNode, error) {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return workspaceNode{}, err
+	}
+
+	node := workspaceNode{
+		Type: "file",
+		Name: info.Name(),
+		Path: filePath,
+		Size: info.Size(),
+	}
+
+	if includeContent {
+		if info.Size() > 1*1024*1024 {
+			node.Content = "[file too large to preview]"
+		} else {
+			data, err := os.ReadFile(filePath)
+			if err != nil {
+				return node, err
+			}
+			checkLen := len(data)
+			if checkLen > 8192 {
+				checkLen = 8192
+			}
+			isText := true
+			for _, b := range data[:checkLen] {
+				if b == 0 {
+					isText = false
+					break
+				}
+			}
+			if isText {
+				node.Content = string(data)
+			} else {
+				node.Content = "[binary file]"
+			}
+		}
+	}
+
+	return node, nil
+}

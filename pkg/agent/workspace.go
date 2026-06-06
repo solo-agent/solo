@@ -131,6 +131,11 @@ func (wm *WorkspaceManager) WorkspacePath(agentID string) string {
 	return filepath.Join(wm.rootDir, agentID)
 }
 
+// WorkspaceDir returns the WorkDir path for an agent.
+func (wm *WorkspaceManager) WorkspaceDir(agentID string) string {
+	return filepath.Join(wm.rootDir, agentID, "workspace")
+}
+
 // Cleanup removes the entire Agent workspace directory tree.
 // It is safe to call on a non-existent workspace.
 func (wm *WorkspaceManager) Cleanup(agentID string) error {
