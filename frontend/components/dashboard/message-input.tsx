@@ -23,7 +23,6 @@ import {
   ClipboardList,
   Upload,
   X,
-  Loader2,
   Check,
   AlertTriangle,
 } from 'lucide-react';
@@ -31,6 +30,7 @@ import { cn } from '@/lib/utils';
 import { useMentions } from '@/lib/hooks/use-mentions';
 import { MentionDropdown, type DropdownAnchor } from './mention-dropdown';
 import { useToast } from '@/components/ui/toast';
+import { Spinner } from '@/components/ui/spinner';
 import type { ChannelMember } from '@/lib/types';
 
 // ---- Types ----
@@ -480,7 +480,7 @@ export function MessageInput({
           aria-live="polite"
         >
           <Upload className="h-8 w-8 text-brutal-black opacity-60" aria-hidden />
-          <p className="font-display text-base font-bold text-foreground">
+          <p className="font-heading text-base font-bold text-foreground">
             拖放文件到此处上传
           </p>
           <p className="font-mono text-xs text-muted-foreground">
@@ -537,7 +537,7 @@ export function MessageInput({
                   /* Status icon for non-image files */
                   <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center">
                     {upload.status === 'uploading' && (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-label="上传中" />
+                      <Spinner size="sm" className="text-muted-foreground" label="上传中" />
                     )}
                     {upload.status === 'done' && (
                       <Check className="h-3.5 w-3.5 text-brutal-lime" aria-label="已上传" />

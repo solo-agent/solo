@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, Space_Grotesk, Space_Mono, Syne } from "next/font/google";
+import { Inter, Space_Grotesk, Space_Mono } from "next/font/google";
 import { AuthProvider } from "@/lib/auth-context";
 import { WSProvider } from "@/lib/ws-context";
 import { WSAuthBridge } from "@/components/ws-auth-bridge";
@@ -25,12 +25,6 @@ const spaceMono = Space_Mono({
   variable: "--font-space-mono",
 });
 
-const syne = Syne({
-  subsets: ["latin"],
-  weight: ["700", "800"],
-  variable: "--font-syne",
-});
-
 export const metadata: Metadata = {
   title: "Solo - 频道式多 Agent 协作平台",
   description: "像 Slack 一样组织人+AI 的协作空间",
@@ -47,7 +41,7 @@ export default function RootLayout({
   return (
     <html
       lang="zh-CN"
-      className={`${inter.variable} ${spaceGrotesk.variable} ${spaceMono.variable} ${syne.variable}`}
+      className={`${inter.variable} ${spaceGrotesk.variable} ${spaceMono.variable}`}
     >
       <body className="min-h-screen antialiased">
         <AuthProvider>
