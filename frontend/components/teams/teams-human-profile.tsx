@@ -32,7 +32,7 @@ export function TeamsHumanProfile({ userId }: TeamsHumanProfileProps) {
     setError(null);
     try {
       // /api/v1/users/me gives us the current user. If the userId doesn't
-      // match, we still show what we have (today there's only one human).
+      // match, the row is treated as inaccessible (multi-user not yet supported).
       const me = await apiClient.get<UserInfo>('/api/v1/users/me');
       if (me.id !== userId) {
         setError('该用户不存在或当前不可访问');
