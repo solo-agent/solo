@@ -2,6 +2,19 @@
    globals.brutal.css — Solo Neubrutalist Design System v3.0
    Based on neubrutalism.com canonical patterns
    Replaces globals.css as the primary stylesheet
+
+   v3.0 changelog:
+   - Added semantic color tokens (primary/accent/info/success/warning/danger/violet/muted)
+     with light/light-light pairs. Old hex-named tokens kept as deprecated aliases
+     pointing to the new names; remove aliases in v4.0.
+   - Added --border-brutal-thicker (4px) and --border-brutal-thickest (8px).
+   - btn-brutal-sm :active translate aligned with base (3px 3px).
+   - card-brutal hover translated -y to -2px and shadow to 7px 8px.
+   - prefers-reduced-motion extended to kill spin/pulse/bounce.
+   - @media (prefers-color-scheme: dark) block inverts canvas; shadow color
+     driven by --color-brutal-shadow token.
+   - Global focus-visible outline color moved to --color-brutal-info.
+   - Dropped --font-display (Syne was unused).
    ============================================================ */
 
 @import "tailwindcss";
@@ -14,33 +27,62 @@
 
 @theme inline {
   /* ---- Typography ---- */
+  /* --font-sans / --font-body: body and UI text.
+     --font-heading: heavy display (Space Grotesk).
+     --font-mono: code, IDs, tabular numerals only. Do not use for prose. */
   --font-sans: var(--font-inter), ui-sans-serif, system-ui;
   --font-body: var(--font-inter), ui-sans-serif, system-ui;
-  --font-display: var(--font-syne), var(--font-space-grotesk), 'Space Grotesk', sans-serif;
   --font-heading: var(--font-space-grotesk), 'Space Grotesk', sans-serif;
   --font-mono: var(--font-space-mono), ui-monospace, monospace;
 
-  /* ---- Brand Color Palette ---- */
+  /* ---- Brand Color Palette (semantic, light mode) ----
+     primary = call-to-action yellow, accent = hot red, info = electric blue,
+     success = lime, warning = peach, danger = coral red, violet = soft purple,
+     muted = warm gray. Each pairs with a `*-light` 8% tint for backgrounds. */
   --color-brutal-bg: #fffaef;
   --color-brutal-fg: #000000;
   --color-brutal-cream: #fffaef;
   --color-brutal-black: #000000;
   --color-brutal-white: #ffffff;
-  --color-brutal-pink: #FFD23F;
-  --color-brutal-pink-light: #FFF9E0;
-  --color-brutal-yellow: #FF6B6B;
-  --color-brutal-yellow-light: #FFD4D4;
-  --color-brutal-lavender: #bbafe6;
-  --color-brutal-lavender-light: #f0ecff;
-  --color-brutal-cyan: #74B9FF;
-  --color-brutal-cyan-light: #E0F0FF;
-  --color-brutal-lime: #88D498;
-  --color-brutal-lime-light: #E0F5E0;
-  --color-brutal-orange: #f8a16f;
-  --color-brutal-orange-light: #fff0e0;
-  --color-brutal-red: #f97264;
-  --color-brutal-red-light: #ffe0dc;
-  --color-brutal-stone: #c0b9b1;
+
+  --color-brutal-primary: #FFD23F;
+  --color-brutal-primary-light: #FFF9E0;
+  --color-brutal-accent: #FF6B6B;
+  --color-brutal-accent-light: #FFD4D4;
+  --color-brutal-info: #74B9FF;
+  --color-brutal-info-light: #E0F0FF;
+  --color-brutal-success: #88D498;
+  --color-brutal-success-light: #E0F5E0;
+  --color-brutal-warning: #f8a16f;
+  --color-brutal-warning-light: #fff0e0;
+  --color-brutal-danger: #f97264;
+  --color-brutal-danger-light: #ffe0dc;
+  --color-brutal-violet: #bbafe6;
+  --color-brutal-violet-light: #f0ecff;
+  --color-brutal-muted: #c0b9b1;
+  --color-brutal-muted-light: #ece6df;
+
+  /* Hard shadow color. Switched to white in dark mode (see media query below). */
+  --color-brutal-shadow: #000000;
+
+  /* ---- Deprecated color aliases (v3.0 → remove in v4.0) ----
+     These point at the new semantic names so any old `bg-brutal-pink` etc.
+     still resolves correctly. Do not introduce new uses. */
+  --color-brutal-pink: var(--color-brutal-primary);
+  --color-brutal-pink-light: var(--color-brutal-primary-light);
+  --color-brutal-yellow: var(--color-brutal-accent);
+  --color-brutal-yellow-light: var(--color-brutal-accent-light);
+  --color-brutal-cyan: var(--color-brutal-info);
+  --color-brutal-cyan-light: var(--color-brutal-info-light);
+  --color-brutal-lime: var(--color-brutal-success);
+  --color-brutal-lime-light: var(--color-brutal-success-light);
+  --color-brutal-orange: var(--color-brutal-warning);
+  --color-brutal-orange-light: var(--color-brutal-warning-light);
+  --color-brutal-red: var(--color-brutal-danger);
+  --color-brutal-red-light: var(--color-brutal-danger-light);
+  --color-brutal-lavender: var(--color-brutal-violet);
+  --color-brutal-lavender-light: var(--color-brutal-violet-light);
+  --color-brutal-stone: var(--color-brutal-muted);
 
   /* ---- Functional Colors (shadcn/ui compatibility) ---- */
   --color-background: #fffaef;
@@ -49,19 +91,19 @@
   --color-card-foreground: #000000;
   --color-popover: #ffffff;
   --color-popover-foreground: #000000;
-  --color-primary: #FFD23F;
+  --color-primary: var(--color-brutal-primary);
   --color-primary-foreground: #000000;
   --color-secondary: #ffffff;
   --color-secondary-foreground: #000000;
   --color-muted: #f5f0e8;
   --color-muted-foreground: #666666;
-  --color-accent: #FF6B6B;
+  --color-accent: var(--color-brutal-accent);
   --color-accent-foreground: #000000;
-  --color-destructive: #f97264;
+  --color-destructive: var(--color-brutal-danger);
   --color-destructive-foreground: #000000;
   --color-border: #000000;
   --color-input: #000000;
-  --color-ring: #74b9ff;
+  --color-ring: var(--color-brutal-info);
   --color-sidebar: #fffaef;
   --color-sidebar-foreground: #000000;
   --color-sidebar-muted: #f5f0e8;
@@ -117,37 +159,69 @@
 }
 
 /* ============================================================
-   Shadow System — hard offset, zero blur, pure black
+   Dark Mode (auto via prefers-color-scheme)
+   - Inverts canvas, switches shadow color to white.
+   - Accent palette stays the same (reads fine on dark with white borders).
+   ============================================================ */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-brutal-bg: #1a1a1a;
+    --color-brutal-cream: #1a1a1a;
+    --color-brutal-black: #ffffff;
+    --color-brutal-white: #000000;
+    --color-brutal-shadow: #ffffff;
+
+    --color-background: #1a1a1a;
+    --color-foreground: #f5f0e8;
+    --color-card: #242424;
+    --color-card-foreground: #f5f0e8;
+    --color-popover: #242424;
+    --color-popover-foreground: #f5f0e8;
+    --color-muted: #2a2a2a;
+    --color-muted-foreground: #b0a8a0;
+    --color-border: #ffffff;
+    --color-input: #ffffff;
+    --color-sidebar: #1a1a1a;
+    --color-sidebar-foreground: #f5f0e8;
+    --color-sidebar-muted: #2a2a2a;
+    --color-sidebar-muted-foreground: #b0a8a0;
+    --color-sidebar-border: #ffffff;
+  }
+}
+
+/* ============================================================
+   Shadow System — hard offset, zero blur, color from --color-brutal-shadow
    ============================================================ */
 
 .shadow-brutal {
-  box-shadow: 5px 5px 0 0 #000;
+  box-shadow: 5px 5px 0 0 var(--color-brutal-shadow);
 }
 
 .shadow-brutal-sm {
-  box-shadow: 3px 3px 0 0 #000;
+  box-shadow: 3px 3px 0 0 var(--color-brutal-shadow);
 }
 
 .shadow-brutal-lg {
-  box-shadow: 7px 7px 0 0 #000;
+  box-shadow: 7px 7px 0 0 var(--color-brutal-shadow);
 }
 
 .shadow-brutal-xl {
-  box-shadow: 10px 10px 0 0 #000;
+  box-shadow: 10px 10px 0 0 var(--color-brutal-shadow);
 }
 
-/* Colored shadow variants */
+/* Colored shadow variants (override the black with a color shadow token) */
 .shadow-brutal-pink {
-  --tw-shadow-color: #FFD23F;
+  --tw-shadow-color: var(--color-brutal-primary);
 }
 .shadow-brutal-yellow {
-  --tw-shadow-color: #FF6B6B;
+  --tw-shadow-color: var(--color-brutal-accent);
 }
 .shadow-brutal-blue {
-  --tw-shadow-color: #74b9ff;
+  --tw-shadow-color: var(--color-brutal-info);
 }
 .shadow-brutal-lime {
-  --tw-shadow-color: #88D498;
+  --tw-shadow-color: var(--color-brutal-success);
 }
 
 /* ============================================================
@@ -155,19 +229,29 @@
    ============================================================ */
 
 .border-brutal {
-  border: 2px solid #000;
-}
-
-.border-brutal-thick {
-  border: 3px solid #000;
+  border: 2px solid var(--color-brutal-black);
 }
 
 .border-brutal-thin {
-  border: 1px solid #000;
+  border: 1px solid var(--color-brutal-black);
+}
+
+.border-brutal-thick {
+  border: 3px solid var(--color-brutal-black);
+}
+
+.border-brutal-thicker {
+  border: 4px solid var(--color-brutal-black);
+}
+
+.border-brutal-thickest {
+  border: 8px solid var(--color-brutal-black);
 }
 
 /* ============================================================
    Button — btn-brutal with lift/press interactions
+   Translate rhythm: hover -1/-1 + shadow 7, active +3/+3 + shadow 0.
+   Small variant uses the same rhythm with smaller shadow offsets.
    ============================================================ */
 
 .btn-brutal {
@@ -181,12 +265,12 @@
   color: #000;
   cursor: pointer;
   transition: transform 0.1s ease, box-shadow 0.1s ease;
-  box-shadow: 5px 5px 0 0 #000;
+  box-shadow: 5px 5px 0 0 var(--color-brutal-shadow);
 }
 
 .btn-brutal:hover {
   transform: translate(-1px, -1px);
-  box-shadow: 7px 7px 0 0 #000;
+  box-shadow: 7px 7px 0 0 var(--color-brutal-shadow);
 }
 
 .btn-brutal:active {
@@ -199,22 +283,23 @@
   pointer-events: none;
 }
 
-/* Pink primary variant */
+/* Primary variant (yellow call-to-action) */
 .btn-brutal-pink {
-  background: #FFD23F;
+  background: var(--color-brutal-primary);
 }
 
-/* Small variant */
+/* Small variant: same translate rhythm as base, just smaller shadow. */
 .btn-brutal-sm {
-  box-shadow: 3px 3px 0 0 #000;
+  box-shadow: 3px 3px 0 0 var(--color-brutal-shadow);
 }
 
 .btn-brutal-sm:hover {
-  box-shadow: 5px 5px 0 0 #000;
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 0 var(--color-brutal-shadow);
 }
 
 .btn-brutal-sm:active {
-  transform: translate(2px, 2px);
+  transform: translate(3px, 3px);
   box-shadow: none;
 }
 
@@ -224,7 +309,7 @@
   border: none;
   font-family: var(--font-heading);
   font-weight: 500;
-  color: var(--color-brutal-stone);
+  color: var(--color-brutal-muted);
   cursor: pointer;
   padding: 0.375rem 0.75rem;
   transition: background 0.1s ease, color 0.1s ease;
@@ -240,19 +325,19 @@
 }
 
 /* ============================================================
-   Card
+   Card — hover lifts -y to a stronger position
    ============================================================ */
 
 .card-brutal {
   border: 2px solid #000;
   background: #fff;
-  box-shadow: 5px 5px 0 0 #000;
+  box-shadow: 5px 5px 0 0 var(--color-brutal-shadow);
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .card-brutal:hover {
-  transform: translate(-1px, -1px);
-  box-shadow: 7px 7px 0 0 #000;
+  transform: translate(-1px, -2px);
+  box-shadow: 7px 8px 0 0 var(--color-brutal-shadow);
 }
 
 /* ============================================================
@@ -265,7 +350,7 @@
   font-family: var(--font-sans);
   padding: 0.5rem 0.75rem;
   font-size: 0.9375rem;
-  box-shadow: 3px 3px 0 0 #000;
+  box-shadow: 3px 3px 0 0 var(--color-brutal-shadow);
   outline: none;
   width: 100%;
   height: 44px;
@@ -273,8 +358,8 @@
 }
 
 .input-brutal:focus {
-  box-shadow: 5px 5px 0 0 #000;
-  outline: 3px solid #74b9ff;
+  box-shadow: 5px 5px 0 0 var(--color-brutal-shadow);
+  outline: 3px solid var(--color-brutal-info);
   outline-offset: 2px;
 }
 
@@ -290,14 +375,14 @@
 /* Error state */
 .input-brutal[aria-invalid="true"],
 .input-brutal.input-error {
-  border-color: #f97264;
-  box-shadow: 3px 3px 0 0 #f97264;
+  border-color: var(--color-brutal-danger);
+  box-shadow: 3px 3px 0 0 var(--color-brutal-danger);
 }
 
 .input-brutal[aria-invalid="true"]:focus,
 .input-brutal.input-error:focus {
-  box-shadow: 5px 5px 0 0 #f97264;
-  outline: 3px solid #f97264;
+  box-shadow: 5px 5px 0 0 var(--color-brutal-danger);
+  outline: 3px solid var(--color-brutal-danger);
 }
 
 /* ============================================================
@@ -314,7 +399,7 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   border: 2px solid #000;
-  box-shadow: 2px 2px 0 0 #000;
+  box-shadow: 2px 2px 0 0 var(--color-brutal-shadow);
 }
 
 /* ============================================================
@@ -350,7 +435,7 @@
    ============================================================ */
 
 .navbar-brutal {
-  background: #FFD23F;
+  background: var(--color-brutal-primary);
 }
 
 .navbar-icon {
@@ -361,7 +446,7 @@
   height: 40px;
   border: 2px solid #000;
   background: #fff;
-  box-shadow: 3px 3px 0 0 #000;
+  box-shadow: 3px 3px 0 0 var(--color-brutal-shadow);
   cursor: pointer;
   transition: transform 0.1s ease, box-shadow 0.1s ease;
   color: #000;
@@ -369,26 +454,28 @@
 
 .navbar-icon:hover {
   transform: translate(-1px, -1px);
-  box-shadow: 5px 5px 0 0 #000;
+  box-shadow: 5px 5px 0 0 var(--color-brutal-shadow);
 }
 
 .navbar-icon:active {
-  transform: translate(2px, 2px);
+  transform: translate(3px, 3px);
   box-shadow: none;
 }
 
 .navbar-icon-active {
-  background: #FFD23F;
-  box-shadow: 5px 5px 0 0 #000;
+  background: var(--color-brutal-primary);
+  box-shadow: 5px 5px 0 0 var(--color-brutal-shadow);
   transform: translate(-1px, -1px);
 }
 
 /* ============================================================
-   Global Focus Visible
+   Global Focus Visible — color from --color-brutal-info (electric blue)
+   This is the canonical focus ring; per-component overrides removed
+   in v3.0 audit.
    ============================================================ */
 
 *:focus-visible {
-  outline: 3px solid #74b9ff;
+  outline: 3px solid var(--color-brutal-info);
   outline-offset: 2px;
 }
 
@@ -402,37 +489,63 @@
    ============================================================ */
 
 ::selection {
-  background-color: #FFD23F;
+  background-color: var(--color-brutal-primary);
   color: #000;
 }
 
 /* ============================================================
-   Reduced Motion
+   Reduced Motion — kill animations + transform interactions
    ============================================================ */
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+
   .btn-brutal,
   .btn-brutal-sm,
   .card-brutal,
-  .input-brutal {
+  .input-brutal,
+  .navbar-icon {
     transition: none;
   }
 
   .btn-brutal:hover,
-  .btn-brutal-sm:hover {
+  .btn-brutal-sm:hover,
+  .navbar-icon:hover {
     transform: none;
-    box-shadow: 5px 5px 0 0 #000;
+    box-shadow: 5px 5px 0 0 var(--color-brutal-shadow);
   }
 
   .btn-brutal:active,
-  .btn-brutal-sm:active {
+  .btn-brutal-sm:active,
+  .navbar-icon:active {
     transform: none;
-    box-shadow: 5px 5px 0 0 #000;
+    box-shadow: 5px 5px 0 0 var(--color-brutal-shadow);
   }
 
   .card-brutal:hover {
     transform: none;
-    box-shadow: 5px 5px 0 0 #000;
+    box-shadow: 5px 5px 0 0 var(--color-brutal-shadow);
+  }
+
+  /* Stop all loop animations (the all-* override above doesn't catch
+     custom @keyframes — explicitly null them). */
+  .animate-spin,
+  .animate-pulse,
+  .animate-bounce,
+  .animate-spin-slow,
+  .animate-fade-in,
+  .animate-slide-in-from-left,
+  .animate-slide-in-from-right,
+  .animate-indeterminate-progress,
+  .cursor-blink,
+  .cursor-blink-pink {
+    animation: none !important;
   }
 
   html {
@@ -443,6 +556,18 @@
 /* ============================================================
    Responsive: Shadow scaling on mobile
    ============================================================ */
+
+@media (max-width: 768px) {
+  .shadow-brutal {
+    box-shadow: 4px 4px 0 0 var(--color-brutal-shadow);
+  }
+  .shadow-brutal-lg {
+    box-shadow: 6px 6px 0 0 var(--color-brutal-shadow);
+  }
+  .shadow-brutal-xl {
+    box-shadow: 8px 8px 0 0 var(--color-brutal-shadow);
+  }
+}
 
 /* ============================================================
    Cursor Blink Animation — pink pulse for streaming cursor
@@ -457,7 +582,7 @@
   display: inline-block;
   width: 2px;
   height: 1em;
-  background: #FFD23F;
+  background: var(--color-brutal-primary);
   animation: cursor-blink-pink 1s step-end infinite;
   vertical-align: text-bottom;
 }
@@ -481,11 +606,11 @@
    ============================================================ */
 
 .border-l-brutal-pink {
-  border-left: 3px solid #FF6B6B;
+  border-left: 3px solid var(--color-brutal-accent);
 }
 
 .border-l-brutal-gray {
-  border-left: 3px solid #c0b9b1;
+  border-left: 3px solid var(--color-brutal-muted);
 }
 
 /* ============================================================
@@ -495,7 +620,7 @@
 .message-bubble {
   border: 2px solid #000;
   background: #fff;
-  box-shadow: 3px 3px 0 0 #000;
+  box-shadow: 3px 3px 0 0 var(--color-brutal-shadow);
   padding: 0.625rem 0.75rem;
   font-family: var(--font-body);
   font-size: 0.9375rem;
@@ -506,25 +631,13 @@
    ============================================================ */
 
 .agent-message {
-  background: #fffaef;
+  background: var(--color-brutal-cream);
 }
 
 .agent-message code {
   background: #000 !important;
-  color: #88D498 !important;
+  color: var(--color-brutal-success) !important;
   font-family: var(--font-mono);
-}
-
-@media (max-width: 768px) {
-  .shadow-brutal {
-    box-shadow: 4px 4px 0 0 #000;
-  }
-  .shadow-brutal-lg {
-    box-shadow: 6px 6px 0 0 #000;
-  }
-  .shadow-brutal-xl {
-    box-shadow: 8px 8px 0 0 #000;
-  }
 }
 
 /* ============================================================
@@ -558,20 +671,20 @@
 
 .mention-highlight {
   display: inline-block;
-  background: #FF6B6B;
+  background: var(--color-brutal-accent);
   color: #000;
   font-weight: 700;
   padding: 0 0.25rem;
   border: 2px solid #000;
-  box-shadow: 2px 2px 0 0 #000;
+  box-shadow: 2px 2px 0 0 var(--color-brutal-shadow);
 }
 
 .tasknum-highlight {
   display: inline-block;
-  background: #74B9FF;
+  background: var(--color-brutal-info);
   color: #000;
   font-weight: 700;
   padding: 0 0.25rem;
   border: 2px solid #000;
-  box-shadow: 2px 2px 0 0 #000;
+  box-shadow: 2px 2px 0 0 var(--color-brutal-shadow);
 }
