@@ -6,13 +6,16 @@
 
 import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Plus, Loader2, Filter, X } from 'lucide-react';
+import { Plus, Filter, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { useTasks, useDMTasks } from '@/lib/hooks/use-tasks';
 import { useChannels } from '@/lib/hooks/use-channels';
 import { useDM } from '@/lib/hooks/use-dm';
 import { useToast } from '@/components/ui/toast';
 import { NavBar } from '@/components/ui/navbar';
+import { Spinner } from '@/components/ui/spinner';
+import { Button } from '@/components/ui/button';
+import { Select } from '@/components/ui/select';
 import { TasksLeftColumn } from '@/components/tasks/tasks-left-column';
 import { TaskBoard } from '@/components/tasks/task-board';
 import type { Task, TaskStatus, Message } from '@/lib/types';
@@ -257,7 +260,7 @@ export default function TasksPage() {
     return (
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-brutal-pink border-t-transparent" />
+          <Spinner size="lg" />
           <p className="font-mono text-sm text-muted-foreground">加载中...</p>
         </div>
       </div>
@@ -296,10 +299,10 @@ export default function TasksPage() {
               <Filter className="h-4 w-4 text-muted-foreground flex-shrink-0" />
 
               {/* Assignee dropdown */}
-              <select
+              <Select
                 value={filterAssignee}
                 onChange={(e) => handleFilterChange('assignee', e.target.value)}
-                className="input-brutal h-8 py-0 text-xs min-w-[120px]"
+                className="h-8 py-0 text-xs min-w-[120px]"
                 aria-label="按认领人筛选"
               >
                 <option value="">认领人: 全部</option>
@@ -308,13 +311,13 @@ export default function TasksPage() {
                     {a.name}
                   </option>
                 ))}
-              </select>
+              </Select>
 
               {/* Creator dropdown */}
-              <select
+              <Select
                 value={filterCreator}
                 onChange={(e) => handleFilterChange('creator', e.target.value)}
-                className="input-brutal h-8 py-0 text-xs min-w-[120px]"
+                className="h-8 py-0 text-xs min-w-[120px]"
                 aria-label="按创建者筛选"
               >
                 <option value="">创建者: 全部</option>
@@ -323,18 +326,19 @@ export default function TasksPage() {
                     {c.name}
                   </option>
                 ))}
-              </select>
+              </Select>
 
               {/* Clear filters button */}
               {hasFilters && (
-                <button
-                  type="button"
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={handleClearFilters}
-                  className="btn-brutal btn-brutal-sm flex items-center gap-1 text-xs"
+                  className="flex items-center gap-1"
                 >
                   <X className="h-3 w-3" />
                   清除筛选
-                </button>
+                </Button>
               )}
             </div>
 
@@ -347,13 +351,14 @@ export default function TasksPage() {
                     <Filter className="h-6 w-6 text-muted-foreground" />
                   </div>
                   <p className="font-body text-sm text-muted-foreground">没有符合筛选条件的任务</p>
-                  <button
-                    type="button"
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={handleClearFilters}
-                    className="btn-brutal btn-brutal-sm mt-4"
+                    className="mt-4"
                   >
                     清除筛选
-                  </button>
+                  </Button>
                 </div>
               ) : !sourceIsLoading && !sourceError && tasks.length === 0 && hasFilters ? (
                 // Selected channel/DM has no tasks
@@ -362,13 +367,14 @@ export default function TasksPage() {
                     <Filter className="h-6 w-6 text-muted-foreground" />
                   </div>
                   <p className="font-body text-sm text-muted-foreground">{selectedSourceEmptyMessage}</p>
-                  <button
-                    type="button"
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={handleClearFilters}
-                    className="btn-brutal btn-brutal-sm mt-4"
+                    className="mt-4"
                   >
                     清除筛选
-                  </button>
+                  </Button>
                 </div>
               ) : !sourceIsLoading && !sourceError && tasks.length === 0 ? (
                 // No tasks at all
@@ -400,7 +406,7 @@ export default function TasksPage() {
               <Suspense
                 fallback={
                   <div className="flex h-full items-center justify-center">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                    <Spinner size="sm" square={false} />
                   </div>
                 }
               >
