@@ -1,11 +1,6 @@
-// ============================================================================
-// Tasks Kanban Board Page — 5-column board with filters + DnD (v1.5)
-// - Route: /tasks
-// - Filter bar: Assignee / Creator / Channel (global only)
-// - Filter state synced to URL query params
-// - Board: DnD between columns with status transition validation
-// - Neubrutalist styling
-// ============================================================================
+// Tasks Kanban Board Page — DnD board, filters, thread panel (v2).
+// Layout: NavBar + TasksLeftColumn (220px) + main (no AppFrame).
+// ?channel= and ?dm= are mutually exclusive URL params (source-of-truth).
 
 'use client';
 
@@ -13,10 +8,12 @@ import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Loader2, Filter, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
-import { useTasks } from '@/lib/hooks/use-tasks';
+import { useTasks, useDMTasks } from '@/lib/hooks/use-tasks';
 import { useChannels } from '@/lib/hooks/use-channels';
+import { useDM } from '@/lib/hooks/use-dm';
 import { useToast } from '@/components/ui/toast';
-import { AppFrame } from '@/components/layout/app-frame';
+import { NavBar } from '@/components/ui/navbar';
+import { TasksLeftColumn } from '@/components/tasks/tasks-left-column';
 import { TaskBoard } from '@/components/tasks/task-board';
 import type { Task, TaskStatus, Message } from '@/lib/types';
 
@@ -29,43 +26,42 @@ export default function TasksPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { channels } = useChannels();
   const { showToast } = useToast();
 
-  // ---- Filter state from URL ----
-  const urlChannelId = searchParams.get('channel') || '';
+  // ---- Left column data ----
+  const { channels, isLoading: channelsLoading, error: channelsError, refetch: refetchChannels } = useChannels();
+  const { dmChannels, isLoadingDMs, dmError, refetchDMs } = useDM();
+
+  // ---- URL filter state ----
+  const filterChannelId = searchParams.get('channel');
+  const filterDmId = searchParams.get('dm');
   const urlAssignee = searchParams.get('assignee') || '';
   const urlCreator = searchParams.get('creator') || '';
 
-  const [filterChannel, setFilterChannel] = useState(urlChannelId);
   const [filterAssignee, setFilterAssignee] = useState(urlAssignee);
   const [filterCreator, setFilterCreator] = useState(urlCreator);
 
   // Sync URL -> state (for browser back/forward)
   useEffect(() => {
-    setFilterChannel(urlChannelId);
     setFilterAssignee(urlAssignee);
     setFilterCreator(urlCreator);
-  }, [urlChannelId, urlAssignee, urlCreator]);
+  }, [urlAssignee, urlCreator]);
 
-  const hasFilters = !!(filterChannel || filterAssignee || filterCreator);
-  const isGlobalView = !urlChannelId;
+  const hasFilters = !!(filterChannelId || filterDmId || filterAssignee || filterCreator);
 
-  // ---- Task data ----
-  const {
-    tasks: allTasks,
-    isLoading: tasksLoading,
-    error: tasksError,
-    updateTask,
-    claimTask,
-    unclaimTask,
-    refetch: refetchTasks,
-  } = useTasks();
+  // ---- Task data sources (hooks unconditional; pick source after) ----
+  const { tasks: allTasks, isLoading: tasksLoading, error: tasksError, updateTask, claimTask, unclaimTask, refetch: refetchTasks } = useTasks();
+  const { tasks: dmTasks, isLoading: dmTasksLoading, error: dmTasksError, refetch: refetchDMTasks } = useDMTasks(filterDmId);
 
-  // ---- Client-side filtering ----
+  const sourceTasks = filterDmId ? dmTasks : allTasks;
+  const sourceIsLoading = filterDmId ? dmTasksLoading : tasksLoading;
+  const sourceError = filterDmId ? dmTasksError : tasksError;
+  const sourceRefetch = filterDmId ? refetchDMTasks : refetchTasks;
+
+  // ---- Client-side filtering (assignee/creator always; channel only on non-DM path) ----
   const tasks = useMemo(() => {
-    return allTasks.filter((t) => {
-      if (filterChannel && t.channel_id !== filterChannel) return false;
+    return sourceTasks.filter((t) => {
+      if (!filterDmId && filterChannelId && t.channel_id !== filterChannelId) return false;
       if (filterAssignee) {
         const claimerVal = t.claimer_id || t.assignee_id || '';
         const claimerName = (t.claimer_name || t.assignee_name || '').toLowerCase();
@@ -79,7 +75,7 @@ export default function TasksPage() {
       }
       return true;
     });
-  }, [allTasks, filterChannel, filterAssignee, filterCreator]);
+  }, [sourceTasks, filterDmId, filterChannelId, filterAssignee, filterCreator]);
 
   // ---- Unique filter options derived from allTasks ----
   const assigneeOptions = useMemo(() => {
@@ -102,34 +98,47 @@ export default function TasksPage() {
     return Array.from(seen.values());
   }, [allTasks]);
 
-  // ---- Update URL when filters change ----
+  // ---- Left column click handlers (re-click clears filter) ----
+  const handleChannelClick = useCallback(
+    (channelId: string) => {
+      router.push(filterChannelId === channelId ? '/tasks' : `/tasks?channel=${channelId}`);
+    },
+    [router, filterChannelId],
+  );
+
+  const handleDmClick = useCallback(
+    (dmId: string) => {
+      router.push(filterDmId === dmId ? '/tasks' : `/tasks?dm=${dmId}`);
+    },
+    [router, filterDmId],
+  );
+
+  // ---- Update URL when filter bar (assignee/creator) changes; preserves ?channel=?dm= ----
   const updateUrlFilter = useCallback(
-    (channel: string, assignee: string, creator: string) => {
+    (assignee: string, creator: string) => {
       const params = new URLSearchParams();
-      if (channel) params.set('channel', channel);
+      if (filterChannelId) params.set('channel', filterChannelId);
+      if (filterDmId) params.set('dm', filterDmId);
       if (assignee) params.set('assignee', assignee);
       if (creator) params.set('creator', creator);
       const qs = params.toString();
       router.push(qs ? `/tasks?${qs}` : '/tasks');
     },
-    [router],
+    [router, filterChannelId, filterDmId],
   );
 
   const handleFilterChange = useCallback(
-    (field: 'channel' | 'assignee' | 'creator', value: string) => {
-      const newChannel = field === 'channel' ? value : filterChannel;
+    (field: 'assignee' | 'creator', value: string) => {
       const newAssignee = field === 'assignee' ? value : filterAssignee;
       const newCreator = field === 'creator' ? value : filterCreator;
-      setFilterChannel(newChannel);
       setFilterAssignee(newAssignee);
       setFilterCreator(newCreator);
-      updateUrlFilter(newChannel, newAssignee, newCreator);
+      updateUrlFilter(newAssignee, newCreator);
     },
-    [filterChannel, filterAssignee, filterCreator, updateUrlFilter],
+    [filterAssignee, filterCreator, updateUrlFilter],
   );
 
   const handleClearFilters = useCallback(() => {
-    setFilterChannel('');
     setFilterAssignee('');
     setFilterCreator('');
     router.push('/tasks');
@@ -236,144 +245,139 @@ export default function TasksPage() {
     : '该频道没有任务';
 
   return (
-    <AppFrame>
-      <div className="relative flex flex-1 overflow-hidden">
-        {/* Main content area — unaffected by ThreadPanel */}
-        <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Page header */}
-          <div className="flex h-14 flex-shrink-0 items-center border-b-2 border-black px-6">
-            <h1 className="font-heading text-lg font-bold text-foreground">
-              任务看板
-            </h1>
-          </div>
+    <div className="flex h-screen min-w-[1024px] overflow-hidden bg-brutal-cream">
+      <NavBar />
+      <div className="w-[220px] flex-shrink-0">
+        <TasksLeftColumn
+          channels={channels}
+          channelsLoading={channelsLoading}
+          channelsError={channelsError}
+          onRetryChannels={refetchChannels}
+          selectedChannelId={filterChannelId}
+          onChannelClick={handleChannelClick}
+          dms={dmChannels}
+          dmsLoading={isLoadingDMs}
+          dmsError={dmError}
+          onRetryDMs={refetchDMs}
+          selectedDmId={filterDmId}
+          onDmClick={handleDmClick}
+        />
+      </div>
 
-          {/* Filter bar */}
-          <div className="flex flex-shrink-0 items-center gap-3 border-b-2 border-black px-6 py-2.5">
-            <Filter className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+      <main className="flex flex-1 flex-col overflow-hidden">
+        <div className="relative flex flex-1 overflow-hidden">
+          {/* Main content area — unaffected by ThreadPanel */}
+          <div className="flex flex-1 flex-col overflow-hidden">
+            {/* Filter bar */}
+            <div className="flex flex-shrink-0 items-center gap-3 border-b-2 border-black px-6 py-2.5">
+              <Filter className="h-4 w-4 text-muted-foreground flex-shrink-0" />
 
-            {/* Assignee dropdown */}
-            <select
-              value={filterAssignee}
-              onChange={(e) => handleFilterChange('assignee', e.target.value)}
-              className="input-brutal h-8 py-0 text-xs min-w-[120px]"
-              aria-label="按认领人筛选"
-            >
-              <option value="">认领人: 全部</option>
-              {assigneeOptions.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-
-            {/* Creator dropdown */}
-            <select
-              value={filterCreator}
-              onChange={(e) => handleFilterChange('creator', e.target.value)}
-              className="input-brutal h-8 py-0 text-xs min-w-[120px]"
-              aria-label="按创建者筛选"
-            >
-              <option value="">创建者: 全部</option>
-              {creatorOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-
-            {/* Channel dropdown — only visible in global view */}
-            {isGlobalView && (
+              {/* Assignee dropdown */}
               <select
-                value={filterChannel}
-                onChange={(e) => handleFilterChange('channel', e.target.value)}
+                value={filterAssignee}
+                onChange={(e) => handleFilterChange('assignee', e.target.value)}
                 className="input-brutal h-8 py-0 text-xs min-w-[120px]"
-                aria-label="按频道筛选"
+                aria-label="按认领人筛选"
               >
-                <option value="">频道: 全部</option>
-                {channels.map((ch) => (
-                  <option key={ch.id} value={ch.id}>
-                    #{ch.name}
+                <option value="">认领人: 全部</option>
+                {assigneeOptions.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
                   </option>
                 ))}
               </select>
-            )}
 
-            {/* Clear filters button */}
-            {hasFilters && (
-              <button
-                type="button"
-                onClick={handleClearFilters}
-                className="btn-brutal btn-brutal-sm flex items-center gap-1 text-xs"
+              {/* Creator dropdown */}
+              <select
+                value={filterCreator}
+                onChange={(e) => handleFilterChange('creator', e.target.value)}
+                className="input-brutal h-8 py-0 text-xs min-w-[120px]"
+                aria-label="按创建者筛选"
               >
-                <X className="h-3 w-3" />
-                清除筛选
-              </button>
-            )}
-          </div>
+                <option value="">创建者: 全部</option>
+                {creatorOptions.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
 
-          {/* Board content — scrollable */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-6">
-            {!tasksLoading && !tasksError && tasks.length === 0 && allTasks.length > 0 ? (
-              // Filtered empty state
-              <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
-                <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-cream">
-                  <Filter className="h-6 w-6 text-muted-foreground" />
-                </div>
-                <p className="font-body text-sm text-muted-foreground">{emptyMessage}</p>
+              {/* Clear filters button */}
+              {hasFilters && (
                 <button
                   type="button"
                   onClick={handleClearFilters}
-                  className="btn-brutal btn-brutal-sm mt-4"
+                  className="btn-brutal btn-brutal-sm flex items-center gap-1 text-xs"
                 >
+                  <X className="h-3 w-3" />
                   清除筛选
                 </button>
-              </div>
-            ) : !tasksLoading && !tasksError && tasks.length === 0 && allTasks.length === 0 ? (
-              // No tasks at all
-              <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
-                <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-cream">
-                  <Plus className="h-6 w-6 text-muted-foreground" />
+              )}
+            </div>
+
+            {/* Board content — scrollable */}
+            <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-6">
+              {!sourceIsLoading && !sourceError && tasks.length === 0 && sourceTasks.length > 0 ? (
+                // Filtered empty state
+                <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-cream">
+                    <Filter className="h-6 w-6 text-muted-foreground" />
+                  </div>
+                  <p className="font-body text-sm text-muted-foreground">{emptyMessage}</p>
+                  <button
+                    type="button"
+                    onClick={handleClearFilters}
+                    className="btn-brutal btn-brutal-sm mt-4"
+                  >
+                    清除筛选
+                  </button>
                 </div>
-                <p className="font-body text-sm text-muted-foreground">还没有任务</p>
-              </div>
-            ) : (
-              <TaskBoard
-                tasks={tasks}
-                isLoading={tasksLoading}
-                error={tasksError}
-                onTaskClick={handleTaskClick}
-                onStatusChange={handleBoardStatusChange}
-                onRefetch={refetchTasks}
-              />
+              ) : !sourceIsLoading && !sourceError && tasks.length === 0 && sourceTasks.length === 0 ? (
+                // No tasks at all
+                <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-cream">
+                    <Plus className="h-6 w-6 text-muted-foreground" />
+                  </div>
+                  <p className="font-body text-sm text-muted-foreground">还没有任务</p>
+                </div>
+              ) : (
+                <TaskBoard
+                  tasks={tasks}
+                  isLoading={sourceIsLoading}
+                  error={sourceError}
+                  onTaskClick={handleTaskClick}
+                  onStatusChange={handleBoardStatusChange}
+                  onRefetch={sourceRefetch}
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Thread panel — absolute overlay, doesn't shift main content */}
+          <div
+            className="absolute right-0 top-0 bottom-0 z-20 bg-brutal-cream overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] border-l-2 border-black shadow-brutal-lg"
+            style={{ width: threadMessage ? 400 : 0, opacity: threadMessage ? 1 : 0 }}
+          >
+            {threadMessage && (
+              <Suspense
+                fallback={
+                  <div className="flex h-full items-center justify-center">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                }
+              >
+                <ThreadPanel
+                  parentMessage={threadMessage}
+                  onClose={handleThreadClose}
+                  task={threadTask ?? undefined}
+                  onClaimTask={handleClaim}
+                  onUnclaimTask={handleUnclaim}
+                />
+              </Suspense>
             )}
           </div>
         </div>
-
-        {/* Thread panel — absolute overlay, doesn't shift main content */}
-        <div
-          className="absolute right-0 top-0 bottom-0 z-20 bg-brutal-cream overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] border-l-2 border-black shadow-brutal-lg"
-          style={{ width: threadMessage ? 400 : 0, opacity: threadMessage ? 1 : 0 }}
-        >
-          {threadMessage && (
-            <Suspense
-              fallback={
-                <div className="flex h-full items-center justify-center">
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                </div>
-              }
-            >
-              <ThreadPanel
-                parentMessage={threadMessage}
-                onClose={handleThreadClose}
-                task={threadTask ?? undefined}
-                onClaimTask={handleClaim}
-                onUnclaimTask={handleUnclaim}
-              />
-            </Suspense>
-          )}
-        </div>
-      </div>
-
-    </AppFrame>
+      </main>
+    </div>
   );
 }
