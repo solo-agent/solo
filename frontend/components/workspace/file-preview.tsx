@@ -1,11 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ComponentPropsWithoutRef } from 'react';
 import { createHighlighter } from 'shiki';
 import { Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeShiki from '@shikijs/rehype';
 
 // Module-level singleton to avoid re-creating the highlighter
 let highlighterPromise: ReturnType<typeof createHighlighter> | null = null;
@@ -35,12 +34,42 @@ function detectLanguage(filename: string): string {
   return map[ext || ''] || 'text';
 }
 
+function CodeBlock({ children, className }: ComponentPropsWithoutRef<'code'>) {
+  const [html, setHtml] = useState<string | null>(null);
+  const code = String(children).replace(/\n$/, '');
+  const lang = className?.replace('language-', '') || 'text';
+
+  useEffect(() => {
+    let cancelled = false;
+    getHighlighter().then(async (highlighter) => {
+      if (cancelled) return;
+      try {
+        const result = highlighter.codeToHtml(code, { lang, theme: 'dark-plus' });
+        if (!cancelled) setHtml(result);
+      } catch {
+        // unsupported language — fall through to plain pre/code
+      }
+    });
+    return () => { cancelled = true; };
+  }, [code, lang]);
+
+  if (html) {
+    return <div dangerouslySetInnerHTML={{ __html: html }} className="[&>pre]:my-0 [&>pre]:rounded-none" />;
+  }
+
+  return (
+    <pre className="bg-black text-brutal-lime border-2 border-black shadow-brutal-sm p-3 overflow-x-auto">
+      <code className={className}>{children}</code>
+    </pre>
+  );
+}
+
 export function MarkdownPreview({ content }: { content: string }) {
   return (
     <div className="p-4 prose prose-sm max-w-none prose-headings:font-heading prose-headings:font-bold prose-code:font-mono">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeShiki, { theme: 'dark-plus' }]]}
+        components={{ code: CodeBlock }}
       >
         {content}
       </ReactMarkdown>
