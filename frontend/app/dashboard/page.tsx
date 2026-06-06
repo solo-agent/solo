@@ -14,6 +14,7 @@ import { CreateChannelModal } from "@/components/dashboard/create-channel-modal"
 import { CreateDMModal } from "@/components/dashboard/create-dm-modal";
 import { DeleteChannelDialog } from "@/components/dashboard/delete-channel-dialog";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 
 // SOLO-63-F: Lazy-load heavy view components
 const ChannelView = dynamic(
@@ -21,7 +22,7 @@ const ChannelView = dynamic(
   {
     loading: () => (
       <div className="flex flex-1 items-center justify-center">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner size="default" />
       </div>
     ),
   },
@@ -32,7 +33,7 @@ const DMView = dynamic(
   {
     loading: () => (
       <div className="flex flex-1 items-center justify-center">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <Spinner size="default" />
       </div>
     ),
   },
@@ -47,7 +48,7 @@ export default function DashboardPage() {
       fallback={
         <div className="flex h-screen items-center justify-center bg-brutal-cream">
           <div className="flex flex-col items-center gap-3">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-brutal-pink border-t-transparent" />
+            <Spinner size="lg" />
             <p className="font-mono text-sm text-muted-foreground">加载中...</p>
           </div>
         </div>
@@ -292,7 +293,7 @@ function DashboardContent() {
     return (
       <div className="flex h-screen items-center justify-center bg-muted/20">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          <Spinner size="lg" />
           <p className="text-sm text-muted-foreground">加载中...</p>
         </div>
       </div>
@@ -306,7 +307,7 @@ function DashboardContent() {
       if (!selectedChannel) {
         return (
           <div className="flex flex-1 items-center justify-center">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <Spinner size="default" />
           </div>
         );
       }
@@ -325,7 +326,7 @@ function DashboardContent() {
       if (!selectedDM) {
         return (
           <div className="flex flex-1 items-center justify-center">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <Spinner size="default" />
           </div>
         );
       }
