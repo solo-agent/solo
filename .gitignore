@@ -54,3 +54,4 @@ docs/
 *.bak
 *.bak2
 .playwright-cli/
+.superpowers/
