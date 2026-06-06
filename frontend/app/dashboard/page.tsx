@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
-import { Hash, MessageSquare, AlertCircle, RefreshCw } from "lucide-react";
+import { MessageSquare, AlertCircle, RefreshCw } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useChannels } from "@/lib/hooks/use-channels";
 import { useDM } from "@/lib/hooks/use-dm";
@@ -413,8 +413,7 @@ function DashboardContent() {
     <div className="flex h-screen min-w-[1024px] overflow-hidden bg-brutal-cream">
       <NavBar />
       <Sidebar
-        routeIcon={Hash}
-        routeTitle="频道与私信"
+        routeTitle="Chat"
         channels={channels}
         isLoading={channelsLoading}
         selectedChannelId={selectedChannelId}

@@ -27,8 +27,7 @@ interface SidebarProps {
   /** Inbox props */
   inboxSelected: boolean;
   onSelectInbox: () => void;
-  /** Route context for header */
-  routeIcon?: React.ElementType;
+  /** Page label rendered at the top of the sidebar. */
   routeTitle?: string;
 }
 
@@ -46,8 +45,7 @@ export function Sidebar({
   onCreateDM,
   inboxSelected,
   onSelectInbox,
-  routeIcon: Icon,
-  routeTitle = 'Solo',
+  routeTitle = 'Chat',
 }: SidebarProps) {
   const { unreadCount, isLoading: unreadLoading } = useInboxUnread();
   const [channelsExpanded, setChannelsExpanded] = useState(true);
@@ -57,12 +55,11 @@ export function Sidebar({
 
   return (
     <aside className="flex w-50 flex-col bg-sidebar text-sidebar-foreground border-r-2 border-sidebar-border flex-shrink-0">
-      {/* Route-aware header */}
-      <div className="flex h-14 items-center border-b-2 border-sidebar-border px-4">
-        <div className="flex items-center gap-2">
-          {Icon && <Icon className="h-5 w-5 flex-shrink-0" />}
-          <span className="font-heading font-bold text-sidebar-foreground text-sm truncate">{routeTitle}</span>
-        </div>
+      {/* Page label — matches Teams / Tasks / Computers top label style */}
+      <div className="border-b-2 border-sidebar-border px-4 py-3">
+        <span className="font-heading text-lg font-bold text-sidebar-foreground truncate">
+          {routeTitle}
+        </span>
       </div>
 
       {/* Inbox badge — above channel list, navigates to ?inbox */}
