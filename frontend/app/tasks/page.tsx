@@ -50,8 +50,24 @@ export default function TasksPage() {
   const hasFilters = !!(filterChannelId || filterDmId || filterAssignee || filterCreator);
 
   // ---- Task data sources (hooks unconditional; pick source after) ----
-  const { tasks: allTasks, isLoading: tasksLoading, error: tasksError, updateTask, claimTask, unclaimTask, refetch: refetchTasks } = useTasks();
-  const { tasks: dmTasks, isLoading: dmTasksLoading, error: dmTasksError, refetch: refetchDMTasks } = useDMTasks(filterDmId);
+  const {
+    tasks: allTasks,
+    isLoading: tasksLoading,
+    error: tasksError,
+    updateTask,
+    claimTask,
+    unclaimTask,
+    refetch: refetchTasks,
+  } = useTasks();
+  const {
+    tasks: dmTasks,
+    isLoading: dmTasksLoading,
+    error: dmTasksError,
+    updateTask: dmUpdateTask,
+    claimTask: dmClaimTask,
+    unclaimTask: dmUnclaimTask,
+    refetch: refetchDMTasks,
+  } = useDMTasks(filterDmId);
 
   const sourceTasks = filterDmId ? dmTasks : allTasks;
   const sourceIsLoading = filterDmId ? dmTasksLoading : tasksLoading;
@@ -77,26 +93,26 @@ export default function TasksPage() {
     });
   }, [sourceTasks, filterDmId, filterChannelId, filterAssignee, filterCreator]);
 
-  // ---- Unique filter options derived from allTasks ----
+  // ---- Unique filter options derived from the active source ----
   const assigneeOptions = useMemo(() => {
     const seen = new Map<string, { id: string; name: string }>();
-    for (const t of allTasks) {
+    for (const t of sourceTasks) {
       const id = t.claimer_id || t.assignee_id;
       const name = t.claimer_name || t.assignee_name || (id ? id.slice(0, 8) : '');
       if (id && !seen.has(id)) seen.set(id, { id, name });
     }
     return Array.from(seen.values());
-  }, [allTasks]);
+  }, [sourceTasks]);
 
   const creatorOptions = useMemo(() => {
     const seen = new Map<string, { id: string; name: string }>();
-    for (const t of allTasks) {
+    for (const t of sourceTasks) {
       const id = t.creator_id;
       const name = t.creator_name || (id ? id.slice(0, 8) : '');
       if (id && !seen.has(id)) seen.set(id, { id, name });
     }
     return Array.from(seen.values());
-  }, [allTasks]);
+  }, [sourceTasks]);
 
   // ---- Left column click handlers (re-click clears filter) ----
   const handleChannelClick = useCallback(
@@ -175,11 +191,11 @@ export default function TasksPage() {
 
   useEffect(() => {
     if (!threadTask) return;
-    const updated = allTasks.find((t) => t.id === threadTask.id);
+    const updated = sourceTasks.find((t) => t.id === threadTask.id);
     if (updated && (updated.status !== threadTask.status || updated.claimer_id !== threadTask.claimer_id)) {
       setThreadTask(updated);
     }
-  }, [allTasks, threadTask]);
+  }, [sourceTasks, threadTask]);
 
   const handleThreadClose = useCallback(() => {
     setThreadMessage(null);
@@ -187,44 +203,53 @@ export default function TasksPage() {
   }, []);
 
   // ---- Status change from board ----
+  // In DM mode, the mutation must go through the DM-specific hook (the
+  // channel-scoped endpoint would 404 because the task's channel_id is
+  // actually the dm_id).
   const handleBoardStatusChange = useCallback(
     async (task: Task, newStatus: TaskStatus) => {
       try {
-        const updated = await updateTask(task.channel_id, task.id, { status: newStatus });
+        const updated = filterDmId
+          ? await dmUpdateTask(task.id, { status: newStatus })
+          : await updateTask(task.channel_id, task.id, { status: newStatus });
         setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
         showToast(`任务状态已更新: ${newStatus}`, 'success');
       } catch {
         // Error handled by hook
       }
     },
-    [updateTask, showToast],
+    [filterDmId, updateTask, dmUpdateTask, showToast],
   );
 
   // ---- Claim / Unclaim ----
   const handleClaim = useCallback(
     async (task: Task) => {
       try {
-        const updated = await claimTask(task.channel_id, task.id);
+        const updated = filterDmId
+          ? await dmClaimTask(task.channel_id, task.id)
+          : await claimTask(task.channel_id, task.id);
         setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
         showToast(`已认领任务 #${task.task_number ?? '?'}`, 'success');
       } catch {
         // 409: silent
       }
     },
-    [claimTask, showToast],
+    [filterDmId, claimTask, dmClaimTask, showToast],
   );
 
   const handleUnclaim = useCallback(
     async (task: Task) => {
       try {
-        const updated = await unclaimTask(task.channel_id, task.id);
+        const updated = filterDmId
+          ? await dmUnclaimTask(task.channel_id, task.id)
+          : await unclaimTask(task.channel_id, task.id);
         setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
         showToast(`已释放任务 #${task.task_number ?? '?'}`, 'info');
       } catch {
         // silent
       }
     },
-    [unclaimTask, showToast],
+    [filterDmId, unclaimTask, dmUnclaimTask, showToast],
   );
 
   // ---- Auth loading ----
@@ -239,10 +264,8 @@ export default function TasksPage() {
     );
   }
 
-  // Determine empty state messages
-  const emptyMessage = hasFilters
-    ? '没有符合筛选条件的任务'
-    : '该频道没有任务';
+  // Per-source empty-state message for "selected source has 0 tasks"
+  const selectedSourceEmptyMessage = filterDmId ? '该 DM 没有任务' : '该频道没有任务';
 
   return (
     <div className="flex h-screen min-w-[1024px] overflow-hidden bg-brutal-cream">
@@ -338,7 +361,7 @@ export default function TasksPage() {
                   <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-cream">
                     <Filter className="h-6 w-6 text-muted-foreground" />
                   </div>
-                  <p className="font-body text-sm text-muted-foreground">{emptyMessage}</p>
+                  <p className="font-body text-sm text-muted-foreground">{selectedSourceEmptyMessage}</p>
                   <button
                     type="button"
                     onClick={handleClearFilters}
