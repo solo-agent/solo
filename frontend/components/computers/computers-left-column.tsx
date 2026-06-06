@@ -30,7 +30,7 @@ interface ComputersLeftColumnProps {
 type SectionKey = 'all';
 
 const SECTION_HEADER =
-  'flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider font-heading text-muted-foreground hover:bg-brutal-pink/40';
+  'flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider font-heading text-muted-foreground border-2 border-transparent hover:border-black transition-all';
 const SECTION_COUNT = 'ml-auto text-xs tabular-nums opacity-50';
 
 export function ComputersLeftColumn({
@@ -117,10 +117,10 @@ export function ComputersLeftColumn({
                     type="button"
                     onClick={() => onComputerClick(computer.id)}
                     className={cn(
-                      'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm border-2',
+                      'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm border-2 transition-all',
                       computer.id === selectedComputerId
                         ? 'border-black bg-brutal-pink text-black shadow-brutal-sm'
-                        : 'border-transparent hover:bg-brutal-pink/60',
+                        : 'border-transparent hover:border-black',
                     )}
                     aria-current={computer.id === selectedComputerId ? 'true' : undefined}
                   >

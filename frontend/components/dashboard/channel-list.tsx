@@ -77,15 +77,18 @@ function ChannelItem({
         }
       }}
       className={cn(
-        'group flex cursor-pointer items-center justify-between pl-5 pr-3 py-1.5 text-sm transition-all',
+        'group flex cursor-pointer items-center justify-between gap-2 px-3 py-1.5 text-sm transition-all',
         isSelected
           ? 'bg-brutal-pink text-black border-2 border-black shadow-brutal-sm'
-          : 'text-black hover:bg-brutal-pink/60 border-2 border-transparent',
+          : 'text-black border-2 border-transparent hover:border-black',
       )}
       aria-current={isSelected ? 'true' : undefined}
     >
       <div className="flex min-w-0 items-center gap-1.5">
-        <span className="truncate font-body">#{channel.name}</span>
+        <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center font-mono text-sm font-bold">
+          #
+        </span>
+        <span className="truncate font-body">{channel.name}</span>
       </div>
 
       <div className="flex items-center gap-1">
@@ -98,7 +101,7 @@ function ChannelItem({
             onDelete();
           }}
           className="hidden group-hover:flex items-center justify-center rounded-none p-1 hover:bg-brutal-pink-light transition-colors flex-shrink-0"
-          aria-label={`关闭 #${channel.name}`}
+          aria-label={`关闭 ${channel.name}`}
         >
           <X className="h-4 w-4" />
         </button>
@@ -124,7 +127,7 @@ export function ChannelList({
       {/* Section header — group hover covers both chevron and + button so the
           entire row highlights as one unit (chevron + count + + are visually
           grouped) */}
-      <div className="group flex items-center justify-between hover:bg-brutal-pink/40">
+      <div className="group flex items-center justify-between border-2 border-transparent hover:border-black transition-all">
         <button
           type="button"
           onClick={onToggleExpand}
@@ -144,7 +147,7 @@ export function ChannelList({
         </button>
         <button
           onClick={onCreateChannel}
-          className="mr-2 flex h-5 w-5 items-center justify-center text-sidebar-muted-foreground group-hover:text-black active:ring-2 active:ring-brutal-cream transition-colors"
+          className="mr-2 flex h-5 w-5 items-center justify-center rounded-sm text-sidebar-muted-foreground group-hover:text-black hover:bg-brutal-pink/40 active:bg-brutal-pink active:text-black active:ring-2 active:ring-black transition-all cursor-pointer"
           aria-label="创建频道"
         >
           <Plus className="h-3.5 w-3.5" />

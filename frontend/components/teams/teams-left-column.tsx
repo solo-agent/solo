@@ -38,7 +38,7 @@ interface TeamsLeftColumnProps {
 type SectionKey = 'graph' | 'agents' | 'humans';
 
 const SECTION_HEADER =
-  'flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider font-heading';
+  'flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider font-heading border-2 border-transparent hover:border-black transition-all';
 const SECTION_COUNT = 'ml-auto text-xs tabular-nums opacity-50';
 
 export function TeamsLeftColumn({
@@ -84,8 +84,8 @@ export function TeamsLeftColumn({
           className={cn(
             SECTION_HEADER,
             selection?.kind === 'graph'
-              ? 'bg-brutal-pink text-black'
-              : 'text-muted-foreground hover:bg-brutal-pink/40',
+              ? 'bg-brutal-pink text-black border-black shadow-brutal-sm'
+              : 'text-muted-foreground',
           )}
           aria-label="进入 Graph 视图"
         >
@@ -98,7 +98,7 @@ export function TeamsLeftColumn({
         <button
           type="button"
           onClick={() => toggle('agents')}
-          className={cn(SECTION_HEADER, 'text-muted-foreground hover:bg-brutal-pink/40')}
+          className={cn(SECTION_HEADER, 'text-muted-foreground')}
           aria-label="展开或折叠 Agents"
           aria-expanded={isAgentsExpanded}
         >
@@ -137,7 +137,7 @@ export function TeamsLeftColumn({
         <button
           type="button"
           onClick={() => toggle('humans')}
-          className={cn(SECTION_HEADER, 'text-muted-foreground hover:bg-brutal-pink/40')}
+          className={cn(SECTION_HEADER, 'text-muted-foreground')}
           aria-label="展开或折叠 Humans"
           aria-expanded={isHumansExpanded}
         >

@@ -22,22 +22,18 @@ export function InboxBadge({ unreadCount, isSelected, onClick }: InboxBadgeProps
       type="button"
       onClick={onClick}
       className={cn(
-        'flex items-center justify-between w-full px-3 pt-4 pb-0 text-sm font-body transition-colors',
+        'flex w-full items-center gap-1.5 px-3 pt-4 pb-2 text-left text-xs font-bold uppercase tracking-wider font-heading transition-all border-2',
         isSelected
-          ? 'bg-brutal-pink text-black'
-          : 'text-muted-foreground hover:bg-brutal-pink/40',
+          ? 'bg-brutal-pink text-black border-black shadow-brutal-sm'
+          : 'text-muted-foreground border-transparent hover:border-black',
       )}
       aria-label={`收件箱${unreadCount > 0 ? `，${unreadCount} 条未读` : ''}`}
     >
-      <span className="flex items-center gap-1.5">
-        <Mail className="h-3.5 w-3.5" />
-        <span className="font-heading text-xs font-bold uppercase tracking-wider">
-          Inbox
-        </span>
-      </span>
+      <Mail className="h-3.5 w-3.5" />
+      <span>Inbox</span>
       {unreadCount > 0 && (
         <span
-          className="flex h-5 min-w-[20px] items-center justify-center border-2 border-black bg-brutal-red px-1.5 font-mono text-[11px] font-bold text-white"
+          className="ml-auto flex h-5 min-w-[20px] items-center justify-center border-2 border-black bg-brutal-red px-1.5 font-mono text-[11px] font-bold text-white"
           aria-label={`${unreadCount} 条未读`}
         >
           {unreadCount > 99 ? '99+' : unreadCount}

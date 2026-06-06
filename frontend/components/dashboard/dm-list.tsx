@@ -118,7 +118,7 @@ function DMItem({
         'group flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm transition-all',
         isSelected
           ? 'bg-brutal-pink text-black border-2 border-black shadow-brutal-sm'
-          : 'text-black hover:bg-brutal-pink/60 border-2 border-transparent',
+          : 'text-black border-2 border-transparent hover:border-black',
       )}
       aria-current={isSelected ? 'true' : undefined}
     >
@@ -236,7 +236,7 @@ export function DMList({
     <div>
       {/* Section header — group hover covers both chevron and + button so the
           entire row highlights as one unit */}
-      <div className="group flex items-center justify-between hover:bg-brutal-pink/40">
+      <div className="group flex items-center justify-between border-2 border-transparent hover:border-black transition-all">
         <button
           type="button"
           onClick={onToggleExpand}
@@ -256,7 +256,7 @@ export function DMList({
         </button>
         <button
           onClick={onCreateDM}
-          className="mr-2 flex h-5 w-5 items-center justify-center text-sidebar-muted-foreground group-hover:text-black active:ring-2 active:ring-brutal-cream transition-colors"
+          className="mr-2 flex h-5 w-5 items-center justify-center rounded-sm text-sidebar-muted-foreground group-hover:text-black hover:bg-brutal-pink/40 active:bg-brutal-pink active:text-black active:ring-2 active:ring-black transition-all cursor-pointer"
           aria-label="发起私信"
         >
           <Plus className="h-3.5 w-3.5" />

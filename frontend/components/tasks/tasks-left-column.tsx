@@ -38,7 +38,7 @@ interface TasksLeftColumnProps {
 type SectionKey = 'channels' | 'dms';
 
 const SECTION_HEADER =
-  'flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider font-heading text-muted-foreground hover:bg-brutal-pink/40';
+  'flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider font-heading text-muted-foreground border-2 border-transparent hover:border-black transition-all';
 const SECTION_COUNT = 'ml-auto text-xs tabular-nums opacity-50';
 
 function getDmDisplayName(dm: DMChannel): string {
@@ -141,14 +141,17 @@ export function TasksLeftColumn({
                   type="button"
                   onClick={() => onChannelClick(channel.id)}
                   className={cn(
-                    'flex w-full items-center gap-2 pl-5 pr-3 py-1.5 text-left text-sm border-2',
+                    'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm border-2',
                     channel.id === selectedChannelId
                       ? 'border-black bg-brutal-pink text-black shadow-brutal-sm'
-                      : 'border-transparent hover:bg-brutal-pink/60',
+                      : 'border-transparent hover:border-black',
                   )}
                   aria-current={channel.id === selectedChannelId ? 'true' : undefined}
                 >
-                  <span className="truncate font-body">#{channel.name}</span>
+                  <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center font-mono text-sm font-bold">
+                    #
+                  </span>
+                  <span className="truncate font-body">{channel.name}</span>
                 </button>
               ))
             )}
@@ -210,7 +213,7 @@ export function TasksLeftColumn({
                       'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm border-2',
                       dm.id === selectedDmId
                         ? 'border-black bg-brutal-pink text-black shadow-brutal-sm'
-                        : 'border-transparent hover:bg-brutal-pink/60',
+                        : 'border-transparent hover:border-black',
                     )}
                     aria-current={dm.id === selectedDmId ? 'true' : undefined}
                   >
