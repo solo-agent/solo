@@ -1,9 +1,8 @@
 // ============================================================================
 // TeamsLeftColumn — the 220px-wide left navigation column on /teams.
-// - Three collapsible sections: Graph, Agents, Humans.
-// - Graph header click toggles expand AND emits onSelectGraph (drives the
-//   right main panel to the structure view).
-// - Agents / Humans header click only toggles expand.
+// - Graph has no children: header click just emits onSelectGraph (no toggle,
+//   no ChevronDown).
+// - Agents / Humans have children: header click toggles expand/collapse.
 // - Section item click (agent or human row) emits onSelectAgent / onSelectHuman.
 // - Selected item gets the brutalist yellow selection style.
 // ============================================================================
@@ -43,7 +42,8 @@ export function TeamsLeftColumn({
   onSelectAgent,
   onSelectHuman,
 }: TeamsLeftColumnProps) {
-  // Default: Graph collapsed, Agents + Humans expanded.
+  // Default: Agents + Humans expanded. Graph has no children, so its expand
+  // state is irrelevant and not tracked.
   const [expanded, setExpanded] = useState<Set<SectionKey>>(
     () => new Set<SectionKey>(['agents', 'humans']),
   );
@@ -57,29 +57,22 @@ export function TeamsLeftColumn({
     });
   }, []);
 
-  const handleGraphClick = useCallback(() => {
-    toggle('graph');
-    onSelectGraph();
-  }, [onSelectGraph, toggle]);
-
-  const isGraphExpanded = expanded.has('graph');
   const isAgentsExpanded = expanded.has('agents');
   const isHumansExpanded = expanded.has('humans');
 
   return (
     <div className="flex h-full flex-col overflow-hidden border-r-2 border-black bg-white">
-      {/* Page label */}
-      <div className="flex items-center gap-2 border-b-2 border-black px-3 py-3">
-        <span className="text-base">🜨</span>
-        <span className="font-heading text-sm font-bold">Teams</span>
+      {/* Page label — matches Sidebar / Tasks / Computers top label style */}
+      <div className="border-b-2 border-black px-4 py-3">
+        <span className="font-heading text-lg font-bold">Teams</span>
       </div>
 
       {/* Sections */}
       <div className="flex-1 overflow-y-auto py-2">
-        {/* Graph */}
+        {/* Graph — no children, so no ChevronDown; click selects the view */}
         <button
           type="button"
-          onClick={handleGraphClick}
+          onClick={onSelectGraph}
           className={cn(
             'flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold',
             selection?.kind === 'graph'
@@ -88,12 +81,6 @@ export function TeamsLeftColumn({
           )}
           aria-label="进入 Graph 视图"
         >
-          <ChevronDown
-            className={cn(
-              'h-4 w-4 transition-transform',
-              isGraphExpanded ? 'rotate-0' : '-rotate-90',
-            )}
-          />
           <Network className="h-4 w-4" />
           <span>Graph</span>
           <span className="ml-auto border border-black bg-brutal-yellow px-1.5 py-0.5 font-mono text-[10px]">
@@ -110,6 +97,7 @@ export function TeamsLeftColumn({
           aria-expanded={isAgentsExpanded}
         >
           <ChevronDown
+            aria-hidden="true"
             className={cn(
               'h-4 w-4 transition-transform',
               isAgentsExpanded ? 'rotate-0' : '-rotate-90',
@@ -151,6 +139,7 @@ export function TeamsLeftColumn({
           aria-expanded={isHumansExpanded}
         >
           <ChevronDown
+            aria-hidden="true"
             className={cn(
               'h-4 w-4 transition-transform',
               isHumansExpanded ? 'rotate-0' : '-rotate-90',
