@@ -55,11 +55,11 @@ test.describe('Teams page redesign', () => {
   test('3. clicking an agent row selects it', async ({ page }) => {
     await page.goto(`${BASE}/teams`);
 
-    // Scope to rows that have a DM button (agent rows); the same aria-label
-    // prefix is used on human rows, which have no DM button.
+    // Agents render before Humans in the left column, so the first row
+    // matching the aria-label pattern is always an agent (no row-level DM
+    // button anymore — DM is now in the detail header).
     const firstAgentButton = page
       .locator('[aria-label^="查看"][aria-label$="详情"]')
-      .filter({ has: page.locator('button[aria-label*="发起私信"]') })
       .first();
     const ariaLabel = (await firstAgentButton.getAttribute('aria-label')) ?? '';
     const agentName = ariaLabel.replace(/^查看 (.+) 详情$/, '$1');
@@ -72,6 +72,7 @@ test.describe('Teams page redesign', () => {
 
   test('4. clicking the Message button jumps to /dashboard?dm=', async ({ page }) => {
     await page.goto(`${BASE}/teams`);
+    // Message button is now in the agent detail header (only place it lives).
     await page.getByRole('button', { name: /^Message/i }).first().click();
     await page.waitForURL(/\/dashboard\?dm=/, { timeout: 10000 });
     expect(page.url()).toMatch(/\/dashboard\?dm=/);
