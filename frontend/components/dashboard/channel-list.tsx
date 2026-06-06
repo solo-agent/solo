@@ -4,7 +4,7 @@
 
 'use client';
 
-import { Hash, Plus, X, ChevronDown } from 'lucide-react';
+import { Plus, X, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Channel } from '@/lib/types';
@@ -85,8 +85,7 @@ function ChannelItem({
       aria-current={isSelected ? 'true' : undefined}
     >
       <div className="flex min-w-0 items-center gap-1.5">
-        <Hash className="h-4 w-4 flex-shrink-0" />
-        <span className="truncate font-body">{channel.name}</span>
+        <span className="truncate font-body">#{channel.name}</span>
       </div>
 
       <div className="flex items-center gap-1">
@@ -138,7 +137,8 @@ export function ChannelList({
               isExpanded ? 'rotate-0' : '-rotate-90',
             )}
           />
-          频道
+          <span>Channels</span>
+          <span className="ml-auto text-xs tabular-nums opacity-50">{channels.length}</span>
         </button>
         <button
           onClick={onCreateChannel}

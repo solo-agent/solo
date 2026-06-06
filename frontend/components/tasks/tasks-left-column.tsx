@@ -1,20 +1,22 @@
 // ============================================================================
 // TasksLeftColumn — 220px-wide left navigation column on /tasks.
 // - Static "Tasks" label at the top (matches Sidebar / Teams / Computers).
-// - Channels section: collapsible, default expanded. Hash icon + label +
-//   count badge (bg-brutal-yellow). Item click emits onChannelClick.
-// - Direct Messages section: collapsible, default expanded. MessageSquare
-//   icon + label + count badge (bg-brutal-stone, white text). Item click
-//   emits onDmClick.
+// - Channels section: collapsible, default expanded. Header has chevron +
+//   UPPERCASE name + plain count (no badge, no icon — the chevron is the
+//   marker). Item click emits onChannelClick.
+// - Direct Messages section: collapsible, default expanded. Same header
+//   pattern. Items use a PixelAvatar so agent/user identity is glanceable
+//   (matches Teams' Agents row treatment).
 // - Selection + data are owned by the parent. Expand/collapse is the only
-//   internal state (mirrors TeamsLeftColumn).
+//   internal state.
 // ============================================================================
 
 'use client';
 
 import { useState, useCallback } from 'react';
-import { ChevronDown, Hash, MessageSquare, AlertCircle, RefreshCw } from 'lucide-react';
+import { ChevronDown, AlertCircle, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import type { Channel, DMChannel } from '@/lib/types';
 
 interface TasksLeftColumnProps {
@@ -35,10 +37,18 @@ interface TasksLeftColumnProps {
 
 type SectionKey = 'channels' | 'dms';
 
+const SECTION_HEADER =
+  'flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider font-heading text-muted-foreground hover:bg-brutal-pink/40';
+const SECTION_COUNT = 'ml-auto text-xs tabular-nums opacity-50';
+
 function getDmDisplayName(dm: DMChannel): string {
   if (dm.other_user) return dm.other_user.display_name;
   if (dm.other_agent) return dm.other_agent.name;
   return '未知对话';
+}
+
+function getDmAvatarId(dm: DMChannel): string {
+  return dm.other_user?.id || dm.other_agent?.id || dm.id;
 }
 
 export function TasksLeftColumn({
@@ -73,7 +83,7 @@ export function TasksLeftColumn({
   const isDmsExpanded = expanded.has('dms');
 
   return (
-    <div className="flex h-full flex-col overflow-hidden border-r-2 border-black bg-white">
+    <div className="flex h-full flex-col overflow-hidden border-r-2 border-black bg-brutal-cream">
       {/* Page label — matches Sidebar / Teams / Computers top label style */}
       <div className="border-b-2 border-black px-4 py-3">
         <span className="font-heading text-lg font-bold">Tasks</span>
@@ -85,22 +95,19 @@ export function TasksLeftColumn({
         <button
           type="button"
           onClick={() => toggle('channels')}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold text-foreground hover:bg-brutal-pink/40"
+          className={SECTION_HEADER}
           aria-label="展开或折叠 频道"
           aria-expanded={isChannelsExpanded}
         >
           <ChevronDown
             aria-hidden="true"
             className={cn(
-              'h-4 w-4 transition-transform',
+              'h-3 w-3 transition-transform',
               isChannelsExpanded ? 'rotate-0' : '-rotate-90',
             )}
           />
-          <Hash className="h-4 w-4" />
           <span>Channels</span>
-          <span className="ml-auto border border-black bg-brutal-yellow px-1.5 py-0.5 font-mono text-[10px] text-black">
-            {channels.length}
-          </span>
+          <span className={SECTION_COUNT}>{channels.length}</span>
         </button>
         {isChannelsExpanded && (
           <div>
@@ -134,14 +141,13 @@ export function TasksLeftColumn({
                   type="button"
                   onClick={() => onChannelClick(channel.id)}
                   className={cn(
-                    'flex w-full items-center gap-2 px-3 py-2 text-left text-sm border-2',
+                    'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm border-2',
                     channel.id === selectedChannelId
                       ? 'border-black bg-brutal-pink text-black shadow-brutal-sm'
                       : 'border-transparent hover:bg-brutal-pink/60',
                   )}
                   aria-current={channel.id === selectedChannelId ? 'true' : undefined}
                 >
-                  <Hash className="h-4 w-4 flex-shrink-0" />
                   <span className="truncate font-body">#{channel.name}</span>
                 </button>
               ))
@@ -153,22 +159,19 @@ export function TasksLeftColumn({
         <button
           type="button"
           onClick={() => toggle('dms')}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold text-foreground hover:bg-brutal-pink/40"
+          className={SECTION_HEADER}
           aria-label="展开或折叠 直接消息"
           aria-expanded={isDmsExpanded}
         >
           <ChevronDown
             aria-hidden="true"
             className={cn(
-              'h-4 w-4 transition-transform',
+              'h-3 w-3 transition-transform',
               isDmsExpanded ? 'rotate-0' : '-rotate-90',
             )}
           />
-          <MessageSquare className="h-4 w-4" />
           <span>Direct Messages</span>
-          <span className="ml-auto border border-black bg-brutal-stone px-1.5 py-0.5 font-mono text-[10px] text-white">
-            {dms.length}
-          </span>
+          <span className={SECTION_COUNT}>{dms.length}</span>
         </button>
         {isDmsExpanded && (
           <div>
@@ -204,14 +207,15 @@ export function TasksLeftColumn({
                     type="button"
                     onClick={() => onDmClick(dm.id)}
                     className={cn(
-                      'flex w-full items-center gap-2 px-3 py-2 text-left text-sm border-2',
+                      'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm border-2',
                       dm.id === selectedDmId
                         ? 'border-black bg-brutal-pink text-black shadow-brutal-sm'
                         : 'border-transparent hover:bg-brutal-pink/60',
                     )}
                     aria-current={dm.id === selectedDmId ? 'true' : undefined}
                   >
-                    <span className="truncate font-body">@{displayName}</span>
+                    <PixelAvatar agentId={getDmAvatarId(dm)} size="sm" />
+                    <span className="truncate font-body">{displayName}</span>
                   </button>
                 );
               })

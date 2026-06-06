@@ -54,7 +54,7 @@ export function Sidebar({
   const toggleDMs = useCallback(() => setDmsExpanded((v) => !v), []);
 
   return (
-    <aside className="flex w-50 flex-col bg-sidebar text-sidebar-foreground border-r-2 border-sidebar-border flex-shrink-0">
+    <aside className="flex w-[220px] flex-col bg-sidebar text-sidebar-foreground border-r-2 border-sidebar-border flex-shrink-0">
       {/* Page label — matches Teams / Tasks / Computers top label style */}
       <div className="border-b-2 border-sidebar-border px-4 py-3">
         <span className="font-heading text-lg font-bold text-sidebar-foreground truncate">

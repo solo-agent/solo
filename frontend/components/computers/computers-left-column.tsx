@@ -1,18 +1,20 @@
 // ============================================================================
 // ComputersLeftColumn — 220px-wide left navigation column on /computers.
 // - Static "Computers" label at the top (matches Sidebar / Tasks / Teams).
-// - All Computers section: collapsible, default expanded. Monitor icon +
-//   label + cyan count badge (bg-brutal-cyan ties to ComputerCard's OS icon).
+// - All Computers section: collapsible, default expanded. Header has
+//   chevron + UPPERCASE name + plain count (no badge, no icon — the
+//   chevron is the marker).
 // - Each item shows a small status dot (green online / gray pulsing offline)
-//   + computer name. Click emits onComputerClick.
+//   + computer name. The status dot is functional (not decorative) so it
+//   stays. Click emits onComputerClick.
 // - Selection + data are owned by the parent. Expand/collapse is the only
-//   internal state (mirrors TasksLeftColumn).
+//   internal state.
 // ============================================================================
 
 'use client';
 
 import { useState, useCallback } from 'react';
-import { ChevronDown, Monitor, AlertCircle, RefreshCw } from 'lucide-react';
+import { ChevronDown, AlertCircle, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Computer } from '@/lib/types';
 
@@ -26,6 +28,10 @@ interface ComputersLeftColumnProps {
 }
 
 type SectionKey = 'all';
+
+const SECTION_HEADER =
+  'flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider font-heading text-muted-foreground hover:bg-brutal-pink/40';
+const SECTION_COUNT = 'ml-auto text-xs tabular-nums opacity-50';
 
 export function ComputersLeftColumn({
   computers,
@@ -52,7 +58,7 @@ export function ComputersLeftColumn({
   const isAllExpanded = expanded.has('all');
 
   return (
-    <div className="flex h-full flex-col overflow-hidden border-r-2 border-black bg-white">
+    <div className="flex h-full flex-col overflow-hidden border-r-2 border-black bg-brutal-cream">
       {/* Page label — matches Sidebar / Tasks / Teams top label style */}
       <div className="border-b-2 border-black px-4 py-3">
         <span className="font-heading text-lg font-bold">Computers</span>
@@ -63,22 +69,19 @@ export function ComputersLeftColumn({
         <button
           type="button"
           onClick={() => toggle('all')}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold text-foreground hover:bg-brutal-pink/40"
+          className={SECTION_HEADER}
           aria-label="展开或折叠 电脑列表"
           aria-expanded={isAllExpanded}
         >
           <ChevronDown
             aria-hidden="true"
             className={cn(
-              'h-4 w-4 transition-transform',
+              'h-3 w-3 transition-transform',
               isAllExpanded ? 'rotate-0' : '-rotate-90',
             )}
           />
-          <Monitor className="h-4 w-4" />
           <span>All Computers</span>
-          <span className="ml-auto border border-black bg-brutal-cyan px-1.5 py-0.5 font-mono text-[10px] text-white">
-            {computers.length}
-          </span>
+          <span className={SECTION_COUNT}>{computers.length}</span>
         </button>
         {isAllExpanded && (
           <div>
@@ -114,7 +117,7 @@ export function ComputersLeftColumn({
                     type="button"
                     onClick={() => onComputerClick(computer.id)}
                     className={cn(
-                      'flex w-full items-center gap-2 px-3 py-2 text-left text-sm border-2',
+                      'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm border-2',
                       computer.id === selectedComputerId
                         ? 'border-black bg-brutal-pink text-black shadow-brutal-sm'
                         : 'border-transparent hover:bg-brutal-pink/60',

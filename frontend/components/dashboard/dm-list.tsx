@@ -11,7 +11,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { MessageSquare, Plus, X, ChevronDown } from 'lucide-react';
+import { Plus, X, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -250,7 +250,8 @@ export function DMList({
               isExpanded ? 'rotate-0' : '-rotate-90',
             )}
           />
-          直接消息
+          <span>Direct Messages</span>
+          <span className="ml-auto text-xs tabular-nums opacity-50">{sortedDMs.length}</span>
         </button>
         <button
           onClick={onCreateDM}

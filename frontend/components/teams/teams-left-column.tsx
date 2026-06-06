@@ -1,7 +1,10 @@
 // ============================================================================
 // TeamsLeftColumn — the 220px-wide left navigation column on /teams.
-// - Graph has no children: header click just emits onSelectGraph (no toggle,
-//   no ChevronDown).
+// - Section header style is unified across pages: chevron + UPPERCASE name
+//   + plain count (no badge). Decorative icons are dropped — the chevron
+//   acts as the visual marker.
+// - Graph has no children: no chevron. To preserve a leading marker it
+//   keeps the Network icon; click just emits onSelectGraph (no toggle).
 // - Agents / Humans have children: header click toggles expand/collapse.
 // - Section item click (agent or human row) emits onSelectAgent / onSelectHuman.
 // - Selected item gets the brutalist yellow selection style.
@@ -10,7 +13,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { ChevronDown, Network, Bot, User } from 'lucide-react';
+import { ChevronDown, Network } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TeamsAgentItem } from './teams-agent-item';
 import { TeamsHumanItem } from './teams-human-item';
@@ -33,6 +36,10 @@ interface TeamsLeftColumnProps {
 }
 
 type SectionKey = 'graph' | 'agents' | 'humans';
+
+const SECTION_HEADER =
+  'flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider font-heading';
+const SECTION_COUNT = 'ml-auto text-xs tabular-nums opacity-50';
 
 export function TeamsLeftColumn({
   agents,
@@ -61,7 +68,7 @@ export function TeamsLeftColumn({
   const isHumansExpanded = expanded.has('humans');
 
   return (
-    <div className="flex h-full flex-col overflow-hidden border-r-2 border-black bg-white">
+    <div className="flex h-full flex-col overflow-hidden border-r-2 border-black bg-brutal-cream">
       {/* Page label — matches Sidebar / Tasks / Computers top label style */}
       <div className="border-b-2 border-black px-4 py-3">
         <span className="font-heading text-lg font-bold">Teams</span>
@@ -69,45 +76,41 @@ export function TeamsLeftColumn({
 
       {/* Sections */}
       <div className="flex-1 overflow-y-auto py-2">
-        {/* Graph — no children, so no ChevronDown; click selects the view */}
+        {/* Graph — no children, so no ChevronDown; keep Network as the
+            leading marker; click selects the view */}
         <button
           type="button"
           onClick={onSelectGraph}
           className={cn(
-            'flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold',
+            SECTION_HEADER,
             selection?.kind === 'graph'
               ? 'bg-brutal-pink text-black'
-              : 'text-foreground hover:bg-brutal-pink/40',
+              : 'text-muted-foreground hover:bg-brutal-pink/40',
           )}
           aria-label="进入 Graph 视图"
         >
-          <Network className="h-4 w-4" />
+          <Network className="h-3.5 w-3.5" aria-hidden="true" />
           <span>Graph</span>
-          <span className="ml-auto border border-black bg-brutal-yellow px-1.5 py-0.5 font-mono text-[10px]">
-            {agents.length}
-          </span>
+          <span className={SECTION_COUNT}>{agents.length}</span>
         </button>
 
         {/* Agents */}
         <button
           type="button"
           onClick={() => toggle('agents')}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold text-foreground hover:bg-brutal-pink/40"
+          className={cn(SECTION_HEADER, 'text-muted-foreground hover:bg-brutal-pink/40')}
           aria-label="展开或折叠 Agents"
           aria-expanded={isAgentsExpanded}
         >
           <ChevronDown
             aria-hidden="true"
             className={cn(
-              'h-4 w-4 transition-transform',
+              'h-3 w-3 transition-transform',
               isAgentsExpanded ? 'rotate-0' : '-rotate-90',
             )}
           />
-          <Bot className="h-4 w-4" />
           <span>Agents</span>
-          <span className="ml-auto border border-black bg-brutal-stone px-1.5 py-0.5 font-mono text-[10px] text-white">
-            {agents.length}
-          </span>
+          <span className={SECTION_COUNT}>{agents.length}</span>
         </button>
         {isAgentsExpanded && (
           <div>
@@ -134,22 +137,19 @@ export function TeamsLeftColumn({
         <button
           type="button"
           onClick={() => toggle('humans')}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold text-foreground hover:bg-brutal-pink/40"
+          className={cn(SECTION_HEADER, 'text-muted-foreground hover:bg-brutal-pink/40')}
           aria-label="展开或折叠 Humans"
           aria-expanded={isHumansExpanded}
         >
           <ChevronDown
             aria-hidden="true"
             className={cn(
-              'h-4 w-4 transition-transform',
+              'h-3 w-3 transition-transform',
               isHumansExpanded ? 'rotate-0' : '-rotate-90',
             )}
           />
-          <User className="h-4 w-4" />
           <span>Humans</span>
-          <span className="ml-auto border border-black bg-brutal-stone px-1.5 py-0.5 font-mono text-[10px] text-white">
-            {humans.length}
-          </span>
+          <span className={SECTION_COUNT}>{humans.length}</span>
         </button>
         {isHumansExpanded && (
           <div>
