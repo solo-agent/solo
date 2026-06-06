@@ -71,7 +71,7 @@ export function Sidebar({
 
       {/* Scrollable channel + DM area — matches TeamsLeftColumn's scroll
           container: py-2 only, no horizontal padding (rows pad themselves) */}
-      <div className="flex-1 overflow-y-auto py-2">
+      <div className="flex-1 overflow-y-auto pt-0 pb-2">
         <ChannelList
           channels={channels}
           isLoading={isLoading}

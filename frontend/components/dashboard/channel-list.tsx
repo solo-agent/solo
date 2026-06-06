@@ -77,7 +77,7 @@ function ChannelItem({
         }
       }}
       className={cn(
-        'group flex cursor-pointer items-center justify-between px-3 py-1.5 text-sm transition-all',
+        'group flex cursor-pointer items-center justify-between pl-5 pr-3 py-1.5 text-sm transition-all',
         isSelected
           ? 'bg-brutal-pink text-black border-2 border-black shadow-brutal-sm'
           : 'text-black hover:bg-brutal-pink/60 border-2 border-transparent',
@@ -121,12 +121,14 @@ export function ChannelList({
 }: ChannelListProps) {
   return (
     <div>
-      {/* Section header — matches TeamsLeftColumn (px-3 py-2, no mb) */}
-      <div className="flex items-center justify-between">
+      {/* Section header — group hover covers both chevron and + button so the
+          entire row highlights as one unit (chevron + count + + are visually
+          grouped) */}
+      <div className="group flex items-center justify-between hover:bg-brutal-pink/40">
         <button
           type="button"
           onClick={onToggleExpand}
-          className="flex flex-1 items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider text-sidebar-muted-foreground font-heading hover:bg-brutal-pink/40"
+          className="flex flex-1 items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider text-sidebar-muted-foreground font-heading"
           aria-label="展开或折叠 频道"
           aria-expanded={isExpanded}
         >
@@ -142,7 +144,7 @@ export function ChannelList({
         </button>
         <button
           onClick={onCreateChannel}
-          className="mr-2 flex h-5 w-5 items-center justify-center text-sidebar-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+          className="mr-2 flex h-5 w-5 items-center justify-center text-sidebar-muted-foreground group-hover:text-black transition-colors"
           aria-label="创建频道"
         >
           <Plus className="h-3.5 w-3.5" />

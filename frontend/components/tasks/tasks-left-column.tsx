@@ -141,7 +141,7 @@ export function TasksLeftColumn({
                   type="button"
                   onClick={() => onChannelClick(channel.id)}
                   className={cn(
-                    'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm border-2',
+                    'flex w-full items-center gap-2 pl-5 pr-3 py-1.5 text-left text-sm border-2',
                     channel.id === selectedChannelId
                       ? 'border-black bg-brutal-pink text-black shadow-brutal-sm'
                       : 'border-transparent hover:bg-brutal-pink/60',

@@ -234,12 +234,13 @@ export function DMList({
 
   return (
     <div>
-      {/* Section header */}
-      <div className="flex items-center justify-between">
+      {/* Section header — group hover covers both chevron and + button so the
+          entire row highlights as one unit */}
+      <div className="group flex items-center justify-between hover:bg-brutal-pink/40">
         <button
           type="button"
           onClick={onToggleExpand}
-          className="flex flex-1 items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider text-sidebar-muted-foreground font-heading hover:bg-brutal-pink/40"
+          className="flex flex-1 items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider text-sidebar-muted-foreground font-heading"
           aria-label="展开或折叠 直接消息"
           aria-expanded={isExpanded}
         >
@@ -255,7 +256,7 @@ export function DMList({
         </button>
         <button
           onClick={onCreateDM}
-          className="mr-2 flex h-5 w-5 items-center justify-center text-sidebar-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+          className="mr-2 flex h-5 w-5 items-center justify-center text-sidebar-muted-foreground group-hover:text-black transition-colors"
           aria-label="发起私信"
         >
           <Plus className="h-3.5 w-3.5" />
