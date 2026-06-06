@@ -256,7 +256,7 @@ export function DMList({
         </button>
         <button
           onClick={onCreateDM}
-          className="mr-2 flex h-5 w-5 items-center justify-center text-sidebar-muted-foreground group-hover:text-black transition-colors"
+          className="mr-2 flex h-5 w-5 items-center justify-center text-sidebar-muted-foreground group-hover:text-black active:ring-2 active:ring-brutal-cream transition-colors"
           aria-label="发起私信"
         >
           <Plus className="h-3.5 w-3.5" />

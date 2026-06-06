@@ -144,7 +144,7 @@ export function ChannelList({
         </button>
         <button
           onClick={onCreateChannel}
-          className="mr-2 flex h-5 w-5 items-center justify-center text-sidebar-muted-foreground group-hover:text-black transition-colors"
+          className="mr-2 flex h-5 w-5 items-center justify-center text-sidebar-muted-foreground group-hover:text-black active:ring-2 active:ring-brutal-cream transition-colors"
           aria-label="创建频道"
         >
           <Plus className="h-3.5 w-3.5" />
