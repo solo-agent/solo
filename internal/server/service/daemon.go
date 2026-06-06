@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -417,7 +418,10 @@ func (dm *DaemonManager) CancelTask(ctx context.Context, daemon *DaemonInfo, tas
 
 // ---- workspace.Proxy implementation ----
 
-// FindDaemonForAgent finds an online daemon that can serve workspace files for an agent.
+// FindDaemonForAgent finds an online daemon that can serve workspace files.
+// TODO: implement agent-to-daemon affinity when persistent agent-daemon
+// assignment is available. Currently returns the first online daemon,
+// which is correct for single-daemon deployments.
 func (dm *DaemonManager) FindDaemonForAgent(ctx context.Context, agentID string) (*workspace.Daemon, bool) {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
@@ -436,10 +440,13 @@ func (dm *DaemonManager) FindDaemonForAgent(ctx context.Context, agentID string)
 
 // ProxyWorkspaceList sends a workspace list request to a daemon.
 func (dm *DaemonManager) ProxyWorkspaceList(ctx context.Context, daemon *workspace.Daemon, agentID, path string) ([]byte, error) {
-	url := fmt.Sprintf("http://%s:%d/internal/daemon/workspace/list?agent_id=%s&path=%s",
-		daemon.Host, daemon.Port, agentID, path)
+	params := url.Values{}
+	params.Set("agent_id", agentID)
+	params.Set("path", path)
+	urlStr := fmt.Sprintf("http://%s:%d/internal/daemon/workspace/list?%s",
+		daemon.Host, daemon.Port, params.Encode())
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
 	if err != nil {
 		return nil, fmt.Errorf("proxy workspace list: %w", err)
 	}
@@ -454,15 +461,18 @@ func (dm *DaemonManager) ProxyWorkspaceList(ctx context.Context, daemon *workspa
 		return nil, fmt.Errorf("proxy workspace list: daemon returned %d", resp.StatusCode)
 	}
 
-	return io.ReadAll(resp.Body)
+	return io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024)) // 1MB cap
 }
 
 // ProxyWorkspaceRead sends a workspace read request to a daemon.
 func (dm *DaemonManager) ProxyWorkspaceRead(ctx context.Context, daemon *workspace.Daemon, agentID, path string) ([]byte, error) {
-	url := fmt.Sprintf("http://%s:%d/internal/daemon/workspace/read?agent_id=%s&path=%s",
-		daemon.Host, daemon.Port, agentID, path)
+	params := url.Values{}
+	params.Set("agent_id", agentID)
+	params.Set("path", path)
+	urlStr := fmt.Sprintf("http://%s:%d/internal/daemon/workspace/read?%s",
+		daemon.Host, daemon.Port, params.Encode())
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
 	if err != nil {
 		return nil, fmt.Errorf("proxy workspace read: %w", err)
 	}
@@ -477,7 +487,7 @@ func (dm *DaemonManager) ProxyWorkspaceRead(ctx context.Context, daemon *workspa
 		return nil, fmt.Errorf("proxy workspace read: daemon returned %d", resp.StatusCode)
 	}
 
-	return io.ReadAll(resp.Body)
+	return io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024)) // 1MB cap
 }
 
 // --- Health check loop ---
