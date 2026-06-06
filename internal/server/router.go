@@ -54,7 +54,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	channelHandler := handler.NewChannelHandler(pool)
 	memberHandler := handler.NewMemberHandler(pool, agentSvc)
 	messageHandler := handler.NewMessageHandler(pool, hub, agentSvc, taskSvc)
-	agentHandler := handler.NewAgentHandler(pool)
+	agentHandler := handler.NewAgentHandler(pool, dm)
 	threadHandler := handler.NewThreadHandler(pool, hub, agentSvc)
 	dmHandler := handler.NewDMHandler(pool, hub, agentSvc, taskSvc)
 	daemonHandler := handler.NewDaemonHandler(dm, agentSvc, computerSvc)

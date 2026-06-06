@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/solo-ai/solo/internal/server/workspace"
 	"github.com/solo-ai/solo/pkg/agent"
 )
 
@@ -24,19 +25,22 @@ const (
 
 // AgentHandler handles agent-related HTTP requests.
 type AgentHandler struct {
-	pool           *pgxpool.Pool
-	workspaceRoot  string // base path for agent workspaces, defaults to ~/.solo/agents
+	pool          *pgxpool.Pool
+	workspaceRoot string             // base path for agent workspaces, defaults to ~/.solo/agents
+	proxy         workspace.Proxy    // optional proxy for workspace requests (nil = local FS only)
 }
 
 // NewAgentHandler creates a new AgentHandler.
-func NewAgentHandler(pool *pgxpool.Pool) *AgentHandler {
-	// Use standard workspace path convention from pkg/agent.WorkspaceManager.
+func NewAgentHandler(pool *pgxpool.Pool, proxy workspace.Proxy) *AgentHandler {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
 	}
 	workspaceRoot := filepath.Join(home, ".solo", "agents")
-	return &AgentHandler{pool: pool, workspaceRoot: workspaceRoot}
+	if proxy == nil {
+		slog.Warn("agent handler: no workspace proxy configured, falling back to local filesystem only")
+	}
+	return &AgentHandler{pool: pool, workspaceRoot: workspaceRoot, proxy: proxy}
 }
 
 // --- Request/Response types ---
@@ -572,6 +576,30 @@ func (h *AgentHandler) Workspace(w http.ResponseWriter, r *http.Request) {
 	}
 	includeContent := r.URL.Query().Get("content") == "true"
 
+	// Try proxy to daemon first
+	if h.proxy != nil {
+		if d, ok := h.proxy.FindDaemonForAgent(r.Context(), agentID); ok {
+			if includeContent {
+				data, err := h.proxy.ProxyWorkspaceRead(r.Context(), d, agentID, relPath)
+				if err == nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.Write(data)
+					return
+				}
+				slog.Warn("workspace: daemon proxy read failed, falling back to local filesystem", "error", err)
+			} else {
+				data, err := h.proxy.ProxyWorkspaceList(r.Context(), d, agentID, relPath)
+				if err == nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.Write(data)
+					return
+				}
+				slog.Warn("workspace: daemon proxy list failed, falling back to local filesystem", "error", err)
+			}
+		}
+	}
+
+	// Fallback: local filesystem reading
 	// Prevent path traversal: resolve and verify it stays within workspaceDir.
 	fullPath := filepath.Clean(filepath.Join(workspaceDir, relPath))
 	if !strings.HasPrefix(fullPath, workspaceDir) {

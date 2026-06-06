@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/solo-ai/solo/internal/realtime"
+	"github.com/solo-ai/solo/internal/server/workspace"
 )
 
 // DaemonStatus represents the operational status of a daemon instance.
@@ -412,6 +413,71 @@ func (dm *DaemonManager) CancelTask(ctx context.Context, daemon *DaemonInfo, tas
 	}
 
 	return nil
+}
+
+// ---- workspace.Proxy implementation ----
+
+// FindDaemonForAgent finds an online daemon that can serve workspace files for an agent.
+func (dm *DaemonManager) FindDaemonForAgent(ctx context.Context, agentID string) (*workspace.Daemon, bool) {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+
+	for _, d := range dm.daemons {
+		if d.Status != DaemonStatusOnline {
+			continue
+		}
+		return &workspace.Daemon{
+			Host: d.Host,
+			Port: d.Port,
+		}, true
+	}
+	return nil, false
+}
+
+// ProxyWorkspaceList sends a workspace list request to a daemon.
+func (dm *DaemonManager) ProxyWorkspaceList(ctx context.Context, daemon *workspace.Daemon, agentID, path string) ([]byte, error) {
+	url := fmt.Sprintf("http://%s:%d/internal/daemon/workspace/list?agent_id=%s&path=%s",
+		daemon.Host, daemon.Port, agentID, path)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("proxy workspace list: %w", err)
+	}
+
+	resp, err := dm.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("proxy workspace list: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("proxy workspace list: daemon returned %d", resp.StatusCode)
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
+// ProxyWorkspaceRead sends a workspace read request to a daemon.
+func (dm *DaemonManager) ProxyWorkspaceRead(ctx context.Context, daemon *workspace.Daemon, agentID, path string) ([]byte, error) {
+	url := fmt.Sprintf("http://%s:%d/internal/daemon/workspace/read?agent_id=%s&path=%s",
+		daemon.Host, daemon.Port, agentID, path)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("proxy workspace read: %w", err)
+	}
+
+	resp, err := dm.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("proxy workspace read: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("proxy workspace read: daemon returned %d", resp.StatusCode)
+	}
+
+	return io.ReadAll(resp.Body)
 }
 
 // --- Health check loop ---
