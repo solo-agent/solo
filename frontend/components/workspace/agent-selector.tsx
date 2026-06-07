@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
+import { Select, type SelectOption } from '@/components/ui/select';
 
 interface AgentSummary {
   id: string;
@@ -35,16 +36,18 @@ export function AgentSelector({ agentId }: AgentSelectorProps) {
     router.push(`/workspace?${params.toString()}`);
   };
 
+  const options: SelectOption[] = agents.map((a) => ({
+    value: a.id,
+    label: a.name,
+  }));
+
   return (
-    <select
+    <Select
       value={agentId || ''}
       onChange={handleChange}
-      className="bg-black border-2 border-black text-white px-3 py-1.5 font-mono text-xs rounded-none focus:outline-none focus:border-brutal-pink"
-    >
-      <option value="">选择一个 Agent...</option>
-      {agents.map((a) => (
-        <option key={a.id} value={a.id}>{a.name}</option>
-      ))}
-    </select>
+      options={options}
+      placeholder="选择一个 Agent..."
+      size="sm"
+    />
   );
 }

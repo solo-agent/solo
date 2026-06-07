@@ -127,7 +127,7 @@ export function CreateTaskModal({
       ref={overlayRef}
     >
       <div
-        className="mx-4 w-full max-w-md rounded-none border-2 border-black bg-card shadow-brutal-xl"
+        className="mx-4 w-full max-w-md rounded-none border-brutal-thick bg-card shadow-brutal-xl"
         role="dialog"
         aria-modal="true"
         aria-label="创建任务"

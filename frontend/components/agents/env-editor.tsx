@@ -143,7 +143,7 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
               'flex h-9 w-9 flex-shrink-0 items-center justify-center',
               'border-2 border-black bg-white shadow-brutal-sm',
               'transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal',
-              'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
+              'active:translate-x-[3px] active:translate-y-[3px] active:shadow-none',
               'disabled:opacity-50 disabled:pointer-events-none',
             )}
             style={{ background: '#fffaef' }}
@@ -162,7 +162,7 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
           'border-2 border-black bg-white shadow-brutal-sm',
           'font-heading text-xs font-bold',
           'transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal',
-          'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
+          'active:translate-x-[3px] active:translate-y-[3px] active:shadow-none',
           'disabled:opacity-50 disabled:pointer-events-none',
         )}
         style={{ background: '#fffaef' }}

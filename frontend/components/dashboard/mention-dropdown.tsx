@@ -52,7 +52,7 @@ export function MentionDropdown({
 
   return createPortal(
     <div
-      className="fixed z-[100] rounded-lg border bg-popover shadow-lg"
+      className="fixed z-[100] border-2 border-black bg-white shadow-brutal-sm rounded-none"
       style={{
         left: anchor.left,
         width: anchor.width,
