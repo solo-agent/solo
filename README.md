@@ -38,6 +38,31 @@ make stop      # 关闭
 | Agent Daemon | 8081 |
 | PostgreSQL | 5432 |
 
+### Agent 后端配置
+
+Solo 支持多种 Agent 后端：Claude Code、Hermes、Kimi、Kiro、OpenClaw、OpenCode 等。
+
+**OpenClaw** 通过 ACP 协议 (`openclaw acp`) 通信，连接本地 Gateway。使用前需要：
+
+1. 启动 Gateway：
+   ```bash
+   openclaw gateway start --port 18789
+   ```
+
+2. 首次连接时 Gateway 会挂起等待 scope 审批。在浏览器打开 Gateway Control UI（默认地址与端口）批准设备，或通过 CLI：
+   ```bash
+   openclaw devices list --port 18789
+   openclaw devices approve <request-id> --port 18789
+   ```
+
+3. 验证 ACP 链路：
+   ```bash
+   echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientInfo":{"name":"test","version":"1.0.0"},"clientCapabilities":{}}}' | openclaw acp
+   ```
+   收到包含 `"agentInfo":{"name":"openclaw-acp"}` 的响应即为正常。
+
+**自定义参数**：各 Agent 后端的连接参数（`--token`、`--url`、`--session` 等）可通过 `.env` 中的 `AGENT_EXTRA_ARGS` 或 `AGENT_CUSTOM_ARGS` 传入。
+
 ### 技术栈
 
 Go 1.22 / Chi / gorilla/websocket · Next.js 16 / Tailwind CSS / shadcn/ui · PostgreSQL 16 · WebSocket · Claude Code CLI
