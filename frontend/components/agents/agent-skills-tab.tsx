@@ -118,10 +118,10 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
-        <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-red-light shadow-brutal-sm">
-          <AlertCircle className="h-6 w-6 text-brutal-red" />
+        <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-danger-light shadow-brutal-sm">
+          <AlertCircle className="h-6 w-6 text-brutal-danger" />
         </div>
-        <p className="font-body text-sm text-brutal-red">{error}</p>
+        <p className="font-body text-sm text-brutal-danger">{error}</p>
         <Button type="button" onClick={loadAgent} size="sm" className="mt-4">
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
           重试
@@ -164,7 +164,7 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
                 className={cn(
                   'relative flex h-7 w-11 flex-shrink-0 items-center border-2 border-black transition-colors',
                   isSaving ? 'opacity-50 cursor-wait' : '',
-                  isEnabled ? 'bg-brutal-lime' : 'bg-brutal-stone',
+                  isEnabled ? 'bg-brutal-success' : 'bg-brutal-muted',
                 )}
                 role="switch"
                 aria-checked={isEnabled}
@@ -188,10 +188,10 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
                     className={cn(
                       'badge-brutal text-[10px] px-1.5',
                       isSaving
-                        ? 'bg-brutal-stone text-white'
+                        ? 'bg-brutal-muted text-white'
                         : isEnabled
-                          ? 'bg-brutal-lime text-black'
-                          : 'bg-brutal-stone text-white',
+                          ? 'bg-brutal-success text-black'
+                          : 'bg-brutal-muted text-white',
                     )}
                   >
                     {isSaving ? '保存中...' : isEnabled ? '已启用' : '未启用'}

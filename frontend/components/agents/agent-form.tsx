@@ -11,7 +11,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Bot, Wrench, Terminal } from 'lucide-react';
@@ -20,6 +20,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Select } from '@/components/ui/select';
 import { EnvEditor } from '@/components/agents/env-editor';
 import { ArgsEditor } from '@/components/agents/args-editor';
 import { useCliDetection } from '@/lib/hooks/use-cli-detection';
@@ -107,6 +108,7 @@ export function AgentForm({
   const {
     register,
     handleSubmit,
+    control,
     watch,
     setValue,
     formState: { errors },
@@ -125,7 +127,6 @@ export function AgentForm({
     mode: 'onChange',
   });
 
-  const selectedRuntime = watch('model_provider');
   const currentSystemPrompt = watch('system_prompt') || '';
 
   // v1.4: dynamic CLI detection + backend metadata
@@ -142,8 +143,6 @@ export function AgentForm({
   const [argsValues, setArgsValues] = useState<string[]>(
     defaultValues?.custom_args || [],
   );
-
-  const runtimeReg = register('model_provider');
 
   const handleTemplateSelect = useCallback(
     (template: RoleTemplate) => {
@@ -202,7 +201,7 @@ export function AgentForm({
       {/* Name */}
       <div className="space-y-2">
         <Label htmlFor="name">
-          名称 <span className="text-brutal-red">*</span>
+          名称 <span className="text-brutal-danger">*</span>
         </Label>
         <Input
           id="name"
@@ -212,7 +211,7 @@ export function AgentForm({
           aria-invalid={!!errors.name}
         />
         {errors.name && (
-          <p className="font-mono text-[11px] text-brutal-red">
+          <p className="font-mono text-[11px] text-brutal-danger">
             {errors.name.message}
           </p>
         )}
@@ -228,7 +227,7 @@ export function AgentForm({
           aria-invalid={!!errors.description}
         />
         {errors.description && (
-          <p className="font-mono text-[11px] text-brutal-red">
+          <p className="font-mono text-[11px] text-brutal-danger">
             {errors.description.message}
           </p>
         )}
@@ -237,7 +236,7 @@ export function AgentForm({
       {/* Runtime Selection (v1.4: dynamic, based on CLI detection) */}
       <div className="space-y-3">
         <Label>
-          Runtime <span className="text-brutal-red">*</span>
+          Runtime <span className="text-brutal-danger">*</span>
         </Label>
 
         {/* Loading state */}
@@ -247,35 +246,29 @@ export function AgentForm({
 
         {/* Runtime dropdown — only show available runtimes */}
         {!detectionLoading && (
-          <select
-            name={runtimeReg.name}
-            ref={runtimeReg.ref}
-            onBlur={runtimeReg.onBlur}
-            value={selectedRuntime}
-            onChange={runtimeReg.onChange}
-            className="input-brutal h-10 appearance-none bg-white pr-8 font-body text-sm"
-            style={{
-              backgroundImage:
-                "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")",
-              backgroundRepeat: 'no-repeat',
-              backgroundPosition: 'right 0.75rem center',
-            }}
-          >
-            <option value="">选择 Runtime...</option>
-            {Object.values(detection).map((rt) => (
-              <option
-                key={rt.type}
-                value={rt.type}
-                disabled={!rt.available}
-              >
-                {rt.available ? '●' : '○'} {rt.display_name}
-                {rt.version ? ` (v${rt.version})` : ''}
-              </option>
-            ))}
-          </select>
+          <Controller
+            name="model_provider"
+            control={control}
+            render={({ field }) => (
+              <Select
+                name={field.name}
+                value={field.value ?? ''}
+                onChange={field.onChange}
+                onBlur={field.onBlur}
+                options={Object.values(detection).map((rt) => ({
+                  value: rt.type,
+                  label: `${rt.available ? '●' : '○'} ${rt.display_name}${rt.version ? ` (v${rt.version})` : ''}`,
+                  disabled: !rt.available,
+                }))}
+                placeholder="选择 Runtime..."
+                size="md"
+                className="w-full font-body"
+              />
+            )}
+          />
         )}
         {errors.model_provider && (
-          <p className="font-mono text-[11px] text-brutal-red">
+          <p className="font-mono text-[11px] text-brutal-danger">
             {errors.model_provider.message}
           </p>
         )}
@@ -300,7 +293,7 @@ export function AgentForm({
 
       {/* Role Template Selector (SOLO-210-F) */}
       <div className="space-y-3">
-        <Label>角色模板 <span className="font-normal text-muted-foreground">(可选)</span></Label>
+        <Label>角色模板 <span className="font-bold text-muted-foreground">(可选)</span></Label>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5">
           {ROLE_TEMPLATES.map((template) => {
             const isSelected = selectedTemplateKey === template.key;
@@ -312,7 +305,7 @@ export function AgentForm({
                 className={cn(
                   'flex flex-col items-start gap-0.5 border-2 border-black px-2.5 py-2 text-left transition-all',
                   isSelected
-                    ? 'bg-brutal-pink shadow-brutal-sm translate-x-0.5 translate-y-0.5'
+                    ? 'bg-brutal-primary shadow-brutal-sm translate-x-0.5 translate-y-0.5'
                     : 'bg-white shadow-brutal-sm hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal',
                 )}
               >
@@ -347,7 +340,7 @@ export function AgentForm({
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <Terminal className="h-4 w-4" />
-          <Label>Environment Variables <span className="font-normal text-muted-foreground">(可选)</span></Label>
+          <Label>Environment Variables <span className="font-bold text-muted-foreground">(可选)</span></Label>
         </div>
         <p className="font-mono text-[11px] text-muted-foreground">
           为 Agent 运行时注入环境变量，例如 API 密钥、配置参数等。
@@ -363,7 +356,7 @@ export function AgentForm({
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <Wrench className="h-4 w-4" />
-          <Label>Custom Arguments <span className="font-normal text-muted-foreground">(可选)</span></Label>
+          <Label>Custom Arguments <span className="font-bold text-muted-foreground">(可选)</span></Label>
         </div>
         <p className="font-mono text-[11px] text-muted-foreground">
           传递给 CLI 的额外参数。每个参数作为独立标签添加。
@@ -380,7 +373,7 @@ export function AgentForm({
         <button
           type="submit"
           disabled={isSubmitting}
-          className="btn-brutal btn-brutal-pink"
+          className="btn-brutal btn-brutal-primary"
         >
           {isSubmitting ? (
             <>

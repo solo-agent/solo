@@ -18,7 +18,7 @@ import {
   useReducer,
   type ReactNode,
 } from 'react';
-import { ApiError, apiClient, defaultTokenStorage } from './api-client';
+import { ApiError, apiClient, defaultTokenStorage, setAuthTokens, clearAuthTokens } from './api-client';
 
 // ---- 类型定义 ----
 
@@ -139,7 +139,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           // Token 过期，尝试刷新
           refreshAndFetchUser(dispatch);
         } else {
-          defaultTokenStorage.removeTokens();
+    clearAuthTokens();
           dispatch({
             type: 'AUTH_FAILURE',
             error: err instanceof Error ? err.message : '认证初始化失败',
@@ -154,8 +154,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     dispatch({ type: 'AUTH_START' });
     try {
       const data = await apiClient.post<AuthResponse>('/api/v1/auth/login', req);
-      defaultTokenStorage.setAccessToken(data.access_token);
-      localStorage.setItem('refresh_token', data.refresh_token);
+      setAuthTokens(data.access_token, data.refresh_token);
       dispatch({ type: 'AUTH_SUCCESS', user: data.user });
     } catch (err: unknown) {
       const message =
@@ -171,8 +170,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     dispatch({ type: 'AUTH_START' });
     try {
       const data = await apiClient.post<AuthResponse>('/api/v1/auth/register', req);
-      defaultTokenStorage.setAccessToken(data.access_token);
-      localStorage.setItem('refresh_token', data.refresh_token);
+      setAuthTokens(data.access_token, data.refresh_token);
       dispatch({ type: 'AUTH_SUCCESS', user: data.user });
     } catch (err: unknown) {
       const message =
@@ -191,7 +189,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } catch {
       // 即使登出 API 失败，也清除本地 token
     }
-    defaultTokenStorage.removeTokens();
+    clearAuthTokens();
     dispatch({ type: 'LOGOUT' });
   }, []);
 
@@ -241,7 +239,7 @@ async function refreshAndFetchUser(
 ): Promise<void> {
   const refreshToken = defaultTokenStorage.getRefreshToken();
   if (!refreshToken) {
-    defaultTokenStorage.removeTokens();
+    clearAuthTokens();
     dispatch({ type: 'AUTH_FAILURE', error: '' });
     return;
   }
@@ -253,13 +251,13 @@ async function refreshAndFetchUser(
     );
     defaultTokenStorage.setAccessToken(data.access_token);
     if (data.refresh_token) {
-      localStorage.setItem('refresh_token', data.refresh_token);
+      defaultTokenStorage.setRefreshToken(data.refresh_token);
     }
 
     const user = await fetchCurrentUser();
     dispatch({ type: 'AUTH_SUCCESS', user });
   } catch {
-    defaultTokenStorage.removeTokens();
+    clearAuthTokens();
     dispatch({ type: 'AUTH_FAILURE', error: '' });
   }
 }

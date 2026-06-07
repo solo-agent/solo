@@ -15,6 +15,7 @@ import { Search, X, Clock, Hash } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 import type { SearchResult, SearchResponse } from '@/lib/types';
+import { sanitizeHtml } from '@/lib/sanitize';
 
 interface GlobalSearchProps {
   open: boolean;
@@ -233,7 +234,7 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
           {/* Loading */}
           {isLoading && (
             <div className="flex items-center justify-center py-12">
-              <div className="h-6 w-6 animate-spin rounded-full border-3 border-brutal-pink border-t-transparent" />
+              <div className="h-6 w-6 animate-spin rounded-full border-3 border-brutal-primary border-t-transparent" />
               <span className="ml-3 font-body text-sm text-muted-foreground">
                 搜索中...
               </span>
@@ -243,7 +244,7 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
           {/* Error */}
           {error && !isLoading && (
             <div className="p-6 text-center">
-              <p className="font-body text-sm text-brutal-red">{error}</p>
+              <p className="font-body text-sm text-brutal-danger">{error}</p>
             </div>
           )}
 
@@ -283,7 +284,7 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
                     className={cn(
                       'flex w-full flex-col gap-1 border-b border-brutal-muted px-4 py-3 text-left transition-colors',
                       index === activeIndex
-                        ? 'bg-brutal-pink-light'
+                        ? 'bg-brutal-primary-light'
                         : 'hover:bg-muted',
                     )}
                   >
@@ -304,11 +305,13 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
 
                     {/* Content snippet with highlighted marks */}
                     <p
-                      className="line-clamp-2 font-body text-sm text-foreground leading-relaxed [&_mark]:bg-brutal-pink [&_mark]:text-foreground [&_mark]:px-0.5"
+                      className="line-clamp-2 font-body text-sm text-foreground leading-relaxed [&_mark]:bg-brutal-primary [&_mark]:text-foreground [&_mark]:px-0.5"
                       dangerouslySetInnerHTML={{
-                        __html: result.highlight
-                          ? sanitizeMarkHtml(result.highlight)
-                          : result.content,
+                        __html: sanitizeHtml(
+                          result.highlight
+                            ? sanitizeMarkHtml(result.highlight)
+                            : result.content,
+                        ),
                       }}
                     />
                   </button>

@@ -6,11 +6,32 @@ import { Loader2, InboxIcon, Mail } from 'lucide-react';
 import { useInbox } from '@/lib/hooks/use-inbox';
 import { useInboxUnread } from '@/lib/hooks/use-inbox-unread';
 import { InboxItem } from './inbox-item';
+import { TabBar } from '@/components/ui/tab-bar';
+import type { TabBarTab } from '@/components/ui/tab-bar';
 import type { InboxItem as InboxItemType, Message } from '@/lib/types';
 
 const ThreadPanel = lazy(() =>
   import('@/components/dashboard/thread-panel').then((m) => ({ default: m.ThreadPanel })),
 );
+
+const INBOX_TABS: TabBarTab[] = [
+  { key: 'all', label: '全部' },
+  { key: 'mention', label: '@提及' },
+  { key: 'thread_reply', label: '话题回复' },
+  { key: 'dm', label: '私信' },
+];
+
+const KEY_TO_TYPE_FILTER: Record<string, string[]> = {
+  all: [],
+  mention: ['mention'],
+  thread_reply: ['thread_reply'],
+  dm: ['dm'],
+};
+
+function typeFilterToKey(tf: string[]) {
+  if (tf.length === 0) return 'all';
+  return tf[0];
+}
 
 export function InboxView() {
   const router = useRouter();
@@ -77,21 +98,21 @@ export function InboxView() {
         <div className="flex h-14 flex-shrink-0 items-center border-b-2 border-black px-4">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <Mail className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
-            <h2 className="font-semibold text-foreground truncate">Inbox</h2>
+            <h2 className="font-bold text-foreground truncate">Inbox</h2>
           </div>
           {items.length > 0 && (
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={handleMarkAllRead}
-                className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                className="border-2 border-black bg-white px-3 py-1 text-xs font-heading font-bold shadow-brutal-sm hover:bg-brutal-cream active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
               >
                 全部已读
               </button>
               <button
                 type="button"
                 onClick={handleClearAll}
-                className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                className="border-2 border-black bg-brutal-primary px-3 py-1 text-xs font-heading font-bold text-black shadow-brutal-sm hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
               >
                 清空
               </button>
@@ -100,40 +121,20 @@ export function InboxView() {
         </div>
 
         {/* Filter bar */}
-        <div className="flex h-10 flex-shrink-0 items-center gap-2 border-b-2 border-black px-4 bg-brutal-cream">
-          {/* Type tabs */}
-          {(['全部', '@提及', '话题回复', '私信'] as const).map((label) => {
-            const typeMap: Record<string, string[]> = {
-              '全部': [],
-              '@提及': ['mention'],
-              '话题回复': ['thread_reply'],
-              '私信': ['dm'],
-            };
-            const active = JSON.stringify(typeFilter) === JSON.stringify(typeMap[label]);
-            return (
-              <button
-                key={label}
-                type="button"
-                onClick={() => setTypeFilter(typeMap[label])}
-                className={`text-xs font-heading font-bold px-2.5 py-1 transition-colors ${
-                  active
-                    ? 'bg-brutal-pink text-black border-2 border-black'
-                    : 'text-muted-foreground hover:text-foreground border-2 border-transparent'
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
-          {/* Sender filter */}
+        <TabBar
+          tabs={INBOX_TABS}
+          activeKey={typeFilterToKey(typeFilter)}
+          onChange={(key) => setTypeFilter(KEY_TO_TYPE_FILTER[key])}
+          variant="pill"
+        >
           <input
             type="text"
             placeholder="筛选发送者..."
             value={senderFilter}
             onChange={(e) => setSenderFilter(e.target.value)}
-            className="ml-auto h-7 w-36 text-xs border-2 border-black bg-white px-2 font-body placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brutal-pink"
+            className="ml-auto h-7 w-36 text-xs border-2 border-black bg-white px-2 font-body shadow-brutal-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brutal-info"
           />
-        </div>
+        </TabBar>
 
         <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream">
           {isLoading ? (
@@ -142,7 +143,7 @@ export function InboxView() {
             </div>
           ) : items.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center px-4">
-              <div className="mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm">
+              <div className="mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm">
                 <InboxIcon className="h-8 w-8 text-black" />
               </div>
               <h2 className="font-heading text-lg font-bold text-foreground">
@@ -193,7 +194,7 @@ export function InboxView() {
       >
         {threadMessage && (
           <div
-            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-pink/50 transition-colors z-10"
+            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-primary/50 transition-colors z-10"
             onMouseDown={(e) => {
               e.preventDefault();
               const startX = e.clientX;

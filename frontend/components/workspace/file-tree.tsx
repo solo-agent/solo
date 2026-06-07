@@ -33,7 +33,7 @@ function FileTreeNode({
   };
 
   const Icon = isDir ? (isExpanded ? FolderOpen : Folder) : FileText;
-  const iconColor = isDir ? 'text-brutal-lavender' : 'text-muted-foreground';
+  const iconColor = isDir ? 'text-brutal-violet' : 'text-muted-foreground';
 
   return (
     <div>
@@ -42,7 +42,7 @@ function FileTreeNode({
         onClick={handleClick}
         className={cn(
           'flex w-full items-center gap-1 px-1 py-1 text-left transition-colors',
-          isSelected && 'bg-brutal-pink',
+          isSelected && 'bg-brutal-primary',
           !isSelected && 'hover:bg-muted',
         )}
         style={{ paddingLeft: `${depth * 16 + 4}px` }}

@@ -83,6 +83,9 @@ export const defaultTokenStorage = {
   setAccessToken: (token: string): void => {
     localStorage.setItem(STORAGE_KEY_ACCESS_TOKEN, token);
   },
+  setRefreshToken: (token: string): void => {
+    localStorage.setItem(STORAGE_KEY_REFRESH_TOKEN, token);
+  },
   removeTokens: (): void => {
     localStorage.removeItem(STORAGE_KEY_ACCESS_TOKEN);
     localStorage.removeItem(STORAGE_KEY_REFRESH_TOKEN);
@@ -347,6 +350,24 @@ export function createApiClient(config?: Partial<ApiClientConfig>): ApiClient {
         window.location.href = '/auth/login';
       }),
   });
+}
+
+// ---- 统一 token 写入入口 ----
+
+/**
+ * 同时写入 access_token 和 refresh_token。
+ * 所有 token 写入都应通过此函数，避免各处直接操作 localStorage。
+ */
+export function setAuthTokens(access: string, refresh: string): void {
+  defaultTokenStorage.setAccessToken(access);
+  defaultTokenStorage.setRefreshToken(refresh);
+}
+
+/**
+ * 清除本地保存的 access_token 和 refresh_token。
+ */
+export function clearAuthTokens(): void {
+  defaultTokenStorage.removeTokens();
 }
 
 // ---- 全局单例 ----

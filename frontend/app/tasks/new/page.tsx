@@ -110,11 +110,11 @@ function CreateTaskForm() {
           <div className="mb-5">
             <label className="mb-1.5 block text-sm font-heading font-bold">
               <Hash className="mr-1 inline h-3.5 w-3.5" />
-              所属频道 <span className="text-brutal-red">*</span>
+              所属频道 <span className="text-brutal-danger">*</span>
             </label>
             <Select
               value={selectedChannelId}
-              onChange={(e) => setSelectedChannelId(e.target.value)}
+              onChange={(v) => setSelectedChannelId(v)}
               options={[
                 { value: '', label: '选择频道...' },
                 ...channels.map((ch) => ({ value: ch.id, label: `#${ch.name}` })),

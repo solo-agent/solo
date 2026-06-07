@@ -13,7 +13,7 @@ import { NavBar } from "@/components/ui/navbar";
 import { CreateChannelModal } from "@/components/dashboard/create-channel-modal";
 import { CreateDMModal } from "@/components/dashboard/create-dm-modal";
 import { DeleteChannelDialog } from "@/components/dashboard/delete-channel-dialog";
-import { AgentIsland } from "@/components/agents/agent-island";
+
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -400,7 +400,7 @@ function DashboardContent() {
     return (
       <div className="flex flex-1 items-center justify-center bg-muted/5">
         <div className="text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm">
             <MessageSquare className="h-8 w-8 text-white" />
           </div>
           <h2 className="text-xl font-semibold text-foreground">
@@ -456,6 +456,8 @@ function DashboardContent() {
         onCreateDM={() => setIsCreateDMModalOpen(true)}
         inboxSelected={inboxFromUrl}
         onSelectInbox={handleSelectInbox}
+        activeChannelId={selectedChannelId ?? selectedDmId ?? null}
+        onInvokeAgent={handleInvokeAgent}
       />
 
       {/* Main content area */}
@@ -486,14 +488,7 @@ function DashboardContent() {
         />
       )}
 
-      {/* SOLO-island PR2: bottom-center floating island surfacing
-          current-channel agent status. Channel-scoped, on-demand. PR3:
-          onInvokeAgent wires the expanded panel row click into the
-          AgentViewPanel state owned by the dashboard. */}
-      <AgentIsland
-        channelId={selectedChannelId ?? selectedDmId ?? null}
-        onInvokeAgent={handleInvokeAgent}
-      />
+
     </div>
   );
 }

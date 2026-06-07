@@ -69,7 +69,7 @@ export function TeamsGraphView({ agents, onSelectAgent }: TeamsGraphViewProps) {
                 <div
                   className={cn(
                     'w-[160px] border-2 border-black bg-brutal-cream p-3',
-                    isExpanded && 'border-brutal-pink shadow-brutal',
+                    isExpanded && 'border-brutal-primary shadow-brutal',
                   )}
                 >
                   <button
@@ -91,7 +91,7 @@ export function TeamsGraphView({ agents, onSelectAgent }: TeamsGraphViewProps) {
                           key={agent.id}
                           className="flex items-center gap-2"
                         >
-                          <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-pink">
+                          <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-primary">
                             <Bot className="h-3 w-3 text-white" />
                           </div>
                           <span className="truncate font-body text-xs">{agent.name}</span>
@@ -111,7 +111,7 @@ export function TeamsGraphView({ agents, onSelectAgent }: TeamsGraphViewProps) {
                           key={agent.id}
                           type="button"
                           onClick={() => onSelectAgent(agent.id)}
-                          className="border-2 border-black bg-white px-2 py-1.5 text-left text-xs font-bold hover:bg-brutal-pink/60"
+                          className="border-2 border-black bg-white px-2 py-1.5 text-left text-xs font-bold hover:bg-brutal-primary/60"
                         >
                           → {agent.name}
                         </button>
@@ -121,7 +121,7 @@ export function TeamsGraphView({ agents, onSelectAgent }: TeamsGraphViewProps) {
                 </div>
                 {idx < visibleGroups.length - 1 && (
                   <div className="flex items-center justify-center px-3 py-2 md:py-0">
-                    <ArrowRight className="h-5 w-5 rotate-90 text-brutal-stone md:rotate-0" />
+                    <ArrowRight className="h-5 w-5 rotate-90 text-brutal-muted md:rotate-0" />
                   </div>
                 )}
               </div>

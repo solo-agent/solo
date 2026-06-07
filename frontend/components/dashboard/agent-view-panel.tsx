@@ -73,7 +73,7 @@ export function AgentViewPanel({
     >
       {/* Resize handle (left edge) */}
       <div
-        className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-pink/50 transition-colors z-10"
+        className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-primary/50 transition-colors z-10"
         onMouseDown={(e) => {
           e.preventDefault();
           const startX = e.clientX;
@@ -94,10 +94,10 @@ export function AgentViewPanel({
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b-2 border-black bg-white flex-shrink-0">
         <div className="flex items-center gap-2">
-          <Eye className="h-4 w-4 text-brutal-pink" />
+          <Eye className="h-4 w-4 text-brutal-primary" />
           <span className="font-heading text-sm font-bold">Agent View</span>
           {activeAgentIds.length > 0 && (
-            <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 font-mono text-[10px] font-bold bg-brutal-pink text-white rounded-full">
+            <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 font-mono text-[10px] font-bold bg-brutal-primary text-black border-2 border-black shadow-brutal-sm">
               {activeAgentIds.length}
             </span>
           )}
@@ -116,7 +116,7 @@ export function AgentViewPanel({
             <button
               type="button"
               onClick={onClose}
-              className="flex h-6 w-6 items-center justify-center border-2 border-black bg-brutal-pink text-white hover:bg-brutal-pink/80"
+              className="flex h-6 w-6 items-center justify-center border-2 border-black bg-brutal-primary text-white hover:bg-brutal-primary/80"
               aria-label="关闭 Agent 详情面板"
               title="关闭"
             >
@@ -146,7 +146,7 @@ export function AgentViewPanel({
             }}
             className={cn(
               'transition-colors duration-700',
-              highlightedId === agentId && 'bg-brutal-pink/15',
+              highlightedId === agentId && 'bg-brutal-primary/15',
             )}
           >
             <AgentTrack

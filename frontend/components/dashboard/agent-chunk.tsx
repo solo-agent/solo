@@ -15,7 +15,7 @@ function ToolUseDisplay({ chunk }: { chunk: AgentChunk }) {
   if (!tool) return null;
 
   return (
-    <div className="chunk-tool-use border-l-2 border-brutal-pink pl-2 py-0.5">
+    <div className="chunk-tool-use border-l-2 border-brutal-primary pl-2 py-0.5">
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
@@ -26,11 +26,11 @@ function ToolUseDisplay({ chunk }: { chunk: AgentChunk }) {
         ) : (
           <ChevronRight className="h-3 w-3 flex-shrink-0" />
         )}
-        <Wrench className="h-3 w-3 flex-shrink-0 text-brutal-pink" />
+        <Wrench className="h-3 w-3 flex-shrink-0 text-brutal-primary" />
         <span className="font-bold">{tool.name}</span>
       </button>
       {expanded && tool.input && (
-        <pre className="mt-1 bg-brutal-muted-light p-1.5 text-[10px] font-mono break-all whitespace-pre-wrap max-h-32 overflow-y-auto border border-brutal-muted">
+        <pre className="mt-1 bg-brutal-muted-light p-1.5 text-[10px] font-mono break-all whitespace-pre-wrap max-h-32 overflow-y-auto border-2 border-black">
           {tool.input}
         </pre>
       )}
@@ -45,7 +45,7 @@ function ToolResultDisplay({ chunk }: { chunk: AgentChunk }) {
   return (
     <div className={cn(
       'chunk-tool-result border-l-2 pl-2 py-0.5',
-      tool.output && tool.output.length > 0 ? 'border-brutal-lime' : 'border-muted',
+      tool.output && tool.output.length > 0 ? 'border-brutal-success' : 'border-muted',
     )}>
       <div className="font-mono text-[11px] text-muted-foreground">
         {tool.name} result

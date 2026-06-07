@@ -94,7 +94,7 @@ export function InteractionMode({
               className={cn(
                 'flex w-full items-center gap-3 border-2 px-4 py-3 text-left font-heading text-sm font-bold transition-all',
                 isSelected
-                  ? 'border-black bg-brutal-pink text-black shadow-brutal-sm'
+                  ? 'border-black bg-brutal-primary text-black shadow-brutal-sm'
                   : 'border-black bg-white text-muted-foreground shadow-brutal-sm hover:bg-black/5',
               )}
               aria-pressed={isSelected}
@@ -115,7 +115,7 @@ export function InteractionMode({
                 >
                   {option.label}
                 </span>
-                <span className="mt-0.5 block font-mono text-[11px] font-normal text-muted-foreground">
+                <span className="mt-0.5 block font-mono text-[11px] font-bold text-muted-foreground">
                   {option.description}
                 </span>
               </div>

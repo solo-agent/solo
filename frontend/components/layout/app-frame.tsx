@@ -52,7 +52,6 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
         dmsLoading={isLoadingDMs}
         selectedDmId={null}
         onSelectDM={handleSelectDM}
-        onCreateDM={() => {}}
         inboxSelected={false}
         onSelectInbox={() => router.push('/dashboard?inbox')}
       />

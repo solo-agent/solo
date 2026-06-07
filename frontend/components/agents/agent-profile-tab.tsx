@@ -152,13 +152,13 @@ function StatusToggle({
   };
 
   const statusColor = active
-    ? 'bg-brutal-lime'
-    : 'bg-brutal-stone';
+    ? 'bg-brutal-success'
+    : 'bg-brutal-muted';
 
   return (
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
-        <Circle className={`h-3 w-3 ${active ? 'fill-brutal-lime text-brutal-lime' : 'fill-brutal-stone text-brutal-stone'}`} />
+        <Circle className={`h-3 w-3 ${active ? 'fill-brutal-success text-brutal-success' : 'fill-brutal-muted text-brutal-muted'}`} />
         <span className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
           {active ? '已启用' : '已禁用'}
         </span>
@@ -265,10 +265,10 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
-        <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-red-light shadow-brutal-sm">
-          <AlertCircle className="h-6 w-6 text-brutal-red" />
+        <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-danger-light shadow-brutal-sm">
+          <AlertCircle className="h-6 w-6 text-brutal-danger" />
         </div>
-        <p className="font-body text-sm text-brutal-red">{error}</p>
+        <p className="font-body text-sm text-brutal-danger">{error}</p>
         <Button type="button" onClick={loadAgent} size="sm" className="mt-4">
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
           重试

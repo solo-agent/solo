@@ -35,6 +35,7 @@ import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Skeleton } from '@/components/ui/skeleton';
 import { BrutalAlert } from '@/components/ui/brutal-alert';
+import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { useToast } from '@/components/ui/toast';
 import { NavBar } from '@/components/ui/navbar';
 import { ComputersLeftColumn } from '@/components/computers/computers-left-column';
@@ -70,10 +71,10 @@ function getOsIcon(os?: string): { icon: React.ReactNode; label: string } {
 // Agent status indicator
 function AgentStatusDot({ status }: { status: string }) {
   const colorMap: Record<string, string> = {
-    online: 'bg-brutal-lime',
-    thinking: 'bg-brutal-yellow',
-    running: 'bg-brutal-cyan',
-    offline: 'bg-brutal-stone',
+    online: 'bg-brutal-success',
+    thinking: 'bg-brutal-accent',
+    running: 'bg-brutal-info',
+    offline: 'bg-brutal-muted',
   };
   const labelMap: Record<string, string> = {
     online: '空闲',
@@ -85,8 +86,8 @@ function AgentStatusDot({ status }: { status: string }) {
     <span className="flex items-center gap-1.5 text-xs">
       <span
         className={cn(
-          'inline-block h-2 w-2 flex-shrink-0 rounded-full border border-black',
-          colorMap[status] || 'bg-brutal-stone',
+          'inline-block h-2 w-2 flex-shrink-0 border border-black',
+          colorMap[status] || 'bg-brutal-muted',
         )}
       />
       <span className="text-muted-foreground">{labelMap[status] || status}</span>
@@ -228,7 +229,7 @@ export default function ComputersPage() {
 
       <main className="flex flex-1 flex-col overflow-hidden">
         {/* Top bar — add button only (page label lives in the left column) */}
-        <div className="flex flex-shrink-0 items-center justify-end border-b-2 border-black px-6 py-3">
+        <div className="flex flex-shrink-0 items-center justify-end h-14 border-b-2 border-black px-4">
           <Button onClick={() => setShowAddDialog(true)}>
             <Plus className="mr-2 h-4 w-4" />
             添加电脑
@@ -276,7 +277,7 @@ export default function ComputersPage() {
             {/* Empty state — no computers at all */}
             {!isLoading && !error && computers.length === 0 && (
               <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
-                <div className="mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-cyan shadow-brutal">
+                <div className="mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-info shadow-brutal">
                   <Monitor className="h-8 w-8 text-white" />
                 </div>
                 <h2 className="text-xl font-heading font-bold text-foreground">
@@ -346,8 +347,8 @@ export default function ComputersPage() {
             </div>
             <ol className="list-decimal list-inside space-y-1.5 font-mono text-xs text-foreground">
               <li>在目标机器上克隆项目代码</li>
-              <li>设置 <code className="bg-brutal-black text-brutal-lime px-1">.env</code> 中的 <code className="bg-brutal-black text-brutal-lime px-1">DAEMON_PORT</code> 和 <code className="bg-brutal-black text-brutal-lime px-1">SERVER_URL</code></li>
-              <li>运行 <code className="bg-brutal-black text-brutal-lime px-1">make daemon</code> 启动 Daemon</li>
+              <li>设置 <code className="bg-brutal-black text-brutal-success px-1">.env</code> 中的 <code className="bg-brutal-black text-brutal-success px-1">DAEMON_PORT</code> 和 <code className="bg-brutal-black text-brutal-success px-1">SERVER_URL</code></li>
+              <li>运行 <code className="bg-brutal-black text-brutal-success px-1">make daemon</code> 启动 Daemon</li>
               <li>Daemon 启动后会自动向服务器注册</li>
               <li>注册成功后，电脑将出现在列表中</li>
             </ol>
@@ -446,7 +447,7 @@ function ComputerCard({
         aria-label={`${computer.name} — ${isOnline ? '在线' : '离线'}`}
       >
         <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-cyan shadow-brutal-sm">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-info shadow-brutal-sm">
             {osInfo.icon}
           </div>
           <div className="flex-1 min-w-0">
@@ -678,11 +679,7 @@ function ConnectedAgents({ computerId }: { computerId: string | null }) {
             key={agent.id}
             className="flex items-center gap-3 border-2 border-black bg-brutal-cream p-2.5"
           >
-            <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm">
-              <span className="font-heading text-[10px] font-bold text-black">
-                {agent.name.charAt(0).toUpperCase()}
-              </span>
-            </div>
+            <PixelAvatar agentId={agent.id} size="sm" />
             <div className="flex-1 min-w-0">
               <span className="block truncate font-body text-sm font-medium text-foreground">
                 {agent.name}
@@ -710,8 +707,8 @@ function StatusDot({ isOnline }: { isOnline: boolean }) {
   return (
     <span
       className={cn(
-        'inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full border border-black',
-        isOnline ? 'bg-brutal-lime' : 'bg-brutal-stone animate-pulse',
+        'inline-block h-2.5 w-2.5 flex-shrink-0 border border-black',
+        isOnline ? 'bg-brutal-success' : 'bg-brutal-muted animate-pulse',
       )}
       role="status"
       aria-label={isOnline ? '在线' : '离线'}
@@ -727,7 +724,7 @@ function SectionHeader({ label, className }: { label: string; className?: string
         className,
       )}
     >
-      <span className="h-1 w-1 rounded-full bg-brutal-pink" />
+      <span className="h-1 w-1 bg-brutal-primary" />
       {label}
     </h3>
   );

@@ -9,27 +9,22 @@
 
 import { useState } from 'react';
 import { X, User, Settings, Puzzle, FolderOpen, ArrowLeft } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { AgentProfileTab } from './agent-profile-tab';
 import { AgentRuntimeTab } from './agent-runtime-tab';
 import { AgentSkillsTab } from './agent-skills-tab';
 import { AgentWorkspaceTab } from './agent-workspace-tab';
 import { Skeleton } from '@/components/ui/skeleton';
+import { TabBar } from '@/components/ui/tab-bar';
+import type { TabBarTab } from '@/components/ui/tab-bar';
 import type { Agent } from '@/lib/types';
 
 type TabKey = 'profile' | 'runtime' | 'skills' | 'workspace';
 
-interface TabDef {
-  key: TabKey;
-  label: string;
-  icon: typeof User;
-}
-
-const TABS: TabDef[] = [
-  { key: 'profile', label: 'Profile', icon: User },
-  { key: 'runtime', label: 'Runtime', icon: Settings },
-  { key: 'skills', label: 'Skills', icon: Puzzle },
-  { key: 'workspace', label: 'Workspace', icon: FolderOpen },
+const TABS: TabBarTab[] = [
+  { key: 'profile', label: 'Profile', icon: <User className="h-3.5 w-3.5" /> },
+  { key: 'runtime', label: 'Runtime', icon: <Settings className="h-3.5 w-3.5" /> },
+  { key: 'skills', label: 'Skills', icon: <Puzzle className="h-3.5 w-3.5" /> },
+  { key: 'workspace', label: 'Workspace', icon: <FolderOpen className="h-3.5 w-3.5" /> },
 ];
 
 interface AgentDetailPanelProps {
@@ -74,7 +69,7 @@ export function AgentDetailPanel({ agentId, onClose }: AgentDetailPanelProps) {
         <button
           type="button"
           onClick={onClose}
-          className="flex h-8 w-8 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm hover:shadow-brutal transition-all"
+          className="flex h-8 w-8 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm hover:shadow-brutal transition-all"
           aria-label="关闭"
         >
           <X className="h-4 w-4" />
@@ -82,30 +77,12 @@ export function AgentDetailPanel({ agentId, onClose }: AgentDetailPanelProps) {
       </div>
 
       {/* Tab bar */}
-      <div className="flex border-b-2 border-black">
-        {TABS.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.key;
-          return (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setActiveTab(tab.key)}
-              className={cn(
-                'flex flex-1 items-center justify-center gap-1.5 border-r-2 border-black px-2 py-2.5 font-heading text-xs font-bold transition-colors last:border-r-0',
-                isActive
-                  ? 'bg-brutal-pink text-black'
-                  : 'bg-white text-muted-foreground hover:bg-muted',
-              )}
-              role="tab"
-              aria-selected={isActive}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
+      <TabBar
+        tabs={TABS}
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key as TabKey)}
+        variant="pill"
+      />
 
       {/* Tab content */}
       <div className="flex-1 overflow-y-auto p-4">

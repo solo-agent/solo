@@ -95,8 +95,8 @@ export function TaskBoard({
   // ---- Error state ----
   if (error) {
     return (
-      <div className="flex items-center gap-3 border-2 border-brutal-red bg-brutal-red-light p-4 shadow-brutal-sm">
-        <AlertCircle className="h-5 w-5 flex-shrink-0 text-brutal-red" />
+      <div className="flex items-center gap-3 border-2 border-brutal-danger bg-brutal-danger-light p-4 shadow-brutal-sm">
+        <AlertCircle className="h-5 w-5 flex-shrink-0 text-brutal-danger" />
         <span className="flex-1 font-body text-sm text-foreground">{error}</span>
         <button
           type="button"

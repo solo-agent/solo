@@ -44,6 +44,7 @@ import { AgentMessage } from './agent-message';
 import { StreamingMessage } from './streaming-message';
 import { MessageAttachments } from './message-attachments';
 import type { Channel, Message, Task, TaskStatus } from '@/lib/types';
+import { sanitizeHtml } from '@/lib/sanitize';
 // SOLO-island PR2: TypingIndicator removed — AgentIsland (mounted at the
 // dashboard root) now surfaces agent status. The unused import is removed
 // along with the agentActivities prop and the inline <TypingIndicator />.
@@ -74,29 +75,29 @@ const TASK_HEADER_CONFIG: Record<string, { label: string; borderClass: string; b
     label: 'TODO',
     borderClass: 'border-2 border-black',
     bgClass: '',
-    badgeClass: 'bg-brutal-orange text-black border-2 border-black',
-    lightClass: 'bg-brutal-orange-light',
+    badgeClass: 'bg-brutal-warning text-black border-2 border-black',
+    lightClass: 'bg-brutal-warning-light',
   },
   in_progress: {
     label: '处理中',
     borderClass: 'border-2 border-black',
     bgClass: '',
-    badgeClass: 'bg-brutal-cyan text-black border-2 border-black',
-    lightClass: 'bg-brutal-cyan-light',
+    badgeClass: 'bg-brutal-info text-black border-2 border-black',
+    lightClass: 'bg-brutal-info-light',
   },
   in_review: {
     label: '待审核',
     borderClass: 'border-2 border-black',
     bgClass: '',
-    badgeClass: 'bg-brutal-lavender text-black border-2 border-black',
-    lightClass: 'bg-brutal-lavender-light',
+    badgeClass: 'bg-brutal-violet text-black border-2 border-black',
+    lightClass: 'bg-brutal-violet-light',
   },
   done: {
     label: '已完成',
     borderClass: 'border-2 border-black',
     bgClass: '',
-    badgeClass: 'bg-brutal-lime text-black border-2 border-black',
-    lightClass: 'bg-brutal-lime-light',
+    badgeClass: 'bg-brutal-success text-black border-2 border-black',
+    lightClass: 'bg-brutal-success-light',
   },
 };
 
@@ -232,9 +233,9 @@ const MessageItem = memo(function MessageItem({
       data-message-id={message.id}
       className={cn(
         'group relative flex gap-3 px-6 py-2.5 transition-colors border-b border-brutal-muted',
-        !isTaskMessage && 'hover:bg-brutal-stone/15',
-        isFailed && 'bg-brutal-red-light/30',
-        isEditing && 'border-l-[3px] border-l-brutal-pink bg-brutal-pink-light/30',
+        !isTaskMessage && 'hover:bg-brutal-muted/15',
+        isFailed && 'bg-brutal-danger-light/30',
+        isEditing && 'border-l-[3px] border-l-brutal-primary bg-brutal-primary-light/30',
         isTaskMessage && headerConfig?.borderClass,
         isTaskMessage && headerConfig?.bgClass,
         isTaskMessage && 'cursor-pointer',
@@ -256,7 +257,7 @@ const MessageItem = memo(function MessageItem({
           aria-label="有未读线程回复，点击查看"
           title="有未读回复"
         >
-          <span className="block h-1 w-1 rounded-full bg-brutal-pink animate-fade-in" />
+          <span className="block h-2.5 w-2.5 bg-brutal-danger border border-black animate-fade-in" />
         </button>
       )}
 
@@ -298,7 +299,7 @@ const MessageItem = memo(function MessageItem({
             {message.display_name}
           </span>
           {message.sender_type === 'agent' && message.sender_active === false && (
-            <span className="badge-brutal bg-brutal-stone text-black">
+            <span className="badge-brutal bg-brutal-muted text-black">
               DELETED
             </span>
           )}
@@ -306,7 +307,7 @@ const MessageItem = memo(function MessageItem({
             {time}
           </span>
           {isEditing && (
-            <span className="font-mono text-[11px] text-brutal-pink animate-pulse ml-auto">
+            <span className="font-mono text-[11px] text-brutal-primary animate-pulse ml-auto">
               编辑中...
             </span>
           )}
@@ -335,7 +336,7 @@ const MessageItem = memo(function MessageItem({
                 type="button"
                 onClick={handleSaveEdit}
                 disabled={isSaving || !editContent.trim()}
-                className="btn-brutal btn-brutal-sm btn-brutal-pink"
+                className="btn-brutal btn-brutal-sm btn-brutal-primary"
               >
                 {isSaving ? '保存中...' : '保存'}
               </button>
@@ -353,14 +354,16 @@ const MessageItem = memo(function MessageItem({
           <p
             className={cn(
               'whitespace-pre-wrap break-words leading-relaxed',
-              isFailed && 'text-brutal-red/80',
+              isFailed && 'text-brutal-danger/80',
             )}
             dangerouslySetInnerHTML={{
-              __html: message.content
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/#(\d+)/g, '<span class="tasknum-highlight">#$1</span>'),
+              __html: sanitizeHtml(
+                message.content
+                  .replace(/&/g, '&amp;')
+                  .replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;')
+                  .replace(/#(\d+)/g, '<span class="tasknum-highlight">#$1</span>'),
+              ),
             }}
           />
         )}
@@ -373,8 +376,8 @@ const MessageItem = memo(function MessageItem({
         {/* Failed state actions */}
         {isFailed && (
           <div className="mt-2 flex items-center gap-2">
-            <AlertCircle className="h-3.5 w-3.5 text-brutal-red" />
-            <span className="font-mono text-[11px] text-brutal-red">
+            <AlertCircle className="h-3.5 w-3.5 text-brutal-danger" />
+            <span className="font-mono text-[11px] text-brutal-danger">
               发送失败
             </span>
             <button
@@ -425,8 +428,8 @@ const MessageItem = memo(function MessageItem({
             className={cn(
               'badge-brutal cursor-pointer transition-all',
               hasUnreadThread
-                ? 'bg-brutal-pink text-black border-brutal-pink'
-                : 'bg-white text-black hover:bg-brutal-pink hover:-translate-y-px hover:shadow-brutal',
+                ? 'bg-brutal-primary text-black border-brutal-primary'
+                : 'bg-white text-black hover:bg-brutal-primary hover:-translate-y-px hover:shadow-brutal',
             )}
           >
             <MessageSquare className="mr-1 h-3 w-3" />
@@ -532,7 +535,7 @@ function DeleteConfirmDialog({
         <button
           type="button"
           onClick={onConfirm}
-          className="btn-brutal btn-brutal-sm bg-brutal-red text-white"
+          className="btn-brutal btn-brutal-sm bg-brutal-danger text-white"
         >
           删除
         </button>
@@ -618,8 +621,8 @@ function ChannelBeginning() {
 function LoadMoreFailed({ onRetry }: { onRetry: () => void }) {
   return (
     <div className="flex items-center justify-center gap-2 py-3">
-      <AlertCircle className="h-3.5 w-3.5 text-brutal-red" />
-      <span className="font-mono text-xs text-brutal-red">加载失败</span>
+      <AlertCircle className="h-3.5 w-3.5 text-brutal-danger" />
+      <span className="font-mono text-xs text-brutal-danger">加载失败</span>
       <button
         type="button"
         onClick={onRetry}
@@ -638,7 +641,7 @@ const SHORTCUTS_HELP_KEY = 'solo-keyboard-shortcuts-dismissed';
 
 function KeyboardShortcutsHelp({ onDismiss }: { onDismiss: () => void }) {
   return (
-    <div className="mx-6 mb-2 flex items-center justify-between border-2 border-black bg-brutal-pink-light px-3 py-1.5">
+    <div className="mx-6 mb-2 flex items-center justify-between border-2 border-black bg-brutal-primary-light px-3 py-1.5">
       <span className="font-mono text-[11px] text-muted-foreground">
         悬停消息后按 <kbd className="rounded-none border border-black bg-white px-1 py-px font-bold text-foreground">E</kbd> 编辑 · <kbd className="rounded-none border border-black bg-white px-1 py-px font-bold text-foreground">Delete</kbd> 删除
       </span>
@@ -819,8 +822,8 @@ export function MessageList({
     return (
       <div className="flex flex-1 items-center justify-center">
         <div className="text-center space-y-2">
-          <AlertCircle className="mx-auto h-8 w-8 text-brutal-red" />
-          <p className="font-body text-sm text-brutal-red">{error}</p>
+          <AlertCircle className="mx-auto h-8 w-8 text-brutal-danger" />
+          <p className="font-body text-sm text-brutal-danger">{error}</p>
         </div>
       </div>
     );

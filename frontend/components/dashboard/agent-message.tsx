@@ -32,12 +32,12 @@ function CodeBlock({
   return (
     <div className="my-2 border-2 border-black shadow-brutal-sm overflow-x-auto">
       {language && (
-        <div className="border-b-2 border-black bg-brutal-pink px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-black">
+        <div className="border-b-2 border-black bg-brutal-primary px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-black">
           {language}
         </div>
       )}
       <pre className="bg-black p-3 text-xs leading-relaxed">
-        <code className={`${className ?? ''} font-mono text-brutal-lime`}>
+        <code className={`${className ?? ''} font-mono text-brutal-success`}>
           {children}
         </code>
       </pre>
@@ -69,7 +69,7 @@ export function AgentMessage({ message, onReply }: AgentMessageProps) {
   return (
     <div
       data-message-id={message.id}
-      className="group relative flex gap-3 px-6 py-2.5 agent-message border-l-brutal-pink border-b border-brutal-muted"
+      className="group relative flex gap-3 px-6 py-2.5 agent-message border-l-brutal-primary border-b border-brutal-muted"
       role="listitem"
     >
       <PixelAvatar agentId={message.user_id} size="md" className="mt-0.5 flex-shrink-0" />
@@ -80,11 +80,11 @@ export function AgentMessage({ message, onReply }: AgentMessageProps) {
             {message.display_name}
           </span>
           {message.sender_active === false ? (
-            <span className="badge-brutal bg-brutal-stone text-black">
+            <span className="badge-brutal bg-brutal-muted text-black">
               DELETED
             </span>
           ) : (
-            <span className="badge-brutal bg-brutal-pink text-black">
+            <span className="badge-brutal bg-brutal-primary text-black">
               Agent
             </span>
           )}
@@ -134,7 +134,7 @@ export function AgentMessage({ message, onReply }: AgentMessageProps) {
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-brutal-cyan font-bold underline decoration-2 underline-offset-2 hover:text-brutal-pink transition-colors"
+                    className="text-brutal-info font-bold underline decoration-2 underline-offset-2 hover:text-brutal-primary transition-colors"
                   >
                     {children}
                   </a>
@@ -142,7 +142,7 @@ export function AgentMessage({ message, onReply }: AgentMessageProps) {
               },
               blockquote({ children }) {
                 return (
-                  <blockquote className="my-1.5 border-l-2 border-brutal-pink/50 pl-3 italic text-muted-foreground">
+                  <blockquote className="my-1.5 border-l-2 border-brutal-primary/50 pl-3 italic text-muted-foreground">
                     {children}
                   </blockquote>
                 );
@@ -177,7 +177,7 @@ export function AgentMessage({ message, onReply }: AgentMessageProps) {
               },
               th({ children }) {
                 return (
-                  <th className="border-b-2 border-black bg-brutal-pink px-3 py-2 text-left font-heading font-bold text-black">
+                  <th className="border-b-2 border-black bg-brutal-primary px-3 py-2 text-left font-heading font-bold text-black">
                     {children}
                   </th>
                 );

@@ -14,18 +14,18 @@ import type { Task, TaskStatus, TaskPriority } from '@/lib/types';
 // ---- Status display config ----
 
 const STATUS_CONFIG: Record<TaskStatus, { label: string; bgClass: string }> = {
-  todo: { label: 'TODO', bgClass: 'bg-brutal-orange text-black' },
-  in_progress: { label: 'IN PROGRESS', bgClass: 'bg-brutal-cyan text-black' },
-  in_review: { label: 'IN REVIEW', bgClass: 'bg-brutal-lavender text-black' },
-  done: { label: 'DONE', bgClass: 'bg-brutal-lime text-black' },
-  closed: { label: 'CLOSED', bgClass: 'bg-brutal-stone text-black' },
+  todo: { label: 'TODO', bgClass: 'bg-brutal-warning text-black' },
+  in_progress: { label: 'IN PROGRESS', bgClass: 'bg-brutal-info text-black' },
+  in_review: { label: 'IN REVIEW', bgClass: 'bg-brutal-violet text-black' },
+  done: { label: 'DONE', bgClass: 'bg-brutal-success text-black' },
+  closed: { label: 'CLOSED', bgClass: 'bg-brutal-muted text-black' },
 };
 
 const PRIORITY_CONFIG: Record<TaskPriority, { label: string; bgClass: string }> = {
-  urgent: { label: '紧急', bgClass: 'bg-brutal-red text-white' },
-  high: { label: '高', bgClass: 'bg-brutal-orange text-black' },
-  normal: { label: '普通', bgClass: 'bg-muted text-muted-foreground' },
-  low: { label: '低', bgClass: 'bg-brutal-stone text-black' },
+  urgent: { label: '紧急', bgClass: 'bg-brutal-danger text-white' },
+  high: { label: '高', bgClass: 'bg-brutal-warning text-black' },
+  normal: { label: '普通', bgClass: 'bg-brutal-cream text-foreground border-2 border-black' },
+  low: { label: '低', bgClass: 'bg-brutal-muted text-black' },
 };
 
 // ---- Helpers ----
@@ -135,9 +135,9 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
             <div className="flex items-center gap-2 text-xs">
               <span className="text-muted-foreground">子任务:</span>
               <span className="font-bold">{task.done_subtask_count ?? 0}/{task.subtask_count}</span>
-              <div className="flex-1 h-1.5 border border-brutal-muted bg-muted">
+              <div className="flex-1 h-1.5 border-2 border-black bg-brutal-cream">
                 <div
-                  className="h-full bg-brutal-lime"
+                  className="h-full bg-brutal-success"
                   style={{ width: `${Math.min(((task.done_subtask_count ?? 0) / (task.subtask_count ?? 1)) * 100, 100)}%` }}
                 />
               </div>
@@ -155,7 +155,10 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
           )}
 
           {showChannel && task.channel_name && (
-            <span className="font-mono">#{task.channel_name}</span>
+            <span className="flex items-center gap-1 font-mono">
+              <span className="font-bold text-sm text-black">#</span>
+              {task.channel_name}
+            </span>
           )}
 
           {task.due_date && (

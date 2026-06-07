@@ -91,10 +91,10 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
   if (error && tree.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
-        <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-red-light shadow-brutal-sm">
-          <AlertCircle className="h-6 w-6 text-brutal-red" />
+        <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-danger-light shadow-brutal-sm">
+          <AlertCircle className="h-6 w-6 text-brutal-danger" />
         </div>
-        <p className="font-body text-sm text-brutal-red">{error}</p>
+        <p className="font-body text-sm text-brutal-danger">{error}</p>
         <button
           type="button"
           onClick={() => loadTree()}

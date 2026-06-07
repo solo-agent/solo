@@ -1,7 +1,7 @@
 // ============================================================================
 // MessageInput — bottom message composition with brutalist styling
 // - input-brutal textarea with Space Mono placeholder
-// - Send button: btn-brutal-pink circular icon button
+// - Send button: btn-brutal-primary circular icon button
 // - Enter/Shift+Enter handling
 // - @mention autocomplete (SOLO-51-F)
 // - File upload: drag & drop + paste (SOLO-247-F)
@@ -516,13 +516,13 @@ export function MessageInput({
                 className={cn(
                   'relative flex items-start gap-2 border-2 border-black bg-white px-2.5 py-1.5',
                   'shadow-brutal-sm',
-                  upload.status === 'error' && 'border-brutal-red',
+                  upload.status === 'error' && 'border-brutal-danger',
                 )}
               >
                 {/* Uploading: indeterminate progress bar */}
                 {upload.status === 'uploading' && (
-                  <div className="absolute inset-x-0 bottom-1 left-1 right-1 h-1 overflow-hidden bg-brutal-stone/30">
-                    <div className="h-full w-1/3 animate-indeterminate-progress bg-brutal-pink" />
+                  <div className="absolute inset-x-0 bottom-1 left-1 right-1 h-1 overflow-hidden bg-brutal-muted/30">
+                    <div className="h-full w-1/3 animate-indeterminate-progress bg-brutal-primary" />
                   </div>
                 )}
 
@@ -540,10 +540,10 @@ export function MessageInput({
                       <Spinner size="sm" className="text-muted-foreground" label="上传中" />
                     )}
                     {upload.status === 'done' && (
-                      <Check className="h-3.5 w-3.5 text-brutal-lime" aria-label="已上传" />
+                      <Check className="h-3.5 w-3.5 text-brutal-success" aria-label="已上传" />
                     )}
                     {upload.status === 'error' && (
-                      <AlertTriangle className="h-3.5 w-3.5 text-brutal-red" aria-label="上传失败" />
+                      <AlertTriangle className="h-3.5 w-3.5 text-brutal-danger" aria-label="上传失败" />
                     )}
                   </div>
                 )}
@@ -590,7 +590,7 @@ export function MessageInput({
                 'flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] font-bold transition-all',
                 'border-2 border-black shadow-brutal-sm',
                 asTask
-                  ? 'bg-brutal-pink text-black translate-x-[2px] translate-y-[2px] shadow-none'
+                  ? 'bg-brutal-primary text-black translate-x-[2px] translate-y-[2px] shadow-none'
                   : 'bg-white text-muted-foreground hover:text-foreground hover:-translate-x-px hover:-translate-y-px hover:shadow-brutal',
               )}
               aria-label={asTask ? '取消创建为任务' : '创建为任务'}
@@ -624,7 +624,7 @@ export function MessageInput({
               'input-brutal min-h-[44px] resize-none pr-24 font-mono text-sm leading-relaxed',
               'placeholder:font-mono placeholder:text-muted-foreground/60',
               'disabled:opacity-50',
-              asTask && 'border-brutal-pink',
+              asTask && 'border-brutal-primary',
             )}
           />
           <button
@@ -633,7 +633,7 @@ export function MessageInput({
             disabled={!canSend}
             className={cn(
               'absolute bottom-2 right-2 flex h-8 items-center justify-center gap-1.5 px-3',
-              'btn-brutal btn-brutal-pink',
+              'btn-brutal btn-brutal-primary',
               !canSend && 'opacity-40 pointer-events-none',
               asTask ? 'w-auto' : 'w-8 p-0',
             )}

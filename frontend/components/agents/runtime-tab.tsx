@@ -84,13 +84,13 @@ export function RuntimeTab({ agent, onSave, isSaving = false }: RuntimeTabProps)
             step="0.1"
             value={temperature}
             onChange={(e) => setTemperature(parseFloat(e.target.value))}
-            className="w-full cursor-pointer accent-brutal-pink"
+            className="w-full cursor-pointer accent-brutal-primary"
             aria-label="Temperature"
           />
         ) : (
           <div className="h-2 w-full border-2 border-black bg-black/5">
             <div
-              className="h-full bg-brutal-pink"
+              className="h-full bg-brutal-primary"
               style={{ width: `${(agent.temperature / 2) * 100}%` }}
             />
           </div>

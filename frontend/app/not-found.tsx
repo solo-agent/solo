@@ -9,7 +9,7 @@ export default function NotFoundPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-brutal-cream px-4">
       <div className="mx-auto flex max-w-sm flex-col items-center text-center">
-        <div className="mb-6 flex h-20 w-20 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal">
+        <div className="mb-6 flex h-20 w-20 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal">
           <FileQuestion className="h-10 w-10 text-black" />
         </div>
         <h1 className="font-heading text-4xl font-bold text-foreground">404</h1>
@@ -22,7 +22,7 @@ export default function NotFoundPage() {
         <div className="mt-8 flex gap-4">
           <Link
             href="/dashboard"
-            className="btn-brutal btn-brutal-pink px-5 py-2.5 text-sm"
+            className="btn-brutal btn-brutal-primary px-5 py-2.5 text-sm"
           >
             返回工作台
           </Link>

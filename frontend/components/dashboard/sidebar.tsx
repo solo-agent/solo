@@ -8,6 +8,7 @@ import { useState, useCallback } from 'react';
 import { ChannelList } from './channel-list';
 import { DMList } from './dm-list';
 import { InboxBadge } from '@/components/inbox/inbox-badge';
+import { AgentIsland } from '@/components/agents/agent-island';
 import { useInboxUnread } from '@/lib/hooks/use-inbox-unread';
 import type { Channel, DMChannel } from '@/lib/types';
 
@@ -23,12 +24,16 @@ interface SidebarProps {
   dmsLoading: boolean;
   selectedDmId: string | null;
   onSelectDM: (dmId: string) => void;
-  onCreateDM: () => void;
+  onCreateDM?: () => void;
   /** Inbox props */
   inboxSelected: boolean;
   onSelectInbox: () => void;
   /** Page label rendered at the top of the sidebar. */
   routeTitle?: string;
+  /** SOLO-island: current active channel/dm ID for the island. */
+  activeChannelId?: string | null;
+  /** SOLO-island: callback when island row is clicked. */
+  onInvokeAgent?: (agentId: string) => void;
 }
 
 export function Sidebar({
@@ -46,6 +51,8 @@ export function Sidebar({
   inboxSelected,
   onSelectInbox,
   routeTitle = 'Chat',
+  activeChannelId,
+  onInvokeAgent,
 }: SidebarProps) {
   const { unreadCount, isLoading: unreadLoading } = useInboxUnread();
   const [channelsExpanded, setChannelsExpanded] = useState(true);
@@ -56,7 +63,7 @@ export function Sidebar({
   return (
     <aside className="flex w-[220px] flex-col bg-sidebar text-sidebar-foreground border-r-2 border-sidebar-border flex-shrink-0">
       {/* Page label — matches Teams / Tasks / Computers top label style */}
-      <div className="border-b-2 border-sidebar-border px-4 py-3">
+      <div className="flex items-center h-14 border-b-2 border-sidebar-border px-4">
         <span className="font-heading text-lg font-bold text-sidebar-foreground truncate">
           {routeTitle}
         </span>
@@ -94,6 +101,11 @@ export function Sidebar({
         />
       </div>
 
+      {/* SOLO-island: agent status pill at sidebar bottom */}
+      <AgentIsland
+        channelId={activeChannelId ?? null}
+        onInvokeAgent={onInvokeAgent}
+      />
     </aside>
   );
 }

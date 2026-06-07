@@ -39,7 +39,7 @@ interface TasksLeftColumnProps {
 type SectionKey = 'channels' | 'dms';
 
 const SECTION_HEADER =
-  'flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider font-heading text-muted-foreground border-2 border-transparent hover:border-black transition-all';
+  'flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider font-heading text-muted-foreground';
 const SECTION_COUNT = 'ml-auto text-xs tabular-nums opacity-50';
 
 function getDmDisplayName(dm: DMChannel): string {
@@ -86,12 +86,12 @@ export function TasksLeftColumn({
   return (
     <div className="flex h-full flex-col overflow-hidden border-r-2 border-black bg-brutal-cream">
       {/* Page label — matches Sidebar / Teams / Computers top label style */}
-      <div className="border-b-2 border-black px-4 py-3">
+      <div className="flex items-center h-14 border-b-2 border-black px-4">
         <span className="font-heading text-lg font-bold">Tasks</span>
       </div>
 
       {/* Sections */}
-      <div className="flex-1 overflow-y-auto py-2">
+      <div className="flex-1 overflow-y-auto pt-0 pb-2">
         {/* Channels */}
         <button
           type="button"
@@ -118,7 +118,7 @@ export function TasksLeftColumn({
               </p>
             ) : channelsError ? (
               <div className="flex flex-col items-center gap-2 px-3 py-3">
-                <div className="flex items-center gap-1.5 text-brutal-red">
+                <div className="flex items-center gap-1.5 text-brutal-danger">
                   <AlertCircle className="h-4 w-4 flex-shrink-0" />
                   <span className="font-body text-xs">{channelsError}</span>
                 </div>
@@ -140,14 +140,14 @@ export function TasksLeftColumn({
                   className={cn(
                     'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm border-2',
                     channel.id === selectedChannelId
-                      ? 'border-black bg-brutal-pink text-black shadow-brutal-sm'
+                      ? 'border-black bg-brutal-primary text-black shadow-brutal-sm'
                       : 'border-transparent hover:border-black',
                   )}
                   aria-current={channel.id === selectedChannelId ? 'true' : undefined}
                 >
-                  <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center font-mono text-sm font-bold">
-                    #
-                  </span>
+                  <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-info shadow-brutal-sm">
+                    <span className="font-mono text-base font-bold leading-none select-none">#</span>
+                  </div>
                   <span className="truncate font-body">{channel.name}</span>
                 </button>
               ))
@@ -181,7 +181,7 @@ export function TasksLeftColumn({
               </p>
             ) : dmsError ? (
               <div className="flex flex-col items-center gap-2 px-3 py-3">
-                <div className="flex items-center gap-1.5 text-brutal-red">
+                <div className="flex items-center gap-1.5 text-brutal-danger">
                   <AlertCircle className="h-4 w-4 flex-shrink-0" />
                   <span className="font-body text-xs">{dmsError}</span>
                 </div>
@@ -205,7 +205,7 @@ export function TasksLeftColumn({
                     className={cn(
                       'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm border-2',
                       dm.id === selectedDmId
-                        ? 'border-black bg-brutal-pink text-black shadow-brutal-sm'
+                        ? 'border-black bg-brutal-primary text-black shadow-brutal-sm'
                         : 'border-transparent hover:border-black',
                     )}
                     aria-current={dm.id === selectedDmId ? 'true' : undefined}

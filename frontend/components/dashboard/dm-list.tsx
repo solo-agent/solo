@@ -22,7 +22,7 @@ interface DMListProps {
   isLoading: boolean;
   selectedDmId: string | null;
   onSelectDM: (dmId: string) => void;
-  onCreateDM: () => void;
+  onCreateDM?: () => void;
   isExpanded: boolean;
   onToggleExpand: () => void;
 }
@@ -69,17 +69,19 @@ function DMListSkeleton() {
 
 // ---- Empty state ----
 
-function DMListEmpty({ onCreateDM }: { onCreateDM: () => void }) {
+function DMListEmpty({ onCreateDM }: { onCreateDM?: () => void }) {
   return (
     <div className="space-y-2 px-2 py-3 text-center">
       <p className="text-sm text-sidebar-muted-foreground">还没有私信</p>
+      {onCreateDM && (
       <button
         onClick={onCreateDM}
-        className="inline-flex items-center gap-1 border-2 border-black bg-brutal-pink px-3 py-1 text-sm font-medium text-black shadow-brutal-sm hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
+        className="inline-flex items-center gap-1 border-2 border-black bg-brutal-primary px-3 py-1 text-sm font-medium text-black shadow-brutal-sm hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
       >
         <Plus className="h-3.5 w-3.5" />
         发起私信
       </button>
+      )}
     </div>
   );
 }
@@ -117,7 +119,7 @@ function DMItem({
       className={cn(
         'group flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm transition-all',
         isSelected
-          ? 'bg-brutal-pink text-black border-2 border-black shadow-brutal-sm'
+          ? 'bg-brutal-primary text-black border-2 border-black shadow-brutal-sm'
           : 'text-black border-2 border-transparent hover:border-black',
       )}
       aria-current={isSelected ? 'true' : undefined}
@@ -139,18 +141,18 @@ function DMItem({
             {name}
           </span>
           {deleted && (
-            <span className="badge-brutal bg-brutal-stone text-black flex-shrink-0">
+            <span className="badge-brutal bg-brutal-muted text-black flex-shrink-0">
               DELETED
             </span>
           )}
           {!deleted && isAgent && (
-            <span className="badge-brutal bg-brutal-pink text-black text-[10px]">
+            <span className="badge-brutal bg-brutal-primary text-black text-[10px]">
               Agent
             </span>
           )}
           {/* Unread dot */}
           {hasUnread && (
-            <span className="h-2 w-2 flex-shrink-0 bg-brutal-pink" />
+            <span className="h-2 w-2 flex-shrink-0 bg-brutal-primary" />
           )}
         </div>
         {lastMessageText && (
@@ -173,7 +175,7 @@ function DMItem({
           e.stopPropagation();
           onClose();
         }}
-        className="hidden group-hover:flex items-center justify-center rounded-none p-1 hover:bg-brutal-pink-light transition-colors flex-shrink-0"
+        className="hidden group-hover:flex items-center justify-center rounded-none p-1 hover:bg-brutal-primary-light transition-colors flex-shrink-0"
         aria-label="关闭私信"
       >
         <X className="h-4 w-4" />
@@ -254,13 +256,15 @@ export function DMList({
           <span>Direct Messages</span>
           <span className="ml-auto text-xs tabular-nums opacity-50">{sortedDMs.length}</span>
         </button>
+        {onCreateDM && (
         <button
           onClick={onCreateDM}
-          className="mr-2 flex h-5 w-5 items-center justify-center border-2 border-transparent text-sidebar-muted-foreground group-hover:border-black group-hover:text-black hover:bg-brutal-pink/40 active:bg-brutal-pink active:text-black active:ring-2 active:ring-black transition-all cursor-pointer"
+          className="mr-2 flex h-5 w-5 items-center justify-center border-2 border-transparent text-sidebar-muted-foreground group-hover:border-black group-hover:text-black hover:bg-brutal-primary/40 active:bg-brutal-primary active:text-black active:ring-2 active:ring-black transition-all cursor-pointer"
           aria-label="发起私信"
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
+        )}
       </div>
 
       {/* Content */}

@@ -4,7 +4,7 @@
 // - Optional task metadata bar: #N title [status] -> @claimer + claim/unclaim
 // - Parent message: message-bubble style
 // - Input: input-brutal font-mono
-// - Send: btn-brutal btn-brutal-pink
+// - Send: btn-brutal btn-brutal-primary
 // - Close: btn-brutal-sm
 // - Empty: "还没有回复，发起讨论吧"
 // - States: loading skeleton, empty, error, normal
@@ -59,7 +59,7 @@ function ParentMessageBlock({ message, task }: { message: Message; task?: Task }
   });
 
   return (
-    <div className={`flex gap-3 px-6 py-4 border-b border-brutal-muted ${isAgent ? 'border-l-[3px] border-l-brutal-pink' : ''}`}>
+    <div className={`flex gap-3 px-6 py-4 border-b-2 border-black ${isAgent ? 'border-l-2 border-l-brutal-primary' : ''}`}>
       {isAgent ? (
         <PixelAvatar agentId={message.user_id || message.id} size="md" />
       ) : (
@@ -110,12 +110,12 @@ function CodeBlock({ className, children }: { className?: string; children?: Rea
   return (
     <div className="my-2 border-2 border-black shadow-brutal-sm overflow-x-auto">
       {language && (
-        <div className="border-b-2 border-black bg-brutal-pink px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-black">
+        <div className="border-b-2 border-black bg-brutal-primary px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-black">
           {language}
         </div>
       )}
       <pre className="bg-black p-3 text-xs leading-relaxed">
-        <code className={`${className ?? ''} font-mono text-brutal-lime`}>
+        <code className={`${className ?? ''} font-mono text-brutal-success`}>
           {children}
         </code>
       </pre>
@@ -131,7 +131,7 @@ const mdComponents = {
     return <strong className="font-heading font-black">{children}</strong>;
   },
   a({ href, children }: { href?: string; children?: React.ReactNode }) {
-    return <a href={href} target="_blank" rel="noopener noreferrer" className="text-brutal-cyan font-bold underline decoration-2 underline-offset-2 hover:text-brutal-pink transition-colors">{children}</a>;
+    return <a href={href} target="_blank" rel="noopener noreferrer" className="text-brutal-info font-bold underline decoration-2 underline-offset-2 hover:text-brutal-primary transition-colors">{children}</a>;
   },
   ul({ children }: { children?: React.ReactNode }) {
     return <ul className="my-1 list-disc pl-4 space-y-0.5">{children}</ul>;
@@ -143,7 +143,7 @@ const mdComponents = {
     return <li className="leading-relaxed">{children}</li>;
   },
   blockquote({ children }: { children?: React.ReactNode }) {
-    return <blockquote className="my-1.5 border-l-2 border-brutal-pink/50 pl-3 italic text-muted-foreground">{children}</blockquote>;
+    return <blockquote className="my-1.5 border-l-2 border-brutal-primary/50 pl-3 italic text-muted-foreground">{children}</blockquote>;
   },
   code({ className, children, ...props }: { className?: string; children?: React.ReactNode; [key: string]: unknown }) {
     const isInline = !className;
@@ -162,7 +162,7 @@ const mdComponents = {
     return <div className="my-2 overflow-x-auto border-2 border-black shadow-brutal-sm"><table className="w-full text-sm font-body">{children}</table></div>;
   },
   th({ children }: { children?: React.ReactNode }) {
-    return <th className="border-b-2 border-black bg-brutal-pink px-3 py-2 text-left font-heading font-bold text-black">{children}</th>;
+    return <th className="border-b-2 border-black bg-brutal-primary px-3 py-2 text-left font-heading font-bold text-black">{children}</th>;
   },
   td({ children }: { children?: React.ReactNode }) {
     return <td className="border-t border-black px-3 py-1.5">{children}</td>;
@@ -183,7 +183,7 @@ function ReplyItem({ message }: { message: { id: string; display_name?: string; 
   });
 
   return (
-    <div className={`flex gap-3 px-6 py-2 border-b border-brutal-muted ${isAgent ? 'border-l-[3px] border-l-brutal-pink' : ''}`}>
+    <div className={`flex gap-3 px-6 py-2 border-b-2 border-black ${isAgent ? 'border-l-2 border-l-brutal-primary' : ''}`}>
       {isAgent ? (
         <PixelAvatar agentId={message.id} size="sm" />
       ) : (
@@ -201,7 +201,7 @@ function ReplyItem({ message }: { message: { id: string; display_name?: string; 
             {time}
           </span>
           {isAgent && (
-            <span className="badge-brutal bg-brutal-pink text-black">
+            <span className="badge-brutal bg-brutal-primary text-black">
               Agent
             </span>
           )}
@@ -213,14 +213,14 @@ function ReplyItem({ message }: { message: { id: string; display_name?: string; 
                 {[0, 1, 2].map((i) => (
                   <span
                     key={i}
-                    className="inline-block h-1.5 w-1.5 rounded-full bg-brutal-pink animate-bounce"
+                    className="inline-block h-1.5 w-1.5 bg-brutal-primary animate-bounce"
                     style={{ animationDelay: `${i * 0.15}s`, animationDuration: '0.8s' }}
                   />
                 ))}
               </span>
             </div>
           ) : (
-            <div className={`font-body text-sm leading-relaxed space-y-1 ${isFailed ? 'text-brutal-red/80' : ''}`}>
+            <div className={`font-body text-sm leading-relaxed space-y-1 ${isFailed ? 'text-brutal-danger/80' : ''}`}>
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 rehypePlugins={[rehypeRaw]}
@@ -229,15 +229,15 @@ function ReplyItem({ message }: { message: { id: string; display_name?: string; 
                 {highlightSpecials(message.content)}
               </ReactMarkdown>
               {isStreaming && message.content && (
-                <span className="inline-block h-4 w-[2px] bg-brutal-pink align-middle animate-pulse ml-0.5" />
+                <span className="inline-block h-4 w-[2px] bg-brutal-primary align-middle animate-pulse ml-0.5" />
               )}
             </div>
           )}
         </div>
         {isFailed && (
           <div className="mt-2 flex items-center gap-1">
-            <AlertCircle className="h-3.5 w-3.5 text-brutal-red" />
-            <span className="font-mono text-[11px] text-brutal-red">发送失败</span>
+            <AlertCircle className="h-3.5 w-3.5 text-brutal-danger" />
+            <span className="font-mono text-[11px] text-brutal-danger">发送失败</span>
           </div>
         )}
         {isSending && (
@@ -302,8 +302,8 @@ function ThreadError({
   return (
     <div className="flex flex-1 items-center justify-center px-6">
       <div className="text-center space-y-3">
-        <AlertCircle className="mx-auto h-8 w-8 text-brutal-red" />
-        <p className="font-mono text-sm text-brutal-red">{message}</p>
+        <AlertCircle className="mx-auto h-8 w-8 text-brutal-danger" />
+        <p className="font-mono text-sm text-brutal-danger">{message}</p>
         <button
           type="button"
           onClick={onRetry}
@@ -457,7 +457,7 @@ function ThreadReplyInput({
             disabled={!canSend}
             aria-label="发送回复"
             className={cn(
-              'btn-brutal btn-brutal-pink absolute bottom-2 right-2 flex h-8 w-8 items-center justify-center p-0',
+              'btn-brutal btn-brutal-primary absolute bottom-2 right-2 flex h-8 w-8 items-center justify-center p-0',
               !canSend && 'opacity-40 pointer-events-none',
             )}
           >
@@ -472,11 +472,11 @@ function ThreadReplyInput({
 // ---- Status & priority display helpers ----
 
 const STATUS_BADGE_COLORS: Record<string, string> = {
-  todo: 'bg-brutal-orange text-black border-black',
-  in_progress: 'bg-brutal-cyan text-black border-black',
-  in_review: 'bg-brutal-lavender text-black border-black',
-  done: 'bg-brutal-lime text-black border-black',
-  closed: 'bg-brutal-stone text-black border-black',
+  todo: 'bg-brutal-warning text-black border-black',
+  in_progress: 'bg-brutal-info text-black border-black',
+  in_review: 'bg-brutal-violet text-black border-black',
+  done: 'bg-brutal-success text-black border-black',
+  closed: 'bg-brutal-muted text-black border-black',
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -580,7 +580,7 @@ function TaskMetaBar({
         {isClaimed ? (
           <div className="">
             <span className="flex items-center gap-1">
-              <span className="flex h-4 w-4 items-center justify-center border-2 border-black bg-brutal-lime font-heading text-[9px] font-bold text-black">
+              <span className="flex h-4 w-4 items-center justify-center border-2 border-black bg-brutal-success font-heading text-[9px] font-bold text-black">
                 {(claimerDisplay || '?').charAt(0).toUpperCase()}
               </span>
               <span className="font-heading text-xs font-bold text-foreground">
@@ -711,12 +711,12 @@ export function ThreadPanel({
   return (
     <div
       className={cn(
-        'flex h-full flex-col bg-brutal-cream border-2 border-black shadow-brutal-sm',
+        'flex h-full flex-col bg-brutal-cream border-l-2 border-r-2 border-b-2 border-black shadow-brutal-sm',
         'animate-slide-in-from-right',
       )}
     >
       {/* Header */}
-      <div className="flex h-14 flex-shrink-0 items-center justify-between border-b-2 border-black px-6">
+      <div className="flex h-14 flex-shrink-0 items-center justify-between border-b-2 border-black px-4">
         <h3 className="font-heading text-base font-bold text-foreground">
           线程{replyCount > 0 && (
             <span className="ml-1.5 font-mono text-sm text-muted-foreground">
@@ -749,9 +749,6 @@ export function ThreadPanel({
 
         {/* Parent message */}
         <ParentMessageBlock message={parentMessage} task={task} />
-
-        {/* Divider */}
-        <div className="divider-brutal mx-6" />
 
         {/* Reply list */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto">

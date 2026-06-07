@@ -84,7 +84,7 @@ export default function RegisterPage() {
     <div className="card-brutal p-6 w-full">
       {/* Logo + Title */}
       <div className="text-center mb-6">
-        <div className="inline-flex h-10 w-10 items-center justify-center bg-brutal-pink border-2 border-black shadow-brutal-sm mb-3">
+        <div className="inline-flex h-10 w-10 items-center justify-center bg-brutal-primary border-2 border-black shadow-brutal-sm mb-3">
           <span className="font-heading font-bold text-lg text-black">S</span>
         </div>
         <h1 className="font-heading font-bold text-xl text-black">创建账号</h1>
@@ -187,7 +187,7 @@ export default function RegisterPage() {
           已有账号？{" "}
           <Link
             href="/auth/login"
-            className="font-heading font-bold text-black hover:text-brutal-pink transition-colors"
+            className="font-heading font-bold text-black hover:text-brutal-primary transition-colors"
           >
             登录
           </Link>

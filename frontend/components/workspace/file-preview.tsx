@@ -5,6 +5,8 @@ import { createHighlighter } from 'shiki';
 import { Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
+import { sanitizeHtml } from '@/lib/sanitize';
 
 // Module-level singleton to avoid re-creating the highlighter
 let highlighterPromise: ReturnType<typeof createHighlighter> | null = null;
@@ -12,7 +14,7 @@ let highlighterPromise: ReturnType<typeof createHighlighter> | null = null;
 function getHighlighter() {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
-      themes: ['dark-plus'],
+      themes: ['everforest-light'],
       langs: ['typescript', 'javascript', 'python', 'go', 'rust', 'json', 'markdown',
               'css', 'html', 'yaml', 'toml', 'sql', 'bash', 'tsx', 'jsx',
               'xml', 'graphql', 'mdx', 'dockerfile', 'shellscript'],
@@ -44,7 +46,7 @@ function CodeBlock({ children, className }: ComponentPropsWithoutRef<'code'>) {
     getHighlighter().then(async (highlighter) => {
       if (cancelled) return;
       try {
-        const result = highlighter.codeToHtml(code, { lang, theme: 'dark-plus' });
+        const result = highlighter.codeToHtml(code, { lang, theme: 'everforest-light' });
         if (!cancelled) setHtml(result);
       } catch {
         // unsupported language — fall through to plain pre/code
@@ -54,22 +56,114 @@ function CodeBlock({ children, className }: ComponentPropsWithoutRef<'code'>) {
   }, [code, lang]);
 
   if (html) {
-    return <div dangerouslySetInnerHTML={{ __html: html }} className="[&>pre]:my-0 [&>pre]:rounded-none" />;
+    return <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }} className="[&>pre]:my-0 [&>pre]:rounded-none [&>pre]:bg-brutal-cream" />;
   }
 
   return (
-    <pre className="bg-black text-brutal-lime border-2 border-black shadow-brutal-sm p-3 overflow-x-auto">
+    <pre className="bg-black text-brutal-success border-2 border-black shadow-brutal-sm p-3 overflow-x-auto">
       <code className={className}>{children}</code>
     </pre>
   );
 }
 
+// ---- Markdown component map (matches chat brutalist style) ----
+
+const mdComponents = {
+  p({ children }: { children: React.ReactNode }) {
+    return <p className="my-1 whitespace-pre-wrap break-words">{children}</p>;
+  },
+  ul({ children }: { children: React.ReactNode }) {
+    return <ul className="my-1 list-disc pl-4 space-y-0.5">{children}</ul>;
+  },
+  ol({ children }: { children: React.ReactNode }) {
+    return <ol className="my-1 list-decimal pl-4 space-y-0.5">{children}</ol>;
+  },
+  li({ children }: { children: React.ReactNode }) {
+    return <li className="leading-relaxed">{children}</li>;
+  },
+  strong({ children }: { children: React.ReactNode }) {
+    return <strong className="font-heading font-black">{children}</strong>;
+  },
+  a({ href, children }: { href?: string; children: React.ReactNode }) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-brutal-info font-bold underline decoration-2 underline-offset-2 hover:text-brutal-primary transition-colors"
+      >
+        {children}
+      </a>
+    );
+  },
+  blockquote({ children }: { children: React.ReactNode }) {
+    return (
+      <blockquote className="my-1.5 border-l-2 border-brutal-primary pl-3 italic text-muted-foreground">
+        {children}
+      </blockquote>
+    );
+  },
+  code({ className, children, ...props }: ComponentPropsWithoutRef<'code'>) {
+    const isInline = !className;
+    if (isInline) {
+      return (
+        <code className="rounded-none border border-black bg-black/5 px-1 py-0.5 font-mono text-xs text-foreground">
+          {children}
+        </code>
+      );
+    }
+    return <CodeBlock className={className}>{children}</CodeBlock>;
+  },
+  pre({ children }: { children: React.ReactNode }) {
+    return <>{children}</>;
+  },
+  hr() {
+    return <hr className="divider-brutal my-3" />;
+  },
+  table({ children }: { children: React.ReactNode }) {
+    return (
+      <div className="my-2 overflow-x-auto border-2 border-black shadow-brutal-sm">
+        <table className="w-full text-sm font-body">{children}</table>
+      </div>
+    );
+  },
+  th({ children }: { children: React.ReactNode }) {
+    return (
+      <th className="border-b-2 border-black bg-brutal-primary px-3 py-2 text-left font-heading font-bold text-black">
+        {children}
+      </th>
+    );
+  },
+  td({ children }: { children: React.ReactNode }) {
+    return <td className="border-t border-black px-3 py-1.5">{children}</td>;
+  },
+  h1({ children }: { children: React.ReactNode }) {
+    return <h1 className="mt-4 mb-2 font-heading text-xl font-bold text-foreground">{children}</h1>;
+  },
+  h2({ children }: { children: React.ReactNode }) {
+    return <h2 className="mt-3 mb-1.5 font-heading text-lg font-bold text-foreground">{children}</h2>;
+  },
+  h3({ children }: { children: React.ReactNode }) {
+    return <h3 className="mt-2 mb-1 font-heading text-base font-bold text-foreground">{children}</h3>;
+  },
+  img({ src, alt }: { src?: string; alt?: string }) {
+    return (
+      <img
+        src={src}
+        alt={alt}
+        className="my-2 max-w-full border-2 border-black shadow-brutal-sm"
+      />
+    );
+  },
+};
+
 export function MarkdownPreview({ content }: { content: string }) {
   return (
-    <div className="p-4 prose prose-sm max-w-none prose-headings:font-heading prose-headings:font-bold prose-code:font-mono">
+    <div className="p-4 font-body text-sm leading-relaxed space-y-1">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        components={{ code: CodeBlock }}
+        rehypePlugins={[rehypeRaw]}
+        components={mdComponents}
       >
         {content}
       </ReactMarkdown>
@@ -89,7 +183,7 @@ export function CodePreview({ content, language }: { content: string; language: 
         const lang = language || detectLanguage('');
         const result = highlighter.codeToHtml(content, {
           lang: lang,
-          theme: 'dark-plus',
+          theme: 'everforest-light',
         });
         if (!cancelled) setHtml(result);
       } catch {
@@ -117,8 +211,8 @@ export function CodePreview({ content, language }: { content: string; language: 
 
   return (
     <div
-      className="overflow-auto h-full [&>pre]:p-4 [&>pre]:font-mono [&>pre]:text-xs [&>pre]:leading-relaxed [&>pre]:bg-[#1e1e1e] [&>pre]:min-h-full [&>pre]:rounded-none"
-      dangerouslySetInnerHTML={{ __html: html }}
+      className="overflow-auto h-full [&>pre]:p-4 [&>pre]:font-mono [&>pre]:text-xs [&>pre]:leading-relaxed [&>pre]:bg-brutal-cream [&>pre]:min-h-full [&>pre]:rounded-none"
+      dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }}
     />
   );
 }

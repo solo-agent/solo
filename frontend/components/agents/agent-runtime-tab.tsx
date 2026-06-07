@@ -78,10 +78,10 @@ export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
-        <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-red-light shadow-brutal-sm">
-          <AlertCircle className="h-6 w-6 text-brutal-red" />
+        <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-danger-light shadow-brutal-sm">
+          <AlertCircle className="h-6 w-6 text-brutal-danger" />
         </div>
-        <p className="font-body text-sm text-brutal-red">{error}</p>
+        <p className="font-body text-sm text-brutal-danger">{error}</p>
         <Button type="button" onClick={loadAgent} size="sm" className="mt-4">
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
           重试
@@ -178,10 +178,10 @@ export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
           自动加入频道
         </h3>
         <div className={agent.auto_join
-          ? 'border-2 border-black bg-brutal-lime-light px-3 py-2'
+          ? 'border-2 border-black bg-brutal-success-light px-3 py-2'
           : 'border-2 border-black bg-brutal-cream px-3 py-2'
         }>
-          <span className={`badge-brutal text-[10px] ${agent.auto_join ? 'bg-brutal-lime text-black' : 'bg-brutal-stone text-black'}`}>
+          <span className={`badge-brutal text-[10px] ${agent.auto_join ? 'bg-brutal-success text-black' : 'bg-brutal-muted text-black'}`}>
             {agent.auto_join ? '已启用' : '已禁用'}
           </span>
           <p className="mt-1 font-mono text-[11px] text-muted-foreground">

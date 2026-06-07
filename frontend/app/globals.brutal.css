@@ -118,7 +118,7 @@
   --animate-slide-in-from-right: slide-in-from-right 0.2s ease-out;
   --animate-slide-in-from-left: slide-in-from-left 0.2s ease-out;
   --animate-fade-in: fade-in 0.3s ease-out;
-  --animate-indeterminate-progress: indeterminate-progress 1.2s ease-in-out infinite;
+  --animate-indeterminate-progress: indeterminate-progress 0.6s linear infinite;
 }
 
 @keyframes slide-in-from-right {
@@ -210,16 +210,16 @@
 }
 
 /* Colored shadow variants (override the black with a color shadow token) */
-.shadow-brutal-pink {
+.shadow-brutal-primary {
   --tw-shadow-color: var(--color-brutal-primary);
 }
-.shadow-brutal-yellow {
+.shadow-brutal-accent {
   --tw-shadow-color: var(--color-brutal-accent);
 }
 .shadow-brutal-blue {
   --tw-shadow-color: var(--color-brutal-info);
 }
-.shadow-brutal-lime {
+.shadow-brutal-success {
   --tw-shadow-color: var(--color-brutal-success);
 }
 
@@ -283,8 +283,7 @@
 }
 
 /* Primary variant (yellow call-to-action) */
-/* v4.0: rename to .btn-brutal-primary to match the semantic token name. */
-.btn-brutal-pink {
+.btn-brutal-primary {
   background: var(--color-brutal-primary);
 }
 
@@ -303,10 +302,28 @@
   box-shadow: none;
 }
 
+/* Extra-small variant: tighter shadow + smaller translate, for inline / icon-row buttons. */
+.btn-brutal-xs {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  box-shadow: 2px 2px 0 0 var(--color-brutal-shadow);
+}
+
+.btn-brutal-xs:hover {
+  transform: translate(-0.5px, -0.5px);
+  box-shadow: 3px 3px 0 0 var(--color-brutal-shadow);
+}
+
+.btn-brutal-xs:active {
+  transform: translate(2px, 2px);
+  box-shadow: none;
+}
+
 /* Flat (ghost) variant */
 .btn-flat {
   background: none;
   border: none;
+  box-shadow: none;
   font-family: var(--font-heading);
   font-weight: 500;
   color: var(--color-brutal-muted);
@@ -318,10 +335,13 @@
 .btn-flat:hover {
   background: rgba(0, 0, 0, 0.05);
   color: #000;
+  transform: none;
 }
 
 .btn-flat:active {
   background: rgba(0, 0, 0, 0.1);
+  transform: none;
+  box-shadow: none;
 }
 
 /* ============================================================
@@ -348,7 +368,8 @@
   border: 2px solid var(--color-brutal-black);
   background: #fff;
   font-family: var(--font-sans);
-  padding: 0.5rem 0.75rem;
+  padding-block: 0.5rem;
+  padding-inline: 0.75rem;
   font-size: 0.9375rem;
   box-shadow: 3px 3px 0 0 var(--color-brutal-shadow);
   outline: none;
@@ -359,8 +380,10 @@
 
 .input-brutal:focus {
   box-shadow: 5px 5px 0 0 var(--color-brutal-shadow);
-  outline: 3px solid var(--color-brutal-info);
-  outline-offset: 2px;
+}
+
+.input-brutal:focus-visible {
+  outline: none;
 }
 
 .input-brutal::placeholder {
@@ -605,7 +628,7 @@
    Left border color utilities for message types
    ============================================================ */
 
-.border-l-brutal-pink {
+.border-l-brutal-primary {
   border-left: 3px solid var(--color-brutal-accent);
 }
 
