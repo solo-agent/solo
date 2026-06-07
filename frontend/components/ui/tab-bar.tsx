@@ -29,7 +29,7 @@ export function TabBar({
     <div
       className={cn(
         'flex items-center border-b-2 border-black bg-brutal-cream',
-        variant === 'pill' && 'h-10 px-1 gap-1',
+        variant === 'pill' && 'h-10 px-4 gap-1',
         className,
       )}
       role="tablist"

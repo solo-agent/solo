@@ -21,6 +21,12 @@ import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
 import { TabBar } from '@/components/ui/tab-bar';
 import type { TabBarTab } from '@/components/ui/tab-bar';
+import {
+  Dialog,
+  DialogHeader,
+  DialogTitle,
+  DialogCloseButton,
+} from '@/components/ui/dialog';
 import { BrutalAlert } from '@/components/ui/brutal-alert';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { TeamsLeftColumn, type TeamsSelection } from '@/components/teams/teams-left-column';
@@ -28,6 +34,7 @@ import { TeamsGraphView } from '@/components/teams/teams-graph-view';
 import { TeamsAgentProfile } from '@/components/teams/teams-agent-profile';
 import { TeamsAgentWorkspace } from '@/components/teams/teams-agent-workspace';
 import { TeamsHumanProfile } from '@/components/teams/teams-human-profile';
+import { AgentForm, type AgentFormValues } from '@/components/agents/agent-form';
 import type { Agent } from '@/lib/types';
 
 type AgentTab = 'profile' | 'workspace';
@@ -40,7 +47,7 @@ const AGENT_TABS: TabBarTab[] = [
 export default function TeamsPage() {
   const router = useRouter();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { agents, isLoading: agentsLoading, error: agentsError, refetch: refetchAgents } = useAgents();
+  const { agents, isLoading: agentsLoading, error: agentsError, refetch: refetchAgents, createAgent } = useAgents();
   const { user, isLoading: userLoading, error: userError, refetch: refetchUser } = useUser();
   const { createOrGetDM } = useDM();
   const { showToast } = useToast();
@@ -48,6 +55,8 @@ export default function TeamsPage() {
   const [selection, setSelection] = useState<TeamsSelection | null>(null);
   const [agentTab, setAgentTab] = useState<AgentTab>('profile');
   const [isDMLoading, setIsDMLoading] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
 
   // Auth guard
   useEffect(() => {
@@ -100,6 +109,31 @@ export default function TeamsPage() {
     }
   }, [selectedAgent, isDMLoading, createOrGetDM, router, showToast]);
 
+  const handleCreateAgent = useCallback(async (values: AgentFormValues) => {
+    if (isCreating) return;
+    setIsCreating(true);
+    try {
+      const agent = await createAgent({
+        name: values.name,
+        description: values.description,
+        model_provider: values.model_provider,
+        model_name: values.model_name,
+        system_prompt: values.system_prompt,
+        custom_env: values.custom_env,
+        custom_args: values.custom_args,
+      });
+      showToast('Agent 创建成功', 'success');
+      setIsCreateModalOpen(false);
+      // Auto-select the new agent to open detail panel
+      setSelection({ kind: 'agent', id: agent.id });
+      setAgentTab('profile');
+    } catch {
+      showToast('创建 Agent 失败，请稍后再试', 'error');
+    } finally {
+      setIsCreating(false);
+    }
+  }, [isCreating, createAgent, showToast]);
+
   // Loading shell
   if (authLoading || (agentsLoading && agents.length === 0) || (userLoading && !user)) {
     return (
@@ -123,6 +157,7 @@ export default function TeamsPage() {
           onSelectGraph={handleSelectGraph}
           onSelectAgent={handleSelectAgent}
           onSelectHuman={handleSelectHuman}
+          onCreateAgent={() => setIsCreateModalOpen(true)}
         />
       </div>
 
@@ -189,7 +224,7 @@ export default function TeamsPage() {
               tabs={AGENT_TABS}
               activeKey={agentTab}
               onChange={(key) => setAgentTab(key as AgentTab)}
-              variant="segment"
+              variant="pill"
             />
             <div className={agentTab === 'profile' ? 'flex-1 overflow-y-auto p-6' : 'flex-1 overflow-hidden'}>
               {agentTab === 'profile' ? (
@@ -216,6 +251,25 @@ export default function TeamsPage() {
           </div>
         )}
       </main>
+
+      {/* Create Agent Modal */}
+      <Dialog
+        open={isCreateModalOpen}
+        onOpenChange={(opened) => {
+          if (!opened) setIsCreateModalOpen(false);
+        }}
+        width="lg"
+      >
+        <DialogHeader>
+          <DialogTitle>创建 Agent</DialogTitle>
+          <DialogCloseButton onClick={() => setIsCreateModalOpen(false)} />
+        </DialogHeader>
+        <AgentForm
+          onSubmit={handleCreateAgent}
+          isSubmitting={isCreating}
+          submitLabel="创建 Agent"
+        />
+      </Dialog>
     </div>
   );
 }

@@ -81,7 +81,7 @@ export function AgentDetailPanel({ agentId, onClose }: AgentDetailPanelProps) {
         tabs={TABS}
         activeKey={activeTab}
         onChange={(key) => setActiveTab(key as TabKey)}
-        variant="segment"
+        variant="pill"
       />
 
       {/* Tab content */}

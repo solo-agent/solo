@@ -13,7 +13,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { ChevronDown, Network } from 'lucide-react';
+import { ChevronDown, Network, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TeamsAgentItem } from './teams-agent-item';
 import { TeamsHumanItem } from './teams-human-item';
@@ -33,6 +33,7 @@ interface TeamsLeftColumnProps {
   onSelectGraph: () => void;
   onSelectAgent: (agentId: string) => void;
   onSelectHuman: (userId: string) => void;
+  onCreateAgent?: () => void;
 }
 
 type SectionKey = 'graph' | 'agents' | 'humans';
@@ -48,6 +49,7 @@ export function TeamsLeftColumn({
   onSelectGraph,
   onSelectAgent,
   onSelectHuman,
+  onCreateAgent,
 }: TeamsLeftColumnProps) {
   // Default: Agents + Humans expanded. Graph has no children, so its expand
   // state is irrelevant and not tracked.
@@ -70,7 +72,7 @@ export function TeamsLeftColumn({
   return (
     <div className="flex h-full flex-col overflow-hidden border-r-2 border-black bg-brutal-cream">
       {/* Page label — matches Sidebar / Tasks / Computers top label style */}
-      <div className="border-b-2 border-black px-4 py-3">
+      <div className="flex items-center h-14 border-b-2 border-black bg-brutal-cream px-4">
         <span className="font-heading text-lg font-bold">Teams</span>
       </div>
 
@@ -95,23 +97,34 @@ export function TeamsLeftColumn({
         </button>
 
         {/* Agents */}
-        <button
-          type="button"
-          onClick={() => toggle('agents')}
-          className={cn(SECTION_HEADER, 'text-muted-foreground')}
-          aria-label="展开或折叠 Agents"
-          aria-expanded={isAgentsExpanded}
-        >
-          <ChevronDown
-            aria-hidden="true"
-            className={cn(
-              'h-3 w-3 transition-transform',
-              isAgentsExpanded ? 'rotate-0' : '-rotate-90',
-            )}
-          />
-          <span>Agents</span>
-          <span className={SECTION_COUNT}>{agents.length}</span>
-        </button>
+        <div className="group flex items-center justify-between border-2 border-transparent hover:border-black transition-all">
+          <button
+            type="button"
+            onClick={() => toggle('agents')}
+            className={cn(SECTION_HEADER, 'flex-1 text-muted-foreground')}
+            aria-label="展开或折叠 Agents"
+            aria-expanded={isAgentsExpanded}
+          >
+            <ChevronDown
+              aria-hidden="true"
+              className={cn(
+                'h-3 w-3 transition-transform',
+                isAgentsExpanded ? 'rotate-0' : '-rotate-90',
+              )}
+            />
+            <span>Agents</span>
+            <span className={SECTION_COUNT}>{agents.length}</span>
+          </button>
+          {onCreateAgent && (
+            <button
+              onClick={onCreateAgent}
+              className="mr-2 flex h-5 w-5 items-center justify-center border-2 border-transparent text-sidebar-muted-foreground group-hover:border-black group-hover:text-black hover:bg-brutal-primary/40 active:bg-brutal-primary active:text-black active:ring-2 active:ring-black transition-all cursor-pointer"
+              aria-label="创建 Agent"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
         {isAgentsExpanded && (
           <div>
             {agents.length === 0 ? (

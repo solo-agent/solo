@@ -323,6 +323,7 @@
 .btn-flat {
   background: none;
   border: none;
+  box-shadow: none;
   font-family: var(--font-heading);
   font-weight: 500;
   color: var(--color-brutal-muted);
@@ -334,10 +335,13 @@
 .btn-flat:hover {
   background: rgba(0, 0, 0, 0.05);
   color: #000;
+  transform: none;
 }
 
 .btn-flat:active {
   background: rgba(0, 0, 0, 0.1);
+  transform: none;
+  box-shadow: none;
 }
 
 /* ============================================================
@@ -364,7 +368,8 @@
   border: 2px solid var(--color-brutal-black);
   background: #fff;
   font-family: var(--font-sans);
-  padding: 0.5rem 0.75rem;
+  padding-block: 0.5rem;
+  padding-inline: 0.75rem;
   font-size: 0.9375rem;
   box-shadow: 3px 3px 0 0 var(--color-brutal-shadow);
   outline: none;
@@ -375,8 +380,10 @@
 
 .input-brutal:focus {
   box-shadow: 5px 5px 0 0 var(--color-brutal-shadow);
-  outline: 3px solid var(--color-brutal-info);
-  outline-offset: 2px;
+}
+
+.input-brutal:focus-visible {
+  outline: none;
 }
 
 .input-brutal::placeholder {

@@ -8,7 +8,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Bot, Circle, Search, AlertCircle, RefreshCw } from 'lucide-react';
+import { Bot, Circle, AlertCircle, RefreshCw } from 'lucide-react';
+import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { useAgents } from '@/lib/hooks/use-agents';
 import {
   Dialog,
@@ -79,14 +80,13 @@ export function AddAgentModal({
       </DialogHeader>
 
       {/* Search */}
-      <div className="relative mb-4">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <div className="mb-4">
         <input
           type="text"
           placeholder="搜索 Agent..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="input-brutal pl-9"
+          className="input-brutal"
           autoFocus
         />
       </div>
@@ -146,9 +146,7 @@ export function AddAgentModal({
                 disabled={addingId === agent.id}
                 className="flex w-full items-center gap-3 border-2 border-black bg-white p-2 text-left shadow-brutal-sm transition-all hover:-translate-x-px hover:-translate-y-px hover:shadow-brutal-lg disabled:opacity-50"
               >
-                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-primary-light">
-                  <Bot className="h-4 w-4 text-brutal-primary" />
-                </div>
+                <PixelAvatar agentId={agent.id} size="sm" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate font-heading text-sm font-bold text-foreground">

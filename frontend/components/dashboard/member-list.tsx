@@ -16,6 +16,7 @@ interface MemberListProps {
   isLoading: boolean;
   onAddAgent: () => void;
   onRemoveAgent?: (memberId: string) => void;
+  showHeader?: boolean;
 }
 
 function MemberItem({ member, onRemove }: { member: ChannelMember; onRemove?: (id: string) => void }) {
@@ -53,37 +54,38 @@ function MemberItem({ member, onRemove }: { member: ChannelMember; onRemove?: (i
         {member.display_name}
       </span>
 
-      {/* Type badge */}
-      {isAgent && (
-        <span className="badge-brutal bg-brutal-primary text-black text-[10px]">
-          Agent
-        </span>
-      )}
+      {/* Badge + remove */}
+      <div className="ml-auto flex flex-shrink-0 items-center gap-1">
+        {isAgent && (
+          <span className="badge-brutal bg-brutal-primary text-black text-[10px]">
+            Agent
+          </span>
+        )}
 
-      {/* Status */}
-      <div className="flex-shrink-0" title={statusLabel}>
-        <Circle className={`h-2 w-2 ${statusColor}`} />
+        {isAgent && onRemove && (
+          confirming ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); onRemove(member.member_id); }}
+              className="btn-brutal btn-brutal-sm bg-brutal-danger text-black border-2 border-black font-heading text-[10px] font-bold shadow-brutal-sm"
+            >
+              KICK
+            </button>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
+              className="flex-shrink-0 border-2 border-black bg-white px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-all shadow-brutal-sm hover:bg-brutal-danger hover:text-black"
+              title="移除 Agent"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )
+        )}
       </div>
 
-      {/* Remove button (agents only) — brutalist: thick borders, no rounding, bold */}
-      {isAgent && onRemove && (
-        confirming ? (
-          <button
-            onClick={(e) => { e.stopPropagation(); onRemove(member.member_id); }}
-            className="btn-brutal btn-brutal-sm bg-brutal-danger text-black border-2 border-black font-heading text-[10px] font-bold shadow-brutal-sm"
-          >
-            KICK
-          </button>
-        ) : (
-          <button
-            onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
-            className="flex-shrink-0 border-2 border-black bg-white px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-all shadow-brutal-sm hover:bg-brutal-danger hover:text-black"
-            title="移除 Agent"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        )
-      )}
+      {/* Status dot — always at rightmost, consistent X regardless of badge */}
+      <div className="flex-shrink-0" title={statusLabel} style={{ width: 8 }}>
+        <Circle className={`h-2 w-2 ${statusColor}`} />
+      </div>
     </div>
   );
 }
@@ -101,10 +103,11 @@ function MemberListSkeleton() {
   );
 }
 
-export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent }: MemberListProps) {
+export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent, showHeader = true }: MemberListProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Section header */}
+      {showHeader && (
       <div className="flex items-center justify-between border-b-2 border-black px-4 py-3">
         <div className="flex items-center gap-2 text-sm font-medium text-foreground">
           <Users className="h-4 w-4" />
@@ -121,6 +124,7 @@ export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent
           <Plus className="h-3.5 w-3.5" />
         </button>
       </div>
+      )}
 
       {/* Member list */}
       <div className="flex-1 overflow-y-auto py-2">

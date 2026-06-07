@@ -145,7 +145,9 @@ export function TasksLeftColumn({
                   )}
                   aria-current={channel.id === selectedChannelId ? 'true' : undefined}
                 >
-                  <span className="font-mono text-base font-bold text-black flex-shrink-0">#</span>
+                  <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-info shadow-brutal-sm">
+                    <span className="font-mono text-base font-bold leading-none select-none">#</span>
+                  </div>
                   <span className="truncate font-body">{channel.name}</span>
                 </button>
               ))

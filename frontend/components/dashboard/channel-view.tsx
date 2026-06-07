@@ -5,7 +5,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
-import { Users, Loader2, ClipboardList, MessageSquare, Eye } from 'lucide-react';
+import { Users, Loader2, ClipboardList, MessageSquare, Eye, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
 import { useChannelMembers } from '@/lib/hooks/use-channel-members';
@@ -611,7 +611,19 @@ export function ChannelView({
               </span>
             </div>
           </DialogTitle>
-          <DialogCloseButton onClick={() => setIsMemberPopoverOpen(false)} />
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => {
+                setIsMemberPopoverOpen(false);
+                setIsAddAgentModalOpen(true);
+              }}
+              className="flex h-7 w-7 items-center justify-center border-2 border-black bg-white shadow-brutal-sm hover:bg-brutal-primary-light active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
+              aria-label="添加 Agent 到频道"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+            <DialogCloseButton onClick={() => setIsMemberPopoverOpen(false)} />
+          </div>
         </DialogHeader>
         <div className="max-h-[60vh] overflow-y-auto">
           <MemberList
@@ -623,6 +635,7 @@ export function ChannelView({
               setIsAddAgentModalOpen(true);
             }}
             onRemoveAgent={(memberId) => removeMember('agent', memberId)}
+            showHeader={false}
           />
         </div>
       </Dialog>

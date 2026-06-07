@@ -84,15 +84,14 @@ function ChannelItem({
       )}
       aria-current={isSelected ? 'true' : undefined}
     >
-      <div className="flex min-w-0 items-center gap-1.5">
-        <span className="font-mono text-base font-bold text-black select-none">#</span>
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-info shadow-brutal-sm">
+          <span className="font-mono text-base font-bold leading-none select-none">#</span>
+        </div>
         <span className="truncate font-body">{channel.name}</span>
       </div>
 
       <div className="flex items-center gap-1">
-        <span className="text-xs tabular-nums opacity-60 group-hover:opacity-100">
-          {channel.member_count}
-        </span>
         <button
           onClick={(e) => {
             e.stopPropagation();
