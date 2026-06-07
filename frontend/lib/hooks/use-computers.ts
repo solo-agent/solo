@@ -37,9 +37,9 @@ function mapComputer(resp: ComputerResponse): Computer {
     last_heartbeat: resp.last_heartbeat,
     agent_ids: resp.agent_ids ?? [],
     agent_names: resp.agent_names ?? [],
-    os: (resp as Record<string, unknown>).os as string | undefined,
-    hostname: (resp as Record<string, unknown>).hostname as string | undefined,
-    ip: (resp as Record<string, unknown>).ip as string | undefined,
+    os: (resp as unknown as Record<string, unknown>).os as string | undefined,
+    hostname: (resp as unknown as Record<string, unknown>).hostname as string | undefined,
+    ip: (resp as unknown as Record<string, unknown>).ip as string | undefined,
     created_at: resp.created_at,
     updated_at: resp.updated_at,
   };
