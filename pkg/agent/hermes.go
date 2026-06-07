@@ -246,19 +246,22 @@ func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 			b.logger.Info("hermes: session model set", "model", opts.Model)
 		}
 
-		// 4. Build the prompt content with system prompt prepended.
-		userText := prompt
+		// 4. Build prompt blocks with role-based format so the agent
+		// treats system instructions as authoritative.
+		promptBlocks := []map[string]any{
+			{"type": "text", "text": prompt, "role": "user"},
+		}
 		if opts.SystemPrompt != "" {
-			userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
+			promptBlocks = append([]map[string]any{
+				{"type": "text", "text": opts.SystemPrompt, "role": "system"},
+			}, promptBlocks...)
 		}
 
 		// 5. Send the prompt and wait for PromptResponse.
 		streamingCurrentTurn = true
 		_, err = cl.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
-			"prompt": []map[string]any{
-				{"type": "text", "text": userText},
-			},
+			"prompt":    promptBlocks,
 		})
 		if err != nil {
 			if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
