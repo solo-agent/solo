@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/solo-ai/solo/internal/realtime"
 )
 
 const (
@@ -75,7 +77,7 @@ func (c *Client) ReadPump() {
 			break
 		}
 
-		var msg WSMessage
+		var msg realtime.WSMessage
 		if err := json.Unmarshal(raw, &msg); err != nil {
 			slog.Debug("ws: invalid message", "user_id", c.userID, "error", err)
 			c.sendError("INVALID_MESSAGE", "invalid message format")
@@ -141,7 +143,7 @@ func (c *Client) IsSubscribed(channelID string) bool {
 }
 
 // handleMessage dispatches an incoming WS message to the appropriate handler.
-func (c *Client) handleMessage(msg WSMessage) {
+func (c *Client) handleMessage(msg realtime.WSMessage) {
 	switch msg.Type {
 	case EventSubscribe:
 		var payload SubscribePayload

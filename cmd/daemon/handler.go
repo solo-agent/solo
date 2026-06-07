@@ -908,6 +908,10 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	var messageSentViaCLI bool
 
 	for chunk := range session.Messages {
+		// SOLO-island PR1: emit agent.activity for every chunk the island UI
+		// cares about. Skips empty activity text internally.
+		h.pushAgentActivity(req, agentInfo.Name, req.ModelConfig.Provider, chunk)
+
 		switch chunk.Type {
 		case string(agent.MessageText):
 			// v1.3: Slock-aligned — text output is internal thinking.
@@ -1085,6 +1089,58 @@ func (h *daemonHandler) pushEventJSON(taskID, event string, data interface{}) {
 		Event: event,
 		Data:  string(raw),
 	})
+}
+
+// pushAgentActivity (SOLO-island PR1) translates a backend OutputChunk
+// into an agent.activity SSE event for the AgentIsland UI. Skips push
+// when the chunk produces no activity text (mirrors Kanan's "best effort,
+// skip empty" pattern). Payload matches ws.AgentActivityPayload on the
+// server side; server passes it through to WebSocket unchanged.
+//
+// Per-CLI adaptation (SOLO-island PR-fix): uses
+// InferActivityTextForBackend so ACP backends (Kimi/Kiro/Hermes)
+// get normalised tool names, the stream-json family gets
+// namespace-stripped names, and all surfaces share the same Chinese
+// pill text.
+func (h *daemonHandler) pushAgentActivity(req runTaskRequest, agentName, provider string, chunk agent.OutputChunk) {
+	if req.ChannelID == "" {
+		return
+	}
+	activityText := agent.InferActivityTextForBackend(provider, chunk)
+	if activityText == "" {
+		return
+	}
+	status := agent.InferIslandStatusFromChunk(chunk)
+
+	var toolName, toolInputSummary string
+	if chunk.Tool != nil {
+		// Display name goes through NormalizeToolName so the island
+		// pill shows the canonical form. The raw name is preserved
+		// in tool_name for the AgentViewPanel to render exactly
+		// what the backend said.
+		toolName = agent.NormalizeToolName(provider, chunk.Tool.Name)
+		toolInputSummary = agent.SummarizeToolInput(toolName, chunk.Tool.Input)
+	}
+
+	payload := map[string]interface{}{
+		"channel_id":   req.ChannelID,
+		"agent_id":     req.AgentID,
+		"agent_name":   agentName,
+		"status":       string(status),
+		"activity_text": activityText,
+		"timestamp":    time.Now().UTC().Format(time.RFC3339),
+	}
+	if toolName != "" {
+		payload["tool_name"] = toolName
+	}
+	if toolInputSummary != "" {
+		payload["tool_input_summary"] = toolInputSummary
+	}
+	if provider != "" {
+		payload["source"] = provider
+	}
+
+	h.pushEventJSON(req.TaskID, "agent.activity", payload)
 }
 
 // --- SSE endpoint ---

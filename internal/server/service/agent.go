@@ -302,6 +302,33 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 	// Track usage for logging
 	var inputTokens, outputTokens int
 	taskCompleted := false
+	// Track final state for the agent.done broadcast. Updated by event handlers
+	// and read by the deferred broadcaster. Defaults to "aborted" if the stream
+	// ends without a more specific state.
+	finalState := "aborted"
+
+	// Always broadcast agent.done on exit so the frontend can mark the agent
+	// as idle regardless of how the task ends (completed, failed, error, or
+	// stream end). Replaces the previous 3s inactivity heuristic.
+	//
+	// Uses realtime.Envelope (not ws.Envelope) to avoid a service → ws
+	// import cycle. The on-the-wire shape is identical.
+	defer func() {
+		payload := map[string]interface{}{
+			"channel_id":  taskReq.ChannelID,
+			"agent_id":    ag.ID,
+			"agent_name":  agentName,
+			"task_id":     taskReq.TaskID,
+			"final_state": finalState,
+			"timestamp":   time.Now().UTC().Format(time.RFC3339),
+		}
+		s.hub.BroadcastToChannel(taskReq.ChannelID, realtime.Envelope("agent.done", payload))
+		slog.Debug("broadcast agent done",
+			"channel_id", taskReq.ChannelID,
+			"agent_id", ag.ID,
+			"final_state", finalState,
+		)
+	}()
 
 	for event := range eventCh {
 		switch event.Event {
@@ -370,6 +397,7 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 				inputTokens = data.Usage.InputTokens
 				outputTokens = data.Usage.OutputTokens
 				taskCompleted = true
+				finalState = "completed"
 			}
 
 		case "error":
@@ -384,18 +412,55 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 				)
 				s.broadcastAgentError(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, data.Error)
 			}
-			return
+			finalState = "failed"
+			// Don't return — let the loop consume the "done" sentinel so we
+			// also broadcast agent.done with the correct final state. The
+			// deferred broadcaster will handle the exit.
+			continue
+
+		case "done":
+			// Daemon's stream-end sentinel (cmd/daemon/handler.go:683). No
+			// payload — we already captured the final state from "complete"
+			// or "error" above. Just exit the loop; deferred broadcaster
+			// will fire agent.done.
+
+		case "agent.activity":
+			// SOLO-island PR1: pass through the daemon-built activity event
+			// to WebSocket subscribers. Daemon has already filled all the
+			// fields (status, activity_text, tool_name, etc.) so the server
+			// is a passthrough — no re-derivation here. Skips events for
+			// non-channel tasks (req.ChannelID == "").
+			if taskReq.ChannelID == "" {
+				continue
+			}
+			var activity map[string]interface{}
+			if err := json.Unmarshal([]byte(event.Data), &activity); err != nil {
+				slog.Warn("agent.activity: failed to unmarshal payload",
+					"task_id", taskReq.TaskID, "error", err)
+				continue
+			}
+			// Inject channel_id (in case daemon omitted it; it shouldn't,
+			// but the contract is "server knows the channel for this task").
+			activity["channel_id"] = taskReq.ChannelID
+			s.hub.BroadcastToChannel(taskReq.ChannelID, realtime.Envelope("agent.activity", activity))
+		}
+
+		// Break on stream-end sentinel (empty "done" event).
+		if event.Event == "done" {
+			break
 		}
 	}
 
-	// If task was not completed, skip saving
-	if !taskCompleted {
+	// If task was not completed (no "complete" event arrived), emit a soft
+	// warning. We don't return here because the deferred agent.done broadcast
+	// still needs to run. finalState is already set ("completed" | "failed" |
+	// "aborted" default) for the deferred broadcaster.
+	if !taskCompleted && finalState == "aborted" {
 		slog.Warn("agent task stream ended without complete event",
 			"agent_id", ag.ID,
 			"channel_id", taskReq.ChannelID,
 		)
 		s.broadcastAgentThinking(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "Response ended unexpectedly.")
-		return
 	}
 
 	// v1.3: Slock-aligned dual-channel architecture.
@@ -420,12 +485,7 @@ func (s *AgentService) broadcastThinking(channelID, agentID, agentName, thought 
 		"agent_name": agentName,
 		"thought":    thought,
 	}
-	data, _ := json.Marshal(payload)
-	envelope, _ := json.Marshal(map[string]interface{}{
-		"type":    "agent.thinking",
-		"payload": json.RawMessage(data),
-	})
-	s.hub.BroadcastToChannel(channelID, envelope)
+	s.hub.BroadcastToChannel(channelID, realtime.Envelope("agent.thinking", payload))
 }
 
 
@@ -436,12 +496,7 @@ func (s *AgentService) broadcastError(channelID, agentID, agentName, errMsg stri
 		"agent_name": agentName,
 		"error":      errMsg,
 	}
-	data, _ := json.Marshal(payload)
-	envelope, _ := json.Marshal(map[string]interface{}{
-		"type":    "agent.error",
-		"payload": json.RawMessage(data),
-	})
-	s.hub.BroadcastToChannel(channelID, envelope)
+	s.hub.BroadcastToChannel(channelID, realtime.Envelope("agent.error", payload))
 }
 
 
@@ -469,12 +524,7 @@ func (s *AgentService) broadcastTaskClaimed(task *Task, channelID string) {
 		"message_id":  task.MessageID,
 		"updated_at":  task.UpdatedAt.Format(time.RFC3339),
 	}
-	taskData, _ := json.Marshal(taskPayload)
-	taskEnvelope, _ := json.Marshal(map[string]interface{}{
-		"type":    "task.updated",
-		"payload": json.RawMessage(taskData),
-	})
-	s.hub.BroadcastToChannel(channelID, taskEnvelope)
+	s.hub.BroadcastToChannel(channelID, realtime.Envelope("task.updated", taskPayload))
 
 	// Broadcast message.updated (for TaskBadge real-time update)
 	if task.MessageID != "" {
