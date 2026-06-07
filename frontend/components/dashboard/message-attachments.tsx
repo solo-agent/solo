@@ -71,7 +71,7 @@ export function ImageLightbox({ attachment, onClose }: ImageLightboxProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black"
       onClick={handleBackdropClick}
       role="dialog"
       aria-label={`预览图片: ${attachment.filename}`}
@@ -91,8 +91,8 @@ export function ImageLightbox({ attachment, onClose }: ImageLightboxProps) {
       <div className="relative flex max-w-[90vw] max-h-[85vh] items-center justify-center">
         {/* Loading skeleton */}
         {loadState === 'loading' && (
-          <div className="flex h-64 w-96 items-center justify-center border-2 border-white/20 bg-white/5">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-white border-t-transparent" />
+          <div className="flex h-64 w-96 items-center justify-center border-2 border-white">
+            <div className="h-8 w-8 animate-spin border-2 border-white" />
           </div>
         )}
 
@@ -153,7 +153,7 @@ function InlineImage({ attachment, onClick }: InlineImageProps) {
       {/* Loading skeleton */}
       {loadState === 'loading' && (
         <div className="flex h-40 w-full items-center justify-center bg-brutal-stone/20">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-brutal-stone border-t-transparent" />
+          <div className="h-6 w-6 animate-spin border-2 border-brutal-stone" />
         </div>
       )}
 

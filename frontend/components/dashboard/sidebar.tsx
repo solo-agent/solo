@@ -23,7 +23,7 @@ interface SidebarProps {
   dmsLoading: boolean;
   selectedDmId: string | null;
   onSelectDM: (dmId: string) => void;
-  onCreateDM: () => void;
+  onCreateDM?: () => void;
   /** Inbox props */
   inboxSelected: boolean;
   onSelectInbox: () => void;
@@ -56,7 +56,7 @@ export function Sidebar({
   return (
     <aside className="flex w-[220px] flex-col bg-sidebar text-sidebar-foreground border-r-2 border-sidebar-border flex-shrink-0">
       {/* Page label — matches Teams / Tasks / Computers top label style */}
-      <div className="border-b-2 border-sidebar-border px-4 py-3">
+      <div className="flex items-center h-14 border-b-2 border-sidebar-border px-4">
         <span className="font-heading text-lg font-bold text-sidebar-foreground truncate">
           {routeTitle}
         </span>

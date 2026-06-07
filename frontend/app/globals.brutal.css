@@ -118,7 +118,7 @@
   --animate-slide-in-from-right: slide-in-from-right 0.2s ease-out;
   --animate-slide-in-from-left: slide-in-from-left 0.2s ease-out;
   --animate-fade-in: fade-in 0.3s ease-out;
-  --animate-indeterminate-progress: indeterminate-progress 1.2s ease-in-out infinite;
+  --animate-indeterminate-progress: indeterminate-progress 0.6s linear infinite;
 }
 
 @keyframes slide-in-from-right {
@@ -300,6 +300,23 @@
 
 .btn-brutal-sm:active {
   transform: translate(3px, 3px);
+  box-shadow: none;
+}
+
+/* Extra-small variant: tighter shadow + smaller translate, for inline / icon-row buttons. */
+.btn-brutal-xs {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  box-shadow: 2px 2px 0 0 var(--color-brutal-shadow);
+}
+
+.btn-brutal-xs:hover {
+  transform: translate(-0.5px, -0.5px);
+  box-shadow: 3px 3px 0 0 var(--color-brutal-shadow);
+}
+
+.btn-brutal-xs:active {
+  transform: translate(2px, 2px);
   box-shadow: none;
 }
 

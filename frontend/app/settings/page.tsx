@@ -82,7 +82,7 @@ export default function SettingsPage() {
       {/* Page header */}
       <div className="mb-8">
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm">
+          <div className="flex h-10 w-10 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm">
             <User className="h-6 w-6 text-white" />
           </div>
           <div>

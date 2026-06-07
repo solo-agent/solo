@@ -152,7 +152,7 @@ function StatusBadge({
                 onChange(s);
                 setOpen(false);
               }}
-              className="block w-full text-left px-3 py-1.5 font-heading text-xs font-bold hover:bg-brutal-cream transition-colors"
+              className="block w-full text-left px-3 py-1.5 font-heading text-xs font-bold bg-white text-black transition-colors hover:bg-brutal-pink hover:text-black"
             >
               {STATUS_LABELS[s]}
             </button>

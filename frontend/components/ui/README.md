@@ -178,7 +178,7 @@ const options: SelectOption[] = [
 
 <Select
   value={status}
-  onChange={(e) => setStatus(e.target.value)}
+  onChange={(v) => setStatus(v)}
   options={options}
   placeholder="选择状态"
   size="sm"
@@ -188,12 +188,12 @@ const options: SelectOption[] = [
 | Prop | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `options` | `SelectOption[]` | — | required |
-| `placeholder` | `string` | — | first disabled hidden option |
+| `placeholder` | `string` | — | shown in trigger when no value is selected |
 | `size` | `'sm' \| 'md'` | `'sm'` | h-8 / h-10 |
-| `label` | `string` | — | renders a label above |
-| `…select props` | — | — | extends `SelectHTMLAttributes` |
+| `name` | `string` | — | renders a hidden `<input>` for form submission / `Controller` |
+| `onChange` | `(value: string) => void` | — | receives the selected value, not an event |
 
-Wraps the native `<select>` so we get full keyboard + mobile picker support for free. For complex multi-selects, build a Combobox on top later.
+Custom dropdown panel — open state matches the brutalist design system (hard border + hard offset shadow). Keyboard: Esc closes, Enter/Space toggles or selects, ArrowUp/Down navigate. For react-hook-form, wrap in `<Controller>`.
 
 ---
 

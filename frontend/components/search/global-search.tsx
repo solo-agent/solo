@@ -15,6 +15,7 @@ import { Search, X, Clock, Hash } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 import type { SearchResult, SearchResponse } from '@/lib/types';
+import { sanitizeHtml } from '@/lib/sanitize';
 
 interface GlobalSearchProps {
   open: boolean;
@@ -306,9 +307,11 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
                     <p
                       className="line-clamp-2 font-body text-sm text-foreground leading-relaxed [&_mark]:bg-brutal-pink [&_mark]:text-foreground [&_mark]:px-0.5"
                       dangerouslySetInnerHTML={{
-                        __html: result.highlight
-                          ? sanitizeMarkHtml(result.highlight)
-                          : result.content,
+                        __html: sanitizeHtml(
+                          result.highlight
+                            ? sanitizeMarkHtml(result.highlight)
+                            : result.content,
+                        ),
                       }}
                     />
                   </button>

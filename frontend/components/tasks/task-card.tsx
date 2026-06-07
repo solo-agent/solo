@@ -24,7 +24,7 @@ const STATUS_CONFIG: Record<TaskStatus, { label: string; bgClass: string }> = {
 const PRIORITY_CONFIG: Record<TaskPriority, { label: string; bgClass: string }> = {
   urgent: { label: '紧急', bgClass: 'bg-brutal-red text-white' },
   high: { label: '高', bgClass: 'bg-brutal-orange text-black' },
-  normal: { label: '普通', bgClass: 'bg-muted text-muted-foreground' },
+  normal: { label: '普通', bgClass: 'bg-brutal-cream text-foreground border-2 border-black' },
   low: { label: '低', bgClass: 'bg-brutal-stone text-black' },
 };
 
@@ -135,7 +135,7 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
             <div className="flex items-center gap-2 text-xs">
               <span className="text-muted-foreground">子任务:</span>
               <span className="font-bold">{task.done_subtask_count ?? 0}/{task.subtask_count}</span>
-              <div className="flex-1 h-1.5 border border-brutal-muted bg-muted">
+              <div className="flex-1 h-1.5 border-2 border-black bg-brutal-cream">
                 <div
                   className="h-full bg-brutal-lime"
                   style={{ width: `${Math.min(((task.done_subtask_count ?? 0) / (task.subtask_count ?? 1)) * 100, 100)}%` }}
@@ -155,7 +155,10 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
           )}
 
           {showChannel && task.channel_name && (
-            <span className="font-mono">#{task.channel_name}</span>
+            <span className="flex items-center gap-1 font-mono">
+              <span className="font-bold text-sm text-black">#</span>
+              {task.channel_name}
+            </span>
           )}
 
           {task.due_date && (

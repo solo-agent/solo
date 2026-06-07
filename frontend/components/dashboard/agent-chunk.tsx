@@ -30,7 +30,7 @@ function ToolUseDisplay({ chunk }: { chunk: AgentChunk }) {
         <span className="font-bold">{tool.name}</span>
       </button>
       {expanded && tool.input && (
-        <pre className="mt-1 bg-brutal-muted-light p-1.5 text-[10px] font-mono break-all whitespace-pre-wrap max-h-32 overflow-y-auto border border-brutal-muted">
+        <pre className="mt-1 bg-brutal-muted-light p-1.5 text-[10px] font-mono break-all whitespace-pre-wrap max-h-32 overflow-y-auto border-2 border-black">
           {tool.input}
         </pre>
       )}

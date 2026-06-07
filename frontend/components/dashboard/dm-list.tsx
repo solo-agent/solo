@@ -22,7 +22,7 @@ interface DMListProps {
   isLoading: boolean;
   selectedDmId: string | null;
   onSelectDM: (dmId: string) => void;
-  onCreateDM: () => void;
+  onCreateDM?: () => void;
   isExpanded: boolean;
   onToggleExpand: () => void;
 }
@@ -69,10 +69,11 @@ function DMListSkeleton() {
 
 // ---- Empty state ----
 
-function DMListEmpty({ onCreateDM }: { onCreateDM: () => void }) {
+function DMListEmpty({ onCreateDM }: { onCreateDM?: () => void }) {
   return (
     <div className="space-y-2 px-2 py-3 text-center">
       <p className="text-sm text-sidebar-muted-foreground">还没有私信</p>
+      {onCreateDM && (
       <button
         onClick={onCreateDM}
         className="inline-flex items-center gap-1 border-2 border-black bg-brutal-pink px-3 py-1 text-sm font-medium text-black shadow-brutal-sm hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
@@ -80,6 +81,7 @@ function DMListEmpty({ onCreateDM }: { onCreateDM: () => void }) {
         <Plus className="h-3.5 w-3.5" />
         发起私信
       </button>
+      )}
     </div>
   );
 }
@@ -254,6 +256,7 @@ export function DMList({
           <span>Direct Messages</span>
           <span className="ml-auto text-xs tabular-nums opacity-50">{sortedDMs.length}</span>
         </button>
+        {onCreateDM && (
         <button
           onClick={onCreateDM}
           className="mr-2 flex h-5 w-5 items-center justify-center border-2 border-transparent text-sidebar-muted-foreground group-hover:border-black group-hover:text-black hover:bg-brutal-pink/40 active:bg-brutal-pink active:text-black active:ring-2 active:ring-black transition-all cursor-pointer"
@@ -261,6 +264,7 @@ export function DMList({
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
+        )}
       </div>
 
       {/* Content */}

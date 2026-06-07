@@ -9,6 +9,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, Loader2, X, Hash } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import type { SearchResult, SearchResponse } from '@/lib/types';
+import { sanitizeHtml } from '@/lib/sanitize';
 
 // ---- Helpers ----
 
@@ -222,7 +223,7 @@ export function ChannelSearch({ channelId, channelName, onResultClick }: Channel
                     <button
                       type="button"
                       onClick={() => handleResultClick(result.id)}
-                      className="w-full border-b-2 border-black px-4 py-3 text-left transition-colors hover:bg-brutal-cream last:border-b-0"
+                      className="w-full border-b-2 border-black px-4 py-3 text-left transition-colors hover:bg-brutal-pink last:border-b-0"
                       role="option"
                       aria-label={`跳转到 ${result.sender_name} 的消息`}
                     >
@@ -234,7 +235,7 @@ export function ChannelSearch({ channelId, channelName, onResultClick }: Channel
                       <div className="mt-0.5">
                         <span
                           className="font-body text-sm text-muted-foreground line-clamp-2 [&_mark]:bg-brutal-pink [&_mark]:text-black [&_mark]:font-bold"
-                          dangerouslySetInnerHTML={{ __html: sanitizeMarkHtml(result.highlight || result.content) }}
+                          dangerouslySetInnerHTML={{ __html: sanitizeHtml(sanitizeMarkHtml(result.highlight || result.content)) }}
                         />
                       </div>
                       <div className="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">

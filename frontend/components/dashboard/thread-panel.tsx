@@ -59,7 +59,7 @@ function ParentMessageBlock({ message, task }: { message: Message; task?: Task }
   });
 
   return (
-    <div className={`flex gap-3 px-6 py-4 border-b border-brutal-muted ${isAgent ? 'border-l-[3px] border-l-brutal-pink' : ''}`}>
+    <div className={`flex gap-3 px-6 py-4 border-b-2 border-black ${isAgent ? 'border-l-2 border-l-brutal-pink' : ''}`}>
       {isAgent ? (
         <PixelAvatar agentId={message.user_id || message.id} size="md" />
       ) : (
@@ -183,7 +183,7 @@ function ReplyItem({ message }: { message: { id: string; display_name?: string; 
   });
 
   return (
-    <div className={`flex gap-3 px-6 py-2 border-b border-brutal-muted ${isAgent ? 'border-l-[3px] border-l-brutal-pink' : ''}`}>
+    <div className={`flex gap-3 px-6 py-2 border-b-2 border-black ${isAgent ? 'border-l-2 border-l-brutal-pink' : ''}`}>
       {isAgent ? (
         <PixelAvatar agentId={message.id} size="sm" />
       ) : (
@@ -213,7 +213,7 @@ function ReplyItem({ message }: { message: { id: string; display_name?: string; 
                 {[0, 1, 2].map((i) => (
                   <span
                     key={i}
-                    className="inline-block h-1.5 w-1.5 rounded-full bg-brutal-pink animate-bounce"
+                    className="inline-block h-1.5 w-1.5 bg-brutal-pink animate-bounce"
                     style={{ animationDelay: `${i * 0.15}s`, animationDuration: '0.8s' }}
                   />
                 ))}
@@ -711,12 +711,12 @@ export function ThreadPanel({
   return (
     <div
       className={cn(
-        'flex h-full flex-col bg-brutal-cream border-2 border-black shadow-brutal-sm',
+        'flex h-full flex-col bg-brutal-cream border-l-2 border-r-2 border-b-2 border-black shadow-brutal-sm',
         'animate-slide-in-from-right',
       )}
     >
       {/* Header */}
-      <div className="flex h-14 flex-shrink-0 items-center justify-between border-b-2 border-black px-6">
+      <div className="flex h-14 flex-shrink-0 items-center justify-between border-b-2 border-black px-4">
         <h3 className="font-heading text-base font-bold text-foreground">
           线程{replyCount > 0 && (
             <span className="ml-1.5 font-mono text-sm text-muted-foreground">
@@ -749,9 +749,6 @@ export function ThreadPanel({
 
         {/* Parent message */}
         <ParentMessageBlock message={parentMessage} task={task} />
-
-        {/* Divider */}
-        <div className="divider-brutal mx-6" />
 
         {/* Reply list */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto">

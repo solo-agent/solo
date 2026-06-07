@@ -10,6 +10,12 @@
 import { useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
+import { apiClient } from '@/lib/api-client';
+
+interface TaskRedirectInfo {
+  channel_id: string;
+  message_id?: string;
+}
 
 export default function TaskDetailPage() {
   const params = useParams();
@@ -17,37 +23,24 @@ export default function TaskDetailPage() {
   const taskId = params.id as string;
 
   useEffect(() => {
-    // Fetch the task to get channel_id + message_id, then redirect
     let cancelled = false;
 
     async function redirectToThread() {
       try {
-        const token = localStorage.getItem('access_token');
-        if (!token) {
-          router.push('/auth/login');
-          return;
-        }
-
-        const res = await fetch(`/api/v1/tasks/${taskId}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (!res.ok) {
-          // Task not found or error — redirect to tasks board
-          if (!cancelled) router.push('/tasks');
-          return;
-        }
-
-        const task = await res.json();
+        const task = await apiClient.get<TaskRedirectInfo>(
+          `/api/v1/tasks/${taskId}`,
+        );
 
         if (!cancelled) {
           if (task.message_id) {
-            router.replace(`/dashboard?channel=${task.channel_id}&message=${task.message_id}`);
+            router.replace(
+              `/dashboard?channel=${task.channel_id}&message=${task.message_id}`,
+            );
           } else {
             router.replace(`/dashboard?channel=${task.channel_id}`);
           }
         }
-      } catch {
+      } catch (err: unknown) {
         if (!cancelled) router.push('/tasks');
       }
     }

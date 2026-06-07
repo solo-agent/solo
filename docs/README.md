@@ -46,6 +46,7 @@ docs/
 | 技术架构全貌 | [v0/ARCHITECTURE.md](v0/ARCHITECTURE.md) |
 | 前端设计规范和组件 | [design/frontend-redesign-v2.md](design/frontend-redesign-v2.md) |
 | 任务系统如何设计 | [v1.2/task-system-spec.md](v1.2/task-system-spec.md) |
+| 前端全面审查与美学评估 | [design/frontend-audit-2026-06.md](design/frontend-audit-2026-06.md) |
 | 竞品 (slock.ai) 分析 | [research/slock-architecture.md](research/slock-architecture.md) |
 | 竞品 (multica) 分析 | [research/multica-architecture.md](research/multica-architecture.md) |
 | v1.3 迭代计划 | [v1.3/PRD-v1.3.md](v1.3/PRD-v1.3.md) |

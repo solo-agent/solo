@@ -38,7 +38,7 @@ interface TeamsLeftColumnProps {
 type SectionKey = 'graph' | 'agents' | 'humans';
 
 const SECTION_HEADER =
-  'flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider font-heading border-2 border-transparent hover:border-black transition-all';
+  'flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider font-heading';
 const SECTION_COUNT = 'ml-auto text-xs tabular-nums opacity-50';
 
 export function TeamsLeftColumn({
@@ -75,7 +75,7 @@ export function TeamsLeftColumn({
       </div>
 
       {/* Sections */}
-      <div className="flex-1 overflow-y-auto py-2">
+      <div className="flex-1 overflow-y-auto pt-0 pb-2">
         {/* Graph — no children, so no ChevronDown; keep Network as the
             leading marker; click selects the view */}
         <button

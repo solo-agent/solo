@@ -85,7 +85,7 @@ function ChannelItem({
       aria-current={isSelected ? 'true' : undefined}
     >
       <div className="flex min-w-0 items-center gap-1.5">
-        <span className="font-mono text-sm font-bold text-brutal-stone select-none">#</span>
+        <span className="font-mono text-base font-bold text-black select-none">#</span>
         <span className="truncate font-body">{channel.name}</span>
       </div>
 

@@ -44,6 +44,7 @@ import { AgentMessage } from './agent-message';
 import { StreamingMessage } from './streaming-message';
 import { MessageAttachments } from './message-attachments';
 import type { Channel, Message, Task, TaskStatus } from '@/lib/types';
+import { sanitizeHtml } from '@/lib/sanitize';
 // SOLO-island PR2: TypingIndicator removed — AgentIsland (mounted at the
 // dashboard root) now surfaces agent status. The unused import is removed
 // along with the agentActivities prop and the inline <TypingIndicator />.
@@ -256,7 +257,7 @@ const MessageItem = memo(function MessageItem({
           aria-label="有未读线程回复，点击查看"
           title="有未读回复"
         >
-          <span className="block h-1 w-1 rounded-full bg-brutal-pink animate-fade-in" />
+          <span className="block h-2.5 w-2.5 bg-brutal-red border border-black animate-fade-in" />
         </button>
       )}
 
@@ -356,11 +357,13 @@ const MessageItem = memo(function MessageItem({
               isFailed && 'text-brutal-red/80',
             )}
             dangerouslySetInnerHTML={{
-              __html: message.content
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/#(\d+)/g, '<span class="tasknum-highlight">#$1</span>'),
+              __html: sanitizeHtml(
+                message.content
+                  .replace(/&/g, '&amp;')
+                  .replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;')
+                  .replace(/#(\d+)/g, '<span class="tasknum-highlight">#$1</span>'),
+              ),
             }}
           />
         )}

@@ -97,7 +97,7 @@ export function AgentViewPanel({
           <Eye className="h-4 w-4 text-brutal-pink" />
           <span className="font-heading text-sm font-bold">Agent View</span>
           {activeAgentIds.length > 0 && (
-            <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 font-mono text-[10px] font-bold bg-brutal-pink text-white rounded-full">
+            <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 font-mono text-[10px] font-bold bg-brutal-pink text-black border-2 border-black shadow-brutal-sm">
               {activeAgentIds.length}
             </span>
           )}

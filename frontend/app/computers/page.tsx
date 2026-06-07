@@ -35,6 +35,7 @@ import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Skeleton } from '@/components/ui/skeleton';
 import { BrutalAlert } from '@/components/ui/brutal-alert';
+import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { useToast } from '@/components/ui/toast';
 import { NavBar } from '@/components/ui/navbar';
 import { ComputersLeftColumn } from '@/components/computers/computers-left-column';
@@ -85,7 +86,7 @@ function AgentStatusDot({ status }: { status: string }) {
     <span className="flex items-center gap-1.5 text-xs">
       <span
         className={cn(
-          'inline-block h-2 w-2 flex-shrink-0 rounded-full border border-black',
+          'inline-block h-2 w-2 flex-shrink-0 border border-black',
           colorMap[status] || 'bg-brutal-stone',
         )}
       />
@@ -228,7 +229,7 @@ export default function ComputersPage() {
 
       <main className="flex flex-1 flex-col overflow-hidden">
         {/* Top bar — add button only (page label lives in the left column) */}
-        <div className="flex flex-shrink-0 items-center justify-end border-b-2 border-black px-6 py-3">
+        <div className="flex flex-shrink-0 items-center justify-end h-14 border-b-2 border-black px-4">
           <Button onClick={() => setShowAddDialog(true)}>
             <Plus className="mr-2 h-4 w-4" />
             添加电脑
@@ -678,11 +679,7 @@ function ConnectedAgents({ computerId }: { computerId: string | null }) {
             key={agent.id}
             className="flex items-center gap-3 border-2 border-black bg-brutal-cream p-2.5"
           >
-            <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm">
-              <span className="font-heading text-[10px] font-bold text-black">
-                {agent.name.charAt(0).toUpperCase()}
-              </span>
-            </div>
+            <PixelAvatar agentId={agent.id} size="sm" />
             <div className="flex-1 min-w-0">
               <span className="block truncate font-body text-sm font-medium text-foreground">
                 {agent.name}
@@ -710,7 +707,7 @@ function StatusDot({ isOnline }: { isOnline: boolean }) {
   return (
     <span
       className={cn(
-        'inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full border border-black',
+        'inline-block h-2.5 w-2.5 flex-shrink-0 border border-black',
         isOnline ? 'bg-brutal-lime' : 'bg-brutal-stone animate-pulse',
       )}
       role="status"
@@ -727,7 +724,7 @@ function SectionHeader({ label, className }: { label: string; className?: string
         className,
       )}
     >
-      <span className="h-1 w-1 rounded-full bg-brutal-pink" />
+      <span className="h-1 w-1 bg-brutal-pink" />
       {label}
     </h3>
   );

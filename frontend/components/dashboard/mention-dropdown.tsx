@@ -74,10 +74,10 @@ export function MentionDropdown({
                 key={suggestion.member.member_id}
                 data-index={index}
                 className={cn(
-                  'flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors',
+                  'flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold transition-colors',
                   index === selectedIndex
-                    ? 'bg-accent text-accent-foreground'
-                    : 'text-foreground hover:bg-accent/50',
+                    ? 'bg-black text-brutal-pink'
+                    : 'text-foreground hover:bg-brutal-pink hover:text-black',
                 )}
                 role="option"
                 aria-selected={index === selectedIndex}

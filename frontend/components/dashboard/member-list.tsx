@@ -115,7 +115,7 @@ export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent
         </div>
         <button
           onClick={onAddAgent}
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+          className="btn-brutal flex h-6 w-6 items-center justify-center border-2 border-black font-heading font-bold"
           aria-label="添加 Agent 到频道"
         >
           <Plus className="h-3.5 w-3.5" />
@@ -133,7 +133,7 @@ export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent
               <div>
                 <div className="mb-1 flex items-center gap-1.5 px-2">
                   <UserIcon className="h-3 w-3 text-muted-foreground" />
-                  <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                     用户 ({users.length})
                   </span>
                 </div>
@@ -148,7 +148,7 @@ export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent
               <div>
                 <div className="mb-1 flex items-center gap-1.5 px-2">
                   <Bot className="h-3 w-3 text-muted-foreground" />
-                  <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                     Agent ({agents.length})
                   </span>
                 </div>

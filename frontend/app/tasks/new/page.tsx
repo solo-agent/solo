@@ -114,7 +114,7 @@ function CreateTaskForm() {
             </label>
             <Select
               value={selectedChannelId}
-              onChange={(e) => setSelectedChannelId(e.target.value)}
+              onChange={(v) => setSelectedChannelId(v)}
               options={[
                 { value: '', label: '选择频道...' },
                 ...channels.map((ch) => ({ value: ch.id, label: `#${ch.name}` })),

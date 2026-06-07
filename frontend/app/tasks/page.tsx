@@ -255,6 +255,22 @@ export default function TasksPage() {
     [filterDmId, unclaimTask, dmUnclaimTask, showToast],
   );
 
+  // Resolve selected channel/DM name for the filter bar header.
+  // Must run before any early return so hook order is stable across renders.
+  const selectedSourceName = useMemo(() => {
+    if (filterDmId) {
+      const dm = dmChannels.find((d) => d.id === filterDmId);
+      if (dm?.other_user) return dm.other_user.display_name;
+      if (dm?.other_agent) return dm.other_agent.name;
+      return null;
+    }
+    if (filterChannelId) {
+      const ch = channels.find((c) => c.id === filterChannelId);
+      return ch?.name ?? null;
+    }
+    return null;
+  }, [filterDmId, filterChannelId, dmChannels, channels]);
+
   // ---- Auth loading ----
   if (authLoading || !isAuthenticated) {
     return (
@@ -295,13 +311,25 @@ export default function TasksPage() {
           {/* Main content area — unaffected by ThreadPanel */}
           <div className="flex flex-1 flex-col overflow-hidden">
             {/* Filter bar */}
-            <div className="flex flex-shrink-0 items-center gap-3 border-b-2 border-black px-6 py-2.5">
-              <Filter className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            <div className="flex flex-shrink-0 items-center gap-3 border-b-2 border-black px-4 h-14">
+              {selectedSourceName ? (
+                <>
+                  <span className="flex items-center gap-1.5 truncate">
+                    <span className="font-mono text-base font-bold text-black flex-shrink-0">#</span>
+                    <span className="font-heading text-sm font-bold text-foreground truncate">
+                      {selectedSourceName}
+                    </span>
+                  </span>
+                  <div className="mx-1 h-4 w-px bg-border" />
+                </>
+              ) : (
+                <Filter className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+              )}
 
               {/* Assignee dropdown */}
               <Select
                 value={filterAssignee}
-                onChange={(e) => handleFilterChange('assignee', e.target.value)}
+                onChange={(v) => handleFilterChange('assignee', v)}
                 options={[
                   { value: '', label: '认领人: 全部' },
                   ...assigneeOptions.map((a) => ({ value: a.id, label: a.name })),
@@ -314,7 +342,7 @@ export default function TasksPage() {
               {/* Creator dropdown */}
               <Select
                 value={filterCreator}
-                onChange={(e) => handleFilterChange('creator', e.target.value)}
+                onChange={(v) => handleFilterChange('creator', v)}
                 options={[
                   { value: '', label: '创建者: 全部' },
                   ...creatorOptions.map((c) => ({ value: c.id, label: c.name })),
@@ -395,7 +423,7 @@ export default function TasksPage() {
 
           {/* Thread panel — absolute overlay, doesn't shift main content */}
           <div
-            className="absolute right-0 top-0 bottom-0 z-20 bg-brutal-cream overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] border-l-2 border-black shadow-brutal-lg"
+            className="absolute right-0 top-0 bottom-0 z-20 bg-brutal-cream overflow-hidden transition-[width,opacity] duration-100 ease-linear border-l-2 border-black shadow-brutal-lg"
             style={{ width: threadMessage ? 400 : 0, opacity: threadMessage ? 1 : 0 }}
           >
             {threadMessage && (

@@ -39,7 +39,7 @@ function CodeBlock({
   return (
     <div className="my-2 border-2 border-black shadow-brutal-sm overflow-x-auto">
       {language && (
-        <div className="border-b-2 border-black bg-brutal-pink/30 px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-black">
+        <div className="border-b-2 border-black bg-brutal-pink px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-black">
           {language}
         </div>
       )}
@@ -71,7 +71,7 @@ function TypingDots() {
         <span
           key={i}
           className={cn(
-            'inline-block h-1.5 w-1.5 rounded-full bg-brutal-pink',
+            'inline-block h-1.5 w-1.5 bg-brutal-pink',
             'animate-bounce',
           )}
           style={{

@@ -25,8 +25,7 @@ export function AgentSelector({ agentId }: AgentSelectorProps) {
       .catch(() => setAgents([]));
   }, []);
 
-  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newId = e.target.value;
+  const handleChange = (newId: string) => {
     const params = new URLSearchParams(searchParams.toString());
     if (newId) {
       params.set('agent', newId);

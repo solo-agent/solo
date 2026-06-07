@@ -32,7 +32,7 @@ export function AgentTrack({ agentId, agentName, chunks, isActive, onClear }: Ag
       'agent-track border-b-2 border-brutal-muted pb-2',
       !isActive && 'opacity-60',
     )}>
-      <div className="flex items-center justify-between px-2 py-1.5 bg-black/5">
+      <div className="flex items-center justify-between px-2 py-1.5 bg-brutal-violet-light border-b-2 border-black">
         <div className="flex items-center gap-1.5 min-w-0">
           <PixelAvatar agentId={agentId} size="sm" />
           <span className="font-heading text-[11px] font-bold truncate">{agentName}</span>
@@ -42,7 +42,7 @@ export function AgentTrack({ agentId, agentName, chunks, isActive, onClear }: Ag
           <button
             type="button"
             onClick={() => onClear(agentId)}
-            className="p-0.5 hover:bg-black/10 rounded"
+            className="p-0.5 hover:bg-black/10 rounded-none"
             aria-label={`Clear ${agentName} chunks`}
           >
             <X className="h-3 w-3 text-muted-foreground" />

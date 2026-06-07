@@ -115,7 +115,7 @@ export function InteractionMode({
                 >
                   {option.label}
                 </span>
-                <span className="mt-0.5 block font-mono text-[11px] font-normal text-muted-foreground">
+                <span className="mt-0.5 block font-mono text-[11px] font-bold text-muted-foreground">
                   {option.description}
                 </span>
               </div>
