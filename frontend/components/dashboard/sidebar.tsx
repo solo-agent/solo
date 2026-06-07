@@ -8,6 +8,7 @@ import { useState, useCallback } from 'react';
 import { ChannelList } from './channel-list';
 import { DMList } from './dm-list';
 import { InboxBadge } from '@/components/inbox/inbox-badge';
+import { AgentIsland } from '@/components/agents/agent-island';
 import { useInboxUnread } from '@/lib/hooks/use-inbox-unread';
 import type { Channel, DMChannel } from '@/lib/types';
 
@@ -29,6 +30,10 @@ interface SidebarProps {
   onSelectInbox: () => void;
   /** Page label rendered at the top of the sidebar. */
   routeTitle?: string;
+  /** SOLO-island: current active channel/dm ID for the island. */
+  activeChannelId?: string | null;
+  /** SOLO-island: callback when island row is clicked. */
+  onInvokeAgent?: (agentId: string) => void;
 }
 
 export function Sidebar({
@@ -46,6 +51,8 @@ export function Sidebar({
   inboxSelected,
   onSelectInbox,
   routeTitle = 'Chat',
+  activeChannelId,
+  onInvokeAgent,
 }: SidebarProps) {
   const { unreadCount, isLoading: unreadLoading } = useInboxUnread();
   const [channelsExpanded, setChannelsExpanded] = useState(true);
@@ -94,6 +101,11 @@ export function Sidebar({
         />
       </div>
 
+      {/* SOLO-island: agent status pill at sidebar bottom */}
+      <AgentIsland
+        channelId={activeChannelId ?? null}
+        onInvokeAgent={onInvokeAgent}
+      />
     </aside>
   );
 }
