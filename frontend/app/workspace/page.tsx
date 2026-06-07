@@ -10,6 +10,8 @@ import { AgentSelector } from '@/components/workspace/agent-selector';
 import { Breadcrumb } from '@/components/workspace/breadcrumb';
 import { useWorkspaceFiles } from '@/lib/hooks/use-workspace-files';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
+import { BrutalAlert } from '@/components/ui/brutal-alert';
 
 function WorkspacePageContent() {
   const searchParams = useSearchParams();
@@ -107,11 +109,13 @@ function WorkspacePageContent() {
         <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-red-light shadow-brutal-sm">
           <AlertCircle className="h-6 w-6 text-brutal-red" />
         </div>
-        <p className="font-body text-sm text-brutal-red">{error}</p>
-        <button type="button" onClick={() => loadTree()} className="btn-brutal btn-brutal-sm mt-4">
+        <BrutalAlert variant="error" className="mb-4 max-w-md">
+          {error}
+        </BrutalAlert>
+        <Button variant="outline" size="sm" onClick={() => loadTree()}>
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
           重试
-        </button>
+        </Button>
       </div>
     );
   }
@@ -141,9 +145,15 @@ function WorkspacePageContent() {
     <div className="flex flex-col h-[calc(100vh-64px)]">
       <div className="flex items-center justify-between px-4 py-1.5 bg-white border-b-2 border-black">
         <AgentSelector agentId={agentId} />
-        <button type="button" onClick={() => loadTree()} className="btn-brutal btn-brutal-xs">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => loadTree()}
+          className="h-7 w-7 p-0"
+          aria-label="刷新文件树"
+        >
           <RefreshCw className="h-3 w-3" />
-        </button>
+        </Button>
       </div>
       {selectedPath && (
         <Breadcrumb path={selectedPath} onNavigate={(p) => handleSelect(p, 'directory')} />

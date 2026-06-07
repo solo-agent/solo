@@ -8,6 +8,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
 import { useAuth } from "@/lib/auth-context";
+import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import { BrutalAlert } from "@/components/ui/brutal-alert";
 
 const registerFormSchema = z
   .object({
@@ -70,7 +73,7 @@ export default function RegisterPage() {
     return (
       <div className="card-brutal p-12 w-full">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-black border-t-transparent" />
+          <Spinner size="md" />
           <p className="font-sans text-sm text-muted-foreground">检查登录状态...</p>
         </div>
       </div>
@@ -90,14 +93,7 @@ export default function RegisterPage() {
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         {/* API Error */}
-        {error && (
-          <div
-            className="border-2 border-[#f97264] bg-[#ffe0dc] p-3 text-sm text-[#f97264] font-medium"
-            role="alert"
-          >
-            {error}
-          </div>
-        )}
+        {error && <BrutalAlert variant="error">{error}</BrutalAlert>}
 
         {/* Email field */}
         <div className="space-y-2">
@@ -175,13 +171,14 @@ export default function RegisterPage() {
         </div>
 
         {/* Submit button */}
-        <button
+        <Button
           type="submit"
-          className="btn-brutal btn-brutal-pink w-full"
+          variant="default"
+          className="w-full"
           disabled={isSubmitting}
         >
           {isSubmitting ? "注册中..." : "创建账号"}
-        </button>
+        </Button>
       </form>
 
       {/* Login link */}

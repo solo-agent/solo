@@ -75,10 +75,10 @@ export function ConnectionBanner() {
   if (!visible) return null;
 
   const bgColor = bannerType === 'reconnecting'
-    ? 'bg-amber-500'
+    ? 'bg-brutal-yellow'
     : bannerType === 'disconnected'
-      ? 'bg-destructive'
-      : 'bg-green-500';
+      ? 'bg-brutal-red'
+      : 'bg-brutal-lime';
 
   const IconComponent = bannerType === 'reconnecting'
     ? Loader2
@@ -89,7 +89,7 @@ export function ConnectionBanner() {
   return (
     <div
       role="alert"
-      className={`fixed left-0 right-0 top-0 z-50 flex items-center justify-center gap-2 py-1.5 text-xs font-medium text-white ${bgColor} animate-in slide-in-from-top-0.5 transition-all duration-300`}
+      className={`fixed left-0 right-0 top-0 z-50 flex items-center justify-center gap-2 border-b-2 border-black py-1.5 text-xs font-medium text-black ${bgColor} animate-in slide-in-from-top-0.5 transition-all duration-300`}
     >
       <IconComponent
         className={`h-3.5 w-3.5 ${bannerType === 'reconnecting' ? 'animate-spin' : ''}`}

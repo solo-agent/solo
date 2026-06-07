@@ -9,7 +9,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Search, Bot, Circle, Loader2 } from 'lucide-react';
+import { Search, Bot, Circle } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import {
   Dialog,
@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Spinner } from '@/components/ui/spinner';
 import { Avatar } from '@/components/ui/avatar';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import type { CreateDMInput, DMChannel } from '@/lib/types';
@@ -173,7 +174,7 @@ export function CreateDMModal({
                   key={`${participant.type}-${participant.id}`}
                   onClick={() => handleSelect(participant)}
                   disabled={isCreating}
-                  className="flex w-full items-center gap-3 rounded-md p-2 text-left transition-colors hover:bg-accent disabled:opacity-50"
+                  className="flex w-full items-center gap-3 border-2 border-transparent p-2 text-left transition-colors hover:border-black hover:bg-brutal-pink-light disabled:opacity-50"
                   role="option"
                   aria-selected={false}
                 >
@@ -197,10 +198,10 @@ export function CreateDMModal({
                       </span>
                       {/* Type tag */}
                       <span
-                        className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                        className={`flex-shrink-0 border-2 border-black px-1.5 py-0.5 text-[10px] font-bold ${
                           isAgent
-                            ? 'bg-green-500/10 text-green-600 dark:text-green-400'
-                            : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                            ? 'bg-brutal-lime-light text-black'
+                            : 'bg-brutal-cyan-light text-black'
                         }`}
                       >
                         {isAgent ? 'Agent' : '用户'}
@@ -212,8 +213,8 @@ export function CreateDMModal({
                         <Circle
                           className={`h-2 w-2 ${
                             participant.online
-                              ? 'fill-green-500 text-green-500'
-                              : 'fill-gray-400 text-gray-400'
+                              ? 'fill-brutal-lime text-brutal-lime'
+                              : 'fill-brutal-stone text-brutal-stone'
                           }`}
                         />
                         {participant.online ? '在线' : '离线'}
@@ -239,7 +240,7 @@ export function CreateDMModal({
                   >
                     {isCreating ? (
                       <>
-                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        <Spinner size="sm" className="mr-1" />
                         处理中...
                       </>
                     ) : existing ? (

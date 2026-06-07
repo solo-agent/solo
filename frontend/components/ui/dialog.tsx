@@ -40,14 +40,14 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={(e) => {
         if (e.target === overlayRef.current) onOpenChange(false);
       }}
       ref={overlayRef}
     >
       <div
-        className="mx-4 w-full max-w-md rounded-none border-brutal-thick bg-card p-6 shadow-brutal-xl"
+        className="mx-4 w-full max-w-md border-4 border-black bg-card p-6 shadow-brutal-xl"
         role="dialog"
         aria-modal="true"
       >
