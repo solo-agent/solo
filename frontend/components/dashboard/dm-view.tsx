@@ -221,16 +221,14 @@ export function DMView({
 
   const handleMessageClick = useCallback(
     (message: Message) => {
-      if (message.task_number != null) {
-        refetchTasks?.();
-        const task = tasks?.find((t) => t.message_id === message.id || t.id === message.id);
-        setThreadMessage({
-          ...message,
-          display_name: task?.creator_name || message.display_name,
-        });
-        setThreadTask(task ?? null);
-        onThreadChange?.(message.id);
-      }
+      refetchTasks?.();
+      const task = tasks?.find((t) => t.message_id === message.id || t.id === message.id);
+      setThreadMessage({
+        ...message,
+        display_name: task?.creator_name || message.display_name,
+      });
+      setThreadTask(task ?? null);
+      onThreadChange?.(message.id);
     },
     [tasks, refetchTasks, onThreadChange],
   );
