@@ -22,7 +22,7 @@ export function InboxBadge({ unreadCount, isSelected, onClick }: InboxBadgeProps
       type="button"
       onClick={onClick}
       className={cn(
-        'flex w-full items-center gap-1.5 px-3 pt-4 pb-2 text-left text-xs font-bold uppercase tracking-wider font-heading transition-all border-2',
+        'flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider font-heading transition-all border-2',
         isSelected
           ? 'bg-brutal-pink text-black border-black shadow-brutal-sm'
           : 'text-muted-foreground border-transparent hover:border-black',
