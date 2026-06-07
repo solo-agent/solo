@@ -298,15 +298,16 @@ func (b *OpenClawBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 	finalOutput := output.String()
 	outputMu.Unlock()
 
-	resCh <- &Result{
-		Status:     "completed",
-		Output:     finalOutput,
-		DurationMs: duration.Milliseconds(),
-		Usage:      buildACPUsageMap(usage, opts.Model),
+	if state.turnFin.CompareAndSwap(false, true) {
+		resCh <- &Result{
+			Status:     "completed",
+			Output:     finalOutput,
+			DurationMs: duration.Milliseconds(),
+			Usage:      buildACPUsageMap(usage, opts.Model),
+		}
+		close(msgCh)
+		close(resCh)
 	}
-	close(msgCh)
-	close(resCh)
-	state.turnFin.Store(true)
 
 	b.logger.Info("openclaw: initial persistent turn completed",
 		"session_id", sessionID,
@@ -372,9 +373,10 @@ func (b *OpenClawBackend) Send(ctx context.Context, ps *PersistentSession, messa
 			{"type": "text", "text": prompt, "role": "user"},
 		},
 	}); err != nil {
-		state.turnFin.Store(true)
-		close(msgCh)
-		close(resCh)
+		if state.turnFin.CompareAndSwap(false, true) {
+			close(msgCh)
+			close(resCh)
+		}
 		return nil, fmt.Errorf("openclaw persistent session/prompt: %w", err)
 	}
 
@@ -390,15 +392,16 @@ func (b *OpenClawBackend) Send(ctx context.Context, ps *PersistentSession, messa
 	finalOutput := output.String()
 	outputMu.Unlock()
 
-	resCh <- &Result{
-		Status:     "completed",
-		Output:     finalOutput,
-		DurationMs: duration.Milliseconds(),
-		Usage:      buildACPUsageMap(usage, ""),
+	if state.turnFin.CompareAndSwap(false, true) {
+		resCh <- &Result{
+			Status:     "completed",
+			Output:     finalOutput,
+			DurationMs: duration.Milliseconds(),
+			Usage:      buildACPUsageMap(usage, ""),
+		}
+		close(msgCh)
+		close(resCh)
 	}
-	close(msgCh)
-	close(resCh)
-	state.turnFin.Store(true)
 
 	b.logger.Info("openclaw: persistent turn completed via Send",
 		"session_id", state.sessionID,
