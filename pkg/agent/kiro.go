@@ -3,12 +3,14 @@ package agent
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -321,6 +323,364 @@ func (b *KiroBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *Ex
 		Result:   resCh,
 		Stop:     stop,
 	}, nil
+}
+
+// ── Persistent Backend (v1.5) ──────────────────────────────────────────────────
+
+// kiroPersistentState holds the runtime state of a long-running Kiro ACP
+// subprocess across multiple turns.
+type kiroPersistentState struct {
+	runner    *persistentRunner
+	client    *acpClient
+	sessionID string
+	turnFin   atomic.Bool // guards duplicate onPromptDone calls per turn
+}
+
+// Compile-time check.
+var _ SessionStater = (*kiroPersistentState)(nil)
+
+func (s *kiroPersistentState) IsAlive() bool           { return s.runner.isAlive() }
+func (s *kiroPersistentState) SessionID() string       { return s.sessionID }
+func (s *kiroPersistentState) Done() <-chan struct{}   { return s.runner.done }
+func (s *kiroPersistentState) Notify(msg string) error { return s.runner.write([]byte(msg)) }
+
+// buildKiroSessionParams constructs the session/new parameters for Kiro.
+func buildKiroSessionParams(cwd string) map[string]any {
+	return map[string]any{
+		"cwd":        cwd,
+		"mcpServers": []any{},
+	}
+}
+
+// Start creates a persistent Kiro session via ACP. The initial handshake
+// and prompt are processed synchronously before Start returns.
+func (b *KiroBackend) Start(ctx context.Context, req *ExecuteRequest, opts *ExecuteOptions) (*PersistentSession, error) {
+	execPath := b.executablePath
+	if _, err := exec.LookPath(execPath); err != nil {
+		return nil, fmt.Errorf("kiro executable not found at %q: %w", execPath, err)
+	}
+
+	kiroArgs := []string{"acp", "--trust-all-tools"}
+	kiroArgs = append(kiroArgs, filterCustomArgs(opts.ExtraArgs, kiroBlockedArgs)...)
+	kiroArgs = append(kiroArgs, filterCustomArgs(opts.CustomArgs, kiroBlockedArgs)...)
+
+	extraEnv := make(map[string]string, len(opts.Env))
+	for k, v := range opts.Env {
+		extraEnv[k] = v
+	}
+
+	runner, err := startPersistent(ctx, execPath, kiroArgs, opts.WorkspaceDir, extraEnv, b.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	prompt := buildPrompt(req, opts)
+	msgCh := make(chan OutputChunk, 256)
+	resCh := make(chan *Result, 1)
+
+	var outputMu sync.Mutex
+	var output strings.Builder
+	turnDone := make(chan acpPromptResult, 1)
+
+	cl := &acpClient{
+		logger:  b.logger,
+		stdin:   runner.stdin,
+		pending: make(map[int]*pendingRPC),
+		onChunk: func(chunk OutputChunk) {
+			if chunk.Type == string(MessageToolUse) {
+				chunk.Tool.Name = kiroToolNameFromTitle(chunk.Tool.Name)
+			}
+			if chunk.Type == string(MessageText) && chunk.Content != "" {
+				outputMu.Lock()
+				output.WriteString(chunk.Content)
+				outputMu.Unlock()
+			}
+			trySend(msgCh, chunk)
+		},
+		onPromptDone: func(pr acpPromptResult) {
+			select {
+			case turnDone <- pr:
+			default:
+			}
+		},
+	}
+
+	state := &kiroPersistentState{
+		runner: runner,
+		client: cl,
+	}
+
+	// Start reader goroutine for process lifetime.
+	go func() {
+		defer close(state.runner.done)
+		scanner := bufio.NewScanner(runner.stdout)
+		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			cl.handleLine(line)
+		}
+		cl.closeAllPending(fmt.Errorf("kiro process exited"))
+
+		// If a turn is still active, signal failure.
+		if state.turnFin.CompareAndSwap(false, true) {
+			resCh <- &Result{Status: "failed", Error: "kiro process exited unexpectedly"}
+			close(msgCh)
+			close(resCh)
+		}
+	}()
+
+	// Drive the initial handshake and prompt synchronously.
+	startTime := time.Now()
+	handleError := func(errMsg string) {
+		if state.turnFin.CompareAndSwap(false, true) {
+			resCh <- &Result{Status: "failed", Error: errMsg, DurationMs: time.Since(startTime).Milliseconds()}
+			close(msgCh)
+			close(resCh)
+		}
+	}
+
+	// 1. Initialize handshake.
+	_, err = cl.request(ctx, "initialize", map[string]any{
+		"protocolVersion": 1,
+		"clientInfo": map[string]any{
+			"name":    "solo-agent-sdk",
+			"version": "1.0.0",
+		},
+		"clientCapabilities": map[string]any{},
+	})
+	if err != nil {
+		runner.close()
+		handleError(fmt.Sprintf("kiro initialize failed: %v", err))
+		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+	}
+
+	// 2. Create or resume session.
+	cwd := opts.WorkspaceDir
+	if cwd == "" {
+		cwd = "."
+	}
+	var sessionID string
+	if opts.ResumeSessionID != "" {
+		result, err := cl.request(ctx, "session/resume", map[string]any{
+			"sessionId": opts.ResumeSessionID,
+		})
+		if err == nil {
+			sessionID, _ = resolveResumedSessionID(opts.ResumeSessionID, result)
+		}
+	}
+	if sessionID == "" {
+		result, err := cl.request(ctx, "session/new", buildKiroSessionParams(cwd))
+		if err != nil {
+			runner.close()
+			handleError(fmt.Sprintf("kiro session/new failed: %v", err))
+			return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		}
+		sessionID = extractACPSessionID(result)
+		if sessionID == "" {
+			runner.close()
+			handleError("kiro session/new returned no session ID")
+			return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		}
+	}
+	cl.sessionID = sessionID
+	state.sessionID = sessionID
+	b.logger.Info("kiro: persistent session created", "session_id", sessionID)
+
+	// 3. Set model if specified.
+	if opts.Model != "" {
+		if _, err := cl.request(ctx, "session/set_model", map[string]any{
+			"sessionId": sessionID,
+			"modelId":   opts.Model,
+		}); err != nil {
+			b.logger.Warn("kiro: set_session_model failed", "error", err)
+		}
+	}
+
+	// 4. Build prompt blocks with role-based format so the agent
+	// treats system instructions as authoritative.
+	promptBlocks := []map[string]any{
+		{"type": "text", "text": prompt, "role": "user"},
+	}
+	if opts.SystemPrompt != "" {
+		promptBlocks = append([]map[string]any{
+			{"type": "text", "text": opts.SystemPrompt, "role": "system"},
+		}, promptBlocks...)
+	}
+
+	// 5. Send the initial prompt. Kiro's session/prompt accepts both
+	// "content" and "prompt" keys; we send both for protocol compat.
+	_, err = cl.request(ctx, "session/prompt", map[string]any{
+		"sessionId": sessionID,
+		"content":   promptBlocks,
+		"prompt":    promptBlocks,
+	})
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			handleError(fmt.Sprintf("kiro timed out during initial prompt"))
+		} else if errors.Is(ctx.Err(), context.Canceled) {
+			handleError("execution cancelled")
+		} else {
+			handleError(fmt.Sprintf("kiro session/prompt failed: %v", err))
+		}
+		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+	}
+
+	// Collect prompt result (usage, stop reason).
+	var usage TokenUsage
+	select {
+	case pr := <-turnDone:
+		usage = pr.usage
+	default:
+	}
+
+	duration := time.Since(startTime)
+	outputMu.Lock()
+	finalOutput := output.String()
+	outputMu.Unlock()
+
+	resCh <- &Result{
+		Status:     "completed",
+		Output:     finalOutput,
+		DurationMs: duration.Milliseconds(),
+		Usage:      buildKiroUsageMap(usage, opts.Model),
+	}
+	close(msgCh)
+	close(resCh)
+	state.turnFin.Store(true)
+
+	b.logger.Info("kiro: initial persistent turn completed",
+		"session_id", sessionID,
+		"duration", duration.Round(time.Millisecond).String(),
+	)
+
+	var stopOnce sync.Once
+	stop := func() error { stopOnce.Do(func() { runner.cancel() }); return nil }
+
+	return &PersistentSession{
+		Messages:  msgCh,
+		Result:    resCh,
+		Stop:      stop,
+		SessionID: sessionID,
+		state:     state,
+	}, nil
+}
+
+// Send delivers new messages to a running persistent Kiro session on the
+// existing ACP session.
+func (b *KiroBackend) Send(ctx context.Context, ps *PersistentSession, messages []Message) (*PersistentSession, error) {
+	state, ok := ps.state.(*kiroPersistentState)
+	if !ok || state == nil {
+		return nil, fmt.Errorf("kiro: invalid session state")
+	}
+	if !state.runner.isAlive() {
+		return nil, fmt.Errorf("kiro: session process has exited")
+	}
+
+	prompt := buildPromptFromMessages(messages)
+
+	msgCh := make(chan OutputChunk, 256)
+	resCh := make(chan *Result, 1)
+
+	var outputMu sync.Mutex
+	var output strings.Builder
+	turnDone := make(chan acpPromptResult, 1)
+
+	// Redirect client callbacks to this turn's channels.
+	state.client.onChunk = func(chunk OutputChunk) {
+		if chunk.Type == string(MessageToolUse) {
+			chunk.Tool.Name = kiroToolNameFromTitle(chunk.Tool.Name)
+		}
+		if chunk.Type == string(MessageText) && chunk.Content != "" {
+			outputMu.Lock()
+			output.WriteString(chunk.Content)
+			outputMu.Unlock()
+		}
+		trySend(msgCh, chunk)
+	}
+	state.client.onPromptDone = func(pr acpPromptResult) {
+		select {
+		case turnDone <- pr:
+		default:
+		}
+	}
+
+	startTime := time.Now()
+	state.turnFin.Store(false)
+
+	promptBlocks := []map[string]any{
+		{"type": "text", "text": prompt, "role": "user"},
+	}
+
+	_, err := state.client.request(ctx, "session/prompt", map[string]any{
+		"sessionId": state.sessionID,
+		"content":   promptBlocks,
+		"prompt":    promptBlocks,
+	})
+	if err != nil {
+		state.turnFin.Store(true)
+		close(msgCh)
+		close(resCh)
+		return nil, fmt.Errorf("kiro persistent session/prompt: %w", err)
+	}
+
+	var usage TokenUsage
+	select {
+	case pr := <-turnDone:
+		usage = pr.usage
+	default:
+	}
+
+	duration := time.Since(startTime)
+	outputMu.Lock()
+	finalOutput := output.String()
+	outputMu.Unlock()
+
+	resCh <- &Result{
+		Status:     "completed",
+		Output:     finalOutput,
+		DurationMs: duration.Milliseconds(),
+		Usage:      buildKiroUsageMap(usage, ""),
+	}
+	close(msgCh)
+	close(resCh)
+	state.turnFin.Store(true)
+
+	b.logger.Info("kiro: persistent turn completed via Send",
+		"session_id", state.sessionID,
+		"duration", duration.Round(time.Millisecond).String(),
+	)
+
+	var stopOnce sync.Once
+	stop := func() error { stopOnce.Do(func() {}); return nil }
+
+	return &PersistentSession{
+		Messages:  msgCh,
+		Result:    resCh,
+		Stop:      stop,
+		SessionID: state.sessionID,
+		state:     state,
+	}, nil
+}
+
+// Close terminates the persistent Kiro session.
+func (b *KiroBackend) Close(ps *PersistentSession) error {
+	state, ok := ps.state.(*kiroPersistentState)
+	if !ok || state == nil {
+		return fmt.Errorf("kiro: invalid session state")
+	}
+	return state.runner.close()
+}
+
+// buildKiroUsageMap returns a usage map for the given model, or nil if
+// there are no tokens.
+func buildKiroUsageMap(usage TokenUsage, model string) map[string]TokenUsage {
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 {
+		return nil
+	}
+	return map[string]TokenUsage{model: usage}
 }
 
 // kiroToolNameFromTitle normalises tool names from Kiro's ACP server

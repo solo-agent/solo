@@ -3,12 +3,14 @@ package agent
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -315,6 +317,358 @@ func (b *KimiBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *Ex
 		Result:   resCh,
 		Stop:     stop,
 	}, nil
+}
+
+// ── Persistent Backend (v1.5) ──────────────────────────────────────────────────
+
+// kimiPersistentState holds the runtime state of a long-running Kimi ACP
+// subprocess across multiple turns.
+type kimiPersistentState struct {
+	runner    *persistentRunner
+	client    *acpClient
+	sessionID string
+	turnFin   atomic.Bool // guards duplicate onPromptDone calls per turn
+}
+
+// Compile-time check.
+var _ SessionStater = (*kimiPersistentState)(nil)
+
+func (s *kimiPersistentState) IsAlive() bool           { return s.runner.isAlive() }
+func (s *kimiPersistentState) SessionID() string       { return s.sessionID }
+func (s *kimiPersistentState) Done() <-chan struct{}   { return s.runner.done }
+func (s *kimiPersistentState) Notify(msg string) error { return s.runner.write([]byte(msg)) }
+
+// buildKimiSessionParams constructs the session/new parameters for Kimi.
+func buildKimiSessionParams(cwd string) map[string]any {
+	return map[string]any{
+		"cwd":        cwd,
+		"mcpServers": []any{},
+	}
+}
+
+// Start creates a persistent Kimi session via ACP. The initial handshake
+// and prompt are processed synchronously before Start returns.
+func (b *KimiBackend) Start(ctx context.Context, req *ExecuteRequest, opts *ExecuteOptions) (*PersistentSession, error) {
+	execPath := b.executablePath
+	if _, err := exec.LookPath(execPath); err != nil {
+		return nil, fmt.Errorf("kimi executable not found at %q: %w", execPath, err)
+	}
+
+	kimiArgs := append([]string{"acp"}, filterCustomArgs(opts.ExtraArgs, kimiBlockedArgs)...)
+	kimiArgs = append(kimiArgs, filterCustomArgs(opts.CustomArgs, kimiBlockedArgs)...)
+
+	extraEnv := make(map[string]string, len(opts.Env))
+	for k, v := range opts.Env {
+		extraEnv[k] = v
+	}
+
+	runner, err := startPersistent(ctx, execPath, kimiArgs, opts.WorkspaceDir, extraEnv, b.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	prompt := buildPrompt(req, opts)
+	msgCh := make(chan OutputChunk, 256)
+	resCh := make(chan *Result, 1)
+
+	var outputMu sync.Mutex
+	var output strings.Builder
+	turnDone := make(chan acpPromptResult, 1)
+
+	cl := &acpClient{
+		logger:  b.logger,
+		stdin:   runner.stdin,
+		pending: make(map[int]*pendingRPC),
+		onChunk: func(chunk OutputChunk) {
+			if chunk.Type == string(MessageToolUse) {
+				chunk.Tool.Name = kimiToolNameFromTitle(chunk.Tool.Name)
+			}
+			if chunk.Type == string(MessageText) && chunk.Content != "" {
+				outputMu.Lock()
+				output.WriteString(chunk.Content)
+				outputMu.Unlock()
+			}
+			trySend(msgCh, chunk)
+		},
+		onPromptDone: func(pr acpPromptResult) {
+			select {
+			case turnDone <- pr:
+			default:
+			}
+		},
+	}
+
+	state := &kimiPersistentState{
+		runner: runner,
+		client: cl,
+	}
+
+	// Start reader goroutine for process lifetime.
+	go func() {
+		defer close(state.runner.done)
+		scanner := bufio.NewScanner(runner.stdout)
+		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			cl.handleLine(line)
+		}
+		cl.closeAllPending(fmt.Errorf("kimi process exited"))
+
+		// If a turn is still active, signal failure.
+		if state.turnFin.CompareAndSwap(false, true) {
+			resCh <- &Result{Status: "failed", Error: "kimi process exited unexpectedly"}
+			close(msgCh)
+			close(resCh)
+		}
+	}()
+
+	// Drive the initial handshake and prompt synchronously.
+	startTime := time.Now()
+	handleError := func(errMsg string) {
+		if state.turnFin.CompareAndSwap(false, true) {
+			resCh <- &Result{Status: "failed", Error: errMsg, DurationMs: time.Since(startTime).Milliseconds()}
+			close(msgCh)
+			close(resCh)
+		}
+	}
+
+	// 1. Initialize handshake.
+	_, err = cl.request(ctx, "initialize", map[string]any{
+		"protocolVersion": 1,
+		"clientInfo": map[string]any{
+			"name":    "solo-agent-sdk",
+			"version": "1.0.0",
+		},
+		"clientCapabilities": map[string]any{},
+	})
+	if err != nil {
+		runner.close()
+		handleError(fmt.Sprintf("kimi initialize failed: %v", err))
+		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+	}
+
+	// 2. Create or resume session.
+	cwd := opts.WorkspaceDir
+	if cwd == "" {
+		cwd = "."
+	}
+	var sessionID string
+	if opts.ResumeSessionID != "" {
+		result, err := cl.request(ctx, "session/resume", map[string]any{
+			"sessionId": opts.ResumeSessionID,
+		})
+		if err == nil {
+			sessionID, _ = resolveResumedSessionID(opts.ResumeSessionID, result)
+		}
+	}
+	if sessionID == "" {
+		result, err := cl.request(ctx, "session/new", buildKimiSessionParams(cwd))
+		if err != nil {
+			runner.close()
+			handleError(fmt.Sprintf("kimi session/new failed: %v", err))
+			return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		}
+		sessionID = extractACPSessionID(result)
+		if sessionID == "" {
+			runner.close()
+			handleError("kimi session/new returned no session ID")
+			return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		}
+	}
+	cl.sessionID = sessionID
+	state.sessionID = sessionID
+	b.logger.Info("kimi: persistent session created", "session_id", sessionID)
+
+	// 3. Set model if specified.
+	if opts.Model != "" {
+		if _, err := cl.request(ctx, "session/set_model", map[string]any{
+			"sessionId": sessionID,
+			"modelId":   opts.Model,
+		}); err != nil {
+			b.logger.Warn("kimi: set_session_model failed", "error", err)
+		}
+	}
+
+	// 4. Build prompt blocks with role-based format so the agent
+	// treats system instructions as authoritative.
+	promptBlocks := []map[string]any{
+		{"type": "text", "text": prompt, "role": "user"},
+	}
+	if opts.SystemPrompt != "" {
+		promptBlocks = append([]map[string]any{
+			{"type": "text", "text": opts.SystemPrompt, "role": "system"},
+		}, promptBlocks...)
+	}
+
+	// 5. Send the initial prompt.
+	_, err = cl.request(ctx, "session/prompt", map[string]any{
+		"sessionId": sessionID,
+		"prompt":    promptBlocks,
+	})
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			handleError(fmt.Sprintf("kimi timed out during initial prompt"))
+		} else if errors.Is(ctx.Err(), context.Canceled) {
+			handleError("execution cancelled")
+		} else {
+			handleError(fmt.Sprintf("kimi session/prompt failed: %v", err))
+		}
+		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+	}
+
+	// Collect prompt result (usage, stop reason).
+	var usage TokenUsage
+	select {
+	case pr := <-turnDone:
+		usage = pr.usage
+	default:
+	}
+
+	duration := time.Since(startTime)
+	outputMu.Lock()
+	finalOutput := output.String()
+	outputMu.Unlock()
+
+	resCh <- &Result{
+		Status:     "completed",
+		Output:     finalOutput,
+		DurationMs: duration.Milliseconds(),
+		Usage:      buildKimiUsageMap(usage, opts.Model),
+	}
+	close(msgCh)
+	close(resCh)
+	state.turnFin.Store(true)
+
+	b.logger.Info("kimi: initial persistent turn completed",
+		"session_id", sessionID,
+		"duration", duration.Round(time.Millisecond).String(),
+	)
+
+	var stopOnce sync.Once
+	stop := func() error { stopOnce.Do(func() { runner.cancel() }); return nil }
+
+	return &PersistentSession{
+		Messages:  msgCh,
+		Result:    resCh,
+		Stop:      stop,
+		SessionID: sessionID,
+		state:     state,
+	}, nil
+}
+
+// Send delivers new messages to a running persistent Kimi session on the
+// existing ACP session.
+func (b *KimiBackend) Send(ctx context.Context, ps *PersistentSession, messages []Message) (*PersistentSession, error) {
+	state, ok := ps.state.(*kimiPersistentState)
+	if !ok || state == nil {
+		return nil, fmt.Errorf("kimi: invalid session state")
+	}
+	if !state.runner.isAlive() {
+		return nil, fmt.Errorf("kimi: session process has exited")
+	}
+
+	prompt := buildPromptFromMessages(messages)
+
+	msgCh := make(chan OutputChunk, 256)
+	resCh := make(chan *Result, 1)
+
+	var outputMu sync.Mutex
+	var output strings.Builder
+	turnDone := make(chan acpPromptResult, 1)
+
+	// Redirect client callbacks to this turn's channels.
+	state.client.onChunk = func(chunk OutputChunk) {
+		if chunk.Type == string(MessageToolUse) {
+			chunk.Tool.Name = kimiToolNameFromTitle(chunk.Tool.Name)
+		}
+		if chunk.Type == string(MessageText) && chunk.Content != "" {
+			outputMu.Lock()
+			output.WriteString(chunk.Content)
+			outputMu.Unlock()
+		}
+		trySend(msgCh, chunk)
+	}
+	state.client.onPromptDone = func(pr acpPromptResult) {
+		select {
+		case turnDone <- pr:
+		default:
+		}
+	}
+
+	startTime := time.Now()
+	state.turnFin.Store(false)
+
+	_, err := state.client.request(ctx, "session/prompt", map[string]any{
+		"sessionId": state.sessionID,
+		"prompt": []map[string]any{
+			{"type": "text", "text": prompt, "role": "user"},
+		},
+	})
+	if err != nil {
+		state.turnFin.Store(true)
+		close(msgCh)
+		close(resCh)
+		return nil, fmt.Errorf("kimi persistent session/prompt: %w", err)
+	}
+
+	var usage TokenUsage
+	select {
+	case pr := <-turnDone:
+		usage = pr.usage
+	default:
+	}
+
+	duration := time.Since(startTime)
+	outputMu.Lock()
+	finalOutput := output.String()
+	outputMu.Unlock()
+
+	resCh <- &Result{
+		Status:     "completed",
+		Output:     finalOutput,
+		DurationMs: duration.Milliseconds(),
+		Usage:      buildKimiUsageMap(usage, ""),
+	}
+	close(msgCh)
+	close(resCh)
+	state.turnFin.Store(true)
+
+	b.logger.Info("kimi: persistent turn completed via Send",
+		"session_id", state.sessionID,
+		"duration", duration.Round(time.Millisecond).String(),
+	)
+
+	var stopOnce sync.Once
+	stop := func() error { stopOnce.Do(func() {}); return nil }
+
+	return &PersistentSession{
+		Messages:  msgCh,
+		Result:    resCh,
+		Stop:      stop,
+		SessionID: state.sessionID,
+		state:     state,
+	}, nil
+}
+
+// Close terminates the persistent Kimi session.
+func (b *KimiBackend) Close(ps *PersistentSession) error {
+	state, ok := ps.state.(*kimiPersistentState)
+	if !ok || state == nil {
+		return fmt.Errorf("kimi: invalid session state")
+	}
+	return state.runner.close()
+}
+
+// buildKimiUsageMap returns a usage map for the given model, or nil if
+// there are no tokens.
+func buildKimiUsageMap(usage TokenUsage, model string) map[string]TokenUsage {
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 {
+		return nil
+	}
+	return map[string]TokenUsage{model: usage}
 }
 
 // kimiToolNameFromTitle normalises tool names from Kimi's ACP server
