@@ -5,7 +5,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
-import { Hash, Users, Loader2, ClipboardList, MessageSquare, Eye } from 'lucide-react';
+import { Users, Loader2, ClipboardList, MessageSquare, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
 import { useChannelMembers } from '@/lib/hooks/use-channel-members';
@@ -397,8 +397,8 @@ export function ChannelView({
         {/* Channel header */}
         <div className="flex h-14 flex-shrink-0 items-center border-b-2 border-black px-4">
           <div className="flex items-center gap-2 flex-1 min-w-0">
-            <Hash className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
-            <h2 className="font-semibold text-foreground truncate">{channel.name}</h2>
+            <span className="font-mono text-base font-bold text-black flex-shrink-0">#</span>
+            <h2 className="font-bold text-foreground truncate">{channel.name}</h2>
             <div className="mx-2 h-4 w-px bg-border flex-shrink-0" />
             {/* Channel tab bar (SOLO-128-F) */}
             <div className="flex items-center gap-1">
@@ -406,10 +406,11 @@ export function ChannelView({
                 type="button"
                 onClick={() => setChannelViewTab('messages')}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold transition-colors',
+                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold border-2 transition-all',
+                  'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
                   channelViewTab === 'messages'
-                    ? 'bg-brutal-pink text-black border-2 border-black'
-                    : 'text-muted-foreground hover:text-foreground border-2 border-transparent',
+                    ? 'bg-brutal-pink text-black border-black shadow-brutal-sm -translate-y-px'
+                    : 'text-muted-foreground hover:text-foreground border-transparent hover:border-black hover:bg-white hover:shadow-brutal-sm hover:-translate-y-px',
                 )}
               >
                 <MessageSquare className="h-3.5 w-3.5" />
@@ -419,10 +420,11 @@ export function ChannelView({
                 type="button"
                 onClick={() => setChannelViewTab('tasks')}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold transition-colors',
+                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold border-2 transition-all',
+                  'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
                   channelViewTab === 'tasks'
-                    ? 'bg-brutal-pink text-black border-2 border-black'
-                    : 'text-muted-foreground hover:text-foreground border-2 border-transparent',
+                    ? 'bg-brutal-pink text-black border-black shadow-brutal-sm -translate-y-px'
+                    : 'text-muted-foreground hover:text-foreground border-transparent hover:border-black hover:bg-white hover:shadow-brutal-sm hover:-translate-y-px',
                 )}
               >
                 <ClipboardList className="h-3.5 w-3.5" />
@@ -542,7 +544,7 @@ export function ChannelView({
 
       {/* Thread panel (lazy-loaded, SOLO-63-F) — always mounted for smooth width transition */}
       <div
-        className="flex-shrink-0 bg-brutal-cream overflow-hidden relative transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] border-l-2 border-transparent"
+        className="flex-shrink-0 bg-brutal-cream overflow-hidden relative transition-[width] duration-100 ease-linear border-l-2 border-transparent"
         style={{ width: threadMessage ? threadPanelWidth : 0, borderLeftColor: threadMessage ? 'var(--color-border, #000)' : 'transparent' }}
       >
         {/* Resize handle — only interactive when panel is open */}

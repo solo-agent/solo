@@ -19,7 +19,10 @@ import { useToast } from '@/components/ui/toast';
 import { NavBar } from '@/components/ui/navbar';
 import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
+import { TabBar } from '@/components/ui/tab-bar';
+import type { TabBarTab } from '@/components/ui/tab-bar';
 import { BrutalAlert } from '@/components/ui/brutal-alert';
+import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { TeamsLeftColumn, type TeamsSelection } from '@/components/teams/teams-left-column';
 import { TeamsGraphView } from '@/components/teams/teams-graph-view';
 import { TeamsAgentProfile } from '@/components/teams/teams-agent-profile';
@@ -28,6 +31,11 @@ import { TeamsHumanProfile } from '@/components/teams/teams-human-profile';
 import type { Agent } from '@/lib/types';
 
 type AgentTab = 'profile' | 'workspace';
+
+const AGENT_TABS: TabBarTab[] = [
+  { key: 'profile', label: 'Profile', icon: <User className="h-3.5 w-3.5" /> },
+  { key: 'workspace', label: 'Workspace', icon: <FolderOpen className="h-3.5 w-3.5" /> },
+];
 
 export default function TeamsPage() {
   const router = useRouter();
@@ -160,10 +168,8 @@ export default function TeamsPage() {
         {/* Agent detail with header + tabs */}
         {selection?.kind === 'agent' && selectedAgent && (
           <>
-            <div className="flex items-center gap-3 border-b border-black bg-brutal-cream px-5 py-3">
-              <div className="flex h-9 w-9 items-center justify-center border-2 border-black bg-brutal-yellow font-bold">
-                {selectedAgent.name.charAt(0).toUpperCase()}
-              </div>
+            <div className="flex items-center gap-3 h-14 border-b-2 border-black bg-brutal-cream px-4">
+              <PixelAvatar agentId={selectedAgent.id} size="md" />
               <div className="flex-1 min-w-0">
                 <h1 className="truncate font-heading text-base font-bold">
                   {selectedAgent.name}
@@ -179,36 +185,12 @@ export default function TeamsPage() {
                 {isDMLoading ? '跳转中...' : 'Message'}
               </Button>
             </div>
-            <div className="flex border-b border-black bg-brutal-cream">
-              <button
-                type="button"
-                onClick={() => setAgentTab('profile')}
-                className={`flex items-center gap-1.5 border-r-2 border-black px-5 py-2 font-heading text-xs font-bold ${
-                  agentTab === 'profile'
-                    ? 'bg-brutal-pink text-black'
-                    : 'bg-white text-foreground hover:bg-brutal-pink-light'
-                }`}
-                aria-selected={agentTab === 'profile'}
-                role="tab"
-              >
-                <User className="h-3.5 w-3.5" />
-                Profile
-              </button>
-              <button
-                type="button"
-                onClick={() => setAgentTab('workspace')}
-                className={`flex items-center gap-1.5 border-r-2 border-black px-5 py-2 font-heading text-xs font-bold ${
-                  agentTab === 'workspace'
-                    ? 'bg-brutal-pink text-black'
-                    : 'bg-white text-foreground hover:bg-brutal-pink-light'
-                }`}
-                aria-selected={agentTab === 'workspace'}
-                role="tab"
-              >
-                <FolderOpen className="h-3.5 w-3.5" />
-                Workspace
-              </button>
-            </div>
+            <TabBar
+              tabs={AGENT_TABS}
+              activeKey={agentTab}
+              onChange={(key) => setAgentTab(key as AgentTab)}
+              variant="segment"
+            />
             <div className={agentTab === 'profile' ? 'flex-1 overflow-y-auto p-6' : 'flex-1 overflow-hidden'}>
               {agentTab === 'profile' ? (
                 <TeamsAgentProfile agentId={selectedAgent.id} />

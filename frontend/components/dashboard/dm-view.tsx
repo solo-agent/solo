@@ -11,13 +11,14 @@
 'use client';
 
 import { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
-import { Bot, User, AlertCircle, RefreshCw, MessageSquare, Circle, ClipboardList } from 'lucide-react';
+import { AlertCircle, RefreshCw, MessageSquare, Circle, ClipboardList } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useStreamingMessages } from '@/lib/hooks/use-streaming-messages';
 import { MessageList } from './message-list';
 import { MessageInput } from './message-input';
 import { TaskBoard } from '@/components/tasks/task-board';
 import { Skeleton } from '@/components/ui/skeleton';
+import { PixelAvatar } from '@/components/ui/pixel-avatar';
 const ThreadPanel = lazy(() =>
   import('./thread-panel').then((m) => ({ default: m.ThreadPanel })),
 );
@@ -287,42 +288,34 @@ export function DMView({
   return (
     <div className="flex flex-1 overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Header — card-brutal style */}
-        <div className="card-brutal mx-4 mt-4 p-4">
-          <div className="flex items-center gap-3">
-            {/* Icon */}
-            <div className={`
-              flex h-10 w-10 flex-shrink-0 items-center justify-center border-2 border-black
-              ${isAgent ? 'bg-brutal-lime' : 'bg-brutal-cyan'}
-            `}>
-              {isAgent ? (
-                <Bot className="h-5 w-5 text-black" />
-              ) : (
-                <User className="h-5 w-5 text-black" />
-              )}
+        {/* Header — full-width attached bar, same skeleton as Channel */}
+        <div className="flex h-14 flex-shrink-0 items-center border-b-2 border-black px-4">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            {/* Avatar */}
+            <PixelAvatar
+              agentId={dm.other_agent?.id ?? dm.other_user?.id ?? dm.id}
+              size="md"
+            />
+            {/* Name + status */}
+            <div className="flex items-center gap-2 min-w-0">
+              <h2 className="font-bold text-foreground truncate">
+                {name}
+              </h2>
+              {/* Online status dot */}
+              <Circle className="h-2 w-2 fill-brutal-lime text-brutal-lime flex-shrink-0" />
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <h2 className="font-heading font-bold text-foreground">
-                  {name}
-                </h2>
-                {/* Online status dot */}
-                <Circle className="h-2.5 w-2.5 fill-brutal-lime text-brutal-lime" />
-              </div>
-              <span className="font-mono text-[11px] text-muted-foreground">
-                {isAgent ? 'AI Agent' : '用户'}
-              </span>
-            </div>
+            <div className="mx-2 h-4 w-px bg-border flex-shrink-0" />
             {/* Tab bar (v1.2 Phase 2+3) */}
-            <div className="flex items-center gap-1 flex-shrink-0">
+            <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => setViewTab('messages')}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold transition-colors',
+                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold border-2 transition-all',
+                  'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
                   viewTab === 'messages'
-                    ? 'bg-brutal-pink text-black border-2 border-black'
-                    : 'text-muted-foreground hover:text-foreground border-2 border-transparent',
+                    ? 'bg-brutal-pink text-black border-black shadow-brutal-sm -translate-y-px'
+                    : 'text-muted-foreground hover:text-foreground border-transparent hover:border-black hover:bg-white hover:shadow-brutal-sm hover:-translate-y-px',
                 )}
               >
                 <MessageSquare className="h-3.5 w-3.5" />
@@ -332,10 +325,11 @@ export function DMView({
                 type="button"
                 onClick={() => setViewTab('tasks')}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold transition-colors',
+                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold border-2 transition-all',
+                  'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
                   viewTab === 'tasks'
-                    ? 'bg-brutal-pink text-black border-2 border-black'
-                    : 'text-muted-foreground hover:text-foreground border-2 border-transparent',
+                    ? 'bg-brutal-pink text-black border-black shadow-brutal-sm -translate-y-px'
+                    : 'text-muted-foreground hover:text-foreground border-transparent hover:border-black hover:bg-white hover:shadow-brutal-sm hover:-translate-y-px',
                 )}
               >
                 <ClipboardList className="h-3.5 w-3.5" />
@@ -452,7 +446,7 @@ export function DMView({
 
       {/* ThreadPanel — always mounted for smooth width transition */}
       <div
-        className="flex-shrink-0 bg-brutal-cream overflow-hidden relative transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] border-l-2 border-transparent"
+        className="flex-shrink-0 bg-brutal-cream overflow-hidden relative transition-[width] duration-100 ease-linear border-l-2 border-transparent"
         style={{ width: threadMessage ? threadPanelWidth : 0, borderLeftColor: threadMessage ? '#000' : 'transparent' }}
       >
         {/* Resize handle — only interactive when panel is open */}

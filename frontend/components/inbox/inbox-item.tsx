@@ -44,9 +44,10 @@ export function InboxItem({ item, onClick }: InboxItemProps) {
         }
       }}
       className={cn(
-        'group relative flex gap-3 px-6 py-2.5 cursor-pointer transition-colors border-b-2 border-black',
-        'hover:bg-brutal-muted/15',
-        item.is_unread && 'border-l-[3px] border-l-brutal-accent bg-brutal-primary-light/30',
+        'group relative flex gap-3 px-6 py-2.5 cursor-pointer transition-all border-b-2 border-black',
+        'hover:bg-brutal-accent-light hover:shadow-brutal-sm hover:-translate-y-px',
+        'active:translate-y-0.5 active:shadow-none',
+        item.is_unread && 'border-l-[3px] border-l-brutal-accent bg-brutal-primary-light',
       )}
     >
       {/* Unread dot */}
