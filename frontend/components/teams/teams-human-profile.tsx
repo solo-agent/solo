@@ -63,10 +63,10 @@ export function TeamsHumanProfile({ userId }: TeamsHumanProfileProps) {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
-        <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-red-light shadow-brutal-sm">
-          <AlertCircle className="h-6 w-6 text-brutal-red" />
+        <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-danger-light shadow-brutal-sm">
+          <AlertCircle className="h-6 w-6 text-brutal-danger" />
         </div>
-        <p className="font-body text-sm text-brutal-red">{error}</p>
+        <p className="font-body text-sm text-brutal-danger">{error}</p>
         <Button onClick={load} size="sm" className="mt-4">
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
           重试
@@ -81,7 +81,7 @@ export function TeamsHumanProfile({ userId }: TeamsHumanProfileProps) {
     <div className="p-6">
       <div className="border-2 border-black bg-white p-6 shadow-brutal">
         <div className="flex items-center gap-4">
-          <div className="flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-yellow text-2xl font-bold">
+          <div className="flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-accent text-2xl font-bold">
             <User className="h-8 w-8" />
           </div>
           <div>

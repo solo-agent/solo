@@ -81,7 +81,7 @@ export function ImageLightbox({ attachment, onClose }: ImageLightboxProps) {
       <button
         type="button"
         onClick={onClose}
-        className="absolute top-4 right-4 flex h-10 w-10 items-center justify-center border-2 border-white bg-black text-white hover:bg-brutal-red transition-colors"
+        className="absolute top-4 right-4 flex h-10 w-10 items-center justify-center border-2 border-white bg-black text-white hover:bg-brutal-danger transition-colors"
         aria-label="关闭预览"
       >
         <X className="h-5 w-5" />
@@ -99,7 +99,7 @@ export function ImageLightbox({ attachment, onClose }: ImageLightboxProps) {
         {/* Error state */}
         {loadState === 'error' && (
           <div className="flex flex-col items-center gap-3 p-12 text-white">
-            <ImageOff className="h-10 w-10 text-brutal-red" />
+            <ImageOff className="h-10 w-10 text-brutal-danger" />
             <p className="font-mono text-sm">图片加载失败</p>
           </div>
         )}
@@ -152,15 +152,15 @@ function InlineImage({ attachment, onClick }: InlineImageProps) {
     >
       {/* Loading skeleton */}
       {loadState === 'loading' && (
-        <div className="flex h-40 w-full items-center justify-center bg-brutal-stone/20">
-          <div className="h-6 w-6 animate-spin border-2 border-brutal-stone" />
+        <div className="flex h-40 w-full items-center justify-center bg-brutal-muted/20">
+          <div className="h-6 w-6 animate-spin border-2 border-brutal-muted" />
         </div>
       )}
 
       {/* Error state */}
       {loadState === 'error' && (
         <div className="flex flex-col items-center gap-1 p-4">
-          <ImageOff className="h-6 w-6 text-brutal-stone" />
+          <ImageOff className="h-6 w-6 text-brutal-muted" />
           <span className="font-mono text-[10px] text-muted-foreground">
             图片加载失败
           </span>

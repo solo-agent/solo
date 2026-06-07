@@ -210,16 +210,16 @@
 }
 
 /* Colored shadow variants (override the black with a color shadow token) */
-.shadow-brutal-pink {
+.shadow-brutal-primary {
   --tw-shadow-color: var(--color-brutal-primary);
 }
-.shadow-brutal-yellow {
+.shadow-brutal-accent {
   --tw-shadow-color: var(--color-brutal-accent);
 }
 .shadow-brutal-blue {
   --tw-shadow-color: var(--color-brutal-info);
 }
-.shadow-brutal-lime {
+.shadow-brutal-success {
   --tw-shadow-color: var(--color-brutal-success);
 }
 
@@ -283,8 +283,7 @@
 }
 
 /* Primary variant (yellow call-to-action) */
-/* v4.0: rename to .btn-brutal-primary to match the semantic token name. */
-.btn-brutal-pink {
+.btn-brutal-primary {
   background: var(--color-brutal-primary);
 }
 
@@ -622,7 +621,7 @@
    Left border color utilities for message types
    ============================================================ */
 
-.border-l-brutal-pink {
+.border-l-brutal-primary {
   border-left: 3px solid var(--color-brutal-accent);
 }
 

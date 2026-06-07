@@ -60,7 +60,7 @@ function CodeBlock({ children, className }: ComponentPropsWithoutRef<'code'>) {
   }
 
   return (
-    <pre className="bg-black text-brutal-lime border-2 border-black shadow-brutal-sm p-3 overflow-x-auto">
+    <pre className="bg-black text-brutal-success border-2 border-black shadow-brutal-sm p-3 overflow-x-auto">
       <code className={className}>{children}</code>
     </pre>
   );
@@ -90,7 +90,7 @@ const mdComponents = {
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-brutal-cyan font-bold underline decoration-2 underline-offset-2 hover:text-brutal-pink transition-colors"
+        className="text-brutal-info font-bold underline decoration-2 underline-offset-2 hover:text-brutal-primary transition-colors"
       >
         {children}
       </a>
@@ -98,7 +98,7 @@ const mdComponents = {
   },
   blockquote({ children }: { children: React.ReactNode }) {
     return (
-      <blockquote className="my-1.5 border-l-2 border-brutal-pink pl-3 italic text-muted-foreground">
+      <blockquote className="my-1.5 border-l-2 border-brutal-primary pl-3 italic text-muted-foreground">
         {children}
       </blockquote>
     );
@@ -129,7 +129,7 @@ const mdComponents = {
   },
   th({ children }: { children: React.ReactNode }) {
     return (
-      <th className="border-b-2 border-black bg-brutal-pink px-3 py-2 text-left font-heading font-bold text-black">
+      <th className="border-b-2 border-black bg-brutal-primary px-3 py-2 text-left font-heading font-bold text-black">
         {children}
       </th>
     );

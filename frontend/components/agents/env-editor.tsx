@@ -148,7 +148,7 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
             )}
             style={{ background: '#fffaef' }}
           >
-            <Trash2 className="h-3.5 w-3.5 text-brutal-red" />
+            <Trash2 className="h-3.5 w-3.5 text-brutal-danger" />
           </button>
         </div>
       ))}

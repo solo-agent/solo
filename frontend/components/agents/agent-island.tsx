@@ -37,11 +37,11 @@ const FINAL_STATE_BADGE: Record<
   NonNullable<IslandAgent['finalState']>,
   { label: string; className: string }
 > = {
-  completed: { label: '完成', className: 'bg-brutal-lime text-black' },
-  failed: { label: '失败', className: 'bg-brutal-red text-white' },
-  aborted: { label: '中断', className: 'bg-brutal-stone text-white' },
-  timeout: { label: '超时', className: 'bg-brutal-orange text-black' },
-  cancelled: { label: '已取消', className: 'bg-brutal-stone text-white' },
+  completed: { label: '完成', className: 'bg-brutal-success text-black' },
+  failed: { label: '失败', className: 'bg-brutal-danger text-white' },
+  aborted: { label: '中断', className: 'bg-brutal-muted text-white' },
+  timeout: { label: '超时', className: 'bg-brutal-warning text-black' },
+  cancelled: { label: '已取消', className: 'bg-brutal-muted text-white' },
 };
 
 // ---- Status visual config ----
@@ -66,58 +66,58 @@ interface StatusVisuals {
 const STATUS_VISUALS: Record<IslandAgentStatus, StatusVisuals> = {
   idle: {
     icon: Bot,
-    dotClass: 'bg-brutal-stone',
-    iconClass: 'text-muted-foreground',
+    dotClass: 'bg-brutal-muted',
+    iconClass: 'text-foreground',
     spin: false,
     pulse: false,
     label: '空闲',
-    badgeClass: 'bg-brutal-stone text-white',
+    badgeClass: 'bg-brutal-muted text-white',
   },
   thinking: {
     icon: Brain,
-    dotClass: 'bg-brutal-yellow',
+    dotClass: 'bg-brutal-accent',
     iconClass: 'text-yellow-600',
     spin: false,
     pulse: true,
     label: '思考中',
-    badgeClass: 'bg-brutal-yellow text-black',
+    badgeClass: 'bg-brutal-accent text-black',
   },
   running: {
     icon: Loader2,
-    dotClass: 'bg-brutal-cyan',
+    dotClass: 'bg-brutal-info',
     iconClass: 'text-cyan-600',
     spin: true,
     pulse: false,
     label: '执行中',
-    badgeClass: 'bg-brutal-cyan text-black',
+    badgeClass: 'bg-brutal-info text-black',
   },
   streaming: {
     icon: Bot,
-    dotClass: 'bg-brutal-lime',
+    dotClass: 'bg-brutal-success',
     iconClass: 'text-green-600',
     spin: false,
     pulse: true,
     label: '生成中',
-    badgeClass: 'bg-brutal-lime text-black',
+    badgeClass: 'bg-brutal-success text-black',
   },
   // waiting_approval: reserved per PRD v1.x approval flow — UI not implemented yet
   waiting_approval: {
     icon: AlertTriangle,
-    dotClass: 'bg-brutal-orange',
+    dotClass: 'bg-brutal-warning',
     iconClass: 'text-orange-600',
     spin: false,
     pulse: true,
     label: '等审批',
-    badgeClass: 'bg-brutal-orange text-black',
+    badgeClass: 'bg-brutal-warning text-black',
   },
   error: {
     icon: AlertTriangle,
-    dotClass: 'bg-brutal-red',
+    dotClass: 'bg-brutal-danger',
     iconClass: 'text-red-600',
     spin: false,
     pulse: false,
     label: '出错',
-    badgeClass: 'bg-brutal-red text-white',
+    badgeClass: 'bg-brutal-danger text-white',
   },
 };
 
@@ -279,7 +279,7 @@ function CollapsedPill({
     <button
       type="button"
       onClick={onClick}
-      className="group flex w-full items-center gap-2 border-t-2 border-black bg-brutal-cream px-3 py-2 transition-colors hover:bg-brutal-stone/10"
+      className="group flex w-full items-center gap-2 border-t-2 border-black bg-brutal-cream px-3 py-2 transition-colors hover:bg-brutal-muted-light"
       aria-label={`Agent ${primary.agentName} ${STATUS_VISUALS[primary.status].label},点击查看详情`}
     >
       {/* Pixel avatar */}
@@ -310,20 +310,20 @@ function CollapsedPill({
         <span className="truncate font-heading text-xs font-bold text-foreground">
           {primary.agentName}
         </span>
-        <span className="truncate font-mono text-[10px] text-muted-foreground">
+        <span className="truncate font-mono text-[10px] text-foreground">
           {primary.activityText || STATUS_VISUALS[primary.status].label}
         </span>
       </div>
 
       {/* Overflow indicator */}
       {overflow > 0 && (
-        <span className="flex h-4 min-w-[16px] flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-pink px-1 font-mono text-[9px] font-bold text-black">
+        <span className="flex h-4 min-w-[16px] flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-primary px-1 font-mono text-[9px] font-bold text-black">
           +{overflow}
         </span>
       )}
 
       {/* Expand hint */}
-      <Eye className="h-3 w-3 flex-shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+      <Eye className="h-3 w-3 flex-shrink-0 text-foreground opacity-0 transition-opacity group-hover:opacity-100" />
     </button>
   );
 }
@@ -348,11 +348,11 @@ function ExpandedPanel({
       {/* Header */}
       <div className="flex items-center justify-between border-b-2 border-black bg-brutal-cream px-2.5 py-1.5">
         <div className="flex items-center gap-1.5">
-          <span className="flex h-4 w-4 items-center justify-center border-2 border-black bg-brutal-pink">
+          <span className="flex h-4 w-4 items-center justify-center border-2 border-black bg-brutal-primary">
             <Eye className="h-2.5 w-2.5 text-white" />
           </span>
           <span className="font-heading text-xs font-bold">Agent View</span>
-          <span className="font-mono text-[9px] text-muted-foreground">
+          <span className="font-mono text-[9px] text-foreground">
             {agents.length}
           </span>
         </div>
@@ -369,7 +369,7 @@ function ExpandedPanel({
           <button
             type="button"
             onClick={onCollapse}
-            className="flex h-5 w-5 items-center justify-center border-2 border-black bg-brutal-cream hover:bg-brutal-stone/20"
+            className="flex h-5 w-5 items-center justify-center border-2 border-black bg-brutal-cream hover:bg-brutal-muted-light"
             aria-label="收起"
             title="收起"
           >
@@ -464,7 +464,7 @@ function AgentRow({ agent, onClick }: { agent: IslandAgent; onClick?: () => void
             </span>
           )}
         </div>
-        <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
+        <p className="mt-0.5 truncate font-mono text-[10px] text-foreground">
           {agent.activityText}
         </p>
         {agent.toolInputSummary && (

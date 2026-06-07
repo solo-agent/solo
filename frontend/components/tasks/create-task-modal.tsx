@@ -141,7 +141,7 @@ export function CreateTaskModal({
             type="button"
             onClick={() => !isDisabled && onOpenChange(false)}
             disabled={isDisabled}
-            className="flex h-7 w-7 items-center justify-center border-2 border-black bg-white hover:bg-brutal-pink-light transition-colors disabled:opacity-50"
+            className="flex h-7 w-7 items-center justify-center border-2 border-black bg-white hover:bg-brutal-primary-light transition-colors disabled:opacity-50"
             aria-label="关闭"
           >
             <X className="h-3.5 w-3.5" />
@@ -178,15 +178,15 @@ export function CreateTaskModal({
 
           {/* Validation error */}
           {validationError && (
-            <p className="mt-2 font-mono text-xs font-bold text-brutal-red">
+            <p className="mt-2 font-mono text-xs font-bold text-brutal-danger">
               {validationError}
             </p>
           )}
 
           {/* Submit error (server) */}
           {submitError && (
-            <div className="mt-3 border-2 border-brutal-red bg-brutal-red-light p-2.5">
-              <p className="font-mono text-xs font-bold text-brutal-red">
+            <div className="mt-3 border-2 border-brutal-danger bg-brutal-danger-light p-2.5">
+              <p className="font-mono text-xs font-bold text-brutal-danger">
                 {submitError}
               </p>
             </div>
@@ -207,7 +207,7 @@ export function CreateTaskModal({
             type="button"
             onClick={handleSubmit}
             disabled={isDisabled}
-            className="btn-brutal btn-brutal-sm btn-brutal-pink"
+            className="btn-brutal btn-brutal-sm btn-brutal-primary"
           >
             {isDisabled ? '创建中...' : '创建任务'}
           </button>

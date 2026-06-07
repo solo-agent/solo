@@ -302,7 +302,7 @@ export function DMView({
                 {name}
               </h2>
               {/* Online status dot */}
-              <Circle className="h-2 w-2 fill-brutal-lime text-brutal-lime flex-shrink-0" />
+              <Circle className="h-2 w-2 fill-brutal-success text-brutal-success flex-shrink-0" />
             </div>
             <div className="mx-2 h-4 w-px bg-border flex-shrink-0" />
             {/* Tab bar (v1.2 Phase 2+3) */}
@@ -314,7 +314,7 @@ export function DMView({
                   'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold border-2 transition-all',
                   'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
                   viewTab === 'messages'
-                    ? 'bg-brutal-pink text-black border-black shadow-brutal-sm -translate-y-px'
+                    ? 'bg-brutal-primary text-black border-black shadow-brutal-sm -translate-y-px'
                     : 'text-muted-foreground hover:text-foreground border-transparent hover:border-black hover:bg-white hover:shadow-brutal-sm hover:-translate-y-px',
                 )}
               >
@@ -328,7 +328,7 @@ export function DMView({
                   'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold border-2 transition-all',
                   'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
                   viewTab === 'tasks'
-                    ? 'bg-brutal-pink text-black border-black shadow-brutal-sm -translate-y-px'
+                    ? 'bg-brutal-primary text-black border-black shadow-brutal-sm -translate-y-px'
                     : 'text-muted-foreground hover:text-foreground border-transparent hover:border-black hover:bg-white hover:shadow-brutal-sm hover:-translate-y-px',
                 )}
               >
@@ -356,8 +356,8 @@ export function DMView({
             {error && !isLoading && (
               <div className="flex flex-1 items-center justify-center">
                 <div className="text-center space-y-3">
-                  <AlertCircle className="mx-auto h-8 w-8 text-brutal-red" />
-                  <p className="font-mono text-sm text-brutal-red">{error}</p>
+                  <AlertCircle className="mx-auto h-8 w-8 text-brutal-danger" />
+                  <p className="font-mono text-sm text-brutal-danger">{error}</p>
                   <button
                     type="button"
                     onClick={handleRetry}
@@ -405,8 +405,8 @@ export function DMView({
               />
             )}
             {deleted && (
-              <div className="border-t-2 border-black bg-brutal-stone/20 px-4 py-3 text-center">
-                <span className="badge-brutal bg-brutal-stone text-black">
+              <div className="border-t-2 border-black bg-brutal-muted/20 px-4 py-3 text-center">
+                <span className="badge-brutal bg-brutal-muted text-black">
                   DELETED
                 </span>
                 <p className="mt-2 font-body text-xs text-muted-foreground">
@@ -452,7 +452,7 @@ export function DMView({
         {/* Resize handle — only interactive when panel is open */}
         {threadMessage && (
           <div
-            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-pink/50 transition-colors z-10"
+            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-primary/50 transition-colors z-10"
             onMouseDown={(e) => {
               e.preventDefault();
               const startX = e.clientX;

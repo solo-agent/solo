@@ -51,7 +51,7 @@ export function ResizablePanel({
       </div>
       <div
         onMouseDown={onMouseDown}
-        className="w-1 bg-black cursor-col-resize flex-shrink-0 hover:bg-brutal-pink transition-colors active:bg-brutal-pink"
+        className="w-1 bg-black cursor-col-resize flex-shrink-0 hover:bg-brutal-primary transition-colors active:bg-brutal-primary"
         role="separator"
         aria-orientation="vertical"
       />

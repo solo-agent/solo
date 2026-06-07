@@ -205,7 +205,7 @@ export default function TeamsPage() {
         {selection === null && agents.length === 0 && (
           <div className="flex flex-1 items-center justify-center p-8 text-center">
             <div>
-              <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm">
+              <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm">
                 <Plus className="h-7 w-7 text-white" />
               </div>
               <h2 className="font-heading text-lg font-bold">还没有 Agent</h2>

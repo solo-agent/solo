@@ -174,7 +174,7 @@ export function CreateDMModal({
                   key={`${participant.type}-${participant.id}`}
                   onClick={() => handleSelect(participant)}
                   disabled={isCreating}
-                  className="flex w-full items-center gap-3 border-2 border-transparent p-2 text-left transition-colors hover:border-black hover:bg-brutal-pink-light disabled:opacity-50"
+                  className="flex w-full items-center gap-3 border-2 border-transparent p-2 text-left transition-colors hover:border-black hover:bg-brutal-primary-light disabled:opacity-50"
                   role="option"
                   aria-selected={false}
                 >
@@ -200,8 +200,8 @@ export function CreateDMModal({
                       <span
                         className={`flex-shrink-0 border-2 border-black px-1.5 py-0.5 text-[10px] font-bold ${
                           isAgent
-                            ? 'bg-brutal-lime-light text-black'
-                            : 'bg-brutal-cyan-light text-black'
+                            ? 'bg-brutal-success-light text-black'
+                            : 'bg-brutal-info-light text-black'
                         }`}
                       >
                         {isAgent ? 'Agent' : '用户'}
@@ -213,8 +213,8 @@ export function CreateDMModal({
                         <Circle
                           className={`h-2 w-2 ${
                             participant.online
-                              ? 'fill-brutal-lime text-brutal-lime'
-                              : 'fill-brutal-stone text-brutal-stone'
+                              ? 'fill-brutal-success text-brutal-success'
+                              : 'fill-brutal-muted text-brutal-muted'
                           }`}
                         />
                         {participant.online ? '在线' : '离线'}

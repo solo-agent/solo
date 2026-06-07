@@ -69,7 +69,7 @@ export function AgentDetailPanel({ agentId, onClose }: AgentDetailPanelProps) {
         <button
           type="button"
           onClick={onClose}
-          className="flex h-8 w-8 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm hover:shadow-brutal transition-all"
+          className="flex h-8 w-8 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm hover:shadow-brutal transition-all"
           aria-label="关闭"
         >
           <X className="h-4 w-4" />

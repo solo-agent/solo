@@ -46,7 +46,7 @@ export function NetworkStatus() {
     <div
       role="alert"
       className={`fixed left-0 right-0 top-0 z-50 flex items-center justify-center gap-2 border-b-2 border-black py-2 text-sm font-medium text-black transition-transform duration-100 ease-linear ${
-        isOnline ? 'bg-brutal-lime' : 'bg-brutal-red'
+        isOnline ? 'bg-brutal-success' : 'bg-brutal-danger'
       }`}
     >
       {isOnline ? (

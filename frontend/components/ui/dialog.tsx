@@ -61,7 +61,7 @@ export function DialogCloseButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="rounded-none p-1 hover:bg-brutal-pink-light transition-colors"
+      className="rounded-none p-1 hover:bg-brutal-primary-light transition-colors"
       aria-label="关闭"
     >
       <X className="h-4 w-4" />

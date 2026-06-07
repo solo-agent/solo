@@ -76,8 +76,8 @@ export function MentionDropdown({
                 className={cn(
                   'flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold transition-colors',
                   index === selectedIndex
-                    ? 'bg-black text-brutal-pink'
-                    : 'text-foreground hover:bg-brutal-pink hover:text-black',
+                    ? 'bg-black text-brutal-primary'
+                    : 'text-foreground hover:bg-brutal-primary hover:text-black',
                 )}
                 role="option"
                 aria-selected={index === selectedIndex}

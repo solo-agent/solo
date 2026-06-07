@@ -31,27 +31,27 @@ export const STATUS_COLUMN_CONFIG: Record<
 > = {
   todo: {
     label: 'TODO',
-    bgClass: 'bg-brutal-orange',
+    bgClass: 'bg-brutal-warning',
     textClass: 'text-black',
   },
   in_progress: {
     label: 'IN PROGRESS',
-    bgClass: 'bg-brutal-cyan',
+    bgClass: 'bg-brutal-info',
     textClass: 'text-black',
   },
   in_review: {
     label: 'IN REVIEW',
-    bgClass: 'bg-brutal-lavender',
+    bgClass: 'bg-brutal-violet',
     textClass: 'text-black',
   },
   done: {
     label: 'DONE',
-    bgClass: 'bg-brutal-lime',
+    bgClass: 'bg-brutal-success',
     textClass: 'text-black',
   },
   closed: {
     label: 'CLOSED',
-    bgClass: 'bg-brutal-stone',
+    bgClass: 'bg-brutal-muted',
     textClass: 'text-black',
   },
 };
@@ -152,7 +152,7 @@ function StatusBadge({
                 onChange(s);
                 setOpen(false);
               }}
-              className="block w-full text-left px-3 py-1.5 font-heading text-xs font-bold bg-white text-black transition-colors hover:bg-brutal-pink hover:text-black"
+              className="block w-full text-left px-3 py-1.5 font-heading text-xs font-bold bg-white text-black transition-colors hover:bg-brutal-primary hover:text-black"
             >
               {STATUS_LABELS[s]}
             </button>
@@ -208,7 +208,7 @@ function TaskCard({
       className={cn(
         'card-brutal w-full cursor-pointer text-left',
         'hover:shadow-brutal-lg',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-pink focus-visible:ring-offset-2',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-primary focus-visible:ring-offset-2',
       )}
     >
       <div className="p-3">
@@ -241,7 +241,7 @@ function TaskCard({
                     onParentClick(task.parent_task_id!);
                   }
                 }}
-                className="text-[10px] text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-pink"
+                className="text-[10px] text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-primary"
               >
                 <ChevronRight className="inline h-3 w-3 -mt-px" />
                 {' '}子任务 of {parentTaskNumber ? `#${parentTaskNumber}` : '父任务'}
@@ -273,13 +273,13 @@ function TaskCard({
           <div className="mt-2 flex items-center gap-2">
             {isClaimed ? (
               <>
-                <span className="flex h-5 w-5 items-center justify-center border-2 border-black bg-brutal-lime font-heading text-[10px] font-bold text-black">
+                <span className="flex h-5 w-5 items-center justify-center border-2 border-black bg-brutal-success font-heading text-[10px] font-bold text-black">
                   {(claimerDisplay || '?').charAt(0).toUpperCase()}
                 </span>
                 <span className="flex-1 truncate font-body text-[11px] text-foreground font-medium">
                   {claimerDisplay}
                 </span>
-                <span className="flex-shrink-0 badge-brutal bg-brutal-lime text-black text-[10px]">
+                <span className="flex-shrink-0 badge-brutal bg-brutal-success text-black text-[10px]">
                   已认领
                 </span>
               </>
@@ -299,7 +299,7 @@ function TaskCard({
               <span className="font-bold">{task.done_subtask_count ?? 0}/{task.subtask_count}</span>
               <div className="flex-1 h-1 border border-brutal-muted bg-muted">
                 <div
-                  className="h-full bg-brutal-lime"
+                  className="h-full bg-brutal-success"
                   style={{ width: `${Math.min(((task.done_subtask_count ?? 0) / (task.subtask_count ?? 1)) * 100, 100)}%` }}
                 />
               </div>

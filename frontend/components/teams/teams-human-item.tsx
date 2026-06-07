@@ -20,7 +20,7 @@ export function TeamsHumanItem({ user, isSelected, onSelect }: TeamsHumanItemPro
       className={cn(
         'flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm transition-all',
         isSelected
-          ? 'bg-brutal-pink text-black border-2 border-black shadow-brutal-sm'
+          ? 'bg-brutal-primary text-black border-2 border-black shadow-brutal-sm'
           : 'border-2 border-transparent hover:border-black',
       )}
       role="button"

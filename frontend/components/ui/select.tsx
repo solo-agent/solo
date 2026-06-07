@@ -203,10 +203,10 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
                     // Selected: invert — black bg, pink text. High contrast,
                     // distinctly different from the hover state.
                     isSelected
-                      ? 'bg-black text-brutal-pink'
+                      ? 'bg-black text-brutal-primary'
                       : // Hover/keyboard-active: bold primary CTA — no pastels.
                         isActive
-                        ? 'bg-brutal-pink text-black'
+                        ? 'bg-brutal-primary text-black'
                         : // Default: white card, black ink.
                           'bg-white text-black',
                   )}

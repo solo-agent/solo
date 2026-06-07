@@ -22,11 +22,11 @@ function MemberItem({ member, onRemove }: { member: ChannelMember; onRemove?: (i
   const isAgent = member.member_type === 'agent';
   const [confirming, setConfirming] = useState(false);
   const statusColor = {
-    online: 'fill-brutal-lime text-brutal-lime',
-    offline: 'fill-brutal-stone text-brutal-stone',
-    thinking: 'fill-brutal-yellow text-brutal-yellow',
-    typing: 'fill-brutal-cyan text-brutal-cyan',
-  }[member.status] || 'fill-brutal-stone text-brutal-stone';
+    online: 'fill-brutal-success text-brutal-success',
+    offline: 'fill-brutal-muted text-brutal-muted',
+    thinking: 'fill-brutal-accent text-brutal-accent',
+    typing: 'fill-brutal-info text-brutal-info',
+  }[member.status] || 'fill-brutal-muted text-brutal-muted';
 
   const statusLabel = {
     online: '在线',
@@ -36,12 +36,12 @@ function MemberItem({ member, onRemove }: { member: ChannelMember; onRemove?: (i
   }[member.status] || '离线';
 
   return (
-    <div className="group flex items-center gap-2 border-2 border-transparent px-2 py-1.5 transition-colors hover:border-black hover:bg-brutal-pink-light">
+    <div className="group flex items-center gap-2 border-2 border-transparent px-2 py-1.5 transition-colors hover:border-black hover:bg-brutal-primary-light">
       {/* Icon / Avatar */}
       {isAgent ? (
         <PixelAvatar agentId={member.member_id} size="sm" />
       ) : (
-        <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-stone shadow-brutal-sm">
+        <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-muted shadow-brutal-sm">
           <span className="font-heading text-[10px] font-bold text-black">
             {member.display_name?.charAt(0)?.toUpperCase() || '?'}
           </span>
@@ -55,7 +55,7 @@ function MemberItem({ member, onRemove }: { member: ChannelMember; onRemove?: (i
 
       {/* Type badge */}
       {isAgent && (
-        <span className="badge-brutal bg-brutal-pink text-black text-[10px]">
+        <span className="badge-brutal bg-brutal-primary text-black text-[10px]">
           Agent
         </span>
       )}
@@ -70,14 +70,14 @@ function MemberItem({ member, onRemove }: { member: ChannelMember; onRemove?: (i
         confirming ? (
           <button
             onClick={(e) => { e.stopPropagation(); onRemove(member.member_id); }}
-            className="btn-brutal btn-brutal-sm bg-brutal-red text-black border-2 border-black font-heading text-[10px] font-bold shadow-brutal-sm"
+            className="btn-brutal btn-brutal-sm bg-brutal-danger text-black border-2 border-black font-heading text-[10px] font-bold shadow-brutal-sm"
           >
             KICK
           </button>
         ) : (
           <button
             onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
-            className="flex-shrink-0 border-2 border-black bg-white px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-all shadow-brutal-sm hover:bg-brutal-red hover:text-black"
+            className="flex-shrink-0 border-2 border-black bg-white px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-all shadow-brutal-sm hover:bg-brutal-danger hover:text-black"
             title="移除 Agent"
           >
             <X className="h-3 w-3" />

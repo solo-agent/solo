@@ -1,6 +1,6 @@
 // ============================================================================
 // Settings / Profile page — neubrutalist styling
-// - card-brutal form, input-brutal, btn-brutal-pink
+// - card-brutal form, input-brutal, btn-brutal-primary
 // - Display email and display_name
 // - Loading / error / success states
 // ============================================================================
@@ -82,7 +82,7 @@ export default function SettingsPage() {
       {/* Page header */}
       <div className="mb-8">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm">
+          <div className="flex h-10 w-10 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm">
             <User className="h-6 w-6 text-white" />
           </div>
           <div>
@@ -179,7 +179,7 @@ export default function SettingsPage() {
             {/* Feedback messages */}
             <div className="mt-3 space-y-1">
               {successMessage && (
-                <div className="flex items-center gap-1.5 font-mono text-xs text-brutal-lime">
+                <div className="flex items-center gap-1.5 font-mono text-xs text-brutal-success">
                   <CheckCircle2 className="h-4 w-4" />
                   <span>{successMessage}</span>
                 </div>

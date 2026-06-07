@@ -93,7 +93,7 @@ export function TaskForm({
       {/* Title */}
       <div>
         <Label htmlFor="task-title" className="mb-1.5 block">
-          任务标题 <span className="text-brutal-red">*</span>
+          任务标题 <span className="text-brutal-danger">*</span>
         </Label>
         <Input
           id="task-title"
@@ -190,8 +190,8 @@ export function TaskForm({
 
       {/* Error display */}
       {(validationError || error) && (
-        <div className="border-2 border-brutal-red bg-brutal-red-light p-3">
-          <p className="text-sm font-bold text-brutal-red">
+        <div className="border-2 border-brutal-danger bg-brutal-danger-light p-3">
+          <p className="text-sm font-bold text-brutal-danger">
             {validationError || error}
           </p>
         </div>
@@ -202,7 +202,7 @@ export function TaskForm({
         <button
           type="submit"
           disabled={isSubmitting}
-          className="btn-brutal btn-brutal-pink px-6"
+          className="btn-brutal btn-brutal-primary px-6"
         >
           {isSubmitting ? '提交中...' : submitLabel}
         </button>

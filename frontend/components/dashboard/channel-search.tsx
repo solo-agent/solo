@@ -171,7 +171,7 @@ export function ChannelSearch({ channelId, channelName, onResultClick }: Channel
             <button
               type="button"
               onClick={handleClose}
-              className="flex-shrink-0 p-0.5 hover:bg-brutal-pink-light transition-colors"
+              className="flex-shrink-0 p-0.5 hover:bg-brutal-primary-light transition-colors"
               aria-label="关闭搜索"
             >
               <X className="h-4 w-4 text-muted-foreground" />
@@ -193,7 +193,7 @@ export function ChannelSearch({ channelId, channelName, onResultClick }: Channel
             {/* Error state */}
             {error && (
               <div className="px-4 py-4 text-center">
-                <p className="font-body text-sm text-brutal-red">{error}</p>
+                <p className="font-body text-sm text-brutal-danger">{error}</p>
               </div>
             )}
 
@@ -223,7 +223,7 @@ export function ChannelSearch({ channelId, channelName, onResultClick }: Channel
                     <button
                       type="button"
                       onClick={() => handleResultClick(result.id)}
-                      className="w-full border-b-2 border-black px-4 py-3 text-left transition-colors hover:bg-brutal-pink last:border-b-0"
+                      className="w-full border-b-2 border-black px-4 py-3 text-left transition-colors hover:bg-brutal-primary last:border-b-0"
                       role="option"
                       aria-label={`跳转到 ${result.sender_name} 的消息`}
                     >
@@ -234,7 +234,7 @@ export function ChannelSearch({ channelId, channelName, onResultClick }: Channel
                       </div>
                       <div className="mt-0.5">
                         <span
-                          className="font-body text-sm text-muted-foreground line-clamp-2 [&_mark]:bg-brutal-pink [&_mark]:text-black [&_mark]:font-bold"
+                          className="font-body text-sm text-muted-foreground line-clamp-2 [&_mark]:bg-brutal-primary [&_mark]:text-black [&_mark]:font-bold"
                           dangerouslySetInnerHTML={{ __html: sanitizeHtml(sanitizeMarkHtml(result.highlight || result.content)) }}
                         />
                       </div>

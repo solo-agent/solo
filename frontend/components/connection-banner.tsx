@@ -75,10 +75,10 @@ export function ConnectionBanner() {
   if (!visible) return null;
 
   const bgColor = bannerType === 'reconnecting'
-    ? 'bg-brutal-yellow'
+    ? 'bg-brutal-accent'
     : bannerType === 'disconnected'
-      ? 'bg-brutal-red'
-      : 'bg-brutal-lime';
+      ? 'bg-brutal-danger'
+      : 'bg-brutal-success';
 
   const IconComponent = bannerType === 'reconnecting'
     ? Loader2

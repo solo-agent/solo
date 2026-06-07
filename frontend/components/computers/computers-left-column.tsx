@@ -91,7 +91,7 @@ export function ComputersLeftColumn({
               </p>
             ) : error ? (
               <div className="flex flex-col items-center gap-2 px-3 py-3">
-                <div className="flex items-center gap-1.5 text-brutal-red">
+                <div className="flex items-center gap-1.5 text-brutal-danger">
                   <AlertCircle className="h-4 w-4 flex-shrink-0" />
                   <span className="font-body text-xs">{error}</span>
                 </div>
@@ -119,7 +119,7 @@ export function ComputersLeftColumn({
                     className={cn(
                       'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm border-2 transition-all',
                       computer.id === selectedComputerId
-                        ? 'border-black bg-brutal-pink text-black shadow-brutal-sm'
+                        ? 'border-black bg-brutal-primary text-black shadow-brutal-sm'
                         : 'border-transparent hover:border-black',
                     )}
                     aria-current={computer.id === selectedComputerId ? 'true' : undefined}

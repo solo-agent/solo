@@ -31,7 +31,7 @@ export function NavBar() {
       {/* Workspace logo */}
       <Link
         href="/dashboard"
-        className="mb-2 flex h-9 w-9 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm"
+        className="mb-2 flex h-9 w-9 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm"
         aria-label="Solo 工作区"
       >
         <span className="font-heading text-sm font-black text-black">S</span>

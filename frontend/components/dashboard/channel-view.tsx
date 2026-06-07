@@ -409,7 +409,7 @@ export function ChannelView({
                   'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold border-2 transition-all',
                   'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
                   channelViewTab === 'messages'
-                    ? 'bg-brutal-pink text-black border-black shadow-brutal-sm -translate-y-px'
+                    ? 'bg-brutal-primary text-black border-black shadow-brutal-sm -translate-y-px'
                     : 'text-muted-foreground hover:text-foreground border-transparent hover:border-black hover:bg-white hover:shadow-brutal-sm hover:-translate-y-px',
                 )}
               >
@@ -423,7 +423,7 @@ export function ChannelView({
                   'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold border-2 transition-all',
                   'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
                   channelViewTab === 'tasks'
-                    ? 'bg-brutal-pink text-black border-black shadow-brutal-sm -translate-y-px'
+                    ? 'bg-brutal-primary text-black border-black shadow-brutal-sm -translate-y-px'
                     : 'text-muted-foreground hover:text-foreground border-transparent hover:border-black hover:bg-white hover:shadow-brutal-sm hover:-translate-y-px',
                 )}
               >
@@ -439,7 +439,7 @@ export function ChannelView({
               className={cn(
                 'flex h-8 w-8 items-center justify-center border-2 border-black shadow-brutal-sm transition-colors',
                 showAgentView
-                  ? 'bg-brutal-pink text-black'
+                  ? 'bg-brutal-primary text-black'
                   : 'bg-white hover:bg-brutal-cream',
               )}
               aria-label="Agent View"
@@ -550,7 +550,7 @@ export function ChannelView({
         {/* Resize handle — only interactive when panel is open */}
         {threadMessage && (
           <div
-            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-pink/50 transition-colors z-10"
+            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-primary/50 transition-colors z-10"
             onMouseDown={(e) => {
               e.preventDefault();
               const startX = e.clientX;

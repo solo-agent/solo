@@ -43,7 +43,7 @@ function ChannelListEmpty({ onCreateChannel }: { onCreateChannel: () => void }) 
       <p className="text-sm text-sidebar-muted-foreground">还没有频道</p>
       <button
         onClick={onCreateChannel}
-        className="inline-flex items-center gap-1 border-2 border-black bg-brutal-pink px-3 py-1.5 text-sm font-medium text-black shadow-brutal-sm hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
+        className="inline-flex items-center gap-1 border-2 border-black bg-brutal-primary px-3 py-1.5 text-sm font-medium text-black shadow-brutal-sm hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
       >
         <Plus className="h-3.5 w-3.5" />
         创建频道
@@ -79,7 +79,7 @@ function ChannelItem({
       className={cn(
         'group flex cursor-pointer items-center justify-between gap-2 px-3 py-1.5 text-sm transition-all',
         isSelected
-          ? 'bg-brutal-pink text-black border-2 border-black shadow-brutal-sm'
+          ? 'bg-brutal-primary text-black border-2 border-black shadow-brutal-sm'
           : 'text-black border-2 border-transparent hover:border-black',
       )}
       aria-current={isSelected ? 'true' : undefined}
@@ -98,7 +98,7 @@ function ChannelItem({
             e.stopPropagation();
             onDelete();
           }}
-          className="hidden group-hover:flex items-center justify-center rounded-none p-1 hover:bg-brutal-pink-light transition-colors flex-shrink-0"
+          className="hidden group-hover:flex items-center justify-center rounded-none p-1 hover:bg-brutal-primary-light transition-colors flex-shrink-0"
           aria-label={`关闭 ${channel.name}`}
         >
           <X className="h-4 w-4" />
@@ -145,7 +145,7 @@ export function ChannelList({
         </button>
         <button
           onClick={onCreateChannel}
-          className="mr-2 flex h-5 w-5 items-center justify-center border-2 border-transparent text-sidebar-muted-foreground group-hover:border-black group-hover:text-black hover:bg-brutal-pink/40 active:bg-brutal-pink active:text-black active:ring-2 active:ring-black transition-all cursor-pointer"
+          className="mr-2 flex h-5 w-5 items-center justify-center border-2 border-transparent text-sidebar-muted-foreground group-hover:border-black group-hover:text-black hover:bg-brutal-primary/40 active:bg-brutal-primary active:text-black active:ring-2 active:ring-black transition-all cursor-pointer"
           aria-label="创建频道"
         >
           <Plus className="h-3.5 w-3.5" />

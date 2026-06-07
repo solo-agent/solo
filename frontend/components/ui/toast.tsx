@@ -75,15 +75,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 // ---- Toast item ----
 
 const ICON_MAP: Record<ToastType, React.ReactNode> = {
-  success: <CheckCircle className="h-4 w-4 text-brutal-lime" />,
-  error: <AlertTriangle className="h-4 w-4 text-brutal-red" />,
-  info: <Info className="h-4 w-4 text-brutal-lavender" />,
+  success: <CheckCircle className="h-4 w-4 text-brutal-success" />,
+  error: <AlertTriangle className="h-4 w-4 text-brutal-danger" />,
+  info: <Info className="h-4 w-4 text-brutal-violet" />,
 };
 
 const BG_MAP: Record<ToastType, string> = {
-  success: 'border-brutal-lime',
-  error: 'border-brutal-red',
-  info: 'border-brutal-lavender',
+  success: 'border-brutal-success',
+  error: 'border-brutal-danger',
+  info: 'border-brutal-violet',
 };
 
 function ToastItem({

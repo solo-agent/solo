@@ -94,7 +94,7 @@ export function InteractionMode({
               className={cn(
                 'flex w-full items-center gap-3 border-2 px-4 py-3 text-left font-heading text-sm font-bold transition-all',
                 isSelected
-                  ? 'border-black bg-brutal-pink text-black shadow-brutal-sm'
+                  ? 'border-black bg-brutal-primary text-black shadow-brutal-sm'
                   : 'border-black bg-white text-muted-foreground shadow-brutal-sm hover:bg-black/5',
               )}
               aria-pressed={isSelected}

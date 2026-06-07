@@ -400,7 +400,7 @@ function DashboardContent() {
     return (
       <div className="flex flex-1 items-center justify-center bg-muted/5">
         <div className="text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm">
             <MessageSquare className="h-8 w-8 text-white" />
           </div>
           <h2 className="text-xl font-semibold text-foreground">

@@ -84,7 +84,7 @@ export function TeamsLeftColumn({
           className={cn(
             SECTION_HEADER,
             selection?.kind === 'graph'
-              ? 'bg-brutal-pink text-black border-black shadow-brutal-sm'
+              ? 'bg-brutal-primary text-black border-black shadow-brutal-sm'
               : 'text-muted-foreground',
           )}
           aria-label="进入 Graph 视图"

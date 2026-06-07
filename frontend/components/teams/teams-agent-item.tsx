@@ -1,6 +1,6 @@
 // ============================================================================
 // TeamsAgentItem — one row in the Teams left column's Agents section.
-// Selection style matches channel-list.tsx: bg-brutal-pink + black border
+// Selection style matches channel-list.tsx: bg-brutal-primary + black border
 // + shadow-brutal-sm (the variable named "pink" is actually #FFD23F yellow).
 // No DM button here — the detail header has a Message button for that.
 // ============================================================================
@@ -24,7 +24,7 @@ export function TeamsAgentItem({ agent, isSelected, onSelect }: TeamsAgentItemPr
       className={cn(
         'flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm transition-all',
         isSelected
-          ? 'bg-brutal-pink text-black border-2 border-black shadow-brutal-sm'
+          ? 'bg-brutal-primary text-black border-2 border-black shadow-brutal-sm'
           : 'border-2 border-transparent hover:border-black',
       )}
       role="button"

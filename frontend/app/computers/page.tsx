@@ -71,10 +71,10 @@ function getOsIcon(os?: string): { icon: React.ReactNode; label: string } {
 // Agent status indicator
 function AgentStatusDot({ status }: { status: string }) {
   const colorMap: Record<string, string> = {
-    online: 'bg-brutal-lime',
-    thinking: 'bg-brutal-yellow',
-    running: 'bg-brutal-cyan',
-    offline: 'bg-brutal-stone',
+    online: 'bg-brutal-success',
+    thinking: 'bg-brutal-accent',
+    running: 'bg-brutal-info',
+    offline: 'bg-brutal-muted',
   };
   const labelMap: Record<string, string> = {
     online: '空闲',
@@ -87,7 +87,7 @@ function AgentStatusDot({ status }: { status: string }) {
       <span
         className={cn(
           'inline-block h-2 w-2 flex-shrink-0 border border-black',
-          colorMap[status] || 'bg-brutal-stone',
+          colorMap[status] || 'bg-brutal-muted',
         )}
       />
       <span className="text-muted-foreground">{labelMap[status] || status}</span>
@@ -277,7 +277,7 @@ export default function ComputersPage() {
             {/* Empty state — no computers at all */}
             {!isLoading && !error && computers.length === 0 && (
               <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
-                <div className="mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-cyan shadow-brutal">
+                <div className="mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-info shadow-brutal">
                   <Monitor className="h-8 w-8 text-white" />
                 </div>
                 <h2 className="text-xl font-heading font-bold text-foreground">
@@ -347,8 +347,8 @@ export default function ComputersPage() {
             </div>
             <ol className="list-decimal list-inside space-y-1.5 font-mono text-xs text-foreground">
               <li>在目标机器上克隆项目代码</li>
-              <li>设置 <code className="bg-brutal-black text-brutal-lime px-1">.env</code> 中的 <code className="bg-brutal-black text-brutal-lime px-1">DAEMON_PORT</code> 和 <code className="bg-brutal-black text-brutal-lime px-1">SERVER_URL</code></li>
-              <li>运行 <code className="bg-brutal-black text-brutal-lime px-1">make daemon</code> 启动 Daemon</li>
+              <li>设置 <code className="bg-brutal-black text-brutal-success px-1">.env</code> 中的 <code className="bg-brutal-black text-brutal-success px-1">DAEMON_PORT</code> 和 <code className="bg-brutal-black text-brutal-success px-1">SERVER_URL</code></li>
+              <li>运行 <code className="bg-brutal-black text-brutal-success px-1">make daemon</code> 启动 Daemon</li>
               <li>Daemon 启动后会自动向服务器注册</li>
               <li>注册成功后，电脑将出现在列表中</li>
             </ol>
@@ -447,7 +447,7 @@ function ComputerCard({
         aria-label={`${computer.name} — ${isOnline ? '在线' : '离线'}`}
       >
         <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-cyan shadow-brutal-sm">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-info shadow-brutal-sm">
             {osInfo.icon}
           </div>
           <div className="flex-1 min-w-0">
@@ -708,7 +708,7 @@ function StatusDot({ isOnline }: { isOnline: boolean }) {
     <span
       className={cn(
         'inline-block h-2.5 w-2.5 flex-shrink-0 border border-black',
-        isOnline ? 'bg-brutal-lime' : 'bg-brutal-stone animate-pulse',
+        isOnline ? 'bg-brutal-success' : 'bg-brutal-muted animate-pulse',
       )}
       role="status"
       aria-label={isOnline ? '在线' : '离线'}
@@ -724,7 +724,7 @@ function SectionHeader({ label, className }: { label: string; className?: string
         className,
       )}
     >
-      <span className="h-1 w-1 bg-brutal-pink" />
+      <span className="h-1 w-1 bg-brutal-primary" />
       {label}
     </h3>
   );

@@ -76,11 +76,11 @@ function WorkspaceLeftColumn({
               </div>
             ) : error ? (
               <div className="px-4 py-2">
-                <p className="font-mono text-[10px] text-brutal-red mb-1">{error}</p>
+                <p className="font-mono text-[10px] text-brutal-danger mb-1">{error}</p>
                 <button
                   type="button"
                   onClick={onRetry}
-                  className="font-mono text-[10px] font-bold underline hover:text-brutal-pink"
+                  className="font-mono text-[10px] font-bold underline hover:text-brutal-primary"
                 >
                   重试
                 </button>
@@ -98,7 +98,7 @@ function WorkspaceLeftColumn({
                   className={cn(
                     'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm border-2',
                     selectedAgentId === agent.id
-                      ? 'border-black bg-brutal-pink text-black shadow-brutal-sm'
+                      ? 'border-black bg-brutal-primary text-black shadow-brutal-sm'
                       : 'border-transparent hover:border-black',
                   )}
                   aria-current={selectedAgentId === agent.id ? 'true' : undefined}
@@ -200,7 +200,7 @@ export default function WorkspacePage() {
         {!selectedAgentId ? (
           <div className="flex flex-1 items-center justify-center">
             <div className="text-center">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm">
                 <FolderOpen className="h-8 w-8 text-black" />
               </div>
               <h2 className="font-heading text-lg font-bold text-foreground">Workspace</h2>
@@ -233,8 +233,8 @@ export default function WorkspacePage() {
             {/* Error */}
             {wsError && tree.length === 0 && !wsLoading && (
               <div className="flex flex-col items-center justify-center py-12">
-                <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-red-light shadow-brutal-sm">
-                  <AlertCircle className="h-6 w-6 text-brutal-red" />
+                <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-danger-light shadow-brutal-sm">
+                  <AlertCircle className="h-6 w-6 text-brutal-danger" />
                 </div>
                 <BrutalAlert variant="error" className="mb-4 max-w-md">
                   {wsError}

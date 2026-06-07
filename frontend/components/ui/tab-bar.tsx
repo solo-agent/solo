@@ -52,14 +52,14 @@ export function TabBar({
                 ? cn(
                     'px-3 py-1 border-2 border-black',
                     isActive
-                      ? 'bg-brutal-pink text-black shadow-brutal-sm -translate-y-px'
+                      ? 'bg-brutal-primary text-black shadow-brutal-sm -translate-y-px'
                       : 'bg-white text-muted-foreground hover:text-foreground hover:shadow-brutal-sm hover:-translate-y-px',
                   )
                 : cn(
                     'justify-center px-3 py-1 border-r-2 border-black',
                     isLast && 'border-r-0',
                     isActive
-                      ? 'bg-brutal-pink text-black shadow-brutal-sm -translate-y-px'
+                      ? 'bg-brutal-primary text-black shadow-brutal-sm -translate-y-px'
                       : 'bg-white text-muted-foreground hover:bg-brutal-accent-light',
                   ),
             )}

@@ -201,7 +201,7 @@ export function AgentForm({
       {/* Name */}
       <div className="space-y-2">
         <Label htmlFor="name">
-          名称 <span className="text-brutal-red">*</span>
+          名称 <span className="text-brutal-danger">*</span>
         </Label>
         <Input
           id="name"
@@ -211,7 +211,7 @@ export function AgentForm({
           aria-invalid={!!errors.name}
         />
         {errors.name && (
-          <p className="font-mono text-[11px] text-brutal-red">
+          <p className="font-mono text-[11px] text-brutal-danger">
             {errors.name.message}
           </p>
         )}
@@ -227,7 +227,7 @@ export function AgentForm({
           aria-invalid={!!errors.description}
         />
         {errors.description && (
-          <p className="font-mono text-[11px] text-brutal-red">
+          <p className="font-mono text-[11px] text-brutal-danger">
             {errors.description.message}
           </p>
         )}
@@ -236,7 +236,7 @@ export function AgentForm({
       {/* Runtime Selection (v1.4: dynamic, based on CLI detection) */}
       <div className="space-y-3">
         <Label>
-          Runtime <span className="text-brutal-red">*</span>
+          Runtime <span className="text-brutal-danger">*</span>
         </Label>
 
         {/* Loading state */}
@@ -268,7 +268,7 @@ export function AgentForm({
           />
         )}
         {errors.model_provider && (
-          <p className="font-mono text-[11px] text-brutal-red">
+          <p className="font-mono text-[11px] text-brutal-danger">
             {errors.model_provider.message}
           </p>
         )}
@@ -305,7 +305,7 @@ export function AgentForm({
                 className={cn(
                   'flex flex-col items-start gap-0.5 border-2 border-black px-2.5 py-2 text-left transition-all',
                   isSelected
-                    ? 'bg-brutal-pink shadow-brutal-sm translate-x-0.5 translate-y-0.5'
+                    ? 'bg-brutal-primary shadow-brutal-sm translate-x-0.5 translate-y-0.5'
                     : 'bg-white shadow-brutal-sm hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal',
                 )}
               >
@@ -373,7 +373,7 @@ export function AgentForm({
         <button
           type="submit"
           disabled={isSubmitting}
-          className="btn-brutal btn-brutal-pink"
+          className="btn-brutal btn-brutal-primary"
         >
           {isSubmitting ? (
             <>

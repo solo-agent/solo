@@ -87,10 +87,10 @@ export function AgentWorkspaceTab({ agentId }: AgentWorkspaceTabProps) {
   if (error && tree.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
-        <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-red-light shadow-brutal-sm">
-          <AlertCircle className="h-6 w-6 text-brutal-red" />
+        <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-danger-light shadow-brutal-sm">
+          <AlertCircle className="h-6 w-6 text-brutal-danger" />
         </div>
-        <p className="font-body text-sm text-brutal-red">{error}</p>
+        <p className="font-body text-sm text-brutal-danger">{error}</p>
         <button type="button" onClick={() => loadTree()} className="btn-brutal btn-brutal-sm mt-4">
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
           重试
@@ -103,7 +103,7 @@ export function AgentWorkspaceTab({ agentId }: AgentWorkspaceTabProps) {
   if (!isLoading && tree.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
-        <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm">
+        <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm">
           <FolderOpen className="h-6 w-6 text-white" />
         </div>
         <p className="font-heading text-sm font-bold text-foreground">Workspace 为空</p>

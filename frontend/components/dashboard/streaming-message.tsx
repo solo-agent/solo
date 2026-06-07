@@ -39,12 +39,12 @@ function CodeBlock({
   return (
     <div className="my-2 border-2 border-black shadow-brutal-sm overflow-x-auto">
       {language && (
-        <div className="border-b-2 border-black bg-brutal-pink px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-black">
+        <div className="border-b-2 border-black bg-brutal-primary px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-black">
           {language}
         </div>
       )}
       <pre className="bg-black p-3 text-xs leading-relaxed">
-        <code className={`${className ?? ''} font-mono text-brutal-lime`}>
+        <code className={`${className ?? ''} font-mono text-brutal-success`}>
           {children}
           {isUnclosed && (
             <span className="text-muted-foreground">...</span>
@@ -71,7 +71,7 @@ function TypingDots() {
         <span
           key={i}
           className={cn(
-            'inline-block h-1.5 w-1.5 bg-brutal-pink',
+            'inline-block h-1.5 w-1.5 bg-brutal-primary',
             'animate-bounce',
           )}
           style={{
@@ -110,7 +110,7 @@ export function StreamingMessage({ message }: StreamingMessageProps) {
     <div
       ref={containerRef}
       data-message-id={message.id}
-      className="group relative flex gap-3 px-6 py-2.5 agent-message border-l-brutal-pink"
+      className="group relative flex gap-3 px-6 py-2.5 agent-message border-l-brutal-primary"
       role="listitem"
       aria-label="流式输出中"
       data-streaming="true"
@@ -119,18 +119,18 @@ export function StreamingMessage({ message }: StreamingMessageProps) {
 
       <div className="min-w-0 flex-1">
         <div className="mb-1.5 flex items-baseline gap-2">
-          <span className="font-heading text-sm font-bold text-brutal-pink">
+          <span className="font-heading text-sm font-bold text-brutal-primary">
             {message.display_name}
           </span>
           {message.sender_active === false && (
-            <span className="badge-brutal bg-brutal-stone text-black">
+            <span className="badge-brutal bg-brutal-muted text-black">
               DELETED
             </span>
           )}
           <span className="font-mono text-[11px] text-muted-foreground">
             {time}
           </span>
-          <span className="badge-brutal bg-brutal-pink/20 text-brutal-pink">
+          <span className="badge-brutal bg-brutal-primary/20 text-brutal-primary">
             流式输出中
           </span>
         </div>
@@ -172,7 +172,7 @@ export function StreamingMessage({ message }: StreamingMessageProps) {
                 },
                 blockquote({ children }) {
                   return (
-                    <blockquote className="my-1.5 border-l-2 border-brutal-pink/50 pl-3 italic text-muted-foreground">
+                    <blockquote className="my-1.5 border-l-2 border-brutal-primary/50 pl-3 italic text-muted-foreground">
                       {children}
                     </blockquote>
                   );

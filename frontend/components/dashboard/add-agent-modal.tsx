@@ -93,9 +93,9 @@ export function AddAgentModal({
 
       {/* Error state */}
       {agentsError && (
-        <div className="mb-4 flex items-center gap-2 border-2 border-brutal-red bg-brutal-red-light/30 px-3 py-2">
-          <AlertCircle className="h-4 w-4 flex-shrink-0 text-brutal-red" />
-          <span className="font-mono text-xs flex-1 text-brutal-red">
+        <div className="mb-4 flex items-center gap-2 border-2 border-brutal-danger bg-brutal-danger-light/30 px-3 py-2">
+          <AlertCircle className="h-4 w-4 flex-shrink-0 text-brutal-danger" />
+          <span className="font-mono text-xs flex-1 text-brutal-danger">
             {agentsError}
           </span>
           <button
@@ -146,8 +146,8 @@ export function AddAgentModal({
                 disabled={addingId === agent.id}
                 className="flex w-full items-center gap-3 border-2 border-black bg-white p-2 text-left shadow-brutal-sm transition-all hover:-translate-x-px hover:-translate-y-px hover:shadow-brutal-lg disabled:opacity-50"
               >
-                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-pink-light">
-                  <Bot className="h-4 w-4 text-brutal-pink" />
+                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-primary-light">
+                  <Bot className="h-4 w-4 text-brutal-primary" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -157,8 +157,8 @@ export function AddAgentModal({
                     <Circle
                       className={`h-2 w-2 flex-shrink-0 ${
                         agent.is_active
-                          ? 'fill-brutal-lime text-brutal-lime'
-                          : 'fill-brutal-stone text-brutal-stone'
+                          ? 'fill-brutal-success text-brutal-success'
+                          : 'fill-brutal-muted text-brutal-muted'
                       }`}
                     />
                   </div>
