@@ -70,7 +70,12 @@ func newClaudeBackendFromEnv() *ClaudeBackend {
 // NewPersistentBackend creates a PersistentBackend for the given provider type.
 // It delegates to the global BackendRegistry and checks whether the created
 // Backend satisfies the PersistentBackend interface.
-// Supported: claude, local, codex, opencode, openclaw, hermes.
+//
+// Supported: claude, local, codex, opencode, hermes.
+//
+// openclaw is intentionally NOT yet listed — its persistent-session
+// migration is tracked under the "openclaw-acp-migration" task and will
+// be added here once Start/Send/Close land on OpenClawBackend.
 func NewPersistentBackend(providerType string) (PersistentBackend, error) {
 	backend, err := GlobalRegistry().Create(providerType, BackendConfig{ProviderType: providerType})
 	if err != nil {
@@ -78,7 +83,7 @@ func NewPersistentBackend(providerType string) (PersistentBackend, error) {
 	}
 	pb, ok := backend.(PersistentBackend)
 	if !ok {
-		return nil, fmt.Errorf("persistent backend not supported for provider %q (supported: claude, local, codex, opencode, openclaw, hermes)", providerType)
+		return nil, fmt.Errorf("persistent backend not supported for provider %q (supported: claude, local, codex, opencode, hermes)", providerType)
 	}
 	return pb, nil
 }

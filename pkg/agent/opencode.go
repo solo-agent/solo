@@ -380,3 +380,32 @@ func (b *OpenCodeBackend) Close(ps *PersistentSession) error {
 	}
 	return state.runner.close()
 }
+
+// ── CLI argument construction ──
+
+// buildOpenCodeArgs constructs the CLI argument vector for `opencode run --format json`.
+//
+// The prompt is always appended as the last positional argument so it is not
+// accidentally consumed by any preceding flag (mirroring `buildOpenClawArgs`
+// and `buildCodexArgs`).
+//
+// Blocked args (currently `--format`) are filtered out of ExtraArgs and
+// CustomArgs to preserve the daemon's JSON-protocol assumption. When the
+// same flag appears in both ExtraArgs and CustomArgs, both occurrences are
+// appended — the last one wins in CLI parsing, which matches the
+// documented behaviour relied on by opencode_test.go.
+func buildOpenCodeArgs(prompt string, opts *ExecuteOptions) []string {
+	args := []string{"run", "--format", "json"}
+	if opts != nil {
+		if opts.Model != "" {
+			args = append(args, "--model", opts.Model)
+		}
+		if opts.SystemPrompt != "" {
+			args = append(args, "--prompt", opts.SystemPrompt)
+		}
+		args = append(args, filterCustomArgs(opts.ExtraArgs, opencodeBlockedArgs)...)
+		args = append(args, filterCustomArgs(opts.CustomArgs, opencodeBlockedArgs)...)
+	}
+	args = append(args, prompt)
+	return args
+}
