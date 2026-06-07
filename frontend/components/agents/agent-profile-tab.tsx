@@ -12,6 +12,7 @@ import { Pencil, Check, X, Circle, AlertCircle, RefreshCw, Bot } from 'lucide-re
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import type { Agent } from '@/lib/types';
 
@@ -268,10 +269,10 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
           <AlertCircle className="h-6 w-6 text-brutal-red" />
         </div>
         <p className="font-body text-sm text-brutal-red">{error}</p>
-        <button type="button" onClick={loadAgent} className="btn-brutal btn-brutal-sm mt-4">
+        <Button type="button" onClick={loadAgent} size="sm" className="mt-4">
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
           重试
-        </button>
+        </Button>
       </div>
     );
   }

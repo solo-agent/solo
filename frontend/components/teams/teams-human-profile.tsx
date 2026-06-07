@@ -10,6 +10,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { User, Mail, Calendar, AlertCircle, RefreshCw } from 'lucide-react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 
 interface UserInfo {
   id: string;
@@ -66,10 +67,10 @@ export function TeamsHumanProfile({ userId }: TeamsHumanProfileProps) {
           <AlertCircle className="h-6 w-6 text-brutal-red" />
         </div>
         <p className="font-body text-sm text-brutal-red">{error}</p>
-        <button onClick={load} className="btn-brutal btn-brutal-sm mt-4">
+        <Button onClick={load} size="sm" className="mt-4">
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
           重试
-        </button>
+        </Button>
       </div>
     );
   }

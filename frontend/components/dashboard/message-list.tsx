@@ -232,7 +232,7 @@ const MessageItem = memo(function MessageItem({
     <div
       data-message-id={message.id}
       className={cn(
-        'group relative flex gap-3 px-6 py-2.5 transition-colors border-b border-black/10',
+        'group relative flex gap-3 px-6 py-2.5 transition-colors border-b border-brutal-muted',
         !isTaskMessage && 'hover:bg-brutal-stone/15',
         isFailed && 'bg-brutal-red-light/30',
         isEditing && 'border-l-[3px] border-l-brutal-pink bg-brutal-pink-light/30',

@@ -74,7 +74,7 @@ const STATUS_BADGE: Record<
 
 function SkeletonRow() {
   return (
-    <div className="flex items-center gap-4 border-b-2 border-black/10 px-5 py-4 last:border-b-0">
+    <div className="flex items-center gap-4 border-b-2 border-brutal-muted px-5 py-4 last:border-b-0">
       <div className="h-3 w-16 animate-pulse bg-muted" />
       <div className="h-3 w-24 animate-pulse bg-muted" />
       <div className="h-5 w-12 animate-pulse bg-muted" />

@@ -104,7 +104,7 @@ export function AgentCard({ agent, onEdit, onDelete, onClick }: AgentCardProps) 
 
         {/* System prompt preview */}
         <p
-          className={agent.system_prompt ? 'text-xs text-gray-400 truncate max-w-[240px]' : 'text-xs text-gray-300 italic'}
+          className={agent.system_prompt ? 'text-xs text-muted-foreground truncate max-w-[240px]' : 'text-xs text-muted-foreground italic'}
           title={agent.system_prompt ? agent.system_prompt.slice(0, 200) : undefined}
         >
           {agent.system_prompt

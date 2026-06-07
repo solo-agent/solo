@@ -38,7 +38,7 @@ export function EmptyState({
         "flex flex-col items-center justify-center gap-3 px-6 py-10 text-center",
         variant === "plain"
           ? "border-2 border-black bg-white shadow-brutal-sm"
-          : "border-2 border-dashed border-black/40 bg-transparent",
+          : "border-2 border-dashed border-brutal-muted bg-transparent",
         className,
       )}
     >

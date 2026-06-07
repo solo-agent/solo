@@ -131,11 +131,11 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
 
         {/* Subtask progress bar (parent task) */}
         {hasSubtasks && (
-          <div className="mt-2 pt-2 border-t-2 border-black/10">
+          <div className="mt-2 pt-2 border-t-2 border-brutal-muted">
             <div className="flex items-center gap-2 text-xs">
               <span className="text-muted-foreground">子任务:</span>
               <span className="font-bold">{task.done_subtask_count ?? 0}/{task.subtask_count}</span>
-              <div className="flex-1 h-1.5 border border-black/20 bg-muted">
+              <div className="flex-1 h-1.5 border border-brutal-muted bg-muted">
                 <div
                   className="h-full bg-brutal-lime"
                   style={{ width: `${Math.min(((task.done_subtask_count ?? 0) / (task.subtask_count ?? 1)) * 100, 100)}%` }}

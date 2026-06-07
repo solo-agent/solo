@@ -69,7 +69,7 @@ export function AgentMessage({ message, onReply }: AgentMessageProps) {
   return (
     <div
       data-message-id={message.id}
-      className="group relative flex gap-3 px-6 py-2.5 agent-message border-l-brutal-pink border-b border-black/10"
+      className="group relative flex gap-3 px-6 py-2.5 agent-message border-l-brutal-pink border-b border-brutal-muted"
       role="listitem"
     >
       <PixelAvatar agentId={message.user_id} size="md" className="mt-0.5 flex-shrink-0" />

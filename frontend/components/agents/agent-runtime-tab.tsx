@@ -12,6 +12,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { AlertCircle, RefreshCw, Terminal, Layers, Cpu } from 'lucide-react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import type { Agent } from '@/lib/types';
 
 interface AgentRuntimeTabProps {
@@ -81,10 +82,10 @@ export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
           <AlertCircle className="h-6 w-6 text-brutal-red" />
         </div>
         <p className="font-body text-sm text-brutal-red">{error}</p>
-        <button type="button" onClick={loadAgent} className="btn-brutal btn-brutal-sm mt-4">
+        <Button type="button" onClick={loadAgent} size="sm" className="mt-4">
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
           重试
-        </button>
+        </Button>
       </div>
     );
   }

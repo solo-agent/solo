@@ -88,15 +88,15 @@ export function MentionDropdown({
                 }}
               >
                 {isAgent ? (
-                  <Bot className="h-4 w-4 flex-shrink-0 text-green-500" />
+                  <Bot className="h-4 w-4 flex-shrink-0 text-brutal-success" />
                 ) : (
-                  <User className="h-4 w-4 flex-shrink-0 text-blue-500" />
+                  <User className="h-4 w-4 flex-shrink-0 text-brutal-info" />
                 )}
                 <span className="font-medium">
                   {suggestion.member.display_name}
                 </span>
                 {isAgent && (
-                  <span className="ml-auto text-[10px] text-green-600 dark:text-green-400">
+                  <span className="ml-auto text-[10px] text-brutal-success">
                     Agent
                   </span>
                 )}

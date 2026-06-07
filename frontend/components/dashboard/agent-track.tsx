@@ -29,7 +29,7 @@ export function AgentTrack({ agentId, agentName, chunks, isActive, onClear }: Ag
 
   return (
     <div className={cn(
-      'agent-track border-b-2 border-black/10 pb-2',
+      'agent-track border-b-2 border-brutal-muted pb-2',
       !isActive && 'opacity-60',
     )}>
       <div className="flex items-center justify-between px-2 py-1.5 bg-black/5">

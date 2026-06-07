@@ -105,7 +105,7 @@ export function TeamsGraphView({ agents, onSelectAgent }: TeamsGraphViewProps) {
                     </div>
                   </button>
                   {isExpanded && (
-                    <div className="mt-3 grid grid-cols-1 gap-2 border-t-2 border-black/10 pt-3">
+                    <div className="mt-3 grid grid-cols-1 gap-2 border-t-2 border-brutal-muted pt-3">
                       {items.map((agent) => (
                         <button
                           key={agent.id}

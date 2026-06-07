@@ -475,7 +475,7 @@ export function MessageInput({
         <div
           className={cn(
             'absolute inset-0 z-50 flex flex-col items-center justify-center gap-2',
-            'border-2 border-dashed border-black bg-brutal-pink-light/60 backdrop-blur-sm',
+            'border-2 border-dashed border-black bg-brutal-primary-light/60',
           )}
           aria-live="polite"
         >

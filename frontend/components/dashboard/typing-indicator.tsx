@@ -38,20 +38,20 @@ const STATE_CONFIG: Record<
   thinking: {
     icon: <Brain className="h-3.5 w-3.5" />,
     label: '思考中',
-    colorClass: 'text-yellow-600 dark:text-yellow-400',
-    bgClass: 'bg-yellow-500/10',
+    colorClass: 'text-brutal-warning',
+    bgClass: 'bg-brutal-warning-light',
   },
   typing: {
     icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />,
     label: '输入中',
-    colorClass: 'text-blue-600 dark:text-blue-400',
-    bgClass: 'bg-blue-500/10',
+    colorClass: 'text-brutal-info',
+    bgClass: 'bg-brutal-info-light',
   },
   streaming: {
     icon: <Bot className="h-3.5 w-3.5 animate-pulse" />,
     label: '流式输出中',
-    colorClass: 'text-green-600 dark:text-green-400',
-    bgClass: 'bg-green-500/10',
+    colorClass: 'text-brutal-success',
+    bgClass: 'bg-brutal-success-light',
   },
 };
 

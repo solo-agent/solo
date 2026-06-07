@@ -120,7 +120,7 @@ export function CreateTaskModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
       onClick={(e) => {
         if (e.target === overlayRef.current && !isDisabled) onOpenChange(false);
       }}

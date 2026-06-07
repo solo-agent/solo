@@ -127,7 +127,7 @@ export function ComputersLeftColumn({
                     <span
                       className={cn(
                         'inline-block h-2 w-2 flex-shrink-0 rounded-full border border-black',
-                        isOnline ? 'bg-green-500' : 'bg-gray-400 animate-pulse',
+                        isOnline ? 'bg-brutal-success' : 'bg-brutal-muted animate-pulse',
                       )}
                       aria-hidden="true"
                     />

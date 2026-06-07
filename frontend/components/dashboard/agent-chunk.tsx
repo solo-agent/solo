@@ -30,7 +30,7 @@ function ToolUseDisplay({ chunk }: { chunk: AgentChunk }) {
         <span className="font-bold">{tool.name}</span>
       </button>
       {expanded && tool.input && (
-        <pre className="mt-1 bg-black/5 p-1.5 text-[10px] font-mono break-all whitespace-pre-wrap max-h-32 overflow-y-auto border border-black/10">
+        <pre className="mt-1 bg-brutal-muted-light p-1.5 text-[10px] font-mono break-all whitespace-pre-wrap max-h-32 overflow-y-auto border border-brutal-muted">
           {tool.input}
         </pre>
       )}
@@ -96,8 +96,8 @@ export function AgentChunkItem({ chunk }: AgentChunkItemProps) {
       return <ToolResultDisplay chunk={chunk} />;
     case 'context':
       return (
-        <div className="chunk-context border-l-2 border-blue-500 pl-2 py-1 mb-1 bg-blue-50/50">
-          <div className="font-mono text-[10px] text-blue-600 font-bold mb-0.5">Trigger</div>
+        <div className="chunk-context border-l-2 border-brutal-info pl-2 py-1 mb-1 bg-brutal-info-light">
+          <div className="font-mono text-[10px] text-brutal-info font-bold mb-0.5">Trigger</div>
           <div className="font-mono text-[11px] text-foreground whitespace-pre-wrap break-words">
             {chunk.content.length > 300 ? chunk.content.slice(0, 300) + '…' : chunk.content}
           </div>
@@ -105,9 +105,9 @@ export function AgentChunkItem({ chunk }: AgentChunkItemProps) {
       );
     case 'error':
       return (
-        <div className="chunk-error border-l-2 border-red-500 pl-2 py-0.5 flex items-start gap-1">
-          <AlertTriangle className="h-3 w-3 flex-shrink-0 text-red-500 mt-0.5" />
-          <span className="font-mono text-[11px] text-red-600">{chunk.content}</span>
+        <div className="chunk-error border-l-2 border-brutal-danger pl-2 py-0.5 flex items-start gap-1">
+          <AlertTriangle className="h-3 w-3 flex-shrink-0 text-brutal-danger mt-0.5" />
+          <span className="font-mono text-[11px] text-brutal-danger">{chunk.content}</span>
         </div>
       );
     case 'text':

@@ -255,7 +255,7 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
                 输入关键词搜索所有频道中的消息
               </p>
               <p className="mt-1 font-mono text-xs text-muted-foreground/60">
-                <kbd className="inline-block rounded border border-black/20 bg-muted px-1.5 py-0.5 font-mono text-xs">
+                <kbd className="inline-block border border-brutal-muted bg-muted px-1.5 py-0.5 font-mono text-xs">
                   Esc
                 </kbd>{' '}
                 关闭搜索
@@ -281,7 +281,7 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
                     onClick={() => navigateToResult(result)}
                     onMouseEnter={() => setActiveIndex(index)}
                     className={cn(
-                      'flex w-full flex-col gap-1 border-b border-black/10 px-4 py-3 text-left transition-colors',
+                      'flex w-full flex-col gap-1 border-b border-brutal-muted px-4 py-3 text-left transition-colors',
                       index === activeIndex
                         ? 'bg-brutal-pink-light'
                         : 'hover:bg-muted',

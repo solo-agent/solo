@@ -59,7 +59,7 @@ function ParentMessageBlock({ message, task }: { message: Message; task?: Task }
   });
 
   return (
-    <div className={`flex gap-3 px-6 py-4 border-b border-black/10 ${isAgent ? 'border-l-[3px] border-l-brutal-pink' : ''}`}>
+    <div className={`flex gap-3 px-6 py-4 border-b border-brutal-muted ${isAgent ? 'border-l-[3px] border-l-brutal-pink' : ''}`}>
       {isAgent ? (
         <PixelAvatar agentId={message.user_id || message.id} size="md" />
       ) : (
@@ -183,7 +183,7 @@ function ReplyItem({ message }: { message: { id: string; display_name?: string; 
   });
 
   return (
-    <div className={`flex gap-3 px-6 py-2 border-b border-black/10 ${isAgent ? 'border-l-[3px] border-l-brutal-pink' : ''}`}>
+    <div className={`flex gap-3 px-6 py-2 border-b border-brutal-muted ${isAgent ? 'border-l-[3px] border-l-brutal-pink' : ''}`}>
       {isAgent ? (
         <PixelAvatar agentId={message.id} size="sm" />
       ) : (
