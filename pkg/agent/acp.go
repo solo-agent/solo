@@ -687,14 +687,45 @@ func buildACPUsageMap(usage TokenUsage, model string) map[string]TokenUsage {
 	return map[string]TokenUsage{model: usage}
 }
 
-func acpToolNameFromTitle(title string, kind string) string {
+// acpToolNameFromTitle normalises an ACP tool title (and optional kind
+// hint) into a canonical snake_case identifier used across the daemon
+// and UI.
+//
+// Each ACP backend emits slightly different title strings — Hermes
+// sends "execute code" with a structured kind, Kimi / Kiro send
+// server-specific labels like "Bash" or "Read File" with no kind. The
+// optional extras slice lets each backend append its own title→name
+// mappings without forking this function. extras entries are matched
+// case-insensitively against the trimmed title and (when present) the
+// text before the first ":".
+func acpToolNameFromTitle(title string, kind string, extras ...map[string]string) string {
+	lookupExtras := func(s string) (string, bool) {
+		lower := strings.ToLower(strings.TrimSpace(s))
+		if lower == "" {
+			return "", false
+		}
+		for _, m := range extras {
+			if v, ok := m[lower]; ok {
+				return v, true
+			}
+		}
+		return "", false
+	}
+
 	switch title {
 	case "execute code":
 		return "execute_code"
 	}
 
+	if v, ok := lookupExtras(title); ok {
+		return v
+	}
+
 	if idx := strings.Index(title, ":"); idx > 0 {
 		name := strings.TrimSpace(title[:idx])
+		if v, ok := lookupExtras(name); ok {
+			return v
+		}
 		switch {
 		case name == "terminal":
 			return "terminal"

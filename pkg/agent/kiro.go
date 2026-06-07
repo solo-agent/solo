@@ -674,41 +674,47 @@ func (b *KiroBackend) Close(ps *PersistentSession) error {
 	return state.runner.close()
 }
 
+// kiroTitleExtras maps Kiro's ACP-server tool labels to the canonical
+// snake_case identifiers the UI expects. Kiro inherits Kimi's mapping
+// and adds two todo variants ("todo list" / "todo_list") plus an
+// explicit "code" passthrough.
+var kiroTitleExtras = map[string]string{
+	"read":              "read_file",
+	"read file":         "read_file",
+	"write":             "write_file",
+	"write file":        "write_file",
+	"edit":              "edit_file",
+	"patch":             "edit_file",
+	"shell":             "terminal",
+	"bash":              "terminal",
+	"terminal":          "terminal",
+	"run command":       "terminal",
+	"run shell command": "terminal",
+	"search":            "search_files",
+	"grep":              "search_files",
+	"find":              "search_files",
+	"glob":              "glob",
+	"code":              "code",
+	"web search":        "web_search",
+	"fetch":             "web_fetch",
+	"web fetch":         "web_fetch",
+	"todo":              "todo_write",
+	"todo write":        "todo_write",
+	"todo list":         "todo_write",
+	"todo_list":         "todo_write",
+}
+
 // kiroToolNameFromTitle normalises tool names from Kiro's ACP server
-// into the snake_case identifiers that the UI expects.
+// into the snake_case identifiers that the UI expects. It is a thin
+// adapter around the shared acpToolNameFromTitle that supplies Kiro's
+// backend-specific title→name mapping.
 func kiroToolNameFromTitle(title string) string {
 	t := strings.TrimSpace(title)
 	if t == "" {
 		return ""
 	}
-
 	if idx := strings.Index(t, ":"); idx > 0 {
 		t = strings.TrimSpace(t[:idx])
 	}
-
-	lower := strings.ToLower(t)
-	switch lower {
-	case "read", "read file":
-		return "read_file"
-	case "write", "write file":
-		return "write_file"
-	case "edit", "patch":
-		return "edit_file"
-	case "shell", "bash", "terminal", "run command", "run shell command":
-		return "terminal"
-	case "grep", "search", "find":
-		return "search_files"
-	case "glob":
-		return "glob"
-	case "code":
-		return "code"
-	case "web search":
-		return "web_search"
-	case "fetch", "web fetch":
-		return "web_fetch"
-	case "todo", "todo write", "todo list", "todo_list":
-		return "todo_write"
-	}
-
-	return strings.ReplaceAll(lower, " ", "_")
+	return acpToolNameFromTitle(t, "", kiroTitleExtras)
 }
