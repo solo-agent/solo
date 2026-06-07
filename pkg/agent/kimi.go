@@ -580,7 +580,8 @@ func (b *KimiBackend) Send(ctx context.Context, ps *PersistentSession, messages 
 	turnDone := make(chan acpPromptResult, 1)
 
 	// Redirect client callbacks to this turn's channels.
-	state.client.onChunk = func(chunk OutputChunk) {
+	state.client.setCallbacks(
+		func(chunk OutputChunk) {
 		if chunk.Type == string(MessageToolUse) {
 			chunk.Tool.Name = kimiToolNameFromTitle(chunk.Tool.Name)
 		}
@@ -590,13 +591,14 @@ func (b *KimiBackend) Send(ctx context.Context, ps *PersistentSession, messages 
 			outputMu.Unlock()
 		}
 		trySend(msgCh, chunk)
-	}
-	state.client.onPromptDone = func(pr acpPromptResult) {
+	},
+		func(pr acpPromptResult) {
 		select {
 		case turnDone <- pr:
 		default:
 		}
-	}
+	},
+	)
 
 	startTime := time.Now()
 	state.turnFin.Store(false)

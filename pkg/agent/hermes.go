@@ -597,20 +597,22 @@ func (b *HermesBackend) Send(ctx context.Context, ps *PersistentSession, message
 	turnDone := make(chan acpPromptResult, 1)
 
 	// Redirect client callbacks to this turn's channels.
-	state.client.onChunk = func(chunk OutputChunk) {
+	state.client.setCallbacks(
+		func(chunk OutputChunk) {
 		if chunk.Type == string(MessageText) && chunk.Content != "" {
 			outputMu.Lock()
 			output.WriteString(chunk.Content)
 			outputMu.Unlock()
 		}
 		trySend(msgCh, chunk)
-	}
-	state.client.onPromptDone = func(pr acpPromptResult) {
+	},
+		func(pr acpPromptResult) {
 		select {
 		case turnDone <- pr:
 		default:
 		}
-	}
+	},
+	)
 
 	startTime := time.Now()
 	state.turnFin.Store(false)

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -122,6 +124,10 @@ func (b *OpenClawBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 	execPath := b.executablePath
 	if _, err := exec.LookPath(execPath); err != nil {
 		return nil, fmt.Errorf("openclaw executable not found at %q: %w", execPath, err)
+	}
+
+	if err := checkOpenclawAcpSupport(ctx, execPath); err != nil {
+		return nil, err
 	}
 
 	openclawArgs := append([]string{"acp"}, filterCustomArgs(opts.ExtraArgs, openclawBlockedArgs)...)
@@ -340,20 +346,22 @@ func (b *OpenClawBackend) Send(ctx context.Context, ps *PersistentSession, messa
 	turnDone := make(chan acpPromptResult, 1)
 
 	// Redirect client callbacks to this turn's channels.
-	state.client.onChunk = func(chunk OutputChunk) {
+	state.client.setCallbacks(
+		func(chunk OutputChunk) {
 		if chunk.Type == string(MessageText) && chunk.Content != "" {
 			outputMu.Lock()
 			output.WriteString(chunk.Content)
 			outputMu.Unlock()
 		}
 		trySend(msgCh, chunk)
-	}
-	state.client.onPromptDone = func(pr acpPromptResult) {
+	},
+		func(pr acpPromptResult) {
 		select {
 		case turnDone <- pr:
 		default:
 		}
-	}
+	},
+	)
 
 	startTime := time.Now()
 	state.turnFin.Store(false)
@@ -419,6 +427,53 @@ func (b *OpenClawBackend) Close(ps *PersistentSession) error {
 }
 
 // ── Helpers ──
+
+// minOpenclawAcpVersion is the minimum openclaw version known to support
+// the `acp` subcommand. Older versions only support `agent --json` and
+// will fail the ACP handshake with a cryptic error.
+const minOpenclawAcpVersion = "2026.5.5"
+
+var openclawVersionPattern = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
+
+func checkOpenclawAcpSupport(ctx context.Context, execPath string) error {
+	cmd := exec.CommandContext(ctx, execPath, "--version")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("openclaw --version failed: %w", err)
+	}
+	detected, ok := parseOpenclawVersion(string(out))
+	if !ok {
+		return fmt.Errorf("could not parse openclaw version from output: %q", strings.TrimSpace(string(out)))
+	}
+	if compareOpenclawVersion(detected, minOpenclawAcpVersion) < 0 {
+		return fmt.Errorf("openclaw %s is below the minimum supported version %s for ACP support — run `openclaw update` to upgrade", detected, minOpenclawAcpVersion)
+	}
+	return nil
+}
+
+func parseOpenclawVersion(raw string) (string, bool) {
+	m := openclawVersionPattern.FindString(raw)
+	if m == "" {
+		return "", false
+	}
+	return m, true
+}
+
+func compareOpenclawVersion(a, b string) int {
+	aParts := strings.SplitN(a, ".", 3)
+	bParts := strings.SplitN(b, ".", 3)
+	for i := 0; i < 3; i++ {
+		ai, _ := strconv.Atoi(aParts[i])
+		bi, _ := strconv.Atoi(bParts[i])
+		if ai < bi {
+			return -1
+		}
+		if ai > bi {
+			return 1
+		}
+	}
+	return 0
+}
 
 // buildOpenclawSessionParams constructs the params for ACP session/new.
 //

@@ -42,8 +42,11 @@ type acpClient struct {
 	nextID       int
 	pending      map[int]*pendingRPC
 	sessionID    string
+
+	cbMu         sync.Mutex // protects onChunk + onPromptDone (replaced per-turn by Send)
 	onChunk      func(OutputChunk)
 	onPromptDone func(acpPromptResult)
+
 	acceptNotification func(updateType string) bool
 
 	toolMu       sync.Mutex
@@ -51,6 +54,37 @@ type acpClient struct {
 
 	usageMu sync.Mutex
 	usage   TokenUsage
+}
+
+// setCallbacks replaces the per-turn chunk and prompt-done callbacks.
+// It is called from Send to redirect output to the new turn's channels.
+// Must NOT be called concurrently with the reader goroutine dispatching
+// events for the same turn — the caller (Send) serialises this by waiting
+// for the previous turn's Result channel to close before issuing a new
+// session/prompt request.
+func (c *acpClient) setCallbacks(onChunk func(OutputChunk), onPromptDone func(acpPromptResult)) {
+	c.cbMu.Lock()
+	c.onChunk = onChunk
+	c.onPromptDone = onPromptDone
+	c.cbMu.Unlock()
+}
+
+func (c *acpClient) invokeOnChunk(chunk OutputChunk) {
+	c.cbMu.Lock()
+	fn := c.onChunk
+	c.cbMu.Unlock()
+	if fn != nil {
+		fn(chunk)
+	}
+}
+
+func (c *acpClient) invokeOnPromptDone(pr acpPromptResult) {
+	c.cbMu.Lock()
+	fn := c.onPromptDone
+	c.cbMu.Unlock()
+	if fn != nil {
+		fn(pr)
+	}
 }
 
 type pendingToolCall struct {
@@ -264,9 +298,7 @@ func (c *acpClient) extractPromptResult(data json.RawMessage) {
 		}
 	}
 
-	if c.onPromptDone != nil {
-		c.onPromptDone(pr)
-	}
+	c.invokeOnPromptDone(pr)
 }
 
 func (c *acpClient) handleNotification(raw map[string]json.RawMessage) {
@@ -362,9 +394,7 @@ func (c *acpClient) handleAgentMessage(data json.RawMessage) {
 	if err := json.Unmarshal(data, &msg); err != nil || msg.Content.Text == "" {
 		return
 	}
-	if c.onChunk != nil {
-		c.onChunk(OutputChunk{Type: string(MessageText), Content: msg.Content.Text})
-	}
+	c.invokeOnChunk(OutputChunk{Type: string(MessageText), Content: msg.Content.Text})
 }
 
 func (c *acpClient) handleAgentThought(data json.RawMessage) {
@@ -377,9 +407,7 @@ func (c *acpClient) handleAgentThought(data json.RawMessage) {
 	if err := json.Unmarshal(data, &msg); err != nil || msg.Content.Text == "" {
 		return
 	}
-	if c.onChunk != nil {
-		c.onChunk(OutputChunk{Type: string(MessageThinking), Content: msg.Content.Text})
-	}
+	c.invokeOnChunk(OutputChunk{Type: string(MessageThinking), Content: msg.Content.Text})
 }
 
 func (c *acpClient) handleToolCallStart(data json.RawMessage) {
@@ -415,12 +443,10 @@ func (c *acpClient) handleToolCallStart(data json.RawMessage) {
 			input:    rawInput,
 			emitted:  true,
 		})
-		if c.onChunk != nil {
-			c.onChunk(OutputChunk{
-				Type: string(MessageToolUse),
-				Tool: &ToolInfo{Name: toolName, CallID: msg.ToolCallID, Input: rawInput},
-			})
-		}
+		c.invokeOnChunk(OutputChunk{
+			Type: string(MessageToolUse),
+			Tool: &ToolInfo{Name: toolName, CallID: msg.ToolCallID, Input: rawInput},
+		})
 		return
 	}
 
@@ -480,12 +506,10 @@ func (c *acpClient) handleToolCallUpdate(data json.RawMessage) {
 	if output == "" {
 		output = extractACPToolCallText(msg.Content)
 	}
-	if c.onChunk != nil {
-		c.onChunk(OutputChunk{
-			Type: string(MessageToolResult),
-			Tool: &ToolInfo{CallID: msg.ToolCallID, Output: output},
-		})
-	}
+	c.invokeOnChunk(OutputChunk{
+		Type: string(MessageToolResult),
+		Tool: &ToolInfo{CallID: msg.ToolCallID, Output: output},
+	})
 }
 
 func (c *acpClient) trackTool(callID string, p *pendingToolCall) {
@@ -541,10 +565,7 @@ func (c *acpClient) emitDeferredToolUse(
 		input = updateRawInput
 	}
 
-	if c.onChunk == nil {
-		return
-	}
-	c.onChunk(OutputChunk{
+	c.invokeOnChunk(OutputChunk{
 		Type: string(MessageToolUse),
 		Tool: &ToolInfo{Name: toolName, CallID: callID, Input: input},
 	})

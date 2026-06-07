@@ -257,7 +257,6 @@ func (b *KiroBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *Ex
 		// 5. Send the prompt and wait for PromptResponse.
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
-			"content":   promptBlocks,
 			"prompt":    promptBlocks,
 		})
 		if err != nil {
@@ -510,11 +509,9 @@ func (b *KiroBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exec
 		}, promptBlocks...)
 	}
 
-	// 5. Send the initial prompt. Kiro's session/prompt accepts both
-	// "content" and "prompt" keys; we send both for protocol compat.
+	// 5. Send the initial prompt.
 	_, err = cl.request(ctx, "session/prompt", map[string]any{
 		"sessionId": sessionID,
-		"content":   promptBlocks,
 		"prompt":    promptBlocks,
 	})
 	if err != nil {
@@ -589,7 +586,8 @@ func (b *KiroBackend) Send(ctx context.Context, ps *PersistentSession, messages 
 	turnDone := make(chan acpPromptResult, 1)
 
 	// Redirect client callbacks to this turn's channels.
-	state.client.onChunk = func(chunk OutputChunk) {
+	state.client.setCallbacks(
+		func(chunk OutputChunk) {
 		if chunk.Type == string(MessageToolUse) {
 			chunk.Tool.Name = kiroToolNameFromTitle(chunk.Tool.Name)
 		}
@@ -599,13 +597,14 @@ func (b *KiroBackend) Send(ctx context.Context, ps *PersistentSession, messages 
 			outputMu.Unlock()
 		}
 		trySend(msgCh, chunk)
-	}
-	state.client.onPromptDone = func(pr acpPromptResult) {
+	},
+		func(pr acpPromptResult) {
 		select {
 		case turnDone <- pr:
 		default:
 		}
-	}
+	},
+	)
 
 	startTime := time.Now()
 	state.turnFin.Store(false)
@@ -616,7 +615,6 @@ func (b *KiroBackend) Send(ctx context.Context, ps *PersistentSession, messages 
 
 	_, err := state.client.request(ctx, "session/prompt", map[string]any{
 		"sessionId": state.sessionID,
-		"content":   promptBlocks,
 		"prompt":    promptBlocks,
 	})
 	if err != nil {
