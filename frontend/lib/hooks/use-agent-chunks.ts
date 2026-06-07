@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useWebSocket } from '@/lib/ws-context';
 
 export interface AgentChunk {
@@ -13,7 +13,6 @@ export interface AgentChunk {
 }
 
 const MAX_CHUNKS_PER_AGENT = 200;
-const DONE_CLEANUP_MS = 3000;
 
 /** Merge consecutive same-type chunks (thinking, text) to avoid fragment spam. */
 function mergeChunks(existing: AgentChunk[], incoming: AgentChunk): AgentChunk[] {
@@ -35,7 +34,6 @@ export function useAgentChunks(channelId: string | null) {
   const [agentTracks, setAgentTracks] = useState<Map<string, AgentChunk[]>>(new Map());
   const [activeAgentIds, setActiveAgentIds] = useState<string[]>([]);
   const { onEvent } = useWebSocket();
-  const doneTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
     if (!channelId) {
@@ -48,7 +46,7 @@ export function useAgentChunks(channelId: string | null) {
     setActiveAgentIds([]);
 
     const unsub = onEvent((event) => {
-      // Handle agent.chunk
+      // Handle agent.chunk — accumulate into per-agent track, mark active
       if (event.type === 'agent.chunk' && event.channel_id === channelId) {
         const chunk: AgentChunk = {
           agentId: event.agent_id,
@@ -72,31 +70,23 @@ export function useAgentChunks(channelId: string | null) {
           }
           return prev;
         });
+        return;
       }
 
-      // Handle message.new from agent: mark done, cleanup after delay
-      if (
-        event.type === 'message.new' &&
-        event.sender_type === 'agent' &&
-        event.channel_id === channelId &&
-        event.sender_id
-      ) {
-        const agentId = event.sender_id;
-        const existing = doneTimers.current.get(agentId);
-        if (existing) clearTimeout(existing);
-        const timer = setTimeout(() => {
-          setActiveAgentIds(prev => prev.filter(id => id !== agentId));
-          doneTimers.current.delete(agentId);
-        }, DONE_CLEANUP_MS);
-        doneTimers.current.set(agentId, timer);
+      // Handle agent.done (SOLO-island PR0) — authoritative terminal signal.
+      // Immediately remove the agent from the active list. Replaces the
+      // previous 3s inactivity heuristic that was both slow and prone to
+      // premature eviction during long-running tool calls.
+      if (event.type === 'agent.done' && event.channel_id === channelId && event.agent_id) {
+        const agentId = event.agent_id;
+        setActiveAgentIds(prev => prev.filter(id => id !== agentId));
+        // Note: we keep agentTracks populated for now so the user can scroll
+        // back through the trace. The next channel navigation or explicit
+        // clearAgentChunks() call removes it.
       }
     });
 
-    return () => {
-      unsub();
-      doneTimers.current.forEach(timer => clearTimeout(timer));
-      doneTimers.current.clear();
-    };
+    return unsub;
   }, [channelId, onEvent]);
 
   const clearAgentChunks = useCallback((agentId: string) => {

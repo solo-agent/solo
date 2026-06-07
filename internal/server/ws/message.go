@@ -1,6 +1,15 @@
 package ws
 
-import "encoding/json"
+import (
+	"github.com/solo-ai/solo/internal/realtime"
+)
+
+// WSMessage is re-exported from realtime so existing callers (and tests)
+// that import the ws package can keep using ws.WSMessage without
+// reaching across the realtime package boundary directly. The
+// canonical definition lives in realtime (moved there to break the
+// service → ws import cycle when realtime needed the broadcaster).
+type WSMessage = realtime.WSMessage
 
 // Event types (client -> server)
 const (
@@ -45,6 +54,15 @@ const (
 	// Agent chunk events (SOLO-agent-view)
 	EventAgentChunk = "agent.chunk"
 
+	// Agent done event (SOLO-island PR0) — terminal signal after task
+	// finishes, replaces the previous 3s heuristic on the frontend.
+	EventAgentDone = "agent.done"
+
+	// Agent activity event (SOLO-island PR1) — derived from OutputChunk
+	// events, carries the island-facing status and a short activity_text
+	// summary. Powers the AgentIsland floating UI.
+	EventAgentActivity = "agent.activity"
+
 	// DM events (SOLO-57-B)
 	EventDMMessageNew  = "dm.message.new"
 
@@ -57,17 +75,14 @@ const (
 	EventInboxUpdated = "inbox.updated"
 )
 
-// WSMessage is the envelope for all WebSocket messages.
-type WSMessage struct {
-	Type    string          `json:"type"`
-	Payload json.RawMessage `json:"payload"`
-}
-
 // Envelope creates a JSON-encoded WSMessage for broadcasting.
+// Thin re-export of realtime.Envelope so the existing call sites
+// in this package keep working unchanged. New code that needs
+// envelope construction outside the ws package should use
+// realtime.Envelope directly to avoid the historical
+// service → ws circular dependency.
 func Envelope(msgType string, payload any) []byte {
-	raw, _ := json.Marshal(payload)
-	data, _ := json.Marshal(WSMessage{Type: msgType, Payload: raw})
-	return data
+	return realtime.Envelope(msgType, payload)
 }
 
 // ----- Client -> Server payloads -----
@@ -173,6 +188,35 @@ type AgentChunkPayload struct {
 	ChunkType string   `json:"chunk_type"` // thinking, tool_use, tool_result, text, error
 	Content   string   `json:"content"`
 	Tool      *ToolRef `json:"tool,omitempty"`
+}
+
+// AgentDonePayload is broadcast on agent.done when a task ends (success or failure).
+// The frontend uses this as the authoritative terminal signal to remove the agent
+// from the "active" list — replaces the previous 3s inactivity heuristic.
+type AgentDonePayload struct {
+	ChannelID  string `json:"channel_id"`
+	AgentID    string `json:"agent_id"`
+	AgentName  string `json:"agent_name,omitempty"`
+	TaskID     string `json:"task_id,omitempty"`
+	FinalState string `json:"final_state"` // "completed" | "failed" | "aborted" | "timeout" | "cancelled"
+	Timestamp  string `json:"timestamp"`
+}
+
+// AgentActivityPayload is broadcast on agent.activity. It carries the
+// island-facing status and a one-line activity_text summary, derived by
+// the daemon from agent.OutputChunk events. Powers the AgentIsland
+// floating UI; replaces the previous chunk-based heuristic in
+// useAgentChunks for the island pill state.
+type AgentActivityPayload struct {
+	ChannelID        string `json:"channel_id"`
+	AgentID          string `json:"agent_id"`
+	AgentName        string `json:"agent_name,omitempty"`
+	Status           string `json:"status"`                       // island status: idle | thinking | running | streaming | waiting_approval | error
+	ActivityText     string `json:"activity_text"`                 // one-line summary in zh-CN
+	ToolName         string `json:"tool_name,omitempty"`
+	ToolInputSummary string `json:"tool_input_summary,omitempty"` // e.g. "Bash: npm test"
+	Source           string `json:"source,omitempty"`             // claude | codex | gemini | kiro | ...; metadata only, not shown in UI
+	Timestamp        string `json:"timestamp"`
 }
 
 // ToolRef carries tool call metadata in an agent chunk.

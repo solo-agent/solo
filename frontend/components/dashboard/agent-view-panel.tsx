@@ -1,19 +1,42 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Eye, EyeOff, X } from 'lucide-react';
 import { useAgentChunks } from '@/lib/hooks/use-agent-chunks';
 import { AgentTrack } from './agent-track';
+import { cn } from '@/lib/utils';
 
 interface AgentViewPanelProps {
   channelId: string | null;
   width: number;
   onWidthChange: (width: number) => void;
+  /**
+   * SOLO-island PR3 — when set, the panel scrolls the matching agent's
+   * track into view and highlights it briefly. Cleared when the user
+   * closes the panel.
+   */
+  focusedAgentId?: string | null;
+  /**
+   * Called when the user clicks the close button. Parent should set
+   * visibility to false and clear focusedAgentId.
+   */
+  onClose?: () => void;
 }
 
-export function AgentViewPanel({ channelId, width, onWidthChange }: AgentViewPanelProps) {
+export function AgentViewPanel({
+  channelId,
+  width,
+  onWidthChange,
+  focusedAgentId,
+  onClose,
+}: AgentViewPanelProps) {
   const { agentTracks, activeAgentIds, clearAgentChunks, clearAllChunks } = useAgentChunks(channelId);
   const isDragging = useRef(false);
+  // Local highlight flag — toggled to true when focusedAgentId changes,
+  // auto-clears after a short visual flash so the user can see which row
+  // the island summoned them to.
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const trackRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   useEffect(() => {
     return () => {
@@ -24,6 +47,22 @@ export function AgentViewPanel({ channelId, width, onWidthChange }: AgentViewPan
     };
   }, []);
 
+  // SOLO-island PR3: scroll + highlight the focused agent when it
+  // changes (driven by an island click). Clears the highlight after a
+  // brief flash so the user gets clear visual feedback without
+  // permanently styling the row.
+  useEffect(() => {
+    if (!focusedAgentId) return;
+    const el = trackRefs.current.get(focusedAgentId);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    setHighlightedId(focusedAgentId);
+    const timer = setTimeout(() => {
+      setHighlightedId(null);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [focusedAgentId]);
 
   const hasContent = agentTracks.size > 0;
 
@@ -63,15 +102,28 @@ export function AgentViewPanel({ channelId, width, onWidthChange }: AgentViewPan
             </span>
           )}
         </div>
-        {hasContent && (
-          <button
-            type="button"
-            onClick={clearAllChunks}
-            className="font-mono text-[10px] text-muted-foreground hover:text-foreground"
-          >
-            清除全部
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          {hasContent && (
+            <button
+              type="button"
+              onClick={clearAllChunks}
+              className="font-mono text-[10px] text-muted-foreground hover:text-foreground"
+            >
+              清除全部
+            </button>
+          )}
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-6 w-6 items-center justify-center border-2 border-black bg-brutal-pink text-white hover:bg-brutal-pink/80"
+              aria-label="关闭 Agent 详情面板"
+              title="关闭"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Content */}
@@ -86,14 +138,25 @@ export function AgentViewPanel({ channelId, width, onWidthChange }: AgentViewPan
           </div>
         )}
         {Array.from(agentTracks.entries()).map(([agentId, chunks]) => (
-          <AgentTrack
+          <div
             key={agentId}
-            agentId={agentId}
-            agentName={chunks[0]?.agentName || agentId.slice(0, 8)}
-            chunks={chunks}
-            isActive={activeAgentIds.includes(agentId)}
-            onClear={clearAgentChunks}
-          />
+            ref={(el) => {
+              if (el) trackRefs.current.set(agentId, el);
+              else trackRefs.current.delete(agentId);
+            }}
+            className={cn(
+              'transition-colors duration-700',
+              highlightedId === agentId && 'bg-brutal-pink/15',
+            )}
+          >
+            <AgentTrack
+              agentId={agentId}
+              agentName={chunks[0]?.agentName || agentId.slice(0, 8)}
+              chunks={chunks}
+              isActive={activeAgentIds.includes(agentId)}
+              onClear={clearAgentChunks}
+            />
+          </div>
         ))}
       </div>
     </div>

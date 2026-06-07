@@ -42,11 +42,11 @@ import {
 } from '@/components/ui/dialog';
 import { AgentMessage } from './agent-message';
 import { StreamingMessage } from './streaming-message';
-import { TypingIndicator } from './typing-indicator';
 import { MessageAttachments } from './message-attachments';
-import type { AgentActivity } from './typing-indicator';
-import type { Message } from '@/lib/types';
-
+import type { Channel, Message, Task, TaskStatus } from '@/lib/types';
+// SOLO-island PR2: TypingIndicator removed — AgentIsland (mounted at the
+// dashboard root) now surfaces agent status. The unused import is removed
+// along with the agentActivities prop and the inline <TypingIndicator />.
 interface MessageListProps {
   messages: Message[];
   isLoading: boolean;
@@ -61,7 +61,6 @@ interface MessageListProps {
   isLoadingMore: boolean;
   loadMoreError: string | null;
   onLoadMore: () => void;
-  agentActivities?: AgentActivity[];
   /** SOLO-237-F: message ID to scroll to (cleared after scroll) */
   scrollToMessageId?: string;
   /** Re-trigger key so clicking the same search result twice still scrolls */
@@ -671,7 +670,6 @@ export function MessageList({
   isLoadingMore,
   loadMoreError,
   onLoadMore,
-  agentActivities,
   scrollToMessageId,
   scrollKey,
 }: MessageListProps) {
@@ -889,7 +887,9 @@ export function MessageList({
           )}
         </div>
 
-        <TypingIndicator agents={agentActivities ?? []} />
+        {/* SOLO-island PR2: TypingIndicator removed — AgentIsland
+            (mounted at the dashboard root) is the new home for
+            "agent is working" status. */}
 
         {showShortcutsHelp && messages.length > 0 && (
           <KeyboardShortcutsHelp onDismiss={dismissShortcutsHelp} />

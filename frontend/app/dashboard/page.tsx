@@ -13,6 +13,7 @@ import { NavBar } from "@/components/ui/navbar";
 import { CreateChannelModal } from "@/components/dashboard/create-channel-modal";
 import { CreateDMModal } from "@/components/dashboard/create-dm-modal";
 import { DeleteChannelDialog } from "@/components/dashboard/delete-channel-dialog";
+import { AgentIsland } from "@/components/agents/agent-island";
 import { Button } from "@/components/ui/button";
 
 // SOLO-63-F: Lazy-load heavy view components
@@ -156,6 +157,28 @@ function DashboardContent() {
     },
     [dmUpdateTask],
   );
+
+  // ---- SOLO-island PR3: AgentViewPanel state lives at the dashboard
+  // level so the AgentIsland (also mounted here) can summon it on click.
+  // ChannelView consumes these as controlled props.
+  const [agentViewVisible, setAgentViewVisible] = useState(false);
+  const [agentViewWidth, setAgentViewWidth] = useState(320);
+  const [agentViewFocusedAgentId, setAgentViewFocusedAgentId] = useState<string | null>(null);
+
+  const handleInvokeAgent = useCallback((agentId: string) => {
+    setAgentViewFocusedAgentId(agentId);
+    setAgentViewVisible(true);
+  }, []);
+
+  // Toggling to false should also clear the focused-agent highlight so
+  // a later reopen starts from a clean state. Forwarded to ChannelView as
+  // the onAgentViewVisibleChange callback.
+  const handleAgentViewVisibleChange = useCallback((visible: boolean) => {
+    setAgentViewVisible(visible);
+    if (!visible) {
+      setAgentViewFocusedAgentId(null);
+    }
+  }, []);
 
   // ---- DM AsTask handler (SOLO-232-F) ----
   const handleDMAsTask = useCallback(
@@ -317,6 +340,11 @@ function DashboardContent() {
           initialThreadMessageId={threadFromUrl ?? undefined}
           initialScrollToMessageId={messageFromUrl ?? undefined}
           onThreadChange={handleChannelThreadChange}
+          agentViewVisible={agentViewVisible}
+          onAgentViewVisibleChange={handleAgentViewVisibleChange}
+          agentViewWidth={agentViewWidth}
+          onAgentViewWidthChange={setAgentViewWidth}
+          agentViewFocusedAgentId={agentViewFocusedAgentId}
         />
       );
     }
@@ -457,6 +485,15 @@ function DashboardContent() {
           onConfirm={() => handleDeleteChannel(deleteTarget.id)}
         />
       )}
+
+      {/* SOLO-island PR2: bottom-center floating island surfacing
+          current-channel agent status. Channel-scoped, on-demand. PR3:
+          onInvokeAgent wires the expanded panel row click into the
+          AgentViewPanel state owned by the dashboard. */}
+      <AgentIsland
+        channelId={selectedChannelId ?? selectedDmId ?? null}
+        onInvokeAgent={handleInvokeAgent}
+      />
     </div>
   );
 }

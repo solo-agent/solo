@@ -9,7 +9,6 @@ import { Hash, Users, Loader2, ClipboardList, MessageSquare, Eye } from 'lucide-
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
 import { useChannelMembers } from '@/lib/hooks/use-channel-members';
-import { useStreamingMessages } from '@/lib/hooks/use-streaming-messages';
 import { useWebSocket } from '@/lib/ws-context';
 import { useTasks } from '@/lib/hooks/use-tasks';
 import { MessageList } from './message-list';
@@ -26,7 +25,6 @@ import {
   DialogCloseButton,
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast';
-import type { AgentActivity } from './typing-indicator';
 import type { Channel, Message, Task, TaskStatus } from '@/lib/types';
 
 // SOLO-63-F: Lazy-load ThreadPanel (only rendered when a thread is open)
@@ -44,9 +42,33 @@ interface ChannelViewProps {
   initialScrollToMessageId?: string;
   /** v1.5: Called when thread opens/closes so the parent can sync to URL */
   onThreadChange?: (threadId: string | null) => void;
+  /** SOLO-island PR3: whether the right-side AgentViewPanel is visible. */
+  agentViewVisible?: boolean;
+  /** SOLO-island PR3: toggle the AgentViewPanel. Called with `true` to
+   * open, `false` to close. */
+  onAgentViewVisibleChange?: (visible: boolean) => void;
+  /** SOLO-island PR3: width of the AgentViewPanel (controlled by parent
+   * so it can outlive unmounts). */
+  agentViewWidth?: number;
+  /** SOLO-island PR3: called when the user drags the panel's resize
+   * handle. Parent should persist the new width. */
+  onAgentViewWidthChange?: (width: number) => void;
+  /** SOLO-island PR3: when set, the panel scrolls/highlights this agent
+   * (driven by AgentIsland's "查看完整 trace" action). */
+  agentViewFocusedAgentId?: string | null;
 }
 
-export function ChannelView({ channel, initialThreadMessageId, initialScrollToMessageId, onThreadChange }: ChannelViewProps) {
+export function ChannelView({
+  channel,
+  initialThreadMessageId,
+  initialScrollToMessageId,
+  onThreadChange,
+  agentViewVisible,
+  onAgentViewVisibleChange,
+  agentViewWidth,
+  onAgentViewWidthChange,
+  agentViewFocusedAgentId,
+}: ChannelViewProps) {
   const {
     messages,
     isLoading,
@@ -83,9 +105,18 @@ export function ChannelView({ channel, initialThreadMessageId, initialScrollToMe
   // ---- Thread panel width ----
   const [threadPanelWidth, setThreadPanelWidth] = useState(400);
 
-  // ---- Agent View panel state ----
-  const [showAgentView, setShowAgentView] = useState(false);
-  const [agentViewWidth, setAgentViewWidth] = useState(320);
+  // ---- Agent View panel state (SOLO-island PR3) ----
+  // Controlled by the parent (dashboard) so the AgentIsland can summon
+  // the panel from outside this component. The Eye button in the channel
+  // header toggles via the same callback; the parent owns the actual
+  // state. This component is treated as "always rendered with a parent
+  // controller" — if you need to mount it standalone, wrap a small
+  // component that owns the boolean state.
+  const showAgentView = !!agentViewVisible;
+  const effectiveAgentViewWidth = agentViewWidth ?? 320;
+  const toggleAgentView = () => {
+    onAgentViewVisibleChange?.(!showAgentView);
+  };
 
   // ---- Tasks tab state (SOLO-128-F) ----
   const [channelViewTab, setChannelViewTab] = useState<'messages' | 'tasks'>('messages');
@@ -115,14 +146,45 @@ export function ChannelView({ channel, initialThreadMessageId, initialScrollToMe
     if (channelViewTab === 'tasks') refetchTasks();
   }, [channelViewTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---- Agent thinking/typing/streaming status tracking (SOLO-47-F, SOLO-52-F) ----
-  const [thinkingAgentNames, setThinkingAgentNames] = useState<string[]>([]);
-  const [typingAgentNames, setTypingAgentNames] = useState<string[]>([]);
-  const typingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+  // ---- Agent member status tracking (SOLO-47-F) ----
+  // SOLO-island PR2: removed thinkingAgentNames/typingAgentNames state and
+  // the TypingIndicator badge. AgentIsland (mounted at the dashboard root)
+  // is now the single source of truth for "agent is working". The member
+  // list (right column) still updates its dots to reflect thinking/typing
+  // /online so the avatar stays in sync, but with a much simpler model.
+  //
+  // PR-fix: the previous 5s inactivity heuristic was the same class of
+  // bug as the 3s heuristic in useAgentChunks (fixed in PR0). It would
+  // prematurely mark an agent as online during long-running tool calls.
+  // Now we rely on agent.done as the authoritative terminal signal and
+  // treat thinking/typing as transient — cleared the moment we see
+  // a done event (or message.new) for the same agent.
+  const memberStatusTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
   );
 
-  const { activeStreamingAgentIds } = useStreamingMessages(channel.id);
+  /** Cancel any pending revert timer for an agent. */
+  const cancelMemberStatusRevert = (agentId: string) => {
+    const t = memberStatusTimersRef.current.get(agentId);
+    if (t) {
+      clearTimeout(t);
+      memberStatusTimersRef.current.delete(agentId);
+    }
+  };
+
+  /**
+   * Schedule a fallback revert to online after `ms` ms. This is a safety
+   * net for paths that don't emit agent.done (e.g. the legacy LLM
+   * provider fallback). Primary terminal signal remains agent.done.
+   */
+  const scheduleMemberStatusRevert = (agentId: string, ms: number) => {
+    cancelMemberStatusRevert(agentId);
+    const timer = setTimeout(() => {
+      updateMemberStatus(agentId, 'online');
+      memberStatusTimersRef.current.delete(agentId);
+    }, ms);
+    memberStatusTimersRef.current.set(agentId, timer);
+  };
 
   const { onEvent } = useWebSocket();
 
@@ -134,55 +196,35 @@ export function ChannelView({ channel, initialThreadMessageId, initialScrollToMe
 
         const isThinking = event.type === 'agent.thinking';
         updateMemberStatus(event.agent_id, isThinking ? 'thinking' : 'typing');
-
-        const agent = agentsRef.current.find(
-          (a) => a.member_id === event.agent_id,
-        );
-        const agentName = agent?.display_name ?? event.agent_id;
-        const setFn = isThinking ? setThinkingAgentNames : setTypingAgentNames;
-        setFn((prev) => {
-          if (prev.includes(agentName)) return prev;
-          return [...prev, agentName];
-        });
-
-        // Auto-clear after 5s
-        const existing = typingTimersRef.current.get(event.agent_id);
-        if (existing) clearTimeout(existing);
-        const timer = setTimeout(() => {
-          setFn((prev) => prev.filter((n) => n !== agentName));
-          typingTimersRef.current.delete(event.agent_id);
-          updateMemberStatus(event.agent_id, 'online');
-        }, 5000);
-        typingTimersRef.current.set(event.agent_id, timer);
+        // Fallback only — agent.done will cancel and immediately revert.
+        scheduleMemberStatusRevert(event.agent_id, 30_000);
       }
 
-      // When an agent sends a message, clear all their statuses
+      // agent.done is the authoritative terminal signal. Clear any
+      // fallback timer and snap status back to online immediately.
+      if (event.type === 'agent.done' && event.channel_id === channel.id && event.agent_id) {
+        cancelMemberStatusRevert(event.agent_id);
+        updateMemberStatus(event.agent_id, 'online');
+      }
+
+      // When an agent sends a message, revert their member status to online.
       if (
         event.type === 'message.new' &&
         event.channel_id === channel.id &&
         event.sender_type === 'agent' &&
         event.sender_id
       ) {
-        const name = event.sender_name;
-        if (name) {
-          setThinkingAgentNames((prev) => prev.filter((n) => n !== name));
-          setTypingAgentNames((prev) => prev.filter((n) => n !== name));
-        }
-        const timer = typingTimersRef.current.get(event.sender_id);
-        if (timer) {
-          clearTimeout(timer);
-          typingTimersRef.current.delete(event.sender_id);
-        }
+        cancelMemberStatusRevert(event.sender_id);
         updateMemberStatus(event.sender_id, 'online');
       }
     });
 
     return () => {
       unsub();
-      for (const timer of typingTimersRef.current.values()) {
+      for (const timer of memberStatusTimersRef.current.values()) {
         clearTimeout(timer);
       }
-      typingTimersRef.current.clear();
+      memberStatusTimersRef.current.clear();
     };
   }, [channel.id, onEvent, updateMemberStatus]);
 
@@ -344,27 +386,9 @@ export function ChannelView({ channel, initialThreadMessageId, initialScrollToMe
     }
   };
 
-  // Compute the combined agent activity array for the typing indicator
-  const agentActivities: AgentActivity[] = [
-    // thinking agents
-    ...thinkingAgentNames.map((name) => {
-      const member = agents.find((a) => a.display_name === name);
-      return { agentId: member?.member_id ?? name, name, state: 'thinking' as const };
-    }),
-    // typing agents (pre-streaming)
-    ...typingAgentNames
-      .filter((n) => !thinkingAgentNames.includes(n))
-      .map((name) => {
-        const member = agents.find((a) => a.display_name === name);
-        return { agentId: member?.member_id ?? name, name, state: 'typing' as const };
-      }),
-    // streaming agents
-    ...activeStreamingAgentIds.map((id) => {
-      const member = agents.find((a) => a.member_id === id);
-      const name = member?.display_name ?? id;
-      return { agentId: id, name, state: 'streaming' as const };
-    }),
-  ];
+  // SOLO-island PR2: removed agentActivities aggregation — the
+  // TypingIndicator it fed is now replaced by AgentIsland, which
+  // subscribes to agent.activity events directly.
 
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -409,7 +433,7 @@ export function ChannelView({ channel, initialThreadMessageId, initialScrollToMe
           <div className="flex items-center gap-2 text-xs text-muted-foreground flex-shrink-0">
             <button
               type="button"
-              onClick={() => setShowAgentView(prev => !prev)}
+              onClick={toggleAgentView}
               className={cn(
                 'flex h-8 w-8 items-center justify-center border-2 border-black shadow-brutal-sm transition-colors',
                 showAgentView
@@ -461,7 +485,6 @@ export function ChannelView({ channel, initialThreadMessageId, initialScrollToMe
               isLoadingMore={isLoadingMore}
               loadMoreError={loadMoreError}
               onLoadMore={loadMore}
-              agentActivities={agentActivities}
               scrollToMessageId={scrollToMessageId}
               scrollKey={scrollMsgKey}
             />
@@ -505,12 +528,15 @@ export function ChannelView({ channel, initialThreadMessageId, initialScrollToMe
         )}
       </div>
 
-      {/* Agent View panel — conditionally mounted to avoid running hooks when hidden */}
+      {/* Agent View panel — SOLO-island PR3: controlled by parent, so the
+          AgentIsland (mounted at the dashboard root) can summon it. */}
       {showAgentView && (
         <AgentViewPanel
           channelId={channel.id}
-          width={agentViewWidth}
-          onWidthChange={setAgentViewWidth}
+          width={effectiveAgentViewWidth}
+          onWidthChange={onAgentViewWidthChange ?? (() => {})}
+          focusedAgentId={agentViewFocusedAgentId}
+          onClose={() => onAgentViewVisibleChange?.(false)}
         />
       )}
 
