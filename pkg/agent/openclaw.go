@@ -232,9 +232,6 @@ func (b *OpenClawBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 		}
 	}
 	if sessionID == "" {
-		// OpenClaw's bridge mode rejects per-session mcpServers, so we
-		// intentionally omit the field. See:
-		// https://docs.openclaw.ai/zh-CN/cli/acp (兼容性矩阵)
 		result, err := cl.request(ctx, "session/new", buildOpenclawSessionParams(cwd, opts.Model))
 		if err != nil {
 			runner.close()
@@ -480,12 +477,15 @@ func compareOpenclawVersion(a, b string) int {
 
 // buildOpenclawSessionParams constructs the params for ACP session/new.
 //
-// The OpenClaw bridge rejects per-session mcpServers, so this helper
-// intentionally omits that field. Model is best-effort — see the
-// comment in Start for why session/set_model is not invoked.
+// The OpenClaw bridge requires mcpServers to be present (even as an empty
+// array). Per-session MCP server config is not supported in bridge mode,
+// so we always send an empty list.
+// Model is best-effort — see the comment in Start for why session/set_model
+// is not invoked.
 func buildOpenclawSessionParams(cwd, model string) map[string]any {
 	params := map[string]any{
-		"cwd": cwd,
+		"cwd":        cwd,
+		"mcpServers": []any{},
 	}
 	if model != "" {
 		params["model"] = model
