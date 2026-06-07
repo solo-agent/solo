@@ -31,16 +31,26 @@ test.describe('Brutal consistency', () => {
 
   test('no mid-range rounded corners on any visited page', async ({ page }) => {
     const pages = ['/dashboard', '/tasks', '/teams', '/computers', '/settings'];
+    // The Tailwind rounded utility appears as a discrete token in the
+    // className string. We match the class with word boundaries so we
+    // don't catch shadow-brutal-sm or border-2 etc. The class attribute
+    // is space-separated tokens, so a regex against the joined class
+    // string is the simplest correct check.
+    const roundedRegex =
+      /\b(rounded-sm|rounded-md|rounded-lg|rounded-xl|rounded-2xl|rounded-3xl)\b/;
     for (const path of pages) {
       await page.goto(`${BASE}${path}`);
       await page.waitForTimeout(400);
-      // Mid-range = rounded-{sm,md,lg,xl,2xl,3xl}. rounded-none and
-      // rounded-full are fine.
-      const offenders = page.locator(
-        '[class*="rounded-sm"], [class*="rounded-md"], [class*="rounded-lg"], [class*="rounded-xl"], [class*="rounded-2xl"], [class*="rounded-3xl"]',
-      );
-      const count = await offenders.count();
-      expect(count, `path=${path} should have 0 mid-range rounded elements`).toBe(0);
+      const all = page.locator('[class]');
+      const total = await all.count();
+      for (let i = 0; i < total; i++) {
+        const cls = (await all.nth(i).getAttribute('class')) ?? '';
+        if (roundedRegex.test(cls)) {
+          throw new Error(
+            `path=${path} element #${i} has mid-range rounded class: ${cls}`,
+          );
+        }
+      }
     }
   });
 

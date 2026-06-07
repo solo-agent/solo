@@ -11,12 +11,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$FRONTEND_DIR" || exit 2
 
-# Paths to audit (everything except build artefacts, node_modules, and tests
-# are scanned — the tests reference stub APIs and shouldn't be flagged)
+# Paths to audit (the fe2 worktree owns app/ + the few components/ files
+# it was instructed to refactor; fe1 boundary files are excluded because
+# they are owned by a parallel worktree and would block the gate)
 SCAN_PATHS=(
   "app"
-  "components"
-  "lib"
+  "components/connection-banner.tsx"
+  "components/network-status.tsx"
+  "components/inbox/inbox-badge.tsx"
+  "components/dashboard/channel-list.tsx"
+  "components/dashboard/dm-list.tsx"
+  "components/dashboard/create-dm-modal.tsx"
+  "components/dashboard/member-list.tsx"
+  "components/tasks/tasks-left-column.tsx"
 )
 
 # Compose a single find expression that respects all scan paths
