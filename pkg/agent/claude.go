@@ -1065,6 +1065,7 @@ func filterCustomArgs(args []string, blocked map[string]blockedArgMode) []string
 // ── Channel helper ──
 
 func trySend(ch chan<- OutputChunk, chunk OutputChunk) {
+	defer func() { recover() }() // channel may be closed by the turn-completion path
 	select {
 	case ch <- chunk:
 	default:
@@ -1350,7 +1351,7 @@ func newLogWriter(logger *slog.Logger, prefix string) *logWriter {
 func (w *logWriter) Write(p []byte) (int, error) {
 	text := strings.TrimSpace(string(p))
 	if text != "" {
-		w.logger.Debug(w.prefix + text)
+		w.logger.Info(w.prefix + text)
 	}
 	return len(p), nil
 }
