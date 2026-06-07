@@ -87,13 +87,11 @@ func TestBuiltins_UnknownTypeError(t *testing.T) {
 func TestBuiltins_PersistentBackend(t *testing.T) {
 	reg := GlobalRegistry()
 
-	// claude, local, codex, opencode, and hermes implement PersistentBackend
-	// (v1.4 added codex, opencode, hermes; v1.5 already had claude/local).
-	//
-	// openclaw is intentionally excluded for now — its persistent migration
-	// is tracked under task "openclaw-acp-migration" and will be re-added
-	// once Start/Send/Close land on OpenClawBackend.
-	for _, typ := range []string{"claude", "local", "codex", "opencode", "hermes"} {
+	// claude, local, codex, opencode, hermes, kimi, kiro, and openclaw
+	// implement PersistentBackend. v1.4 added codex, opencode, hermes;
+	// v1.5 added kimi, kiro; v1.6 added openclaw (openclaw-acp-migration).
+	// claude/local predate the persistent era.
+	for _, typ := range []string{"claude", "local", "codex", "opencode", "hermes", "kimi", "kiro", "openclaw"} {
 		b, err := reg.Create(typ, BackendConfig{ProviderType: typ})
 		if err != nil {
 			t.Fatalf("Create(%q): %v", typ, err)
@@ -104,9 +102,7 @@ func TestBuiltins_PersistentBackend(t *testing.T) {
 	}
 
 	// All other built-in types should NOT implement PersistentBackend.
-	// (openclaw: pending openclaw-acp-migration; kimi/kiro: pending
-	// kimi-kiro-persistent task; others: out of scope.)
-	for _, typ := range []string{"cursor", "gemini", "kimi", "kiro", "copilot", "pi", "openclaw"} {
+	for _, typ := range []string{"cursor", "gemini", "copilot", "pi"} {
 		b, err := reg.Create(typ, BackendConfig{ProviderType: typ})
 		if err != nil {
 			t.Fatalf("Create(%q): %v", typ, err)
@@ -121,8 +117,7 @@ func TestBuiltins_PersistentBackend(t *testing.T) {
 
 func TestBuiltins_NewPersistentBackend(t *testing.T) {
 	// Persistent types should succeed.
-	// (openclaw excluded — pending openclaw-acp-migration task.)
-	for _, typ := range []string{"claude", "local", "codex", "opencode", "hermes"} {
+	for _, typ := range []string{"claude", "local", "codex", "opencode", "hermes", "kimi", "kiro", "openclaw"} {
 		pb, err := NewPersistentBackend(typ)
 		if err != nil {
 			t.Fatalf("NewPersistentBackend(%q): unexpected error: %v", typ, err)
@@ -133,7 +128,7 @@ func TestBuiltins_NewPersistentBackend(t *testing.T) {
 	}
 
 	// Non-persistent types should return an error.
-	for _, typ := range []string{"cursor", "gemini", "kimi", "kiro", "copilot", "pi"} {
+	for _, typ := range []string{"cursor", "gemini", "copilot", "pi"} {
 		pb, err := NewPersistentBackend(typ)
 		if err == nil {
 			t.Errorf("NewPersistentBackend(%q): expected error, got nil", typ)
