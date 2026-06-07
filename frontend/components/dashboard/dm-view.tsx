@@ -392,7 +392,6 @@ export function DMView({
                 isLoadingMore={isLoadingMore}
                 loadMoreError={loadMoreError}
                 onLoadMore={loadMore}
-                agentActivities={agentActivities}
                 scrollToMessageId={scrollToMessageId}
                 scrollKey={scrollMsgKey}
               />
