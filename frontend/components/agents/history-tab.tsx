@@ -58,15 +58,15 @@ const STATUS_BADGE: Record<
 > = {
   success: {
     label: '成功',
-    className: 'bg-brutal-lime text-black',
+    className: 'bg-brutal-success text-black',
   },
   failed: {
     label: '失败',
-    className: 'bg-brutal-red text-white',
+    className: 'bg-brutal-danger text-white',
   },
   running: {
     label: '运行中',
-    className: 'bg-brutal-pink text-black',
+    className: 'bg-brutal-primary text-black',
   },
 };
 
@@ -74,7 +74,7 @@ const STATUS_BADGE: Record<
 
 function SkeletonRow() {
   return (
-    <div className="flex items-center gap-4 border-b-2 border-black/10 px-5 py-4 last:border-b-0">
+    <div className="flex items-center gap-4 border-b-2 border-brutal-muted px-5 py-4 last:border-b-0">
       <div className="h-3 w-16 animate-pulse bg-muted" />
       <div className="h-3 w-24 animate-pulse bg-muted" />
       <div className="h-5 w-12 animate-pulse bg-muted" />
@@ -110,7 +110,7 @@ export function HistoryTab({
   if (error) {
     return (
       <div className="card-brutal p-6">
-        <div className="flex items-center gap-3 border-2 border-brutal-red bg-brutal-red-light p-4">
+        <div className="flex items-center gap-3 border-2 border-brutal-danger bg-brutal-danger-light p-4">
           <span className="font-body text-sm text-foreground">{error}</span>
           {onRetry && (
             <button
@@ -131,7 +131,7 @@ export function HistoryTab({
     return (
       <div className="card-brutal p-8">
         <div className="flex flex-col items-center justify-center py-12">
-          <div className="mb-4 flex h-14 w-14 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm">
             <Bot className="h-7 w-7 text-white" />
           </div>
           <h3 className="font-heading font-bold text-base text-foreground">

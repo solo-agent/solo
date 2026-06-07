@@ -31,8 +31,8 @@ interface AgentCardProps {
 export function AgentCard({ agent, onEdit, onDelete, onClick }: AgentCardProps) {
   // Status color: lime=online, yellow=thinking, gray=offline
   const statusColor = agent.is_active
-    ? 'fill-brutal-lime text-brutal-lime'
-    : 'fill-brutal-stone text-brutal-stone';
+    ? 'fill-brutal-success text-brutal-success'
+    : 'fill-brutal-muted text-brutal-muted';
   const statusLabel = agent.is_active ? '在线' : '离线';
 
   const handleCardClick = () => {
@@ -104,7 +104,7 @@ export function AgentCard({ agent, onEdit, onDelete, onClick }: AgentCardProps) 
 
         {/* System prompt preview */}
         <p
-          className={agent.system_prompt ? 'text-xs text-gray-400 truncate max-w-[240px]' : 'text-xs text-gray-300 italic'}
+          className={agent.system_prompt ? 'text-xs text-muted-foreground truncate max-w-[240px]' : 'text-xs text-muted-foreground italic'}
           title={agent.system_prompt ? agent.system_prompt.slice(0, 200) : undefined}
         >
           {agent.system_prompt
@@ -127,11 +127,11 @@ export function AgentCard({ agent, onEdit, onDelete, onClick }: AgentCardProps) 
         <button
           type="button"
           onClick={handleDeleteClick}
-          className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0 bg-brutal-red-light"
+          className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0 bg-brutal-danger-light"
           aria-label={`删除 ${agent.name}`}
           title="删除"
         >
-          <Trash2 className="h-3.5 w-3.5 text-brutal-red" />
+          <Trash2 className="h-3.5 w-3.5 text-brutal-danger" />
         </button>
       </div>
     </Card>

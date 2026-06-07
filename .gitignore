@@ -1,6 +1,10 @@
 # Claude Code
 .claude/
+.worktrees/
 CLAUDE.md
+
+# Open Code
+.opencode
 
 # Environment
 .env
@@ -54,3 +58,4 @@ docs/
 *.bak
 *.bak2
 .playwright-cli/
+.superpowers/

@@ -31,7 +31,7 @@ export function CliDetection({ selectedRuntime, className }: CliDetectionProps) 
   // If error, show a quiet warning
   if (error) {
     return (
-      <div className={cn('flex items-center gap-1.5 text-brutal-stone', className)}>
+      <div className={cn('flex items-center gap-1.5 text-brutal-muted', className)}>
         <AlertTriangle className="h-3 w-3" />
         <span className="font-mono text-[11px]">无法检测 CLI 状态</span>
       </div>
@@ -50,7 +50,7 @@ export function CliDetection({ selectedRuntime, className }: CliDetectionProps) 
             className={cn(
               'flex items-center gap-2 px-2 py-1',
               'border-2 border-black',
-              isSelected ? 'bg-brutal-pink-light' : 'bg-white',
+              isSelected ? 'bg-brutal-primary-light' : 'bg-white',
             )}
             style={isSelected ? { background: '#fffaef' } : undefined}
           >
@@ -58,7 +58,7 @@ export function CliDetection({ selectedRuntime, className }: CliDetectionProps) 
             <span
               className={cn(
                 'inline-block h-2 w-2 flex-shrink-0 rounded-full',
-                available ? 'bg-brutal-lime' : 'bg-brutal-stone',
+                available ? 'bg-brutal-success' : 'bg-brutal-muted',
               )}
             />
 
@@ -71,7 +71,7 @@ export function CliDetection({ selectedRuntime, className }: CliDetectionProps) 
             <span
               className={cn(
                 'font-mono text-[10px] font-bold',
-                available ? 'text-brutal-lime' : 'text-muted-foreground',
+                available ? 'text-brutal-success' : 'text-muted-foreground',
               )}
             >
               {available ? 'Available' : 'Not installed'}

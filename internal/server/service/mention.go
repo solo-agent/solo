@@ -96,3 +96,68 @@ func (s *MentionService) ResolveMentions(ctx context.Context, content, channelID
 
 	return agentIDs, true, nil
 }
+
+// ResolveUserMentions parses @mention patterns in content, resolves them to
+// user IDs by display_name, and records them in user_mentions.
+// Returns the list of mentioned user IDs for WS broadcast.
+func (s *MentionService) ResolveUserMentions(ctx context.Context, content, messageID string) (mentionedUserIDs []string, err error) {
+	matches := mentionPattern.FindAllStringSubmatch(content, -1)
+	if len(matches) == 0 {
+		return nil, nil
+	}
+
+	nameSet := make(map[string]bool, len(matches))
+	for _, m := range matches {
+		name := strings.TrimSpace(m[1])
+		if name != "" {
+			nameSet[name] = true
+		}
+	}
+
+	if len(nameSet) == 0 {
+		return nil, nil
+	}
+
+	names := make([]string, 0, len(nameSet))
+	for n := range nameSet {
+		names = append(names, n)
+	}
+
+	// Resolve display_names to user IDs
+	rows, err := s.pool.Query(ctx,
+		`SELECT id FROM users WHERE display_name = ANY($1)`, names,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var userIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		userIDs = append(userIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+
+	// Batch insert into user_mentions
+	for _, uid := range userIDs {
+		_, err := s.pool.Exec(ctx,
+			`INSERT INTO user_mentions (message_id, mentioned_user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+			messageID, uid,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return userIDs, nil
+}

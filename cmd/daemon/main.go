@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -142,6 +143,10 @@ func main() {
 	r.Route("/internal/daemon", func(r chi.Router) {
 		r.Post("/run", h.Run)           // Server dispatches agent tasks here
 		r.Post("/proxy", h.ProxyRequest) // Agent-to-server proxy
+		r.Route("/workspace", func(r chi.Router) {
+			r.Get("/list", h.HandleWorkspaceList)
+			r.Get("/read", h.HandleWorkspaceRead)
+		})
 	})
 
 	// SSE requires long-lived connections — no write timeout.
@@ -228,6 +233,7 @@ func registerWithServer(ctx context.Context) error {
 		MaxConcurrent: 10,
 		CurrentLoad:   0,
 		AgentTypes:    registeredAgentTypes(),
+		SystemInfo:    collectSystemInfo(),
 	}
 
 	payload, err := json.Marshal(req)
@@ -321,6 +327,7 @@ func sendHeartbeat() {
 		UptimeSec:   int64(time.Since(startTime).Seconds()),
 		ActiveTasks: taskMgr.ListActiveTasks(),
 		AgentIDs:    taskMgr.ActiveAgentIDs(),
+		SystemInfo:  collectSystemInfo(),
 	}
 
 	payload, err := json.Marshal(req)
@@ -360,17 +367,37 @@ func getOutboundIP() string {
 	return localAddr.IP.String()
 }
 
+// --- System info collected at daemon startup ---
+
+// SystemInfo carries OS, hostname and local IP reported to the server.
+type SystemInfo struct {
+	OS       string `json:"os"`
+	Hostname string `json:"hostname"`
+	IP       string `json:"ip"`
+}
+
+// collectSystemInfo gathers OS, hostname, and primary local IP at startup.
+func collectSystemInfo() SystemInfo {
+	hostname, _ := os.Hostname()
+	return SystemInfo{
+		OS:       runtime.GOOS,
+		Hostname: hostname,
+		IP:       getOutboundIP(),
+	}
+}
+
 // --- Request/Response types for daemon-server communication ---
 
 type daemonRegisterPayload struct {
-	DaemonID      string   `json:"daemon_id"`
-	Host          string   `json:"host"`
-	Port          int      `json:"port"`
-	Version       string   `json:"version"`
-	Capabilities  []string `json:"capabilities"`
-	MaxConcurrent int      `json:"max_concurrent"`
-	CurrentLoad   int32    `json:"current_load"`
-	AgentTypes    []string `json:"agent_types"`
+	DaemonID      string     `json:"daemon_id"`
+	Host          string     `json:"host"`
+	Port          int        `json:"port"`
+	Version       string     `json:"version"`
+	Capabilities  []string   `json:"capabilities"`
+	MaxConcurrent int        `json:"max_concurrent"`
+	CurrentLoad   int32      `json:"current_load"`
+	AgentTypes    []string   `json:"agent_types"`
+	SystemInfo    SystemInfo `json:"system_info"`
 }
 
 type daemonRegisterResponse struct {
@@ -379,12 +406,13 @@ type daemonRegisterResponse struct {
 }
 
 type daemonHeartbeatPayload struct {
-	DaemonID    string   `json:"daemon_id"`
-	Load        int32    `json:"load"`
-	MaxLoad     int      `json:"max_load"`
-	UptimeSec   int64    `json:"uptime_seconds"`
-	ActiveTasks []string `json:"active_tasks"`
-	AgentIDs    []string `json:"agent_ids"`
+	DaemonID    string     `json:"daemon_id"`
+	Load        int32      `json:"load"`
+	MaxLoad     int        `json:"max_load"`
+	UptimeSec   int64      `json:"uptime_seconds"`
+	ActiveTasks []string   `json:"active_tasks"`
+	AgentIDs    []string   `json:"agent_ids"`
+	SystemInfo  SystemInfo `json:"system_info"`
 }
 
 // writeJSON writes a JSON response.

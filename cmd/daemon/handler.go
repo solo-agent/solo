@@ -331,7 +331,8 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		serverPath = "/api/v1/channels/join"
 		serverBody, _ = json.Marshal(map[string]string{"target": req.Content})
 	case "thread_unfollow":
-		serverPath = fmt.Sprintf("/api/v1/threads/%s/mark-read", req.Content)
+		serverPath = "/api/v1/threads/unfollow"
+		serverBody, _ = json.Marshal(map[string]string{"target": req.Content})
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown action: " + req.Action})
 		return
@@ -907,6 +908,10 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	var messageSentViaCLI bool
 
 	for chunk := range session.Messages {
+		// SOLO-island PR1: emit agent.activity for every chunk the island UI
+		// cares about. Skips empty activity text internally.
+		h.pushAgentActivity(req, agentInfo.Name, req.ModelConfig.Provider, chunk)
+
 		switch chunk.Type {
 		case string(agent.MessageText):
 			// v1.3: Slock-aligned — text output is internal thinking.
@@ -1084,6 +1089,58 @@ func (h *daemonHandler) pushEventJSON(taskID, event string, data interface{}) {
 		Event: event,
 		Data:  string(raw),
 	})
+}
+
+// pushAgentActivity (SOLO-island PR1) translates a backend OutputChunk
+// into an agent.activity SSE event for the AgentIsland UI. Skips push
+// when the chunk produces no activity text (mirrors Kanan's "best effort,
+// skip empty" pattern). Payload matches ws.AgentActivityPayload on the
+// server side; server passes it through to WebSocket unchanged.
+//
+// Per-CLI adaptation (SOLO-island PR-fix): uses
+// InferActivityTextForBackend so ACP backends (Kimi/Kiro/Hermes)
+// get normalised tool names, the stream-json family gets
+// namespace-stripped names, and all surfaces share the same Chinese
+// pill text.
+func (h *daemonHandler) pushAgentActivity(req runTaskRequest, agentName, provider string, chunk agent.OutputChunk) {
+	if req.ChannelID == "" {
+		return
+	}
+	activityText := agent.InferActivityTextForBackend(provider, chunk)
+	if activityText == "" {
+		return
+	}
+	status := agent.InferIslandStatusFromChunk(chunk)
+
+	var toolName, toolInputSummary string
+	if chunk.Tool != nil {
+		// Display name goes through NormalizeToolName so the island
+		// pill shows the canonical form. The raw name is preserved
+		// in tool_name for the AgentViewPanel to render exactly
+		// what the backend said.
+		toolName = agent.NormalizeToolName(provider, chunk.Tool.Name)
+		toolInputSummary = agent.SummarizeToolInput(toolName, chunk.Tool.Input)
+	}
+
+	payload := map[string]interface{}{
+		"channel_id":   req.ChannelID,
+		"agent_id":     req.AgentID,
+		"agent_name":   agentName,
+		"status":       string(status),
+		"activity_text": activityText,
+		"timestamp":    time.Now().UTC().Format(time.RFC3339),
+	}
+	if toolName != "" {
+		payload["tool_name"] = toolName
+	}
+	if toolInputSummary != "" {
+		payload["tool_input_summary"] = toolInputSummary
+	}
+	if provider != "" {
+		payload["source"] = provider
+	}
+
+	h.pushEventJSON(req.TaskID, "agent.activity", payload)
 }
 
 // --- SSE endpoint ---
@@ -1304,4 +1361,242 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	defer d.Close()
 	_, err = io.Copy(d, s)
 	return err
+}
+
+// ── Workspace file browsing endpoints ──────────────────────────────────────────
+
+// workspaceNode represents a file or directory in the workspace tree.
+type workspaceNode struct {
+	Type     string          `json:"type"`
+	Name     string          `json:"name"`
+	Path     string          `json:"path,omitempty"`
+	Content  string          `json:"content,omitempty"`
+	Size     int64           `json:"size,omitempty"`
+	Children []workspaceNode `json:"children,omitempty"`
+}
+
+// HandleWorkspaceList returns a file tree for the given agent's workspace.
+func (h *daemonHandler) HandleWorkspaceList(w http.ResponseWriter, r *http.Request) {
+	agentID := r.URL.Query().Get("agent_id")
+	if agentID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_id is required"})
+		return
+	}
+
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		relPath = "."
+	}
+
+	workspaceDir := h.workspaceManager.WorkspaceDir(agentID)
+	fullPath := filepath.Clean(filepath.Join(workspaceDir, relPath))
+	rel, err := filepath.Rel(workspaceDir, fullPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path traversal not allowed"})
+		return
+	}
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "path not found"})
+			return
+		}
+		slog.Error("workspace list: stat failed", "path", fullPath, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	// Resolve symlinks and re-verify containment to prevent
+	// symlink-based path traversal that would bypass the string prefix check.
+	resolvedPath, err := filepath.EvalSymlinks(fullPath)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path resolution failed"})
+		return
+	}
+	resolvedRel, err := filepath.Rel(workspaceDir, resolvedPath)
+	if err != nil || strings.HasPrefix(resolvedRel, "..") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path traversal not allowed"})
+		return
+	}
+
+	var node workspaceNode
+	if info.IsDir() {
+		node, err = buildFileTree(resolvedPath, workspaceDir, 0)
+	} else {
+		node, err = buildFileNode(resolvedPath, workspaceDir)
+	}
+	if err != nil {
+		slog.Error("workspace list: build failed", "path", resolvedPath, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read workspace"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, node)
+}
+
+// HandleWorkspaceRead returns the content of a single file in the workspace.
+func (h *daemonHandler) HandleWorkspaceRead(w http.ResponseWriter, r *http.Request) {
+	agentID := r.URL.Query().Get("agent_id")
+	if agentID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_id is required"})
+		return
+	}
+
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path is required"})
+		return
+	}
+
+	workspaceDir := h.workspaceManager.WorkspaceDir(agentID)
+	fullPath := filepath.Clean(filepath.Join(workspaceDir, relPath))
+	rel, err := filepath.Rel(workspaceDir, fullPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path traversal not allowed"})
+		return
+	}
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
+			return
+		}
+		slog.Error("workspace read: stat failed", "path", fullPath, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	// Resolve symlinks and re-verify containment to prevent
+	// symlink-based path traversal that would bypass the string prefix check.
+	resolvedPath, err := filepath.EvalSymlinks(fullPath)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path resolution failed"})
+		return
+	}
+	resolvedRel, err := filepath.Rel(workspaceDir, resolvedPath)
+	if err != nil || strings.HasPrefix(resolvedRel, "..") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path traversal not allowed"})
+		return
+	}
+
+	if info.Size() > 1*1024*1024 {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"content": "[file too large to preview]",
+			"name":    info.Name(),
+			"size":    info.Size(),
+		})
+		return
+	}
+
+	data, err := os.ReadFile(resolvedPath)
+	if err != nil {
+		slog.Error("workspace read: read failed", "path", resolvedPath, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read file"})
+		return
+	}
+
+	content := string(data)
+	checkLen := len(data)
+	if checkLen > 8192 {
+		checkLen = 8192
+	}
+	for _, b := range data[:checkLen] {
+		if b == 0 {
+			content = "[binary file]"
+			break
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"content": content,
+		"name":    info.Name(),
+		"size":    info.Size(),
+	})
+}
+
+const maxWorkspaceDepth = 20
+
+// buildFileTree recursively builds a workspaceNode tree for a directory.
+func buildFileTree(dirPath, basePath string, depth int) (workspaceNode, error) {
+	if depth > maxWorkspaceDepth {
+		return workspaceNode{
+			Type: "directory",
+			Name: filepath.Base(dirPath),
+		}, nil
+	}
+
+	name := filepath.Base(dirPath)
+	if dirPath == basePath {
+		name = "."
+	}
+
+	relPath, err := filepath.Rel(basePath, dirPath)
+	if err != nil {
+		relPath = filepath.Base(dirPath)
+	}
+	node := workspaceNode{
+		Type:     "directory",
+		Name:     name,
+		Path:     relPath,
+		Children: []workspaceNode{},
+	}
+
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return node, err
+	}
+
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		// Skip symlinks to prevent recursion into directories outside
+		// the workspace via symlink-based traversal.
+		if entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+
+		fullPath := filepath.Join(dirPath, entry.Name())
+		if entry.IsDir() {
+			child, err := buildFileTree(fullPath, basePath, depth+1)
+			if err != nil {
+				slog.Warn("workspace: failed to read subdirectory", "path", fullPath, "error", err)
+				continue
+			}
+			node.Children = append(node.Children, child)
+		} else {
+			child, err := buildFileNode(fullPath, basePath)
+			if err != nil {
+				slog.Warn("workspace: failed to read file", "path", fullPath, "error", err)
+				continue
+			}
+			node.Children = append(node.Children, child)
+		}
+	}
+
+	return node, nil
+}
+
+// buildFileNode creates a workspaceNode for a single file.
+func buildFileNode(filePath, basePath string) (workspaceNode, error) {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return workspaceNode{}, err
+	}
+
+	relPath, err := filepath.Rel(basePath, filePath)
+	if err != nil {
+		relPath = filepath.Base(filePath)
+	}
+	node := workspaceNode{
+		Type: "file",
+		Name: info.Name(),
+		Path: relPath,
+		Size: info.Size(),
+	}
+
+	return node, nil
 }

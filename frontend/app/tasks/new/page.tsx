@@ -17,6 +17,8 @@ import { useChannels } from '@/lib/hooks/use-channels';
 import { useAgents } from '@/lib/hooks/use-agents';
 import { TaskForm } from '@/components/tasks/task-form';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
+import { Select } from '@/components/ui/select';
 import type { CreateTaskInput } from '@/lib/types';
 
 function CreateTaskForm() {
@@ -74,7 +76,7 @@ function CreateTaskForm() {
     return (
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-brutal-pink border-t-transparent" />
+          <Spinner size="md" />
           <p className="font-mono text-sm text-muted-foreground">加载中...</p>
         </div>
       </div>
@@ -108,21 +110,19 @@ function CreateTaskForm() {
           <div className="mb-5">
             <label className="mb-1.5 block text-sm font-heading font-bold">
               <Hash className="mr-1 inline h-3.5 w-3.5" />
-              所属频道 <span className="text-brutal-red">*</span>
+              所属频道 <span className="text-brutal-danger">*</span>
             </label>
-            <select
+            <Select
               value={selectedChannelId}
-              onChange={(e) => setSelectedChannelId(e.target.value)}
-              className="input-brutal h-10 w-full"
+              onChange={(v) => setSelectedChannelId(v)}
+              options={[
+                { value: '', label: '选择频道...' },
+                ...channels.map((ch) => ({ value: ch.id, label: `#${ch.name}` })),
+              ]}
+              size="md"
+              className="w-full"
               disabled={channelsLoading || isSubmitting}
-            >
-              <option value="">选择频道...</option>
-              {channels.map((ch) => (
-                <option key={ch.id} value={ch.id}>
-                  #{ch.name}
-                </option>
-              ))}
-            </select>
+            />
           </div>
         )}
 
@@ -145,7 +145,7 @@ export default function CreateTaskPage() {
       fallback={
         <div className="flex h-screen items-center justify-center bg-brutal-cream">
           <div className="flex flex-col items-center gap-3">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-brutal-pink border-t-transparent" />
+            <Spinner size="md" />
             <p className="font-mono text-sm text-muted-foreground">加载中...</p>
           </div>
         </div>

@@ -8,9 +8,20 @@
 
 'use client';
 
+import { useState, useRef, useEffect } from 'react';
 import { cn } from '@/lib/utils';
-import { MessageSquare, Clock, ChevronRight } from 'lucide-react';
+import { Clock, ChevronRight, ChevronDown } from 'lucide-react';
 import type { Task, TaskStatus } from '@/lib/types';
+
+// ---- Valid status transitions ----
+
+const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
+  todo: ['in_progress', 'closed'],
+  in_progress: ['in_review', 'closed'],
+  in_review: ['done', 'in_progress', 'closed'],
+  done: ['closed'],
+  closed: ['todo'],
+};
 
 // ---- Status display config ----
 
@@ -20,27 +31,27 @@ export const STATUS_COLUMN_CONFIG: Record<
 > = {
   todo: {
     label: 'TODO',
-    bgClass: 'bg-brutal-orange',
+    bgClass: 'bg-brutal-warning',
     textClass: 'text-black',
   },
   in_progress: {
     label: 'IN PROGRESS',
-    bgClass: 'bg-brutal-cyan',
+    bgClass: 'bg-brutal-info',
     textClass: 'text-black',
   },
   in_review: {
     label: 'IN REVIEW',
-    bgClass: 'bg-brutal-lavender',
+    bgClass: 'bg-brutal-violet',
     textClass: 'text-black',
   },
   done: {
     label: 'DONE',
-    bgClass: 'bg-brutal-lime',
+    bgClass: 'bg-brutal-success',
     textClass: 'text-black',
   },
   closed: {
     label: 'CLOSED',
-    bgClass: 'bg-brutal-stone',
+    bgClass: 'bg-brutal-muted',
     textClass: 'text-black',
   },
 };
@@ -78,29 +89,97 @@ function formatRelativeTime(iso?: string): string {
   }
 }
 
-// ---- Mini card for column ----
+// ---- Status badge with dropdown ----
 
-interface TaskCardMiniProps {
+const STATUS_LABELS: Record<TaskStatus, string> = {
+  todo: 'TODO',
+  in_progress: 'IN PROGRESS',
+  in_review: 'IN REVIEW',
+  done: 'DONE',
+  closed: 'CLOSED',
+};
+
+function StatusBadge({
+  status,
+  onChange,
+}: {
+  status: TaskStatus;
+  onChange: (newStatus: TaskStatus) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  const transitions = VALID_TRANSITIONS[status] ?? [];
+  const config = STATUS_COLUMN_CONFIG[status];
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  return (
+    <span ref={ref} className="relative inline-flex">
+      <span
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className={cn(
+          'badge-brutal cursor-pointer hover:opacity-80 transition-opacity inline-flex items-center gap-0.5',
+          config.bgClass,
+          config.textClass,
+        )}
+        aria-label={`状态: ${config.label}`}
+        tabIndex={0}
+      >
+        {config.label}
+        <ChevronDown className="h-3 w-3" />
+      </span>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-30 min-w-[140px] border-2 border-black bg-white shadow-brutal py-1">
+          {transitions.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange(s);
+                setOpen(false);
+              }}
+              className="block w-full text-left px-3 py-1.5 font-heading text-xs font-bold bg-white text-black transition-colors hover:bg-brutal-primary hover:text-black"
+            >
+              {STATUS_LABELS[s]}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
+// ---- Task card ----
+
+interface TaskCardProps {
   task: Task;
   onClick: (task: Task) => void;
-  onStatusClick: (task: Task) => void;
-  onClaim?: (task: Task) => void;
-  onUnclaim?: (task: Task) => void;
-  /** Parent task number lookup (key = task id, value = task_number) */
+  onStatusChange: (task: Task, newStatus: TaskStatus) => void;
   parentTaskNumber?: number;
-  /** Called when the parent badge is clicked */
   onParentClick?: (taskId: string) => void;
 }
 
-function TaskCardMini({
+function TaskCard({
   task,
   onClick,
-  onStatusClick,
-  onClaim,
-  onUnclaim,
+  onStatusChange,
   parentTaskNumber,
   onParentClick,
-}: TaskCardMiniProps) {
+}: TaskCardProps) {
   const statusConf = STATUS_COLUMN_CONFIG[task.status];
   const taskNum = task.task_number ? `#${task.task_number}` : null;
   const isClaimed = !!task.claimer_id;
@@ -108,16 +187,11 @@ function TaskCardMini({
   const hasSubtasks = (task.subtask_count ?? 0) > 0;
   const isChild = !!task.parent_task_id;
 
-  // Compute claimer display: claimer_name > assignee_name > claimer_id (truncated)
   const claimerDisplay =
     task.claimer_name ||
     task.assignee_name ||
     (task.claimer_id ? task.claimer_id.slice(0, 8) : null);
 
-  // Reply count: from task if available (backend may return reply_count)
-  const replyCount = task.reply_count ?? 0;
-
-  // Last activity: use updated_at as fallback for created_at
   const lastActivity = task.updated_at || task.created_at;
 
   return (
@@ -133,8 +207,8 @@ function TaskCardMini({
       }}
       className={cn(
         'card-brutal w-full cursor-pointer text-left',
-        'hover:-translate-y-[1px] hover:shadow-brutal-lg',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-pink focus-visible:ring-offset-2',
+        'hover:shadow-brutal-lg',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-primary focus-visible:ring-offset-2',
       )}
     >
       <div className="p-3">
@@ -167,7 +241,7 @@ function TaskCardMini({
                     onParentClick(task.parent_task_id!);
                   }
                 }}
-                className="text-[10px] text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-pink"
+                className="text-[10px] text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-primary"
               >
                 <ChevronRight className="inline h-3 w-3 -mt-px" />
                 {' '}子任务 of {parentTaskNumber ? `#${parentTaskNumber}` : '父任务'}
@@ -181,32 +255,11 @@ function TaskCardMini({
           </div>
         )}
 
-        {/* Status badge — clickable for non-terminal only */}
-        <span
-          onClick={(e) => {
-            if (isTerminal) return;
-            e.stopPropagation();
-            onStatusClick(task);
-          }}
-          onKeyDown={(e) => {
-            if (isTerminal) return;
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              e.stopPropagation();
-              onStatusClick(task);
-            }
-          }}
-          className={cn(
-            'badge-brutal',
-            isTerminal ? '' : 'cursor-pointer hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-pink',
-            statusConf.bgClass,
-            statusConf.textClass,
-          )}
-          aria-label={`状态: ${statusConf?.label || task.status}`}
-          tabIndex={isTerminal ? undefined : 0}
-        >
-          {statusConf.label}
-        </span>
+        {/* Status badge — with dropdown for non-terminal */}
+        <StatusBadge
+          status={task.status}
+          onChange={(newStatus) => onStatusChange(task, newStatus)}
+        />
 
         {/* Terminal state marker */}
         {isTerminal ? (
@@ -216,76 +269,37 @@ function TaskCardMini({
             </span>
           </div>
         ) : (
-          /* Claimer info + claim/unclaim buttons */
+          /* Claimer info — display only, no claim/unclaim buttons */
           <div className="mt-2 flex items-center gap-2">
             {isClaimed ? (
               <>
-                {/* Claimer avatar */}
-                <span className="flex h-5 w-5 items-center justify-center border-2 border-black bg-brutal-lime font-heading text-[10px] font-bold text-black">
+                <span className="flex h-5 w-5 items-center justify-center border-2 border-black bg-brutal-success font-heading text-[10px] font-bold text-black">
                   {(claimerDisplay || '?').charAt(0).toUpperCase()}
                 </span>
                 <span className="flex-1 truncate font-body text-[11px] text-foreground font-medium">
                   {claimerDisplay}
                 </span>
-                {/* Claimed badge */}
-                <span className="flex-shrink-0 badge-brutal bg-brutal-lime text-black text-[10px]">
+                <span className="flex-shrink-0 badge-brutal bg-brutal-success text-black text-[10px]">
                   已认领
                 </span>
-                {onUnclaim && (
-                  <span
-                    tabIndex={0}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onUnclaim(task);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onUnclaim(task);
-                      }
-                    }}
-                    className="btn-brutal btn-brutal-sm flex-shrink-0 text-[11px] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-pink"
-                    aria-label="释放任务"
-                  >
-                    释放
-                  </span>
-                )}
               </>
             ) : (
-              onClaim && (
-                <span
-                  tabIndex={0}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onClaim(task);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onClaim(task);
-                    }
-                  }}
-                  className="btn-brutal btn-brutal-sm flex-shrink-0 text-[11px] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-pink"
-                  aria-label="认领任务"
-                >
-                  认领
-                </span>
-              )
+              <span className="font-body text-[11px] text-muted-foreground">
+                待认领
+              </span>
             )}
           </div>
         )}
 
         {/* Subtask progress bar (parent task) */}
         {hasSubtasks && (
-          <div className="mt-2 pt-2 border-t-2 border-black/10">
+          <div className="mt-2 pt-2 border-t-2 border-brutal-muted">
             <div className="flex items-center gap-1.5 text-[10px]">
               <span className="text-muted-foreground">子任务:</span>
               <span className="font-bold">{task.done_subtask_count ?? 0}/{task.subtask_count}</span>
-              <div className="flex-1 h-1 border border-black/20 bg-muted">
+              <div className="flex-1 h-1 border border-brutal-muted bg-muted">
                 <div
-                  className="h-full bg-brutal-lime"
+                  className="h-full bg-brutal-success"
                   style={{ width: `${Math.min(((task.done_subtask_count ?? 0) / (task.subtask_count ?? 1)) * 100, 100)}%` }}
                 />
               </div>
@@ -293,16 +307,10 @@ function TaskCardMini({
           </div>
         )}
 
-        {/* Footer: reply count + last activity */}
-        <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <MessageSquare className="h-3 w-3" />
-            {replyCount > 0 ? `${replyCount}` : '0'}
-          </span>
-          <span className="flex items-center gap-1">
-            <Clock className="h-3 w-3" />
-            {formatRelativeTime(lastActivity)}
-          </span>
+        {/* Footer: last activity */}
+        <div className="mt-2 flex items-center text-[11px] text-muted-foreground">
+          <Clock className="mr-1 h-3 w-3" />
+          {formatRelativeTime(lastActivity)}
         </div>
       </div>
     </div>
@@ -339,12 +347,8 @@ interface TaskColumnProps {
   tasks: Task[];
   isLoading: boolean;
   onTaskClick: (task: Task) => void;
-  onStatusClick: (task: Task) => void;
-  onClaim?: (task: Task) => void;
-  onUnclaim?: (task: Task) => void;
-  /** Parent task number lookup map */
+  onStatusChange: (task: Task, newStatus: TaskStatus) => void;
   parentTaskMap?: Map<string, number>;
-  /** Called when a child task's parent badge is clicked */
   onParentClick?: (taskId: string) => void;
 }
 
@@ -355,9 +359,7 @@ export function TaskColumn({
   tasks,
   isLoading,
   onTaskClick,
-  onStatusClick,
-  onClaim,
-  onUnclaim,
+  onStatusChange,
   parentTaskMap,
   onParentClick,
 }: TaskColumnProps) {
@@ -389,13 +391,11 @@ export function TaskColumn({
       {/* Card list */}
       <div className="flex-1 space-y-3 min-h-[100px]">
         {tasks.map((task) => (
-          <TaskCardMini
+          <TaskCard
             key={task.id}
             task={task}
             onClick={onTaskClick}
-            onStatusClick={onStatusClick}
-            onClaim={onClaim}
-            onUnclaim={onUnclaim}
+            onStatusChange={onStatusChange}
             parentTaskNumber={task.parent_task_id ? parentTaskMap?.get(task.parent_task_id) : undefined}
             onParentClick={onParentClick}
           />

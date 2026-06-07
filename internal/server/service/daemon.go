@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/solo-ai/solo/internal/realtime"
+	"github.com/solo-ai/solo/internal/server/workspace"
 )
 
 // DaemonStatus represents the operational status of a daemon instance.
@@ -414,6 +416,80 @@ func (dm *DaemonManager) CancelTask(ctx context.Context, daemon *DaemonInfo, tas
 	return nil
 }
 
+// ---- workspace.Proxy implementation ----
+
+// FindDaemonForAgent finds an online daemon that can serve workspace files.
+// TODO: implement agent-to-daemon affinity when persistent agent-daemon
+// assignment is available. Currently returns the first online daemon,
+// which is correct for single-daemon deployments.
+func (dm *DaemonManager) FindDaemonForAgent(ctx context.Context, agentID string) (*workspace.Daemon, bool) {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+
+	for _, d := range dm.daemons {
+		if d.Status != DaemonStatusOnline {
+			continue
+		}
+		return &workspace.Daemon{
+			Host: d.Host,
+			Port: d.Port,
+		}, true
+	}
+	return nil, false
+}
+
+// ProxyWorkspaceList sends a workspace list request to a daemon.
+func (dm *DaemonManager) ProxyWorkspaceList(ctx context.Context, daemon *workspace.Daemon, agentID, path string) ([]byte, error) {
+	params := url.Values{}
+	params.Set("agent_id", agentID)
+	params.Set("path", path)
+	urlStr := fmt.Sprintf("http://%s:%d/internal/daemon/workspace/list?%s",
+		daemon.Host, daemon.Port, params.Encode())
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
+	if err != nil {
+		return nil, fmt.Errorf("proxy workspace list: %w", err)
+	}
+
+	resp, err := dm.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("proxy workspace list: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("proxy workspace list: daemon returned %d", resp.StatusCode)
+	}
+
+	return io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024)) // 1MB cap
+}
+
+// ProxyWorkspaceRead sends a workspace read request to a daemon.
+func (dm *DaemonManager) ProxyWorkspaceRead(ctx context.Context, daemon *workspace.Daemon, agentID, path string) ([]byte, error) {
+	params := url.Values{}
+	params.Set("agent_id", agentID)
+	params.Set("path", path)
+	urlStr := fmt.Sprintf("http://%s:%d/internal/daemon/workspace/read?%s",
+		daemon.Host, daemon.Port, params.Encode())
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
+	if err != nil {
+		return nil, fmt.Errorf("proxy workspace read: %w", err)
+	}
+
+	resp, err := dm.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("proxy workspace read: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("proxy workspace read: daemon returned %d", resp.StatusCode)
+	}
+
+	return io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024)) // 1MB cap
+}
+
 // --- Health check loop ---
 
 // healthCheckLoop runs periodically to mark daemons as offline after missed heartbeats.
@@ -509,15 +585,23 @@ func hasCapability(caps []string, cap string) bool {
 
 // --- Daemon Register/Heartbeat request types ---
 
+// DaemonSystemInfo is the system info reported by the daemon.
+type DaemonSystemInfo struct {
+	OS       string `json:"os"`
+	Hostname string `json:"hostname"`
+	IP       string `json:"ip"`
+}
+
 type DaemonRegisterRequest struct {
-	DaemonID      string   `json:"daemon_id"`
-	Host          string   `json:"host"`
-	Port          int      `json:"port"`
-	Version       string   `json:"version"`
-	Capabilities  []string `json:"capabilities"`
-	MaxConcurrent int      `json:"max_concurrent"`
-	CurrentLoad   int32    `json:"current_load"`
-	AgentTypes    []string `json:"agent_types"`
+	DaemonID      string           `json:"daemon_id"`
+	Host          string           `json:"host"`
+	Port          int              `json:"port"`
+	Version       string           `json:"version"`
+	Capabilities  []string         `json:"capabilities"`
+	MaxConcurrent int              `json:"max_concurrent"`
+	CurrentLoad   int32            `json:"current_load"`
+	AgentTypes    []string         `json:"agent_types"`
+	SystemInfo    DaemonSystemInfo `json:"system_info"`
 }
 
 type DaemonRegisterResponse struct {
@@ -526,12 +610,13 @@ type DaemonRegisterResponse struct {
 }
 
 type DaemonHeartbeatRequest struct {
-	DaemonID    string   `json:"daemon_id"`
-	Load        int32    `json:"load"`
-	MaxLoad     int      `json:"max_load"`
-	UptimeSec   int64    `json:"uptime_seconds"`
-	ActiveTasks []string `json:"active_tasks"`
-	AgentIDs    []string `json:"agent_ids,omitempty"`
+	DaemonID    string           `json:"daemon_id"`
+	Load        int32            `json:"load"`
+	MaxLoad     int              `json:"max_load"`
+	UptimeSec   int64            `json:"uptime_seconds"`
+	ActiveTasks []string         `json:"active_tasks"`
+	AgentIDs    []string         `json:"agent_ids,omitempty"`
+	SystemInfo  DaemonSystemInfo `json:"system_info"`
 }
 
 type DaemonHeartbeatResponse struct {

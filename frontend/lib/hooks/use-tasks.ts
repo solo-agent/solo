@@ -411,11 +411,15 @@ export function useDMTasks(dmId: string | null) {
       }
 
       if (event.type === 'task.updated') {
-        console.log('[useDMTasks] task.updated received:', { eventChannelId: event.channel_id, dmId, match: event.channel_id === dmId, eventId: event.id, eventStatus: event.status });
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[useDMTasks] task.updated received:', { eventChannelId: event.channel_id, dmId, match: event.channel_id === dmId, eventId: event.id, eventStatus: event.status });
+        }
         if (event.channel_id !== dmId) return;
         setTasks((prev) => {
           const existing = prev.find((t) => t.id === event.id);
-          console.log('[useDMTasks] task.updated existing:', !!existing, 'prevCount:', prev.length);
+          if (process.env.NODE_ENV === 'development') {
+            console.log('[useDMTasks] task.updated existing:', !!existing, 'prevCount:', prev.length);
+          }
           if (!existing) return prev;
           const updated = { ...existing };
           updated.title = event.title;

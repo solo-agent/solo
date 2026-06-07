@@ -1,3 +1,11 @@
+// ============================================================================
+// Button — single canonical button
+// - Variants map directly to brutal design tokens (primary/danger/outline/ghost).
+// - `default` and `destructive` retained as aliases for back-compat — existing
+//   call sites still compile, but new code should use the semantic variants.
+// - Sizes: default (h-10), sm (btn-brutal-sm h-8), lg (h-12), icon (h-10 w-10).
+// ============================================================================
+
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
@@ -7,12 +15,19 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "btn-brutal-pink",
-        destructive: "bg-brutal-red text-brutal-black",
+        // Primary CTA (yellow call-to-action)
+        primary: "btn-brutal-primary",
+        // Dangerous action (destructive intent; white text on coral red)
+        danger: "bg-brutal-danger text-white",
+        // Outlined: white fill, 2px black border (already on the base)
         outline: "bg-brutal-white text-brutal-black",
-        secondary: "bg-brutal-white text-brutal-black",
+        // Ghost: transparent until hover, then yellow tint
         ghost: "btn-flat",
-        link: "text-brutal-pink underline-offset-4 hover:underline",
+        // ---- Deprecated aliases (kept for back-compat) ----
+        default: "btn-brutal-primary",
+        destructive: "bg-brutal-danger text-white",
+        secondary: "bg-brutal-white text-brutal-black",
+        link: "text-brutal-primary underline-offset-4 hover:underline",
       },
       size: {
         default: "h-10 px-3 py-2",
@@ -22,7 +37,7 @@ const buttonVariants = cva(
       },
     },
     defaultVariants: {
-      variant: "default",
+      variant: "primary",
       size: "default",
     },
   },

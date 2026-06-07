@@ -63,6 +63,15 @@ export type WSServerEvent =
   | { type: 'agent.error'; channel_id: string; agent_id: string; status: string; detail?: string }
   // ---- Agent chunk events (agent view) ----
   | { type: 'agent.chunk'; channel_id: string; agent_id: string; agent_name: string; chunk_type: string; content: string; tool?: { name: string; input?: string; output?: string; call_id?: string }; timestamp: string }
+  // ---- Agent done event (SOLO-island PR0) — terminal signal after a task
+  // finishes, replaces the 3s inactivity heuristic. The frontend removes the
+  // agent from the "active" list as soon as this arrives.
+  | { type: 'agent.done'; channel_id: string; agent_id: string; agent_name?: string; task_id?: string; final_state: 'completed' | 'failed' | 'aborted' | 'timeout' | 'cancelled'; timestamp: string }
+  // ---- Agent activity event (SOLO-island PR1) — single channel-scoped
+  // event carrying the island-facing status and a one-line activity_text
+  // summary. Powers the AgentIsland floating UI. Derived by the daemon
+  // from agent.OutputChunk events.
+  | { type: 'agent.activity'; channel_id: string; agent_id: string; agent_name?: string; status: 'idle' | 'thinking' | 'running' | 'streaming' | 'waiting_approval' | 'error'; activity_text: string; tool_name?: string; tool_input_summary?: string; source?: string; timestamp: string }
   // ---- 流式消息事件 (SOLO-51-F, SOLO-52-F) ----
   | { type: 'message.agent_typing'; id: string; channel_id: string; thread_id?: string; sender_id: string; sender_name?: string; content: string; created_at: string }
   // ---- 任务事件 (SOLO-122-B) ----
@@ -71,7 +80,9 @@ export type WSServerEvent =
   | { type: 'task.deleted'; id: string; channel_id: string; task_number: number }
   // ---- DM 事件 ----
   | { type: 'dm.message.new'; id: string; dm_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; created_at: string; attachments?: Attachment[]; thread_id?: string }
-  | { type: 'dm.updated'; dm_id: string; last_message?: { content: string; sender_id: string; sender_name: string; created_at: string }; last_reply_at?: string; unread_count: number };
+  | { type: 'dm.updated'; dm_id: string; last_message?: { content: string; sender_id: string; sender_name: string; created_at: string }; last_reply_at?: string; unread_count: number }
+  // ---- Inbox events (v1.5) ----
+  | { type: 'inbox.updated'; };
 
 /** 客户端发送的 WebSocket 命令 */
 export type WSClientCommand =

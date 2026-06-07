@@ -10,21 +10,15 @@
 
 'use client';
 
-import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
-import { Bot, User, AlertCircle, RefreshCw, MessageSquare, Circle, ClipboardList, Plus } from 'lucide-react';
+import { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
+import { AlertCircle, RefreshCw, MessageSquare, Circle, ClipboardList } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useStreamingMessages } from '@/lib/hooks/use-streaming-messages';
 import { MessageList } from './message-list';
 import { MessageInput } from './message-input';
 import { TaskBoard } from '@/components/tasks/task-board';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Dialog,
-  DialogHeader,
-  DialogTitle,
-  DialogCloseButton,
-} from '@/components/ui/dialog';
-
+import { PixelAvatar } from '@/components/ui/pixel-avatar';
 const ThreadPanel = lazy(() =>
   import('./thread-panel').then((m) => ({ default: m.ThreadPanel })),
 );
@@ -54,9 +48,14 @@ interface DMViewProps {
   onTaskStatusChange?: (task: Task, newStatus: TaskStatus) => Promise<Task | void>;
   onClaimTask?: (task: Task) => void;
   onUnclaimTask?: (task: Task) => void;
-  onCreateTask?: (title: string) => Promise<void>;
   onConvertToTask?: (channelId: string, messageId: string, title?: string) => Promise<Task>;
   onTaskCreated?: () => void;
+  /** v1.5: Called when thread opens/closes so the parent can sync to URL */
+  onThreadChange?: (threadId: string | null) => void;
+  /** v1.5: Initial thread message ID from URL — opens ThreadPanel on mount or on change */
+  initialThreadMessageId?: string;
+  /** Optional message ID to scroll to on mount or URL change */
+  initialScrollToMessageId?: string;
 }
 
 // ---- Helpers ----
@@ -98,25 +97,48 @@ export function DMView({
   onTaskStatusChange,
   onClaimTask,
   onUnclaimTask,
-  onCreateTask,
   onConvertToTask,
   onTaskCreated,
+  onThreadChange,
+  initialThreadMessageId,
+  initialScrollToMessageId,
 }: DMViewProps) {
   const name = getDisplayName(dm);
   const isAgent = isAgentDM(dm);
   const deleted = isAgentDeleted(dm);
   const [viewTab, setViewTab] = useState<'messages' | 'tasks'>('messages');
-  const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
-  const [createTaskTitle, setCreateTaskTitle] = useState('');
-  const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [threadMessage, setThreadMessage] = useState<Message | null>(null);
   const [threadTask, setThreadTask] = useState<Task | null>(null);
   const [threadPanelWidth, setThreadPanelWidth] = useState(400);
+  const [scrollToMessageId, setScrollToMessageId] = useState<string | undefined>(undefined);
+  const [scrollMsgKey, setScrollMsgKey] = useState(0);
+
+  // Handle initialScrollToMessageId: scroll to a specific message on mount or URL change.
+  // Waits for isLoading to become false so the message DOM exists.
+  const lastScrollTarget = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!initialScrollToMessageId || !dm || isLoading) return;
+    if (lastScrollTarget.current === initialScrollToMessageId) return;
+    lastScrollTarget.current = initialScrollToMessageId;
+    setScrollToMessageId(initialScrollToMessageId);
+    setScrollMsgKey((k) => k + 1);
+  }, [initialScrollToMessageId, dm, isLoading]);
 
   // Refetch tasks when switching to tasks tab
   useEffect(() => {
     if (viewTab === 'tasks') refetchTasks?.();
   }, [viewTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // v1.5: Handle initialThreadMessageId — open thread panel when URL param changes
+  useEffect(() => {
+    if (!initialThreadMessageId || !dm) return;
+    const found = messages.find((m) => m.id === initialThreadMessageId);
+    if (found) {
+      setThreadMessage(found);
+      const task = tasks?.find((t) => t.message_id === initialThreadMessageId || t.id === initialThreadMessageId);
+      if (task) setThreadTask(task);
+    }
+  }, [initialThreadMessageId, dm, messages, tasks]);
 
   // Sync threadTask when tasks list changes (align with channel-view pattern)
   useEffect(() => {
@@ -194,7 +216,8 @@ export function DMView({
   const handleThreadClose = useCallback(() => {
     setThreadMessage(null);
     setThreadTask(null);
-  }, []);
+    onThreadChange?.(null);
+  }, [onThreadChange]);
 
   const handleMessageClick = useCallback(
     (message: Message) => {
@@ -206,15 +229,15 @@ export function DMView({
           display_name: task?.creator_name || message.display_name,
         });
         setThreadTask(task ?? null);
+        onThreadChange?.(message.id);
       }
     },
-    [tasks, refetchTasks],
+    [tasks, refetchTasks, onThreadChange],
   );
 
   const handleTaskClickFromBoard = useCallback(
     (task: Task) => {
       if (!task.message_id) return;
-      refetchTasks?.();
       // Use task.message_id to find the original message
       const existingMsg = messages.find((m) => m.id === task.message_id);
       if (existingMsg) {
@@ -239,8 +262,9 @@ export function DMView({
         });
       }
       setThreadTask(task);
+      onThreadChange?.(task.message_id);
     },
-    [messages, refetchTasks],
+    [messages, refetchTasks, onThreadChange],
   );
 
   const handleAsTask = useCallback(
@@ -253,52 +277,45 @@ export function DMView({
           display_name: task?.creator_name || message.display_name,
         });
         setThreadTask(task);
+        onThreadChange?.(message.id);
       } catch {
         // handled silently
       }
     },
-    [dm.id, onConvertToTask],
+    [dm.id, onConvertToTask, onThreadChange],
   );
 
   return (
     <div className="flex flex-1 overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Header — card-brutal style */}
-        <div className="card-brutal mx-4 mt-4 p-4">
-          <div className="flex items-center gap-3">
-            {/* Icon */}
-            <div className={`
-              flex h-10 w-10 flex-shrink-0 items-center justify-center border-2 border-black
-              ${isAgent ? 'bg-brutal-lime' : 'bg-brutal-cyan'}
-            `}>
-              {isAgent ? (
-                <Bot className="h-5 w-5 text-black" />
-              ) : (
-                <User className="h-5 w-5 text-black" />
-              )}
+        {/* Header — full-width attached bar, same skeleton as Channel */}
+        <div className="flex h-14 flex-shrink-0 items-center border-b-2 border-black px-4">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            {/* Avatar */}
+            <PixelAvatar
+              agentId={dm.other_agent?.id ?? dm.other_user?.id ?? dm.id}
+              size="md"
+            />
+            {/* Name + status */}
+            <div className="flex items-center gap-2 min-w-0">
+              <h2 className="font-bold text-foreground truncate">
+                {name}
+              </h2>
+              {/* Online status dot */}
+              <Circle className="h-2 w-2 fill-brutal-success text-brutal-success flex-shrink-0" />
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <h2 className="font-heading font-bold text-foreground">
-                  {name}
-                </h2>
-                {/* Online status dot */}
-                <Circle className="h-2.5 w-2.5 fill-brutal-lime text-brutal-lime" />
-              </div>
-              <span className="font-mono text-[11px] text-muted-foreground">
-                {isAgent ? 'AI Agent' : '用户'}
-              </span>
-            </div>
+            <div className="mx-2 h-4 w-px bg-border flex-shrink-0" />
             {/* Tab bar (v1.2 Phase 2+3) */}
-            <div className="flex items-center gap-1 flex-shrink-0">
+            <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => setViewTab('messages')}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold transition-colors',
+                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold border-2 transition-all',
+                  'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
                   viewTab === 'messages'
-                    ? 'bg-brutal-pink text-black border-2 border-black'
-                    : 'text-muted-foreground hover:text-foreground border-2 border-transparent',
+                    ? 'bg-brutal-primary text-black border-black shadow-brutal-sm -translate-y-px'
+                    : 'text-muted-foreground hover:text-foreground border-transparent hover:border-black hover:bg-white hover:shadow-brutal-sm hover:-translate-y-px',
                 )}
               >
                 <MessageSquare className="h-3.5 w-3.5" />
@@ -308,10 +325,11 @@ export function DMView({
                 type="button"
                 onClick={() => setViewTab('tasks')}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold transition-colors',
+                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold border-2 transition-all',
+                  'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
                   viewTab === 'tasks'
-                    ? 'bg-brutal-pink text-black border-2 border-black'
-                    : 'text-muted-foreground hover:text-foreground border-2 border-transparent',
+                    ? 'bg-brutal-primary text-black border-black shadow-brutal-sm -translate-y-px'
+                    : 'text-muted-foreground hover:text-foreground border-transparent hover:border-black hover:bg-white hover:shadow-brutal-sm hover:-translate-y-px',
                 )}
               >
                 <ClipboardList className="h-3.5 w-3.5" />
@@ -338,8 +356,8 @@ export function DMView({
             {error && !isLoading && (
               <div className="flex flex-1 items-center justify-center">
                 <div className="text-center space-y-3">
-                  <AlertCircle className="mx-auto h-8 w-8 text-brutal-red" />
-                  <p className="font-mono text-sm text-brutal-red">{error}</p>
+                  <AlertCircle className="mx-auto h-8 w-8 text-brutal-danger" />
+                  <p className="font-mono text-sm text-brutal-danger">{error}</p>
                   <button
                     type="button"
                     onClick={handleRetry}
@@ -368,7 +386,8 @@ export function DMView({
                 isLoadingMore={isLoadingMore}
                 loadMoreError={loadMoreError}
                 onLoadMore={loadMore}
-                agentActivities={agentActivities}
+                scrollToMessageId={scrollToMessageId}
+                scrollKey={scrollMsgKey}
               />
             )}
 
@@ -386,8 +405,8 @@ export function DMView({
               />
             )}
             {deleted && (
-              <div className="border-t-2 border-black bg-brutal-stone/20 px-4 py-3 text-center">
-                <span className="badge-brutal bg-brutal-stone text-black">
+              <div className="border-t-2 border-black bg-brutal-muted/20 px-4 py-3 text-center">
+                <span className="badge-brutal bg-brutal-muted text-black">
                   DELETED
                 </span>
                 <p className="mt-2 font-body text-xs text-muted-foreground">
@@ -409,19 +428,6 @@ export function DMView({
                     与 <strong className="text-foreground">{name}</strong> 的任务
                   </span>
                 </div>
-                {onCreateTask && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCreateTaskTitle('');
-                      setIsCreateTaskOpen(true);
-                    }}
-                    className="btn-brutal btn-brutal-sm flex items-center gap-1"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    快速创建
-                  </button>
-                )}
               </div>
             </div>
             <div className="flex-1 overflow-y-auto px-4 py-4">
@@ -432,90 +438,21 @@ export function DMView({
                 onTaskClick={handleTaskClickFromBoard}
                 onStatusChange={handleStatusChange}
                 onRefetch={refetchTasks ?? (() => {})}
-                onClaim={onClaimTask}
-                onUnclaim={onUnclaimTask}
               />
             </div>
           </div>
         )}
       </div>
 
-      {/* Quick-create task dialog (SOLO-231-F) */}
-      <Dialog
-        open={isCreateTaskOpen}
-        onOpenChange={setIsCreateTaskOpen}
+      {/* ThreadPanel — always mounted for smooth width transition */}
+      <div
+        className="flex-shrink-0 bg-brutal-cream overflow-hidden relative transition-[width] duration-100 ease-linear border-l-2 border-transparent"
+        style={{ width: threadMessage ? threadPanelWidth : 0, borderLeftColor: threadMessage ? '#000' : 'transparent' }}
       >
-        <DialogHeader>
-          <DialogTitle>快速创建任务</DialogTitle>
-          <DialogCloseButton onClick={() => setIsCreateTaskOpen(false)} />
-        </DialogHeader>
-        <div className="mt-4 px-5 pb-5">
-          <label
-            htmlFor="dm-create-task-title"
-            className="mb-2 block font-heading text-sm font-bold text-foreground"
-          >
-            任务标题
-          </label>
-          <input
-            id="dm-create-task-title"
-            type="text"
-            value={createTaskTitle}
-            onChange={(e) => setCreateTaskTitle(e.target.value)}
-            onKeyDown={async (e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                if (!createTaskTitle.trim() || isCreatingTask) return;
-                setIsCreatingTask(true);
-                try {
-                  await onCreateTask?.(createTaskTitle.trim());
-                  setIsCreateTaskOpen(false);
-                } finally {
-                  setIsCreatingTask(false);
-                }
-              }
-            }}
-            placeholder={`为与 ${name} 的对话创建任务...`}
-            disabled={isCreatingTask}
-            className="input-brutal w-full"
-          />
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setIsCreateTaskOpen(false)}
-              disabled={isCreatingTask}
-              className="btn-brutal btn-brutal-sm"
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                if (!createTaskTitle.trim() || isCreatingTask) return;
-                setIsCreatingTask(true);
-                try {
-                  await onCreateTask?.(createTaskTitle.trim());
-                  setIsCreateTaskOpen(false);
-                } finally {
-                  setIsCreatingTask(false);
-                }
-              }}
-              disabled={isCreatingTask || !createTaskTitle.trim()}
-              className="btn-brutal btn-brutal-sm btn-brutal-pink"
-            >
-              {isCreatingTask ? '创建中...' : '创建任务'}
-            </button>
-          </div>
-        </div>
-      </Dialog>
-
-      {/* ThreadPanel — opens when a task message is clicked */}
-      {threadMessage && (
-        <div
-          className="flex-shrink-0 bg-brutal-cream overflow-hidden relative border-l-2 border-black"
-          style={{ width: threadPanelWidth }}
-        >
+        {/* Resize handle — only interactive when panel is open */}
+        {threadMessage && (
           <div
-            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-pink/50 transition-colors z-10"
+            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-primary/50 transition-colors z-10"
             onMouseDown={(e) => {
               e.preventDefault();
               const startX = e.clientX;
@@ -532,6 +469,8 @@ export function DMView({
               document.addEventListener('mouseup', onUp);
             }}
           />
+        )}
+        {threadMessage && (
           <Suspense
             fallback={
               <div className="flex h-full w-[400px] items-center justify-center">
@@ -548,8 +487,8 @@ export function DMView({
               replyCount={threadMessage.reply_count ?? 0}
             />
           </Suspense>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

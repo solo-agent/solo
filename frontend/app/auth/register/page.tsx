@@ -8,6 +8,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
 import { useAuth } from "@/lib/auth-context";
+import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import { BrutalAlert } from "@/components/ui/brutal-alert";
 
 const registerFormSchema = z
   .object({
@@ -70,7 +73,7 @@ export default function RegisterPage() {
     return (
       <div className="card-brutal p-12 w-full">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-black border-t-transparent" />
+          <Spinner size="md" />
           <p className="font-sans text-sm text-muted-foreground">检查登录状态...</p>
         </div>
       </div>
@@ -81,7 +84,7 @@ export default function RegisterPage() {
     <div className="card-brutal p-6 w-full">
       {/* Logo + Title */}
       <div className="text-center mb-6">
-        <div className="inline-flex h-10 w-10 items-center justify-center bg-brutal-pink border-2 border-black shadow-brutal-sm mb-3">
+        <div className="inline-flex h-10 w-10 items-center justify-center bg-brutal-primary border-2 border-black shadow-brutal-sm mb-3">
           <span className="font-heading font-bold text-lg text-black">S</span>
         </div>
         <h1 className="font-heading font-bold text-xl text-black">创建账号</h1>
@@ -90,14 +93,7 @@ export default function RegisterPage() {
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         {/* API Error */}
-        {error && (
-          <div
-            className="border-2 border-[#f97264] bg-[#ffe0dc] p-3 text-sm text-[#f97264] font-medium"
-            role="alert"
-          >
-            {error}
-          </div>
-        )}
+        {error && <BrutalAlert variant="error">{error}</BrutalAlert>}
 
         {/* Email field */}
         <div className="space-y-2">
@@ -175,13 +171,14 @@ export default function RegisterPage() {
         </div>
 
         {/* Submit button */}
-        <button
+        <Button
           type="submit"
-          className="btn-brutal btn-brutal-pink w-full"
+          variant="default"
+          className="w-full"
           disabled={isSubmitting}
         >
           {isSubmitting ? "注册中..." : "创建账号"}
-        </button>
+        </Button>
       </form>
 
       {/* Login link */}
@@ -190,7 +187,7 @@ export default function RegisterPage() {
           已有账号？{" "}
           <Link
             href="/auth/login"
-            className="font-heading font-bold text-black hover:text-brutal-pink transition-colors"
+            className="font-heading font-bold text-black hover:text-brutal-primary transition-colors"
           >
             登录
           </Link>

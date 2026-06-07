@@ -12,9 +12,16 @@ interface DialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children: ReactNode;
+  width?: 'sm' | 'md' | 'lg';
 }
 
-export function Dialog({ open, onOpenChange, children }: DialogProps) {
+const DIALOG_WIDTHS = {
+  sm: 'max-w-sm',
+  md: 'max-w-md',
+  lg: 'max-w-lg',
+} as const;
+
+export function Dialog({ open, onOpenChange, children, width = 'md' }: DialogProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -40,14 +47,17 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={(e) => {
         if (e.target === overlayRef.current) onOpenChange(false);
       }}
       ref={overlayRef}
     >
       <div
-        className="mx-4 w-full max-w-md rounded-none border-brutal-thick bg-card p-6 shadow-brutal-xl"
+        className={cn(
+          'mx-4 w-full border-4 border-black bg-card p-6 shadow-brutal-xl max-h-[90vh] overflow-y-auto',
+          DIALOG_WIDTHS[width],
+        )}
         role="dialog"
         aria-modal="true"
       >
@@ -61,7 +71,7 @@ export function DialogCloseButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="rounded-none p-1 hover:bg-brutal-pink-light transition-colors"
+      className="flex h-7 w-7 items-center justify-center rounded-none border-2 border-black bg-white shadow-brutal-sm hover:bg-brutal-primary-light active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
       aria-label="关闭"
     >
       <X className="h-4 w-4" />
@@ -70,7 +80,7 @@ export function DialogCloseButton({ onClick }: { onClick: () => void }) {
 }
 
 export function DialogHeader({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn('mb-4', className)}>{children}</div>;
+  return <div className={cn('mb-4 flex items-center justify-between', className)}>{children}</div>;
 }
 
 export function DialogTitle({ children, className }: { children: ReactNode; className?: string }) {

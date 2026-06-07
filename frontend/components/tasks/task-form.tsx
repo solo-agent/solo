@@ -12,6 +12,7 @@ import { Calendar, User, AlignLeft } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
 import type { CreateTaskInput, TaskPriority } from '@/lib/types';
 
 // ---- Constants ----
@@ -92,7 +93,7 @@ export function TaskForm({
       {/* Title */}
       <div>
         <Label htmlFor="task-title" className="mb-1.5 block">
-          任务标题 <span className="text-brutal-red">*</span>
+          任务标题 <span className="text-brutal-danger">*</span>
         </Label>
         <Input
           id="task-title"
@@ -125,19 +126,14 @@ export function TaskForm({
         <Label htmlFor="task-priority" className="mb-1.5 block">
           优先级
         </Label>
-        <select
+        <Select
           id="task-priority"
           value={priority}
-          onChange={(e) => setPriority(e.target.value as TaskPriority)}
-          className="input-brutal h-10"
+          onChange={(v) => setPriority(v as TaskPriority)}
+          options={PRIORITY_OPTIONS}
+          size="md"
           disabled={isSubmitting}
-        >
-          {PRIORITY_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        />
       </div>
 
       {/* Assignee */}
@@ -148,31 +144,31 @@ export function TaskForm({
             指派人
           </Label>
           <div className="flex gap-2">
-            <select
+            <Select
               value={assigneeType}
-              onChange={(e) => {
-                setAssigneeType(e.target.value as 'user' | 'agent');
+              onChange={(v) => {
+                setAssigneeType(v as 'user' | 'agent');
                 setAssigneeId('');
               }}
-              className="input-brutal h-10 w-24 flex-shrink-0"
+              options={[
+                { value: 'user', label: '用户' },
+                { value: 'agent', label: 'Agent' },
+              ]}
+              size="md"
+              className="w-24 flex-shrink-0"
               disabled={isSubmitting}
-            >
-              <option value="user">用户</option>
-              <option value="agent">Agent</option>
-            </select>
-            <select
+            />
+            <Select
               value={assigneeId}
-              onChange={(e) => setAssigneeId(e.target.value)}
-              className="input-brutal h-10 flex-1"
+              onChange={(v) => setAssigneeId(v)}
+              options={[
+                { value: '', label: '不指定' },
+                ...filteredOptions.map((opt) => ({ value: opt.id, label: opt.name })),
+              ]}
+              size="md"
+              className="flex-1"
               disabled={isSubmitting || filteredOptions.length === 0}
-            >
-              <option value="">不指定</option>
-              {filteredOptions.map((opt) => (
-                <option key={opt.id} value={opt.id}>
-                  {opt.name}
-                </option>
-              ))}
-            </select>
+            />
           </div>
         </div>
       )}
@@ -194,8 +190,8 @@ export function TaskForm({
 
       {/* Error display */}
       {(validationError || error) && (
-        <div className="border-2 border-brutal-red bg-brutal-red-light p-3">
-          <p className="text-sm font-bold text-brutal-red">
+        <div className="border-2 border-brutal-danger bg-brutal-danger-light p-3">
+          <p className="text-sm font-bold text-brutal-danger">
             {validationError || error}
           </p>
         </div>
@@ -206,7 +202,7 @@ export function TaskForm({
         <button
           type="submit"
           disabled={isSubmitting}
-          className="btn-brutal btn-brutal-pink px-6"
+          className="btn-brutal btn-brutal-primary px-6"
         >
           {isSubmitting ? '提交中...' : submitLabel}
         </button>

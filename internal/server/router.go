@@ -47,20 +47,22 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	// Initialize services
 	taskSvc := service.NewTaskService(pool)
 	computerSvc := service.NewComputerService(pool)
+	inboxSvc := service.NewInboxService(pool)
 
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(pool)
 	channelHandler := handler.NewChannelHandler(pool)
 	memberHandler := handler.NewMemberHandler(pool, agentSvc)
 	messageHandler := handler.NewMessageHandler(pool, hub, agentSvc, taskSvc)
-	agentHandler := handler.NewAgentHandler(pool)
+	agentHandler := handler.NewAgentHandler(pool, dm)
 	threadHandler := handler.NewThreadHandler(pool, hub, agentSvc)
 	dmHandler := handler.NewDMHandler(pool, hub, agentSvc, taskSvc)
 	daemonHandler := handler.NewDaemonHandler(dm, agentSvc, computerSvc)
 	mentionSvc := service.NewMentionService(pool)
 	taskHandler := handler.NewTaskHandler(pool, hub, agentSvc, taskSvc, mentionSvc)
 	searchHandler := handler.NewSearchHandler(pool)
-	computerHandler := handler.NewComputerHandler(computerSvc)
+	computerHandler := handler.NewComputerHandler(computerSvc, dm, pool)
+	inboxHandler := handler.NewInboxHandler(inboxSvc)
 
 	// Attachment handler
 	uploadDir := os.Getenv("ATTACHMENTS_DIR")
@@ -191,6 +193,9 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 				r.Get("/", agentHandler.Get)
 				r.Patch("/", agentHandler.Update)
 				r.Delete("/", agentHandler.Delete)
+
+				// Agent workspace files (v1.5)
+				r.Get("/workspace", agentHandler.Workspace)
 			})
 		})
 
@@ -257,12 +262,25 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 				r.Get("/", computerHandler.Get)
 				r.Patch("/", computerHandler.Update)
 				r.Delete("/", computerHandler.Delete)
+
+				// Computer agents (v1.5)
+				r.Get("/agents", computerHandler.ListAgents)
 			})
+		})
+
+		// Inbox routes (v1.5)
+		r.Route("/api/v1/inbox", func(r chi.Router) {
+			r.Get("/", inboxHandler.List)
+			r.Get("/unread-count", inboxHandler.UnreadCount)
+			r.Post("/mark-all-read", inboxHandler.MarkAllRead)
+			r.Post("/clear-all", inboxHandler.ClearAll)
+			r.Post("/{messageId}/mark-read", inboxHandler.MarkRead)
 		})
 
 		// Thread read-status routes (P25-02-B)
 		r.Route("/api/v1/threads", func(r chi.Router) {
 			r.Post("/{threadID}/mark-read", threadHandler.MarkThreadRead)
+			r.Post("/unfollow", threadHandler.UnfollowThread)
 		})
 
 		// Attachment routes (SOLO-243-B)

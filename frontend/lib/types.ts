@@ -254,6 +254,9 @@ export interface Computer {
   last_heartbeat?: string;
   agent_ids?: string[];
   agent_names?: string[];
+  os?: string;
+  hostname?: string;
+  ip?: string;
   created_at: string;
   updated_at: string;
 }
@@ -323,4 +326,52 @@ export interface AgentBackendDetectResult {
   binary: string;
   version?: string;
   install_hint?: string;
+}
+
+// ---- Inbox types (v1.5) ----
+
+export interface InboxItem {
+  id: string;
+  type: 'thread_reply' | 'dm' | 'mention';
+  channel_id?: string | null;
+  channel_name?: string | null;
+  thread_id?: string | null;
+  dm_id?: string | null;
+  message_id: string;
+  sender_name: string;
+  sender_avatar?: string | null;
+  content_preview: string;
+  is_mention: boolean;
+  is_unread: boolean;
+  created_at: string;
+  parent_sender_name?: string | null;
+  parent_sender_type?: string | null;
+  parent_sender_id?: string | null;
+  parent_content?: string | null;
+}
+
+export interface UnreadCount {
+  total: number;
+  mentions: number;
+  thread_replies: number;
+  dm: number;
+}
+
+// ---- Workspace types (v1.5) ----
+
+export interface WorkspaceFileNode {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  size?: number;
+  children?: WorkspaceFileNode[];
+}
+
+// ---- Computer Agent types (v1.5) ----
+
+export interface ComputerAgent {
+  id: string;
+  name: string;
+  status: 'online' | 'thinking' | 'running' | 'offline';
+  active_tasks: number;
 }

@@ -6,9 +6,9 @@ import {
   Hash,
   ClipboardList,
   Users,
-  Bot,
   Monitor,
   Settings,
+  FolderOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
@@ -18,8 +18,8 @@ const NAV_ITEMS = [
   { href: '/dashboard', icon: Hash, label: '频道' },
   { href: '/tasks', icon: ClipboardList, label: '任务看板' },
   { href: '/teams', icon: Users, label: '团队' },
-  { href: '/agents', icon: Bot, label: 'Agent 管理' },
   { href: '/computers', icon: Monitor, label: '电脑管理' },
+  { href: '/workspace', icon: FolderOpen, label: 'Workspace' },
 ] as const;
 
 export function NavBar() {
@@ -31,7 +31,7 @@ export function NavBar() {
       {/* Workspace logo */}
       <Link
         href="/dashboard"
-        className="mb-2 flex h-9 w-9 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm"
+        className="mb-2 flex h-9 w-9 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm"
         aria-label="Solo 工作区"
       >
         <span className="font-heading text-sm font-black text-black">S</span>

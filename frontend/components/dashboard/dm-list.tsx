@@ -11,7 +11,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { MessageSquare, Plus, X } from 'lucide-react';
+import { Plus, X, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -22,7 +22,9 @@ interface DMListProps {
   isLoading: boolean;
   selectedDmId: string | null;
   onSelectDM: (dmId: string) => void;
-  onCreateDM: () => void;
+  onCreateDM?: () => void;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
 }
 
 // ---- Helpers ----
@@ -67,17 +69,19 @@ function DMListSkeleton() {
 
 // ---- Empty state ----
 
-function DMListEmpty({ onCreateDM }: { onCreateDM: () => void }) {
+function DMListEmpty({ onCreateDM }: { onCreateDM?: () => void }) {
   return (
     <div className="space-y-2 px-2 py-3 text-center">
       <p className="text-sm text-sidebar-muted-foreground">还没有私信</p>
+      {onCreateDM && (
       <button
         onClick={onCreateDM}
-        className="inline-flex items-center gap-1 rounded-md bg-sidebar-accent px-3 py-1 text-sm font-medium text-sidebar-accent-foreground hover:bg-sidebar-accent/80 transition-colors"
+        className="inline-flex items-center gap-1 border-2 border-black bg-brutal-primary px-3 py-1 text-sm font-medium text-black shadow-brutal-sm hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
       >
         <Plus className="h-3.5 w-3.5" />
         发起私信
       </button>
+      )}
     </div>
   );
 }
@@ -113,10 +117,10 @@ function DMItem({
         }
       }}
       className={cn(
-        'group flex cursor-pointer items-center gap-2 px-2 py-1.5 text-sm transition-all',
+        'group flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm transition-all',
         isSelected
-          ? 'bg-brutal-pink text-black border-2 border-black shadow-brutal-sm'
-          : 'text-black hover:bg-brutal-pink/60 border-2 border-transparent',
+          ? 'bg-brutal-primary text-black border-2 border-black shadow-brutal-sm'
+          : 'text-black border-2 border-transparent hover:border-black',
       )}
       aria-current={isSelected ? 'true' : undefined}
     >
@@ -137,18 +141,18 @@ function DMItem({
             {name}
           </span>
           {deleted && (
-            <span className="badge-brutal bg-brutal-stone text-black flex-shrink-0">
+            <span className="badge-brutal bg-brutal-muted text-black flex-shrink-0">
               DELETED
             </span>
           )}
           {!deleted && isAgent && (
-            <span className="badge-brutal bg-brutal-pink text-black text-[10px]">
+            <span className="badge-brutal bg-brutal-primary text-black text-[10px]">
               Agent
             </span>
           )}
           {/* Unread dot */}
           {hasUnread && (
-            <span className="h-2 w-2 flex-shrink-0 bg-brutal-pink" />
+            <span className="h-2 w-2 flex-shrink-0 bg-brutal-primary" />
           )}
         </div>
         {lastMessageText && (
@@ -171,7 +175,7 @@ function DMItem({
           e.stopPropagation();
           onClose();
         }}
-        className="hidden group-hover:flex items-center justify-center rounded-none p-1 hover:bg-brutal-pink-light transition-colors flex-shrink-0"
+        className="hidden group-hover:flex items-center justify-center rounded-none p-1 hover:bg-brutal-primary-light transition-colors flex-shrink-0"
         aria-label="关闭私信"
       >
         <X className="h-4 w-4" />
@@ -207,6 +211,8 @@ export function DMList({
   selectedDmId,
   onSelectDM,
   onCreateDM,
+  isExpanded,
+  onToggleExpand,
 }: DMListProps) {
   const [closedDmIds, setClosedDmIds] = useState<Set<string>>(loadClosedDmIds);
 
@@ -230,41 +236,60 @@ export function DMList({
 
   return (
     <div>
-      {/* Section header */}
-      <div className="mb-2 flex items-center justify-between px-2 pb-2 border-b-2 border-sidebar-border">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-sidebar-muted-foreground font-heading">
-          直接消息
-        </h3>
+      {/* Section header — group hover covers both chevron and + button so the
+          entire row highlights as one unit */}
+      <div className="group flex items-center justify-between border-2 border-transparent hover:border-black transition-all">
+        <button
+          type="button"
+          onClick={onToggleExpand}
+          className="flex flex-1 items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider text-sidebar-muted-foreground font-heading"
+          aria-label="展开或折叠 直接消息"
+          aria-expanded={isExpanded}
+        >
+          <ChevronDown
+            aria-hidden="true"
+            className={cn(
+              'h-3 w-3 transition-transform',
+              isExpanded ? 'rotate-0' : '-rotate-90',
+            )}
+          />
+          <span>Direct Messages</span>
+          <span className="ml-auto text-xs tabular-nums opacity-50">{sortedDMs.length}</span>
+        </button>
+        {onCreateDM && (
         <button
           onClick={onCreateDM}
-          className="flex h-5 w-5 items-center justify-center text-sidebar-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+          className="mr-2 flex h-5 w-5 items-center justify-center border-2 border-transparent text-sidebar-muted-foreground group-hover:border-black group-hover:text-black hover:bg-brutal-primary/40 active:bg-brutal-primary active:text-black active:ring-2 active:ring-black transition-all cursor-pointer"
           aria-label="发起私信"
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
+        )}
       </div>
 
       {/* Content */}
-      {isLoading ? (
-        <DMListSkeleton />
-      ) : sortedDMs.length === 0 ? (
-        <DMListEmpty onCreateDM={onCreateDM} />
-      ) : (
-        <div className="space-y-0.5">
-          {sortedDMs.map((dm) => (
-            <DMItem
-              key={dm.id}
-              dm={dm}
-              isSelected={dm.id === selectedDmId}
-              onSelect={() => onSelectDM(dm.id)}
-              onClose={() => setClosedDmIds((prev) => {
-                const next = new Set(prev).add(dm.id);
-                saveClosedDmIds(next);
-                return next;
-              })}
-            />
-          ))}
-        </div>
+      {isExpanded && (
+        isLoading ? (
+          <DMListSkeleton />
+        ) : sortedDMs.length === 0 ? (
+          <DMListEmpty onCreateDM={onCreateDM} />
+        ) : (
+          <div className="space-y-0.5">
+            {sortedDMs.map((dm) => (
+              <DMItem
+                key={dm.id}
+                dm={dm}
+                isSelected={dm.id === selectedDmId}
+                onSelect={() => onSelectDM(dm.id)}
+                onClose={() => setClosedDmIds((prev) => {
+                  const next = new Set(prev).add(dm.id);
+                  saveClosedDmIds(next);
+                  return next;
+                })}
+              />
+            ))}
+          </div>
+        )
       )}
     </div>
   );

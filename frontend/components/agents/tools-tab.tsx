@@ -74,7 +74,7 @@ export function ToolsTab({ agent, onSave, isSaving = false }: ToolsTabProps) {
                 onClick={() => toggleTool(tool.id)}
                 className={cn(
                   'relative flex h-7 w-11 flex-shrink-0 items-center border-2 border-black transition-colors',
-                  isEnabled ? 'bg-brutal-lime' : 'bg-brutal-stone',
+                  isEnabled ? 'bg-brutal-success' : 'bg-brutal-muted',
                 )}
                 role="switch"
                 aria-checked={isEnabled}
@@ -98,8 +98,8 @@ export function ToolsTab({ agent, onSave, isSaving = false }: ToolsTabProps) {
                     className={cn(
                       'badge-brutal text-[10px] px-1.5',
                       isEnabled
-                        ? 'bg-brutal-lime text-black'
-                        : 'bg-brutal-stone text-white',
+                        ? 'bg-brutal-success text-black'
+                        : 'bg-brutal-muted text-white',
                     )}
                   >
                     {isEnabled ? '已启用' : '未启用'}

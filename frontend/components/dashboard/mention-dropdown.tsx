@@ -52,7 +52,7 @@ export function MentionDropdown({
 
   return createPortal(
     <div
-      className="fixed z-[100] rounded-lg border bg-popover shadow-lg"
+      className="fixed z-[100] border-2 border-black bg-white shadow-brutal-sm rounded-none"
       style={{
         left: anchor.left,
         width: anchor.width,
@@ -74,10 +74,10 @@ export function MentionDropdown({
                 key={suggestion.member.member_id}
                 data-index={index}
                 className={cn(
-                  'flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors',
+                  'flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold transition-colors',
                   index === selectedIndex
-                    ? 'bg-accent text-accent-foreground'
-                    : 'text-foreground hover:bg-accent/50',
+                    ? 'bg-black text-brutal-primary'
+                    : 'text-foreground hover:bg-brutal-primary hover:text-black',
                 )}
                 role="option"
                 aria-selected={index === selectedIndex}
@@ -88,15 +88,15 @@ export function MentionDropdown({
                 }}
               >
                 {isAgent ? (
-                  <Bot className="h-4 w-4 flex-shrink-0 text-green-500" />
+                  <Bot className="h-4 w-4 flex-shrink-0 text-brutal-success" />
                 ) : (
-                  <User className="h-4 w-4 flex-shrink-0 text-blue-500" />
+                  <User className="h-4 w-4 flex-shrink-0 text-brutal-info" />
                 )}
                 <span className="font-medium">
                   {suggestion.member.display_name}
                 </span>
                 {isAgent && (
-                  <span className="ml-auto text-[10px] text-green-600 dark:text-green-400">
+                  <span className="ml-auto text-[10px] text-brutal-success">
                     Agent
                   </span>
                 )}

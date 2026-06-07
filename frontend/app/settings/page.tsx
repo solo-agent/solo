@@ -1,6 +1,6 @@
 // ============================================================================
 // Settings / Profile page — neubrutalist styling
-// - card-brutal form, input-brutal, btn-brutal-pink
+// - card-brutal form, input-brutal, btn-brutal-primary
 // - Display email and display_name
 // - Loading / error / success states
 // ============================================================================
@@ -16,6 +16,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Spinner } from '@/components/ui/spinner';
+import { BrutalAlert } from '@/components/ui/brutal-alert';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -55,7 +57,7 @@ export default function SettingsPage() {
     return (
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-brutal-pink border-t-transparent" />
+          <Spinner size="md" />
           <p className="font-mono text-sm text-muted-foreground">加载中...</p>
         </div>
       </div>
@@ -80,7 +82,7 @@ export default function SettingsPage() {
       {/* Page header */}
       <div className="mb-8">
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-pink shadow-brutal-sm">
+          <div className="flex h-10 w-10 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm">
             <User className="h-6 w-6 text-white" />
           </div>
           <div>
@@ -96,18 +98,13 @@ export default function SettingsPage() {
 
       {/* Error banner */}
       {userError && (
-        <div className="mb-6 flex items-center gap-3 border-2 border-brutal-red bg-brutal-red-light p-4 shadow-brutal-sm">
-          <AlertCircle className="h-5 w-5 flex-shrink-0 text-brutal-red" />
-          <span className="flex-1 font-body text-sm text-foreground">
+        <div className="mb-6 space-y-2">
+          <BrutalAlert variant="error" className="p-4">
             {userError}
-          </span>
-          <button
-            type="button"
-            onClick={refetch}
-            className="btn-brutal btn-brutal-sm"
-          >
+          </BrutalAlert>
+          <Button variant="outline" size="sm" onClick={refetch}>
             重试
-          </button>
+          </Button>
         </div>
       )}
 
@@ -165,7 +162,7 @@ export default function SettingsPage() {
                   className="max-w-sm"
                 />
               </div>
-              <button
+              <Button
                 type="button"
                 onClick={handleSave}
                 disabled={
@@ -173,16 +170,16 @@ export default function SettingsPage() {
                   !displayName.trim() ||
                   displayName.trim() === user.display_name
                 }
-                className="btn-brutal btn-brutal-pink"
+                variant="default"
               >
                 {isUpdating ? '保存中...' : '保存'}
-              </button>
+              </Button>
             </div>
 
             {/* Feedback messages */}
             <div className="mt-3 space-y-1">
               {successMessage && (
-                <div className="flex items-center gap-1.5 font-mono text-xs text-brutal-lime">
+                <div className="flex items-center gap-1.5 font-mono text-xs text-brutal-success">
                   <CheckCircle2 className="h-4 w-4" />
                   <span>{successMessage}</span>
                 </div>

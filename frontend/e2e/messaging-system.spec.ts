@@ -96,7 +96,7 @@ async function replyCount(page: Page): Promise<number> {
 }
 
 async function hasUnreadDot(page: Page): Promise<boolean> {
-  return (await page.locator('span.block.h-1.w-1.rounded-full.bg-brutal-pink').count()) > 0;
+  return (await page.locator('span.block.h-1.w-1.rounded-full.bg-brutal-primary').count()) > 0;
 }
 
 // ============================================================================

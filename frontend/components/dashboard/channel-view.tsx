@@ -5,11 +5,10 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
-import { Hash, Users, Loader2, ClipboardList, MessageSquare, Plus, Eye } from 'lucide-react';
+import { Users, Loader2, ClipboardList, MessageSquare, Eye, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
 import { useChannelMembers } from '@/lib/hooks/use-channel-members';
-import { useStreamingMessages } from '@/lib/hooks/use-streaming-messages';
 import { useWebSocket } from '@/lib/ws-context';
 import { useTasks } from '@/lib/hooks/use-tasks';
 import { MessageList } from './message-list';
@@ -26,8 +25,7 @@ import {
   DialogCloseButton,
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast';
-import type { AgentActivity } from './typing-indicator';
-import type { Channel, CreateTaskInput, Message, Task, TaskStatus } from '@/lib/types';
+import type { Channel, Message, Task, TaskStatus } from '@/lib/types';
 
 // SOLO-63-F: Lazy-load ThreadPanel (only rendered when a thread is open)
 const ThreadPanel = lazy(() =>
@@ -36,72 +34,41 @@ const ThreadPanel = lazy(() =>
 
 import { AgentViewPanel } from './agent-view-panel';
 
-// ---- Inline quick-create task form ----
-
-function CreateTaskInline({
-  channelId,
-  isSubmitting,
-  onSubmit,
-}: {
-  channelId: string;
-  isSubmitting: boolean;
-  onSubmit: (input: CreateTaskInput) => Promise<void>;
-}) {
-  const [title, setTitle] = useState('');
-
-  const handleSubmit = async () => {
-    if (!title.trim() || isSubmitting) return;
-    await onSubmit({
-      channel_id: channelId,
-      title: title.trim(),
-    });
-    setTitle('');
-  };
-
-  return (
-    <div className="space-y-3">
-      <label
-        htmlFor="quick-create-title"
-        className="block font-heading text-sm font-bold text-foreground"
-      >
-        任务标题
-      </label>
-      <input
-        id="quick-create-title"
-        type="text"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            handleSubmit();
-          }
-        }}
-        placeholder="输入任务标题..."
-        disabled={isSubmitting}
-        className="input-brutal w-full"
-      />
-      <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={isSubmitting || !title.trim()}
-          className="btn-brutal btn-brutal-sm btn-brutal-pink"
-        >
-          {isSubmitting ? '创建中...' : '创建任务'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 interface ChannelViewProps {
   channel: Channel;
   /** Optional message ID to open ThreadPanel for on mount */
   initialThreadMessageId?: string;
+  /** Optional message ID to scroll to on mount */
+  initialScrollToMessageId?: string;
+  /** v1.5: Called when thread opens/closes so the parent can sync to URL */
+  onThreadChange?: (threadId: string | null) => void;
+  /** SOLO-island PR3: whether the right-side AgentViewPanel is visible. */
+  agentViewVisible?: boolean;
+  /** SOLO-island PR3: toggle the AgentViewPanel. Called with `true` to
+   * open, `false` to close. */
+  onAgentViewVisibleChange?: (visible: boolean) => void;
+  /** SOLO-island PR3: width of the AgentViewPanel (controlled by parent
+   * so it can outlive unmounts). */
+  agentViewWidth?: number;
+  /** SOLO-island PR3: called when the user drags the panel's resize
+   * handle. Parent should persist the new width. */
+  onAgentViewWidthChange?: (width: number) => void;
+  /** SOLO-island PR3: when set, the panel scrolls/highlights this agent
+   * (driven by AgentIsland's "查看完整 trace" action). */
+  agentViewFocusedAgentId?: string | null;
 }
 
-export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProps) {
+export function ChannelView({
+  channel,
+  initialThreadMessageId,
+  initialScrollToMessageId,
+  onThreadChange,
+  agentViewVisible,
+  onAgentViewVisibleChange,
+  agentViewWidth,
+  onAgentViewWidthChange,
+  agentViewFocusedAgentId,
+}: ChannelViewProps) {
   const {
     messages,
     isLoading,
@@ -138,19 +105,21 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
   // ---- Thread panel width ----
   const [threadPanelWidth, setThreadPanelWidth] = useState(400);
 
-  // ---- Agent View panel state ----
-  const [showAgentView, setShowAgentView] = useState(false);
-  const [agentViewWidth, setAgentViewWidth] = useState(320);
+  // ---- Agent View panel state (SOLO-island PR3) ----
+  // Controlled by the parent (dashboard) so the AgentIsland can summon
+  // the panel from outside this component. The Eye button in the channel
+  // header toggles via the same callback; the parent owns the actual
+  // state. This component is treated as "always rendered with a parent
+  // controller" — if you need to mount it standalone, wrap a small
+  // component that owns the boolean state.
+  const showAgentView = !!agentViewVisible;
+  const effectiveAgentViewWidth = agentViewWidth ?? 320;
+  const toggleAgentView = () => {
+    onAgentViewVisibleChange?.(!showAgentView);
+  };
 
   // ---- Tasks tab state (SOLO-128-F) ----
   const [channelViewTab, setChannelViewTab] = useState<'messages' | 'tasks'>('messages');
-  const [isQuickCreateTaskOpen, setIsQuickCreateTaskOpen] = useState(false);
-  const [isCreatingTask, setIsCreatingTask] = useState(false);
-
-  // ---- AsTask dialog state ----
-  const [asTaskTarget, setAsTaskTarget] = useState<Message | null>(null);
-  const [asTaskTitle, setAsTaskTitle] = useState('');
-  const [isConvertingTask, setIsConvertingTask] = useState(false);
 
   // ---- Channel search state (SOLO-237-F) ----
   const [scrollToMessageId, setScrollToMessageId] = useState<string | undefined>(undefined);
@@ -165,7 +134,6 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
     tasks: channelTasks,
     isLoading: tasksLoading,
     error: tasksError,
-    createTask,
     updateTask,
     claimTask,
     unclaimTask,
@@ -178,19 +146,45 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
     if (channelViewTab === 'tasks') refetchTasks();
   }, [channelViewTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Refetch tasks when ThreadPanel opens via reply click
-  useEffect(() => {
-    if (threadMessage?.id) refetchTasks();
-  }, [threadMessage?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ---- Agent thinking/typing/streaming status tracking (SOLO-47-F, SOLO-52-F) ----
-  const [thinkingAgentNames, setThinkingAgentNames] = useState<string[]>([]);
-  const [typingAgentNames, setTypingAgentNames] = useState<string[]>([]);
-  const typingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+  // ---- Agent member status tracking (SOLO-47-F) ----
+  // SOLO-island PR2: removed thinkingAgentNames/typingAgentNames state and
+  // the TypingIndicator badge. AgentIsland (mounted at the dashboard root)
+  // is now the single source of truth for "agent is working". The member
+  // list (right column) still updates its dots to reflect thinking/typing
+  // /online so the avatar stays in sync, but with a much simpler model.
+  //
+  // PR-fix: the previous 5s inactivity heuristic was the same class of
+  // bug as the 3s heuristic in useAgentChunks (fixed in PR0). It would
+  // prematurely mark an agent as online during long-running tool calls.
+  // Now we rely on agent.done as the authoritative terminal signal and
+  // treat thinking/typing as transient — cleared the moment we see
+  // a done event (or message.new) for the same agent.
+  const memberStatusTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
   );
 
-  const { activeStreamingAgentIds } = useStreamingMessages(channel.id);
+  /** Cancel any pending revert timer for an agent. */
+  const cancelMemberStatusRevert = (agentId: string) => {
+    const t = memberStatusTimersRef.current.get(agentId);
+    if (t) {
+      clearTimeout(t);
+      memberStatusTimersRef.current.delete(agentId);
+    }
+  };
+
+  /**
+   * Schedule a fallback revert to online after `ms` ms. This is a safety
+   * net for paths that don't emit agent.done (e.g. the legacy LLM
+   * provider fallback). Primary terminal signal remains agent.done.
+   */
+  const scheduleMemberStatusRevert = (agentId: string, ms: number) => {
+    cancelMemberStatusRevert(agentId);
+    const timer = setTimeout(() => {
+      updateMemberStatus(agentId, 'online');
+      memberStatusTimersRef.current.delete(agentId);
+    }, ms);
+    memberStatusTimersRef.current.set(agentId, timer);
+  };
 
   const { onEvent } = useWebSocket();
 
@@ -202,55 +196,35 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
 
         const isThinking = event.type === 'agent.thinking';
         updateMemberStatus(event.agent_id, isThinking ? 'thinking' : 'typing');
-
-        const agent = agentsRef.current.find(
-          (a) => a.member_id === event.agent_id,
-        );
-        const agentName = agent?.display_name ?? event.agent_id;
-        const setFn = isThinking ? setThinkingAgentNames : setTypingAgentNames;
-        setFn((prev) => {
-          if (prev.includes(agentName)) return prev;
-          return [...prev, agentName];
-        });
-
-        // Auto-clear after 5s
-        const existing = typingTimersRef.current.get(event.agent_id);
-        if (existing) clearTimeout(existing);
-        const timer = setTimeout(() => {
-          setFn((prev) => prev.filter((n) => n !== agentName));
-          typingTimersRef.current.delete(event.agent_id);
-          updateMemberStatus(event.agent_id, 'online');
-        }, 5000);
-        typingTimersRef.current.set(event.agent_id, timer);
+        // Fallback only — agent.done will cancel and immediately revert.
+        scheduleMemberStatusRevert(event.agent_id, 30_000);
       }
 
-      // When an agent sends a message, clear all their statuses
+      // agent.done is the authoritative terminal signal. Clear any
+      // fallback timer and snap status back to online immediately.
+      if (event.type === 'agent.done' && event.channel_id === channel.id && event.agent_id) {
+        cancelMemberStatusRevert(event.agent_id);
+        updateMemberStatus(event.agent_id, 'online');
+      }
+
+      // When an agent sends a message, revert their member status to online.
       if (
         event.type === 'message.new' &&
         event.channel_id === channel.id &&
         event.sender_type === 'agent' &&
         event.sender_id
       ) {
-        const name = event.sender_name;
-        if (name) {
-          setThinkingAgentNames((prev) => prev.filter((n) => n !== name));
-          setTypingAgentNames((prev) => prev.filter((n) => n !== name));
-        }
-        const timer = typingTimersRef.current.get(event.sender_id);
-        if (timer) {
-          clearTimeout(timer);
-          typingTimersRef.current.delete(event.sender_id);
-        }
+        cancelMemberStatusRevert(event.sender_id);
         updateMemberStatus(event.sender_id, 'online');
       }
     });
 
     return () => {
       unsub();
-      for (const timer of typingTimersRef.current.values()) {
+      for (const timer of memberStatusTimersRef.current.values()) {
         clearTimeout(timer);
       }
-      typingTimersRef.current.clear();
+      memberStatusTimersRef.current.clear();
     };
   }, [channel.id, onEvent, updateMemberStatus]);
 
@@ -272,6 +246,17 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
     // If not found yet, it will be caught when messages load (via the next effect)
   }, [initialThreadMessageId, channel, messages, channelTasks]);
 
+  // Handle initialScrollToMessageId: scroll to a specific message on mount or URL change.
+  // Waits for isLoading to become false so the message DOM exists.
+  const lastScrollTarget = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!initialScrollToMessageId || !channel || isLoading) return;
+    if (lastScrollTarget.current === initialScrollToMessageId) return;
+    lastScrollTarget.current = initialScrollToMessageId;
+    setScrollToMessageId(initialScrollToMessageId);
+    setScrollMsgKey((k) => k + 1);
+  }, [initialScrollToMessageId, channel, isLoading]);
+
   // Sync threadTask when channelTasks change (e.g. after WS task.updated)
   useEffect(() => {
     if (!threadMessage) return;
@@ -291,7 +276,6 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
   const handleTaskClickInTab = useCallback(
     (task: Task) => {
       if (!task.message_id) return;
-      refetchTasks();
 
       // Find message in the already-loaded channel messages
       const existingMsg = messages.find((m) => m.id === task.message_id);
@@ -301,15 +285,13 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
           display_name: task.creator_name || existingMsg.display_name,
         });
         setThreadTask(task);
+        onThreadChange?.(task.message_id);
         return;
       }
 
-      // Message not in current loaded set — switch to messages tab
-      // and the message may be loaded via pagination
-      setChannelViewTab('messages');
+      // Message not in current loaded set — ThreadPanel loads its own
+      // data via useThread so a synthetic parent message is sufficient
       setThreadTask(task);
-      // Construct a minimal message object for the ThreadPanel
-      // The useThread hook will load the actual thread messages
       setThreadMessage({
         id: task.message_id,
         channel_id: channel.id,
@@ -323,14 +305,26 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
         task_status: task.status,
         task_claimer_name: task.claimer_name || task.assignee_name,
       });
+      onThreadChange?.(task.message_id);
     },
-    [channel.id, messages, refetchTasks],
+    [channel.id, messages, onThreadChange],
   );
 
   const handleThreadClose = useCallback(() => {
     setThreadMessage(null);
     setThreadTask(null);
-  }, []);
+    onThreadChange?.(null);
+  }, [onThreadChange]);
+
+  // v1.5: Wrap onReply to also sync thread state to URL + pull latest task data
+  const handleReply = useCallback(
+    (message: Message) => {
+      refetchTasks();
+      setThreadMessage(message);
+      onThreadChange?.(message.id);
+    },
+    [refetchTasks, onThreadChange],
+  );
 
   // P25-08-F: Called by ThreadPanel after successfully marking thread as read
   const handleThreadMarkRead = useCallback(() => {
@@ -342,24 +336,6 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
   const existingAgentIds = agents.map((a) => a.member_id);
 
   // ---- Task quick-create handler (SOLO-128-F) ----
-
-  const handleQuickCreateTask = async (input: CreateTaskInput) => {
-    setIsCreatingTask(true);
-    try {
-      await createTask({
-        channel_id: channel.id,
-        title: input.title,
-        description: input.description,
-        priority: input.priority,
-        assignee_id: input.assignee_id,
-        assignee_type: input.assignee_type,
-        due_date: input.due_date,
-      });
-      setIsQuickCreateTaskOpen(false);
-    } finally {
-      setIsCreatingTask(false);
-    }
-  };
 
   // ---- Claim / Unclaim handlers ----
 
@@ -383,31 +359,23 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
     }
   };
 
-  // ---- AsTask handler ----
-
-  const handleAsTaskOpen = (message: Message) => {
-    setAsTaskTarget(message);
-    setAsTaskTitle(message.content.slice(0, 200));
-  };
-
-  const handleAsTaskConfirm = async () => {
-    if (!asTaskTarget || !asTaskTitle.trim()) return;
-    setIsConvertingTask(true);
-    try {
-      const task = await convertMessageToTask(
-        asTaskTarget.channel_id,
-        asTaskTarget.id,
-        asTaskTitle.trim(),
-      );
-      showToast(`已转为任务 #${task.task_number ?? '?'}`, 'success');
-      setAsTaskTarget(null);
-      setAsTaskTitle('');
-    } catch {
-      showToast('转换任务失败，请稍后再试', 'error');
-    } finally {
-      setIsConvertingTask(false);
-    }
-  };
+  // ---- AsTask handler: convert directly, no dialog ----
+  const handleAsTaskOpen = useCallback(
+    async (message: Message) => {
+      const title = message.content.slice(0, 200);
+      try {
+        const task = await convertMessageToTask(
+          message.channel_id,
+          message.id,
+          title,
+        );
+        showToast(`已转为任务 #${task.task_number ?? '?'}`, 'success');
+      } catch {
+        showToast('转换任务失败，请稍后再试', 'error');
+      }
+    },
+    [convertMessageToTask, showToast],
+  );
 
   const handleStatusChange = async (task: Task, newStatus: TaskStatus) => {
     try {
@@ -418,27 +386,9 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
     }
   };
 
-  // Compute the combined agent activity array for the typing indicator
-  const agentActivities: AgentActivity[] = [
-    // thinking agents
-    ...thinkingAgentNames.map((name) => {
-      const member = agents.find((a) => a.display_name === name);
-      return { agentId: member?.member_id ?? name, name, state: 'thinking' as const };
-    }),
-    // typing agents (pre-streaming)
-    ...typingAgentNames
-      .filter((n) => !thinkingAgentNames.includes(n))
-      .map((name) => {
-        const member = agents.find((a) => a.display_name === name);
-        return { agentId: member?.member_id ?? name, name, state: 'typing' as const };
-      }),
-    // streaming agents
-    ...activeStreamingAgentIds.map((id) => {
-      const member = agents.find((a) => a.member_id === id);
-      const name = member?.display_name ?? id;
-      return { agentId: id, name, state: 'streaming' as const };
-    }),
-  ];
+  // SOLO-island PR2: removed agentActivities aggregation — the
+  // TypingIndicator it fed is now replaced by AgentIsland, which
+  // subscribes to agent.activity events directly.
 
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -447,8 +397,8 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
         {/* Channel header */}
         <div className="flex h-14 flex-shrink-0 items-center border-b-2 border-black px-4">
           <div className="flex items-center gap-2 flex-1 min-w-0">
-            <Hash className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
-            <h2 className="font-semibold text-foreground truncate">{channel.name}</h2>
+            <span className="font-mono text-base font-bold text-black flex-shrink-0">#</span>
+            <h2 className="font-bold text-foreground truncate">{channel.name}</h2>
             <div className="mx-2 h-4 w-px bg-border flex-shrink-0" />
             {/* Channel tab bar (SOLO-128-F) */}
             <div className="flex items-center gap-1">
@@ -456,10 +406,11 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
                 type="button"
                 onClick={() => setChannelViewTab('messages')}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold transition-colors',
+                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold border-2 transition-all',
+                  'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
                   channelViewTab === 'messages'
-                    ? 'bg-brutal-pink text-black border-2 border-black'
-                    : 'text-muted-foreground hover:text-foreground border-2 border-transparent',
+                    ? 'bg-brutal-primary text-black border-black shadow-brutal-sm -translate-y-px'
+                    : 'text-muted-foreground hover:text-foreground border-transparent hover:border-black hover:bg-white hover:shadow-brutal-sm hover:-translate-y-px',
                 )}
               >
                 <MessageSquare className="h-3.5 w-3.5" />
@@ -469,10 +420,11 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
                 type="button"
                 onClick={() => setChannelViewTab('tasks')}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold transition-colors',
+                  'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold border-2 transition-all',
+                  'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
                   channelViewTab === 'tasks'
-                    ? 'bg-brutal-pink text-black border-2 border-black'
-                    : 'text-muted-foreground hover:text-foreground border-2 border-transparent',
+                    ? 'bg-brutal-primary text-black border-black shadow-brutal-sm -translate-y-px'
+                    : 'text-muted-foreground hover:text-foreground border-transparent hover:border-black hover:bg-white hover:shadow-brutal-sm hover:-translate-y-px',
                 )}
               >
                 <ClipboardList className="h-3.5 w-3.5" />
@@ -483,11 +435,11 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
           <div className="flex items-center gap-2 text-xs text-muted-foreground flex-shrink-0">
             <button
               type="button"
-              onClick={() => setShowAgentView(prev => !prev)}
+              onClick={toggleAgentView}
               className={cn(
                 'flex h-8 w-8 items-center justify-center border-2 border-black shadow-brutal-sm transition-colors',
                 showAgentView
-                  ? 'bg-brutal-pink text-black'
+                  ? 'bg-brutal-primary text-black'
                   : 'bg-white hover:bg-brutal-cream',
               )}
               aria-label="Agent View"
@@ -527,7 +479,7 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
               error={error}
               onRetry={(id, content) => retryMessage(id, content)}
               onCancel={(id) => cancelMessage(id)}
-              onReply={setThreadMessage}
+              onReply={handleReply}
               onEdit={(id, content) => editMessage(id, content)}
               onDelete={(id) => deleteMessage(id)}
               onAsTask={handleAsTaskOpen}
@@ -535,7 +487,6 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
               isLoadingMore={isLoadingMore}
               loadMoreError={loadMoreError}
               onLoadMore={loadMore}
-              agentActivities={agentActivities}
               scrollToMessageId={scrollToMessageId}
               scrollKey={scrollMsgKey}
             />
@@ -563,19 +514,9 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
         {channelViewTab === 'tasks' && (
           <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream">
             <div className="flex-1 overflow-y-auto px-4 py-4">
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="font-heading text-sm font-bold text-foreground">
+              <h3 className="mb-4 font-heading text-sm font-bold text-foreground">
                   #{channel.name} 的任务
                 </h3>
-                <button
-                  type="button"
-                  onClick={() => setIsQuickCreateTaskOpen(true)}
-                  className="btn-brutal btn-brutal-sm"
-                >
-                  <Plus className="mr-1 h-3.5 w-3.5" />
-                  快速创建
-                </button>
-              </div>
               <TaskBoard
                 tasks={channelTasks}
                 isLoading={tasksLoading}
@@ -583,32 +524,33 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
                 onTaskClick={handleTaskClickInTab}
                 onStatusChange={handleStatusChange}
                 onRefetch={refetchTasks}
-                onClaim={handleClaim}
-                onUnclaim={handleUnclaim}
               />
             </div>
           </div>
         )}
       </div>
 
-      {/* Agent View panel — conditionally mounted to avoid running hooks when hidden */}
+      {/* Agent View panel — SOLO-island PR3: controlled by parent, so the
+          AgentIsland (mounted at the dashboard root) can summon it. */}
       {showAgentView && (
         <AgentViewPanel
           channelId={channel.id}
-          width={agentViewWidth}
-          onWidthChange={setAgentViewWidth}
+          width={effectiveAgentViewWidth}
+          onWidthChange={onAgentViewWidthChange ?? (() => {})}
+          focusedAgentId={agentViewFocusedAgentId}
+          onClose={() => onAgentViewVisibleChange?.(false)}
         />
       )}
 
-      {/* Thread panel (lazy-loaded, SOLO-63-F) */}
-      {threadMessage && (
-        <div
-          className="flex-shrink-0 bg-brutal-cream overflow-hidden relative"
-          style={{ width: threadPanelWidth }}
-        >
-          {/* Resize handle */}
+      {/* Thread panel (lazy-loaded, SOLO-63-F) — always mounted for smooth width transition */}
+      <div
+        className="flex-shrink-0 bg-brutal-cream overflow-hidden relative transition-[width] duration-100 ease-linear border-l-2 border-transparent"
+        style={{ width: threadMessage ? threadPanelWidth : 0, borderLeftColor: threadMessage ? 'var(--color-border, #000)' : 'transparent' }}
+      >
+        {/* Resize handle — only interactive when panel is open */}
+        {threadMessage && (
           <div
-            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-pink/50 transition-colors z-10"
+            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-primary/50 transition-colors z-10"
             onMouseDown={(e) => {
               e.preventDefault();
               const startX = e.clientX;
@@ -625,6 +567,8 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
               document.addEventListener('mouseup', onUp);
             }}
           />
+        )}
+        {threadMessage && (
           <Suspense
             fallback={
               <div className="flex h-full items-center justify-center">
@@ -643,8 +587,8 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
               onMarkRead={handleThreadMarkRead}
             />
           </Suspense>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Add Agent to Channel modal */}
       <AddAgentModal
@@ -654,79 +598,6 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
         onAdd={addAgentToChannel}
       />
 
-      {/* Quick-create task dialog (SOLO-128-F) */}
-      <Dialog
-        open={isQuickCreateTaskOpen}
-        onOpenChange={setIsQuickCreateTaskOpen}
-      >
-        <DialogHeader>
-          <DialogTitle>快速创建任务</DialogTitle>
-          <DialogCloseButton onClick={() => setIsQuickCreateTaskOpen(false)} />
-        </DialogHeader>
-        <div className="mt-4 px-5 pb-5">
-          <CreateTaskInline
-            channelId={channel.id}
-            isSubmitting={isCreatingTask}
-            onSubmit={handleQuickCreateTask}
-          />
-        </div>
-      </Dialog>
-
-      {/* AsTask confirm dialog */}
-      <Dialog
-        open={!!asTaskTarget}
-        onOpenChange={() => setAsTaskTarget(null)}
-      >
-        <DialogHeader>
-          <DialogTitle>转为任务</DialogTitle>
-          <DialogCloseButton onClick={() => setAsTaskTarget(null)} />
-        </DialogHeader>
-        <div className="mt-4 px-5 pb-5">
-          <label
-            htmlFor="as-task-title"
-            className="mb-2 block font-heading text-sm font-bold text-foreground"
-          >
-            任务标题
-          </label>
-          <input
-            id="as-task-title"
-            type="text"
-            value={asTaskTitle}
-            onChange={(e) => setAsTaskTitle(e.target.value)}
-            placeholder="输入任务标题..."
-            className="input-brutal w-full"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleAsTaskConfirm();
-              }
-            }}
-          />
-          {asTaskTarget && (
-            <p className="mt-2 font-mono text-[11px] text-muted-foreground">
-              来源: {asTaskTarget.display_name} 的消息
-            </p>
-          )}
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setAsTaskTarget(null)}
-              disabled={isConvertingTask}
-              className="btn-brutal btn-brutal-sm"
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              onClick={handleAsTaskConfirm}
-              disabled={isConvertingTask || !asTaskTitle.trim()}
-              className="btn-brutal btn-brutal-sm btn-brutal-pink"
-            >
-              {isConvertingTask ? '创建中...' : '转为任务'}
-            </button>
-          </div>
-        </div>
-      </Dialog>
 
       {/* Member popover */}
       <Dialog open={isMemberPopoverOpen} onOpenChange={setIsMemberPopoverOpen}>
@@ -740,7 +611,19 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
               </span>
             </div>
           </DialogTitle>
-          <DialogCloseButton onClick={() => setIsMemberPopoverOpen(false)} />
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => {
+                setIsMemberPopoverOpen(false);
+                setIsAddAgentModalOpen(true);
+              }}
+              className="flex h-7 w-7 items-center justify-center border-2 border-black bg-white shadow-brutal-sm hover:bg-brutal-primary-light active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
+              aria-label="添加 Agent 到频道"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+            <DialogCloseButton onClick={() => setIsMemberPopoverOpen(false)} />
+          </div>
         </DialogHeader>
         <div className="max-h-[60vh] overflow-y-auto">
           <MemberList
@@ -752,6 +635,7 @@ export function ChannelView({ channel, initialThreadMessageId }: ChannelViewProp
               setIsAddAgentModalOpen(true);
             }}
             onRemoveAgent={(memberId) => removeMember('agent', memberId)}
+            showHeader={false}
           />
         </div>
       </Dialog>

@@ -1,7 +1,7 @@
 // ============================================================================
 // MessageInput — bottom message composition with brutalist styling
 // - input-brutal textarea with Space Mono placeholder
-// - Send button: btn-brutal-pink circular icon button
+// - Send button: btn-brutal-primary circular icon button
 // - Enter/Shift+Enter handling
 // - @mention autocomplete (SOLO-51-F)
 // - File upload: drag & drop + paste (SOLO-247-F)
@@ -23,7 +23,6 @@ import {
   ClipboardList,
   Upload,
   X,
-  Loader2,
   Check,
   AlertTriangle,
 } from 'lucide-react';
@@ -31,6 +30,7 @@ import { cn } from '@/lib/utils';
 import { useMentions } from '@/lib/hooks/use-mentions';
 import { MentionDropdown, type DropdownAnchor } from './mention-dropdown';
 import { useToast } from '@/components/ui/toast';
+import { Spinner } from '@/components/ui/spinner';
 import type { ChannelMember } from '@/lib/types';
 
 // ---- Types ----
@@ -106,9 +106,7 @@ export function MessageInput({
   const [isSending, setIsSending] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
   const [asTask, setAsTask] = useState(false);
-  const [taskTitle, setTaskTitle] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const titleInputRef = useRef<HTMLInputElement>(null);
   const isSendingRef = useRef(false);
 
   // ---- Upload state ----
@@ -353,11 +351,10 @@ export function MessageInput({
         trimmed,
         mentionedAgentIds,
         asTask,
-        taskTitle.trim() || undefined,
+        undefined,
         attachmentIds,
       );
       setContent('');
-      setTaskTitle('');
       setAsTask(false);
       setUploads([]);
       resetMention();
@@ -369,7 +366,7 @@ export function MessageInput({
       setIsSending(false);
       textareaRef.current?.focus();
     }
-  }, [canSend, trimmed, onSend, mentionedAgentIds, asTask, taskTitle, doneUploads, resetMention]);
+  }, [canSend, trimmed, onSend, mentionedAgentIds, asTask, doneUploads, resetMention]);
 
   // ---- Keyboard handling ----
 
@@ -478,12 +475,12 @@ export function MessageInput({
         <div
           className={cn(
             'absolute inset-0 z-50 flex flex-col items-center justify-center gap-2',
-            'border-2 border-dashed border-black bg-brutal-pink-light/60 backdrop-blur-sm',
+            'border-2 border-dashed border-black bg-brutal-primary-light/60',
           )}
           aria-live="polite"
         >
           <Upload className="h-8 w-8 text-brutal-black opacity-60" aria-hidden />
-          <p className="font-display text-base font-bold text-foreground">
+          <p className="font-heading text-base font-bold text-foreground">
             拖放文件到此处上传
           </p>
           <p className="font-mono text-xs text-muted-foreground">
@@ -519,13 +516,13 @@ export function MessageInput({
                 className={cn(
                   'relative flex items-start gap-2 border-2 border-black bg-white px-2.5 py-1.5',
                   'shadow-brutal-sm',
-                  upload.status === 'error' && 'border-brutal-red',
+                  upload.status === 'error' && 'border-brutal-danger',
                 )}
               >
                 {/* Uploading: indeterminate progress bar */}
                 {upload.status === 'uploading' && (
-                  <div className="absolute inset-x-0 bottom-1 left-1 right-1 h-1 overflow-hidden bg-brutal-stone/30">
-                    <div className="h-full w-1/3 animate-indeterminate-progress bg-brutal-pink" />
+                  <div className="absolute inset-x-0 bottom-1 left-1 right-1 h-1 overflow-hidden bg-brutal-muted/30">
+                    <div className="h-full w-1/3 animate-indeterminate-progress bg-brutal-primary" />
                   </div>
                 )}
 
@@ -540,13 +537,13 @@ export function MessageInput({
                   /* Status icon for non-image files */
                   <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center">
                     {upload.status === 'uploading' && (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-label="上传中" />
+                      <Spinner size="sm" className="text-muted-foreground" label="上传中" />
                     )}
                     {upload.status === 'done' && (
-                      <Check className="h-3.5 w-3.5 text-brutal-lime" aria-label="已上传" />
+                      <Check className="h-3.5 w-3.5 text-brutal-success" aria-label="已上传" />
                     )}
                     {upload.status === 'error' && (
-                      <AlertTriangle className="h-3.5 w-3.5 text-brutal-red" aria-label="上传失败" />
+                      <AlertTriangle className="h-3.5 w-3.5 text-brutal-danger" aria-label="上传失败" />
                     )}
                   </div>
                 )}
@@ -588,20 +585,12 @@ export function MessageInput({
           <div className="mb-2 flex items-center">
             <button
               type="button"
-              onClick={() => {
-                const next = !asTask;
-                setAsTask(next);
-                if (next) {
-                  setTimeout(() => titleInputRef.current?.focus(), 0);
-                } else {
-                  setTaskTitle('');
-                }
-              }}
+              onClick={() => setAsTask((prev) => !prev)}
               className={cn(
                 'flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] font-bold transition-all',
                 'border-2 border-black shadow-brutal-sm',
                 asTask
-                  ? 'bg-brutal-pink text-black translate-x-[2px] translate-y-[2px] shadow-none'
+                  ? 'bg-brutal-primary text-black translate-x-[2px] translate-y-[2px] shadow-none'
                   : 'bg-white text-muted-foreground hover:text-foreground hover:-translate-x-px hover:-translate-y-px hover:shadow-brutal',
               )}
               aria-label={asTask ? '取消创建为任务' : '创建为任务'}
@@ -610,31 +599,6 @@ export function MessageInput({
               <ClipboardList className="h-3.5 w-3.5" />
               {asTask ? '取消任务' : '创建为任务'}
             </button>
-          </div>
-        )}
-
-        {/* Title input — visible only in asTask mode */}
-        {showAsTaskToggle && asTask && (
-          <div className="mb-2">
-            <input
-              ref={titleInputRef}
-              type="text"
-              value={taskTitle}
-              onChange={(e) => setTaskTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  textareaRef.current?.focus();
-                }
-              }}
-              placeholder="任务标题（可选，留空则使用消息前100字符）"
-              disabled={isSending}
-              className={cn(
-                'input-brutal w-full font-mono text-sm',
-                asTask && 'border-brutal-pink',
-              )}
-              aria-label="任务标题"
-            />
           </div>
         )}
 
@@ -660,7 +624,7 @@ export function MessageInput({
               'input-brutal min-h-[44px] resize-none pr-24 font-mono text-sm leading-relaxed',
               'placeholder:font-mono placeholder:text-muted-foreground/60',
               'disabled:opacity-50',
-              asTask && 'border-brutal-pink',
+              asTask && 'border-brutal-primary',
             )}
           />
           <button
@@ -669,7 +633,7 @@ export function MessageInput({
             disabled={!canSend}
             className={cn(
               'absolute bottom-2 right-2 flex h-8 items-center justify-center gap-1.5 px-3',
-              'btn-brutal btn-brutal-pink',
+              'btn-brutal btn-brutal-primary',
               !canSend && 'opacity-40 pointer-events-none',
               asTask ? 'w-auto' : 'w-8 p-0',
             )}

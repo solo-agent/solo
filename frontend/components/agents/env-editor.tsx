@@ -6,7 +6,7 @@
 
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -37,24 +37,25 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
     }));
   });
 
-  // Sync external value changes
+  // Sync external value changes (e.g. form reset / edit existing agent).
+  // Skips changes we emitted ourselves (tracked via lastEmittedRef).
   useEffect(() => {
-    if (!value) {
+    const next = JSON.stringify(value ?? {});
+    if (next === lastEmittedRef.current) return; // we triggered this ourselves
+    if (!value || Object.keys(value).length === 0) {
       setEntries([]);
       return;
     }
-    const incoming = Object.entries(value);
-    // Only reset if structure changed from outside (not from our own edits)
-    if (incoming.length !== entries.length) {
-      setEntries(
-        incoming.map(([key, val]) => ({
-          id: nextEnvId(),
-          key,
-          value: val,
-        })),
-      );
-    }
+    setEntries(
+      Object.entries(value).map(([key, val]) => ({
+        id: nextEnvId(),
+        key,
+        value: val,
+      })),
+    );
   }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const lastEmittedRef = useRef('');
 
   const emit = useCallback(
     (next: EnvEntry[]) => {
@@ -63,18 +64,15 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
         const k = e.key.trim();
         if (k) result[k] = e.value;
       }
+      lastEmittedRef.current = JSON.stringify(result);
       onChange?.(result);
     },
     [onChange],
   );
 
   const addEntry = useCallback(() => {
-    setEntries((prev) => {
-      const next = [...prev, { id: nextEnvId(), key: '', value: '' }];
-      emit(next);
-      return next;
-    });
-  }, [emit]);
+    setEntries((prev) => [...prev, { id: nextEnvId(), key: '', value: '' }]);
+  }, []);
 
   const updateEntry = useCallback(
     (id: string, field: 'key' | 'value', newVal: string) => {
@@ -143,12 +141,12 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
               'flex h-9 w-9 flex-shrink-0 items-center justify-center',
               'border-2 border-black bg-white shadow-brutal-sm',
               'transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal',
-              'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
+              'active:translate-x-[3px] active:translate-y-[3px] active:shadow-none',
               'disabled:opacity-50 disabled:pointer-events-none',
             )}
             style={{ background: '#fffaef' }}
           >
-            <Trash2 className="h-3.5 w-3.5 text-brutal-red" />
+            <Trash2 className="h-3.5 w-3.5 text-brutal-danger" />
           </button>
         </div>
       ))}
@@ -162,7 +160,7 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
           'border-2 border-black bg-white shadow-brutal-sm',
           'font-heading text-xs font-bold',
           'transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal',
-          'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
+          'active:translate-x-[3px] active:translate-y-[3px] active:shadow-none',
           'disabled:opacity-50 disabled:pointer-events-none',
         )}
         style={{ background: '#fffaef' }}

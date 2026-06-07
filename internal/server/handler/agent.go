@@ -4,23 +4,43 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/solo-ai/solo/internal/server/workspace"
 	"github.com/solo-ai/solo/pkg/agent"
+)
+
+const (
+	// maxWorkspaceFileSize limits the size of files returned when content=true.
+	maxWorkspaceFileSize = 1 * 1024 * 1024 // 1 MB
+	// maxWorkspaceDepth limits directory traversal depth.
+	maxWorkspaceDepth = 20
 )
 
 // AgentHandler handles agent-related HTTP requests.
 type AgentHandler struct {
-	pool *pgxpool.Pool
+	pool          *pgxpool.Pool
+	workspaceRoot string             // base path for agent workspaces, defaults to ~/.solo/agents
+	proxy         workspace.Proxy    // optional proxy for workspace requests (nil = local FS only)
 }
 
 // NewAgentHandler creates a new AgentHandler.
-func NewAgentHandler(pool *pgxpool.Pool) *AgentHandler {
-	return &AgentHandler{pool: pool}
+func NewAgentHandler(pool *pgxpool.Pool, proxy workspace.Proxy) *AgentHandler {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	workspaceRoot := filepath.Join(home, ".solo", "agents")
+	if proxy == nil {
+		slog.Warn("agent handler: no workspace proxy configured, falling back to local filesystem only")
+	}
+	return &AgentHandler{pool: pool, workspaceRoot: workspaceRoot, proxy: proxy}
 }
 
 // --- Request/Response types ---
@@ -494,4 +514,229 @@ func unmarshalStringSlice(b []byte) []string {
 		return []string{}
 	}
 	return s
+}
+
+// workspaceNode represents a file or directory in the agent workspace tree.
+type workspaceNode struct {
+	Type     string           `json:"type"` // "file" or "directory"
+	Name     string           `json:"name"`
+	Path     string           `json:"path,omitempty"`
+	Content  string           `json:"content,omitempty"`
+	Size     int64            `json:"size,omitempty"`
+	Children []workspaceNode  `json:"children,omitempty"`
+}
+
+// Workspace handles GET /api/v1/agents/{agentID}/workspace
+//
+// Returns a file tree for the agent's workspace directory. Supports query params:
+//   - path: subdirectory or file path relative to workspace (default: "workspace")
+//   - content: "true" to include file content (default: false)
+//
+// This is a read-only API. No write operations are supported.
+func (h *AgentHandler) Workspace(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	agentID := chi.URLParam(r, "agentID")
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "agent ID is required")
+		return
+	}
+
+	// Verify the agent exists and belongs to the user.
+	var ownerID string
+	err := h.pool.QueryRow(r.Context(),
+		`SELECT owner_id FROM agents WHERE id = $1 AND is_active = true`,
+		agentID,
+	).Scan(&ownerID)
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+		slog.Error("workspace: failed to query agent", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if ownerID != userID {
+		writeError(w, http.StatusForbidden, "access denied")
+		return
+	}
+
+	// Resolve the workspace base directory: ~/.solo/agents/<agentID>/workspace
+	workspaceDir := filepath.Join(h.workspaceRoot, agentID, "workspace")
+
+	// Parse query params.
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		relPath = "."
+	}
+	includeContent := r.URL.Query().Get("content") == "true"
+
+	// Try proxy to daemon first
+	if h.proxy != nil {
+		if d, ok := h.proxy.FindDaemonForAgent(r.Context(), agentID); ok {
+			if includeContent {
+				data, err := h.proxy.ProxyWorkspaceRead(r.Context(), d, agentID, relPath)
+				if err == nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.Write(data)
+					return
+				}
+				slog.Warn("workspace: daemon proxy read failed, falling back to local filesystem", "error", err)
+			} else {
+				data, err := h.proxy.ProxyWorkspaceList(r.Context(), d, agentID, relPath)
+				if err == nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.Write(data)
+					return
+				}
+				slog.Warn("workspace: daemon proxy list failed, falling back to local filesystem", "error", err)
+			}
+		}
+	}
+
+	// Fallback: local filesystem reading
+	// Prevent path traversal: resolve and verify it stays within workspaceDir.
+	fullPath := filepath.Clean(filepath.Join(workspaceDir, relPath))
+	if !strings.HasPrefix(fullPath, workspaceDir) {
+		writeError(w, http.StatusBadRequest, "path traversal not allowed")
+		return
+	}
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, http.StatusNotFound, "path not found in workspace")
+			return
+		}
+		slog.Error("workspace: failed to stat path", "path", fullPath, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	var node workspaceNode
+	if info.IsDir() {
+		node, err = h.buildFileTree(fullPath, workspaceDir, 0, includeContent)
+		if err != nil {
+			slog.Error("workspace: failed to build file tree", "path", fullPath, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to read workspace")
+			return
+		}
+	} else {
+		node, err = h.buildFileNode(fullPath, workspaceDir, includeContent)
+		if err != nil {
+			slog.Error("workspace: failed to read file", "path", fullPath, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to read file")
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, node)
+}
+
+// buildFileTree recursively builds a workspaceNode tree for a directory.
+func (h *AgentHandler) buildFileTree(dirPath, basePath string, depth int, includeContent bool) (workspaceNode, error) {
+	if depth > maxWorkspaceDepth {
+		return workspaceNode{}, nil
+	}
+
+	name := filepath.Base(dirPath)
+	if dirPath == basePath {
+		name = "."
+	}
+
+	node := workspaceNode{
+		Type:     "directory",
+		Name:     name,
+		Path:     dirPath,
+		Children: []workspaceNode{},
+	}
+
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return node, err
+	}
+
+	for _, entry := range entries {
+		// Skip hidden files and directories.
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		fullPath := filepath.Join(dirPath, entry.Name())
+		if entry.IsDir() {
+			child, err := h.buildFileTree(fullPath, basePath, depth+1, includeContent)
+			if err != nil {
+				slog.Warn("workspace: failed to read subdirectory", "path", fullPath, "error", err)
+				continue
+			}
+			node.Children = append(node.Children, child)
+		} else {
+			child, err := h.buildFileNode(fullPath, basePath, includeContent)
+			if err != nil {
+				slog.Warn("workspace: failed to read file", "path", fullPath, "error", err)
+				continue
+			}
+			node.Children = append(node.Children, child)
+		}
+	}
+
+	return node, nil
+}
+
+// buildFileNode creates a workspaceNode for a single file.
+func (h *AgentHandler) buildFileNode(filePath, basePath string, includeContent bool) (workspaceNode, error) {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return workspaceNode{}, err
+	}
+
+	node := workspaceNode{
+		Type: "file",
+		Name: info.Name(),
+		Path: filePath,
+		Size: info.Size(),
+	}
+
+	if includeContent {
+		if info.Size() > maxWorkspaceFileSize {
+			node.Content = "[file too large to preview]"
+		} else {
+			data, err := os.ReadFile(filePath)
+			if err != nil {
+				return node, err
+			}
+			// Only include text content; binary files are skipped.
+			if isTextFile(data) {
+				node.Content = string(data)
+			} else {
+				node.Content = "[binary file]"
+			}
+		}
+	}
+
+	return node, nil
+}
+
+// isTextFile detects whether byte data represents text content by checking
+// for null bytes (common in binary files).
+func isTextFile(data []byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+	// Check first 8KB for null bytes.
+	checkLen := len(data)
+	if checkLen > 8192 {
+		checkLen = 8192
+	}
+	for _, b := range data[:checkLen] {
+		if b == 0 {
+			return false
+		}
+	}
+	return true
 }
