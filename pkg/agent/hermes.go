@@ -550,7 +550,7 @@ func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 		Status:     "completed",
 		Output:     finalOutput,
 		DurationMs: duration.Milliseconds(),
-		Usage:      buildHermesUsageMap(usage, opts.Model),
+		Usage:      buildACPUsageMap(usage, opts.Model),
 	}
 	close(msgCh)
 	close(resCh)
@@ -641,7 +641,7 @@ func (b *HermesBackend) Send(ctx context.Context, ps *PersistentSession, message
 		Status:     "completed",
 		Output:     finalOutput,
 		DurationMs: duration.Milliseconds(),
-		Usage:      buildHermesUsageMap(usage, ""),
+		Usage:      buildACPUsageMap(usage, ""),
 	}
 	close(msgCh)
 	close(resCh)
@@ -671,13 +671,4 @@ func (b *HermesBackend) Close(ps *PersistentSession) error {
 		return fmt.Errorf("hermes: invalid session state")
 	}
 	return state.runner.close()
-}
-
-// buildHermesUsageMap returns a usage map for the given model, or nil if
-// there are no tokens.
-func buildHermesUsageMap(usage TokenUsage, model string) map[string]TokenUsage {
-	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 {
-		return nil
-	}
-	return map[string]TokenUsage{model: usage}
 }

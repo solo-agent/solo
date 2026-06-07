@@ -536,7 +536,7 @@ func (b *KimiBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exec
 		Status:     "completed",
 		Output:     finalOutput,
 		DurationMs: duration.Milliseconds(),
-		Usage:      buildKimiUsageMap(usage, opts.Model),
+		Usage:      buildACPUsageMap(usage, opts.Model),
 	}
 	close(msgCh)
 	close(resCh)
@@ -630,7 +630,7 @@ func (b *KimiBackend) Send(ctx context.Context, ps *PersistentSession, messages 
 		Status:     "completed",
 		Output:     finalOutput,
 		DurationMs: duration.Milliseconds(),
-		Usage:      buildKimiUsageMap(usage, ""),
+		Usage:      buildACPUsageMap(usage, ""),
 	}
 	close(msgCh)
 	close(resCh)
@@ -660,15 +660,6 @@ func (b *KimiBackend) Close(ps *PersistentSession) error {
 		return fmt.Errorf("kimi: invalid session state")
 	}
 	return state.runner.close()
-}
-
-// buildKimiUsageMap returns a usage map for the given model, or nil if
-// there are no tokens.
-func buildKimiUsageMap(usage TokenUsage, model string) map[string]TokenUsage {
-	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 {
-		return nil
-	}
-	return map[string]TokenUsage{model: usage}
 }
 
 // kimiToolNameFromTitle normalises tool names from Kimi's ACP server

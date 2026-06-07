@@ -545,7 +545,7 @@ func (b *KiroBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exec
 		Status:     "completed",
 		Output:     finalOutput,
 		DurationMs: duration.Milliseconds(),
-		Usage:      buildKiroUsageMap(usage, opts.Model),
+		Usage:      buildACPUsageMap(usage, opts.Model),
 	}
 	close(msgCh)
 	close(resCh)
@@ -642,7 +642,7 @@ func (b *KiroBackend) Send(ctx context.Context, ps *PersistentSession, messages 
 		Status:     "completed",
 		Output:     finalOutput,
 		DurationMs: duration.Milliseconds(),
-		Usage:      buildKiroUsageMap(usage, ""),
+		Usage:      buildACPUsageMap(usage, ""),
 	}
 	close(msgCh)
 	close(resCh)
@@ -672,15 +672,6 @@ func (b *KiroBackend) Close(ps *PersistentSession) error {
 		return fmt.Errorf("kiro: invalid session state")
 	}
 	return state.runner.close()
-}
-
-// buildKiroUsageMap returns a usage map for the given model, or nil if
-// there are no tokens.
-func buildKiroUsageMap(usage TokenUsage, model string) map[string]TokenUsage {
-	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 {
-		return nil
-	}
-	return map[string]TokenUsage{model: usage}
 }
 
 // kiroToolNameFromTitle normalises tool names from Kiro's ACP server

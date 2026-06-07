@@ -296,7 +296,7 @@ func (b *OpenClawBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 		Status:     "completed",
 		Output:     finalOutput,
 		DurationMs: duration.Milliseconds(),
-		Usage:      buildOpenclawUsageMap(usage, opts.Model),
+		Usage:      buildACPUsageMap(usage, opts.Model),
 	}
 	close(msgCh)
 	close(resCh)
@@ -386,7 +386,7 @@ func (b *OpenClawBackend) Send(ctx context.Context, ps *PersistentSession, messa
 		Status:     "completed",
 		Output:     finalOutput,
 		DurationMs: duration.Milliseconds(),
-		Usage:      buildOpenclawUsageMap(usage, ""),
+		Usage:      buildACPUsageMap(usage, ""),
 	}
 	close(msgCh)
 	close(resCh)
@@ -433,15 +433,6 @@ func buildOpenclawSessionParams(cwd, model string) map[string]any {
 		params["model"] = model
 	}
 	return params
-}
-
-// buildOpenclawUsageMap returns a usage map for the given model, or nil
-// if there are no tokens.
-func buildOpenclawUsageMap(usage TokenUsage, model string) map[string]TokenUsage {
-	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 {
-		return nil
-	}
-	return map[string]TokenUsage{model: usage}
 }
 
 // Compile-time interface assertions.

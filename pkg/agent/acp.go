@@ -676,6 +676,17 @@ func resolveResumedSessionID(requested string, response json.RawMessage) (string
 	return got, got != requested
 }
 
+// buildACPUsageMap returns a usage map keyed by the given model, or nil if
+// there are no tokens. It is shared by all ACP-family backends (hermes,
+// kimi, kiro, openclaw, opencode) — they all wrap their per-turn usage
+// the same way before emitting it to the daemon.
+func buildACPUsageMap(usage TokenUsage, model string) map[string]TokenUsage {
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 {
+		return nil
+	}
+	return map[string]TokenUsage{model: usage}
+}
+
 func acpToolNameFromTitle(title string, kind string) string {
 	switch title {
 	case "execute code":

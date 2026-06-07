@@ -264,7 +264,7 @@ func (b *OpenCodeBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 		Status:     "completed",
 		Output:     finalOutput,
 		DurationMs: duration.Milliseconds(),
-		Usage:      buildHermesUsageMap(usage, opts.Model),
+		Usage:      buildACPUsageMap(usage, opts.Model),
 	}
 	close(msgCh)
 	close(resCh)
@@ -350,7 +350,7 @@ func (b *OpenCodeBackend) Send(ctx context.Context, ps *PersistentSession, messa
 		Status:     "completed",
 		Output:     finalOutput,
 		DurationMs: duration.Milliseconds(),
-		Usage:      buildHermesUsageMap(usage, ""),
+		Usage:      buildACPUsageMap(usage, ""),
 	}
 	close(msgCh)
 	close(resCh)
