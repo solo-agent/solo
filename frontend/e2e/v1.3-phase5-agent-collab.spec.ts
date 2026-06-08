@@ -1,6 +1,6 @@
 // ============================================================================
 // Solo v1.3 Phase 5 — Agent Collaboration E2E Tests
-// Aligned with Slock collaboration model. Tests 16 scenarios from case.md.
+
 //
 // Prerequisites:
 //   - 3 agents created & joined to #test-collab: 产品, 前端, 后端

@@ -161,7 +161,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		mentionedAgentIDs = nil
 	}
 
-	// Resolve thread_id to a valid threads.id (Slock-aligned).
+	// Resolve thread_id to a valid threads.id.
 	// Accepts: short message ID prefix, full message UUID, or existing thread UUID.
 	threadID := req.ThreadID
 	if threadID != "" {

@@ -1,7 +1,6 @@
 // Package agent defines the core types and interfaces for the Solo Agent
 // execution layer. It provides a unified Backend interface that wraps CLI
 // agent subprocesses (Claude Code, Codex, etc.) via stdin/stdout pipes,
-// following the pattern established by Multica's pkg/agent/ package.
 package agent
 
 import (
@@ -127,7 +126,7 @@ type TokenUsage struct {
 
 // PersistentBackend extends Backend with session-level lifecycle methods.
 // Implementations keep the subprocess alive across multiple Send() calls,
-// maintaining full conversation context. This is the Slock-aligned model:
+// maintaining full conversation context. agents are long-running colleagues, not one-shot text generators.
 // agents are long-running colleagues, not one-shot text generators.
 type PersistentBackend interface {
 	Backend

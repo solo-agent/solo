@@ -12,7 +12,7 @@ import (
 // exits immediately (indicating a CLI misconfiguration, not a transient failure).
 const failedStartRetryInterval = 30 * time.Second
 
-// AgentSessionManager manages a pool of agent sessions aligned with Slock:
+// AgentSessionManager manages a pool of agent sessions 
 // processes stay alive indefinitely (no idle timeout), crash recovery is
 // automatic via --resume, and concurrent starts are rate-limited.
 type AgentSessionManager struct {
@@ -34,7 +34,7 @@ type AgentSessionManager struct {
 	pendingMu       sync.Mutex
 
 	// startSlots limits concurrent agent process starts to prevent CPU
-	// spikes when multiple agents are triggered at once (Slock-aligned).
+	// spikes when multiple agents are triggered at once.
 	startSlots chan struct{}
 
 	// failedStarts tracks timestamps of recent failed session creations
@@ -60,7 +60,7 @@ func NewAgentSessionManager(backend PersistentBackend, workspaceMgr *WorkspaceMa
 	if logger == nil {
 		logger = slog.Default()
 	}
-	slots := make(chan struct{}, 5) // max 5 concurrent starts (Slock-aligned)
+	slots := make(chan struct{}, 5) // max 5 concurrent starts
 	return &AgentSessionManager{
 		backend:      backend,
 		workspaceMgr: workspaceMgr,
@@ -143,7 +143,7 @@ func (m *AgentSessionManager) QueueIfBusy(agentID string, msg Message) bool {
 		count := len(m.pendingMessages[agentID])
 		m.pendingMu.Unlock()
 		m.logger.Info("session: message queued", "agent_id", agentID, "pending_count", count)
-		// v1.3: Write inbox notification to agent stdin (Slock-aligned).
+		// v1.3: Write inbox notification to agent stdin.
 		m.notifyInbox(agentID, count)
 		return true
 	}
@@ -288,7 +288,7 @@ func (m *AgentSessionManager) createSession(ctx context.Context, agentID string,
 	}
 
 	// v1.3: Rate-limit concurrent starts to prevent CPU spikes when
-	// multiple agents are triggered simultaneously (Slock-aligned:
+	// multiple agents are triggered simultaneously (
 	// max 5 concurrent, FIFO queue with 500ms dequeue interval).
 	queueLen := len(m.startSlots)
 	m.logger.Info("session: start queued", "agent_id", agentID, "queue", queueLen, "max", cap(m.startSlots))
@@ -395,7 +395,7 @@ func (m *AgentSessionManager) watchCrash(agentID string, agentCfg AgentConfig, c
 
 
 // notifyInbox writes a lightweight notification to the agent's stdin,
-// matching Slock's "1 pending inbox message(s)" pattern. The agent sees
+// "1 pending inbox message(s)" pattern. The agent sees
 // this notification at the start of its next stdin read and can call
 // solo message check to pull the actual content.
 func (m *AgentSessionManager) notifyInbox(agentID string, count int) {

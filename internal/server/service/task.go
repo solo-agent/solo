@@ -485,7 +485,7 @@ func (s *TaskService) GetTask(ctx context.Context, channelID, taskID, userID str
 		).Scan(&task.ID, &task.TaskNumber, &task.ChannelID, &task.CreatorID, &task.CreatorName, &task.Title, &description,
 			&task.Status, &task.ClaimerID, &task.ClaimerName, &task.Priority, &dueDate, &task.MessageID, &task.CreatedAt, &task.UpdatedAt)
 		if err2 != nil {
-			// Try by message_id (Slock-aligned: agent uses msg= header short ID)
+			// Try by message_id( agent uses msg= header short ID)
 			err3 := s.pool.QueryRow(ctx,
 				`SELECT t.id, t.task_number, t.channel_id, t.creator_id, COALESCE(u_creator.display_name, a_creator.name, '') as creator_name, t.title, COALESCE(t.description, ''), t.status,
 				 COALESCE(t.claimer_id::text, ''),

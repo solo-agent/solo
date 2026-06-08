@@ -363,7 +363,7 @@ func TestHandleTaskClaimConflict(t *testing.T) {
 	if code != 1 {
 		t.Errorf("expected exit 1 for 409 Conflict, got %d", code)
 	}
-	// Phase 5 Slock-aligned output: 409 Conflict emits a structured failure
+	// Phase 5 output: 409 Conflict emits a structured failure
 	// message to stdout (not stderr).
 	if !strings.Contains(stdout, "already assigned") {
 		t.Errorf("expected 'already assigned' in stdout, got %q", stdout)
@@ -534,7 +534,7 @@ func TestHandleMessageSend(t *testing.T) {
 	if capturedPath != "/api/v1/channels/550e8400-e29b-41d4-a716-446655440001/messages" {
 		t.Errorf("expected path /api/v1/channels/550e8400-e29b-41d4-a716-446655440001/messages, got %s", capturedPath)
 	}
-	// Phase 5 Slock-aligned output: formatted send confirmation (not raw JSON).
+	// Phase 5 output: formatted send confirmation (not raw JSON).
 	if !strings.Contains(stdout, "Message sent") {
 		t.Errorf("expected stdout to contain 'Message sent', got %q", stdout)
 	}

@@ -93,7 +93,7 @@ func (h *MemberHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	)
 
 	// v1.3: When an agent joins a channel, trigger a greeting so it
-	// introduces itself — matching Slock's new-agent-in-channel behavior.
+	// introduces itself — new-agent-in-channel behavior.
 	if req.MemberType == "agent" && h.agentSvc != nil {
 		go h.agentSvc.TriggerAgentGreeting(context.Background(), channelID, req.MemberID)
 	}

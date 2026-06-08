@@ -31,8 +31,7 @@ func (s *AgentService) resolveMentionedNames(ctx context.Context, agentIDs []str
 }
 
 // TriggerAgentGreeting sends a greeting prompt to a newly-joined agent,
-// asking it to introduce itself in the channel. This matches Slock's
-// behavior where new agents post a self-introduction on join.
+// asking it to introduce itself in the channel.
 func (s *AgentService) TriggerAgentGreeting(ctx context.Context, channelID, agentID string) {
 	// Get agent info
 	var ag agentChannelInfo
@@ -60,7 +59,7 @@ func (s *AgentService) TriggerAgentGreeting(ctx context.Context, channelID, agen
 		return
 	}
 
-	// Build a greeting prompt that mirrors Slock's first-message task.
+	// Build a greeting prompt 
 	greetingContent := fmt.Sprintf(
 		"You have just joined the channel #%s. This is your first time here.\n\n"+
 			"Please introduce yourself briefly in the channel:\n"+

@@ -4,7 +4,7 @@
 // - "Create Task" / "Cancel" buttons
 // - Keyboard: Enter to submit, Escape to close
 // - Error handling: empty title validation, server error display
-// - Matches slock.ai patterns: minimal creation, add details later
+
 // ============================================================================
 
 'use client';

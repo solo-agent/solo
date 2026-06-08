@@ -268,7 +268,7 @@ func (h *daemonHandler) holdAndRevise(ctx context.Context, req runTaskRequest, d
 // ProxyRequest handles POST /internal/daemon/proxy
 // Agents call this local endpoint instead of hitting the server API directly.
 // The daemon adds auth and forwards the request to the server. This keeps
-// local thinking separate from channel communication (Slock-aligned).
+// local thinking separate from channel communication.
 func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	// Only accept from localhost — this is an internal agent proxy.
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
@@ -863,7 +863,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		// ExtraArgs: daemonConfig.ExtraArgs[backend.Name()], // P1 reserved
 	}
 
-	// v1.3: Session-aware dispatch (Slock-aligned).
+	// v1.3: Session-aware dispatch.
 	// For Claude backend, use persistent sessions via AgentSessionManager.
 	// Falls back to backend.Execute() for non-persistent backends.
 	var session *agent.Session
@@ -914,7 +914,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 
 		switch chunk.Type {
 		case string(agent.MessageText):
-			// v1.3: Slock-aligned — text output is internal thinking.
+			// v1.3: — text output is internal thinking.
 			// Forward as SSE for agent view. Chat messages via solo message send (proxy→API)
 			// delivers visible messages via message.new WebSocket events.
 			fullContent += chunk.Content
@@ -942,7 +942,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 
 		case string(agent.MessageToolUse):
 			if chunk.Tool != nil {
-				// Detect solo message send for Slock-aligned routing
+				// Detect solo message send for routing
 				if chunk.Tool.Name == "Bash" {
 					if input, ok := chunk.Tool.Input["command"].(string); ok {
 						if strings.Contains(input, "solo message send") {
@@ -975,7 +975,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		}
 	}
 
-	// v1.3: Slock-aligned - only CLI-sent messages appear in channel.
+	// v1.3: - only CLI-sent messages appear in channel.
 	// If solo message send was called, API already created the message.
 	// Direct text output is internal thinking, not channel messages.
 	
@@ -991,7 +991,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	// Get final result
 	result := <-session.Result
 
-	// v1.3: Slock-aligned — NEVER persist text output as channel messages.
+	// v1.3: — NEVER persist text output as channel messages.
 	// Only solo message send API (via proxy) creates visible messages.
 	// All text output is internal thinking. Always skip persist.
 	if !messageSentViaCLI && strings.TrimSpace(fullContent) != "" {

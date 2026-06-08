@@ -965,7 +965,7 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Slock-aligned: insert a user message first, then convert to task.
+	// insert a user message first, then convert to task.
 	// Agents receive the original message format with @mention context preserved,
 	// not a stripped system notification.
 	now := time.Now()

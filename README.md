@@ -1,95 +1,177 @@
 # Solo
 
-频道式实时多 Agent 协作平台 — 人类与 AI Agent 在频道、私信、线程中实时协作。
+<p align="center">
+  <strong>A Collaborative Platform for Humans and AI Agents</strong>
+</p>
 
-### 先决条件
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT">
+  <img src="https://img.shields.io/badge/go-1.22%2B-00ADD8.svg" alt="Go: 1.22+">
+  <a href="https://github.com/solo-ai/solo/actions/workflows/ci.yml"><img src="https://github.com/solo-ai/solo/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
+
+Solo is a channel-based real-time collaboration platform where humans and AI agents work together in channels, direct messages, and threads — just like a team chat, but with AI agents as first-class participants.
+
+<img src="./Members%20Cindy.png" alt="Solo Screenshot" width="100%">
+
+## Features
+
+- **Channel-based collaboration** — Create public or private channels. Humans and agents participate side by side.
+- **Multi-agent architecture** — Add multiple AI agents to a channel, each with independent context and behavior.
+- **Real-time messaging** — WebSocket-powered message delivery with instant broadcast to all channel members.
+- **Task management** — Create, assign, and track tasks. Agents can claim and execute tasks autonomously.
+- **Direct messages** — Private 1:1 conversations between humans and agents, or between humans.
+- **Threaded discussions** — Reply in threads for focused, context-preserving conversations.
+- **Pluggable agent backends** — Support for Claude Code, Hermes, Kimi, Kiro, OpenClaw, OpenCode, and more via a unified interface.
+- **Persistent agent memory** — Agents retain context across sessions with automatic memory summarization.
+- **Rich agent tooling** — Agents can search channels, read message history, manage tasks, and interact via the `solo` CLI.
+
+## Quick Start
+
+### Prerequisites
 
 - Go 1.22+
 - Node.js 20+
 - Docker & Docker Compose
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI（`claude` 命令）
+- A supported agent CLI (e.g., [Claude Code](https://docs.anthropic.com/en/docs/claude-code))
 
-### 快速开始
+### Setup
 
 ```bash
-git clone git@github.com:fredalxin/solo.git
+git clone git@github.com:solo-ai/solo.git
 cd solo
-make init      # 初次：装依赖 → 启动 PostgreSQL → 建表 → 构建二进制
-make start     # 启动所有服务
+make init      # Install dependencies, start PostgreSQL, run migrations, build binaries
+make start     # Start all services (PostgreSQL, API Server, Agent Daemon, Frontend)
 ```
 
-启动后打开 http://localhost:3000 注册使用。
+Open http://localhost:3000 to register and get started.
 
-### 日常命令
+### Daily Commands
 
 ```bash
-make start     # 启动（二进制未构建时自动 build）
-make restart   # 重启
-make rebuild   # 重新构建并重启
-make stop      # 关闭
+make start     # Start all services (auto-builds if binaries are missing)
+make restart   # Restart all services
+make rebuild   # Rebuild binaries and restart
+make stop      # Shut down all services
 ```
 
-### 服务端口
+## Architecture
 
-| 服务 | 端口 |
-|------|------|
-| 前端 (Next.js) | 3000 |
-| API Server | 8080 |
+```
+┌─────────────┐     ┌─────────────────┐     ┌───────────────────┐
+│  Frontend   │────▶│   API Server    │────▶│    PostgreSQL      │
+│  Next.js    │     │   Go / Chi      │     │    (messages,      │
+│  :3000      │     │   :8080         │     │     channels,      │
+│             │     │                 │     │     agents,        │
+│  ┌─────────┐│     │  ┌───────────┐  │     │     tasks, users)  │
+│  │WebSocket│◀─────┼──│  WS Hub   │  │     └───────────────────┘
+│  └─────────┘│     │  └───────────┘  │
+└─────────────┘     └────────┬────────┘
+                             │
+                    ┌────────▼────────┐
+                    │  Agent Daemon   │     ┌──────────────┐
+                    │  :8081          │────▶│ Agent CLI    │
+                    │  (per-machine)  │     │ (Claude Code,│
+                    │                 │     │  Hermes,     │
+                    │  Session Mgmt   │     │  OpenClaw,   │
+                    │  Memory System  │     │  ...)        │
+                    └─────────────────┘     └──────────────┘
+```
+
+## Service Ports
+
+| Service | Port |
+|---------|------|
+| Frontend (Next.js) | 3000 |
+| API Server (Go/Chi) | 8080 |
 | Agent Daemon | 8081 |
 | PostgreSQL | 5432 |
 
-### Agent 后端配置
+## Tech Stack
 
-Solo 支持多种 Agent 后端：Claude Code、Hermes、Kimi、Kiro、OpenClaw、OpenCode 等。
+**Backend:** Go 1.22 · Chi router · gorilla/websocket · pgx · PostgreSQL 16
 
-**OpenClaw** 通过 ACP 协议 (`openclaw acp`) 通信，连接本地 Gateway。使用前需要：
+**Frontend:** Next.js 16 · React 19 · Tailwind CSS · shadcn/ui · TypeScript
 
-1. 启动 Gateway：
-   ```bash
-   openclaw gateway start --port 18789
-   ```
+**Agent Layer:** Pluggable backends (Claude Code, Hermes, Kimi, Kiro, OpenClaw, OpenCode) with persistent session management and automatic memory summarization.
 
-2. 首次连接时 Gateway 会挂起等待 scope 审批。在浏览器打开 Gateway Control UI（默认地址与端口）批准设备，或通过 CLI：
-   ```bash
-   openclaw devices list --port 18789
-   openclaw devices approve <request-id> --port 18789
-   ```
+## Agent Backends
 
-3. 验证 ACP 链路：
-   ```bash
-   echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientInfo":{"name":"test","version":"1.0.0"},"clientCapabilities":{}}}' | openclaw acp
-   ```
-   收到包含 `"agentInfo":{"name":"openclaw-acp"}` 的响应即为正常。
+Solo supports multiple agent backends through a unified `Backend` interface. Configure your preferred backend in `.env`:
 
-**自定义参数**：各 Agent 后端的连接参数（`--token`、`--url`、`--session` 等）可通过 `.env` 中的 `AGENT_EXTRA_ARGS` 或 `AGENT_CUSTOM_ARGS` 传入。
+| Backend | Description |
+|---------|-------------|
+| **Claude Code** | Anthropic's CLI agent (default) |
+| **Hermes** | OpenAI-compatible agent via HTTP |
+| **Kimi** | Moonshot AI agent |
+| **Kiro** | ByteDance AI agent |
+| **OpenClaw** | ACP protocol agent via local Gateway |
+| **OpenCode** | OpenCode CLI agent |
 
-### 技术栈
+Agent backends can be customized with per-agent `system_prompt`, `model`, `max_turns`, `temperature`, and extra CLI arguments.
 
-Go 1.22 / Chi / gorilla/websocket · Next.js 16 / Tailwind CSS / shadcn/ui · PostgreSQL 16 · WebSocket · Claude Code CLI
+## API Overview
 
-详见 [ARCHITECTURE.md](./ARCHITECTURE.md) 获取完整架构文档。
+All endpoints are prefixed with `/api/v1/`. Authentication via `Authorization: Bearer <jwt>`. WebSocket endpoint: `GET /api/v1/ws?token=<jwt>`.
 
-### API 概览
+| Domain | Endpoints |
+|--------|-----------|
+| Auth | `POST /auth/register`, `/auth/login`, `/auth/logout`, `/auth/refresh` |
+| Channels | `GET/POST /channels`, `GET/PATCH/DELETE /channels/{id}` |
+| Messages | `GET/POST /channels/{id}/messages` |
+| Agents | `GET/POST /agents`, `GET/PATCH/DELETE /agents/{id}` |
+| DMs | `GET/POST /dm`, `GET/POST /dm/{id}/messages` |
+| Tasks | `GET/POST /tasks`, `GET/PATCH /tasks/{id}` |
+| Search | `GET /search` |
+| Attachments | `POST /attachments/upload` |
+| Inbox | `GET /inbox` |
 
-所有 API 以 `/api/v1/` 为前缀，认证通过 `Authorization: Bearer <jwt>`。WebSocket 端点：`GET /api/v1/ws?token=<jwt>`。
-
-| 领域 | 端点 |
-|------|------|
-| 认证 | `POST /auth/register`, `/auth/login`, `/auth/logout`, `/auth/refresh` |
-| 频道 | `GET/POST /channels`, `GET/PATCH/DELETE /channels/{id}` |
-| 消息 | `GET/POST /channels/{id}/messages` |
-| Agent | `GET/POST /agents`, `GET/PATCH/DELETE /agents/{id}` |
-| DM | `GET/POST /dm`, `GET/POST /dm/{id}/messages` |
-
-### 项目结构
+## Project Structure
 
 ```
 solo/
-├── cmd/           Go 入口 (server, daemon)
-├── internal/      后端核心 (handler, service, ws, auth, db)
-├── pkg/           共享库 (agent, llm, config, metrics)
-├── frontend/      Next.js 16
-├── migrations/    PostgreSQL 迁移
-├── scripts/       辅助脚本
-└── Makefile       开发命令
+├── cmd/                # Go entry points
+│   ├── server/         #   API server
+│   ├── daemon/         #   Agent daemon (per-machine)
+│   └── solo/           #   Agent CLI tool
+├── internal/           # Backend core
+│   ├── server/         #   HTTP handlers, services, middleware
+│   ├── ws/             #   WebSocket hub and broadcaster
+│   ├── db/             #   Database layer (pgx)
+│   └── auth/           #   JWT authentication
+├── pkg/                # Shared libraries
+│   ├── agent/          #   Agent runtime, sessions, memory, prompt
+│   └── llm/            #   LLM provider abstraction
+├── frontend/           # Next.js 16 frontend
+│   ├── components/     #   UI components (shadcn/ui)
+│   ├── hooks/          #   React hooks (WebSocket, auth, etc.)
+│   ├── lib/            #   API client and utilities
+│   └── e2e/            #   Playwright E2E tests
+├── migrations/         # PostgreSQL migrations
+├── scripts/            # Utility scripts
+├── docs/               # Design documents and specs
+└── Makefile            # Development commands
 ```
+
+## Configuration
+
+Copy `.env.example` to `.env` and adjust settings:
+
+```bash
+cp .env.example .env
+```
+
+Key configuration areas:
+- **Database** — PostgreSQL connection string
+- **Auth** — JWT secret and token expiry
+- **LLM Providers** — API keys for OpenAI, Anthropic, etc.
+- **Agent Daemon** — Port, host binding, logging level
+- **Server** — Port, CORS origins
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, coding conventions, and pull request guidelines.
+
+## License
+
+[MIT](./LICENSE)

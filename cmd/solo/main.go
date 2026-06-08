@@ -264,7 +264,7 @@ func handleTaskClaim(args []string, baseURL, token string) {
 		taskID = strconv.Itoa(number)
 	}
 
-	// Try daemon proxy first (Slock-aligned — uses fresh JWT).
+	// Try daemon proxy first (uses fresh JWT).
 	// Pass messageID via taskID parameter so the proxy uses it in the URL path.
 	statusCode, body, err := proxyRequest("task_claim", channelID, taskID, "", token, number, "")
 	if err != nil {
@@ -297,7 +297,7 @@ func handleTaskClaim(args []string, baseURL, token string) {
 		handleNonProxyHTTPError(statusCode, body)
 	}
 
-	// Parse response to show Slock-style result with thread target
+	// Parse response to show result with thread target
 	printClaimResult(body)
 	doExit(exitOK)
 }
@@ -335,7 +335,7 @@ func handleTaskUpdate(args []string, baseURL, token string) {
 		doExit(exitBusiness)
 	}
 
-	// Try daemon proxy first (Slock-aligned — uses fresh JWT)
+	// Try daemon proxy first (uses fresh JWT)
 	statusCode, body, err := proxyRequest("task_update", channelID, "", "", token, number, status)
 	if err != nil {
 		// Fallback to direct API
@@ -452,7 +452,7 @@ func handleTaskUnclaim(args []string, baseURL, token string) {
 		doExit(exitBusiness)
 	}
 
-	// Try daemon proxy first (Slock-aligned — uses fresh JWT)
+	// Try daemon proxy first (uses fresh JWT)
 	statusCode, body, err := proxyRequest("task_unclaim", channelID, "", "", token, number, "")
 	if err != nil {
 		// Fallback to direct API
@@ -505,7 +505,7 @@ func handleMessageSend(args []string, baseURL, token string) {
 	fs.StringVar(&target, "target", "", "Target: '#channel', 'dm:@peer', '#channel:shortid', or 'dm:@peer:shortid'")
 	fs.Parse(args)
 
-	// If no -c flag, read from stdin (Slock-aligned: heredoc support)
+	// If no -c flag, read from stdin( heredoc support)
 	if content == "" {
 		stdinBytes, _ := io.ReadAll(os.Stdin)
 		content = strings.TrimSpace(string(stdinBytes))
@@ -532,7 +532,7 @@ func handleMessageSend(args []string, baseURL, token string) {
 	}
 
 	body, _ := json.Marshal(reqBody)
-	// Try daemon proxy first (Slock-aligned)
+	// Try daemon proxy first
 	statusCode, respBody, err := proxyRequest("message_send", channelID, content, threadID, token, 0, "")
 	if err != nil {
 		// Fallback to direct API
@@ -890,7 +890,7 @@ func doHTTP(method, url, token string, reqBody []byte) (int, []byte, error) {
 // resolveTaskNumberToID looks up a task by its number in the given channel and
 // returns its UUID. Used by task create --parent to map a human-readable task
 // number to the UUID required by the API's parent_task_id field.
-// resolveTarget parses a Slock-style target into (channelID, threadMsgID, isDM, error).
+// resolveTarget parses a target into (channelID, threadMsgID, isDM, error).
 // Supported formats:
 //
 //	"#channel"       → channel UUID
@@ -1037,7 +1037,7 @@ func handleNonProxyHTTPError(statusCode int, body []byte) {
 	exitOnHTTPError(statusCode)
 }
 
-// printTaskUpdateResult prints a Slock-style task update confirmation.
+// printTaskUpdateResult prints a task update confirmation.
 func printTaskUpdateResult(body []byte, number int) {
 	var resp struct {
 		TaskNumber int    `json:"task_number"`
@@ -1050,7 +1050,7 @@ func printTaskUpdateResult(body []byte, number int) {
 	fmt.Printf("#%d moved to %s.\n", resp.TaskNumber, resp.Status)
 }
 
-// printMessageSendResult prints a Slock-style message send confirmation
+// printMessageSendResult prints a message send confirmation
 // including the thread target for easy follow-up.
 func printMessageSendResult(body []byte, channelID, threadID string) {
 	var resp struct {
@@ -1074,7 +1074,7 @@ func printMessageSendResult(body []byte, channelID, threadID string) {
 	}
 }
 
-// printClaimResult parses the claim API response and prints a Slock-style
+// printClaimResult parses the claim API response and prints a
 // result showing the claimed task and its thread target.
 func printClaimResult(body []byte) {
 	var resp struct {

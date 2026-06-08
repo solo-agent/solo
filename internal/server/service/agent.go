@@ -18,7 +18,7 @@ import (
 
 // Default agent auto-response settings.
 const (
-	defaultContextMessageCount = 1  // v1.3: Slock-aligned — deliver only the triggering message
+	defaultContextMessageCount = 1  // v1.3: — deliver only the triggering message
 	defaultDebounceDuration   = 2 * time.Second
 )
 
@@ -144,7 +144,7 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 
 	// v1.3: ALL agents receive ALL messages. No filtering by @mention.
 	// Each agent decides autonomously whether to participate based on the
-	// CRITICAL RULES in the system prompt (aligned with Slock's model).
+	// CRITICAL RULES in the system prompt (aligned with the model).
 	// The mentionedNames list provides context — agents know if they were
 	// the target or if the message was for someone else.
 	targetAgents := agents
@@ -463,7 +463,7 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 		s.broadcastAgentThinking(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "Response ended unexpectedly.")
 	}
 
-	// v1.3: Slock-aligned dual-channel architecture.
+	// v1.3: dual-channel architecture.
 	// Agent text output is internal thinking (streamed nowhere).
 	// Real messages arrive via solo message send → daemon proxy → server API → message.new.
 	// The complete event here is purely for usage tracking and status notification.
@@ -836,7 +836,7 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 		return
 	}
 
-	// Resolve channel name/type for Slock-aligned target headers in thread context.
+	// Resolve channel name/type for target headers in thread context.
 	var threadChannelName, threadChannelType string
 	_ = s.pool.QueryRow(ctx, `SELECT c.name, c.type FROM channels c
 		JOIN threads t ON t.channel_id = c.id WHERE t.id = $1`, threadID,
@@ -857,7 +857,7 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 		if len(shortID) > 8 {
 			shortID = shortID[:8]
 		}
-		// Slock-aligned header with thread :shortid suffix.
+		// header with thread :shortid suffix.
 		senderName := tm.SenderName
 		if senderName == "" {
 			senderName = tm.SenderID
@@ -1112,7 +1112,7 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 		newChain = append(newChain, agentID)
 
 
-	// Slock-aligned: deliver the task as a regular channel message with
+	// deliver the task as a regular channel message with
 	// [task #N status=todo] suffix, preserving the original sender and content.
 	// The agent sees the same format as any other message — @mention context intact.
 	var channelName, channelType string
@@ -1278,7 +1278,7 @@ func (s *AgentService) getThreadRootAgentSender(ctx context.Context, threadID st
 }
 
 // getRecentMessages returns the most recent N messages in a channel as agent messages.
-// v1.3: Slock-aligned format — each message gets a structured header plus
+// v1.3: format — each message gets a structured header plus
 // "Respond as appropriate" routing instruction on the last message.
 func (s *AgentService) getRecentMessages(ctx context.Context, channelID string, limit int) ([]agent.Message, error) {
 	// Get channel name for the target header.
@@ -1342,7 +1342,7 @@ func (s *AgentService) getRecentMessages(ctx context.Context, channelID string, 
 			role = agent.RoleAssistant
 		}
 
-		// Slock-aligned: [target=#channel msg=shortid time=isotime type=human|agent] @sender: content
+		// [target=#channel msg=shortid time=isotime type=human|agent] @sender: content
 		content := fmt.Sprintf("New message received:\n\n[target=%s msg=%s time=%s type=%s] @%s: %s",
 			msgTarget, shortID, row.createdAt, row.senderType, senderName, row.content)
 

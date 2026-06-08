@@ -22,7 +22,7 @@ type AgentConfig struct {
 	MaxTurns     int               `json:"max_turns,omitempty"`
 	Env          map[string]string `json:"env,omitempty"`
 	CustomArgs   []string          `json:"custom_args,omitempty"`
-	// Runtime context for system prompt (Slock-aligned).
+	// Runtime context for system prompt.
 	WorkspacePath string `json:"workspace_path,omitempty"`
 	ServerID      string `json:"server_id,omitempty"`
 	Hostname      string `json:"hostname,omitempty"`

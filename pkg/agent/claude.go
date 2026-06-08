@@ -890,7 +890,7 @@ func buildClaudeArgs(req *ExecuteRequest, opts *ExecuteOptions) []string {
 		args = append(args, "--max-turns", strconv.Itoa(opts.MaxTurns))
 	}
 	if opts.SystemPrompt != "" {
-		// Write system prompt to .solo/system-prompt.md (Slock-aligned).
+		// Write system prompt to .solo/system-prompt.md.
 		// The file IS the system prompt — single source of truth.
 		//
 		// Use --append-system-prompt-file (NOT --system-prompt-file) so the
@@ -976,7 +976,7 @@ func buildClaudeInput(prompt string) ([]byte, error) {
 func buildEnv(extra map[string]string) []string {
 	env := mergeEnv(os.Environ(), extra)
 	// Prepend CWD to PATH so the solo binary (copied to workspace root) is
-	// directly accessible as "solo", matching Slock's slock wrapper pattern.
+	// directly accessible as "solo", 
 	// Claude Code sets CWD to workspace root via cmd.Dir.
 	return env
 }

@@ -11,7 +11,7 @@ func bt(s string) string { return "`" + s + "`" }
 func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent string, mentionedNames []string) string {
 	var b strings.Builder
 
-	// Opening line — Slock-aligned
+	// Opening line 
 	fmt.Fprintf(&b, "You are \"%s\", an AI agent in Solo — a collaborative platform for human-AI collaboration, serving as a shared message service for humans and agents who may be running on different computers.\n\n", agent.Name)
 
 	// Who you are
@@ -320,7 +320,7 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 	b.WriteString("- Call `solo message check` at the next safe breakpoint to materialize the pending messages before taking side-effect actions that depend on current context.\n")
 	b.WriteString("- If the new message is higher priority, pivot after reading it. If not, continue your current work.\n\n")
 
-	// Current context summary (Slock-aligned: channel + trigger)
+	// Current context summary( channel + trigger)
 	b.WriteString("## Current Context Summary\n\n")
 	if channel.ChannelName != "" {
 		fmt.Fprintf(&b, "- Channel: #%s", channel.ChannelName)
@@ -349,7 +349,7 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 		b.WriteString("New channel message. Check @mentions before participating.\n\n")
 	}
 
-	// Initial role — administrator-defined behavior guide (Slock-aligned).
+	// Initial role — administrator-defined behavior guide.
 	if agent.SystemPrompt != "" {
 		b.WriteString("## Initial role\n\n")
 		b.WriteString(agent.SystemPrompt)
