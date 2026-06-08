@@ -171,13 +171,13 @@ function flatToMessage(event: {
 
 // ---- Hook ----
 
-export function useDM() {
+export function useDM(dmId: string | null = null) {
   const { subscribeDM, unsubscribeDM, onEvent, isConnected } = useWebSocket();
   const [dmChannels, setDMChannels] = useState<DMChannel[]>([]);
   const [isLoadingDMs, setIsLoadingDMs] = useState(true);
   const [dmError, setDMError] = useState<string | null>(null);
 
-  const [activeDMId, setActiveDMId] = useState<string | null>(null);
+  const activeDMId = dmId;
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [messagesError, setMessagesError] = useState<string | null>(null);
@@ -288,13 +288,22 @@ export function useDM() {
 
   // ---- Select active DM ----
 
-  const selectDM = useCallback((dmId: string | null) => {
-    setActiveDMId(dmId);
-    if (dmId !== activeDMId) {
+  const selectDM = useCallback((_newDmId: string | null) => {
+    // DM switching is now driven by the dmId parameter directly.
+    // Messages clearing happens in the dmId-change effect below.
+  }, []);
+
+  // ---- Handle DM switch — clear messages and load new ----
+  const prevDmIdRef = useRef<string | null>(dmId);
+  useEffect(() => {
+    if (dmId !== prevDmIdRef.current) {
       setMessages([]);
       setHasMore(true);
+      setIsLoadingMessages(false);
+      setMessagesError(null);
+      prevDmIdRef.current = dmId;
     }
-  }, [activeDMId]);
+  }, [dmId]);
 
   // ---- WebSocket subscription ----
 

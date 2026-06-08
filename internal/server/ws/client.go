@@ -252,6 +252,7 @@ func (c *Client) handleMessage(msg realtime.WSMessage) {
 			c.sendError("INVALID_PAYLOAD", "dm_id is required")
 			return
 		}
+		slog.Info("ws: dm.unsubscribe received", "dm_id", payload.DMChannelID, "user_id", c.userID)
 		c.hub.Unsubscribe(c, payload.DMChannelID)
 
 	case EventTaskCancel:

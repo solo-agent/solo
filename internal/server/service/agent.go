@@ -431,6 +431,7 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 			// is a passthrough — no re-derivation here. Skips events for
 			// non-channel tasks (req.ChannelID == "").
 			if taskReq.ChannelID == "" {
+				slog.Debug("agent.activity: skipping empty channel_id", "task_id", taskReq.TaskID)
 				continue
 			}
 			var activity map[string]interface{}
@@ -439,9 +440,8 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 					"task_id", taskReq.TaskID, "error", err)
 				continue
 			}
-			// Inject channel_id (in case daemon omitted it; it shouldn't,
-			// but the contract is "server knows the channel for this task").
 			activity["channel_id"] = taskReq.ChannelID
+			slog.Debug("agent.activity: broadcasting", "task_id", taskReq.TaskID, "channel_id", taskReq.ChannelID, "agent_id", activity["agent_id"])
 			s.hub.BroadcastToChannel(taskReq.ChannelID, realtime.Envelope("agent.activity", activity))
 		}
 

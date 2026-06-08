@@ -170,6 +170,7 @@ export function AgentIsland({ channelId, onInvokeAgent }: AgentIslandProps) {
   const lastOverflowRef = useRef<number>(0);
 
   useEffect(() => {
+    console.debug('[AgentIsland] effect running', { activeCount: activeAgents.length, mounted, channelId });
     if (activeAgents.length > 0) {
       // Re-entering — cancel any in-flight unmount and reveal.
       if (unmountTimerRef.current) {
@@ -178,6 +179,7 @@ export function AgentIsland({ channelId, onInvokeAgent }: AgentIslandProps) {
       }
       setMounted(true);
       setClosing(false);
+      console.debug('[AgentIsland] mounting island', { agentCount: activeAgents.length });
       return;
     }
 

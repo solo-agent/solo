@@ -106,7 +106,7 @@ function DashboardContent() {
     cancelMessage: dmCancelMessage,
     editMessage: dmEditMessage,
     deleteMessage: dmDeleteMessage,
-  } = useDM();
+  } = useDM(dmFromUrl);
 
   const { showToast } = useToast();
 
@@ -209,6 +209,8 @@ function DashboardContent() {
     if (dmFromUrl) {
       selectDM(dmFromUrl);
       markAsRead(dmFromUrl);
+    } else {
+      selectDM(null);
     }
     // Only run when dmFromUrl changes
     // eslint-disable-next-line react-hooks/exhaustive-deps

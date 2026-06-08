@@ -68,11 +68,63 @@ export function useAgentIsland(channelId: string | null) {
 
     const unsub = onEvent((event) => {
       if (!('channel_id' in event) || event.channel_id !== channelId) {
+        // DEBUG: log why events are being filtered out for DM island
+        if (event.type === 'agent.activity' || event.type === 'agent.thinking' || event.type === 'agent.done' || (event.type === 'message.new' && event.sender_type === 'agent')) {
+          console.debug('[useAgentIsland] FILTERED event', {
+            eventType: event.type,
+            eventChannelId: ('channel_id' in event) ? event.channel_id : 'MISSING',
+            hookChannelId: channelId,
+            hasChannelId: 'channel_id' in event,
+          });
+        }
+        return;
+      }
+
+      // agent.thinking — initial trigger and LLM thinking chunks.
+      // Shows the island immediately when the agent receives a message,
+      // before the first agent.activity chunk arrives.
+      if (event.type === 'agent.thinking' && event.agent_id) {
+        console.debug('[useAgentIsland] RECEIVED agent.thinking', {
+          agentId: event.agent_id,
+          agentName: event.agent_name,
+          channelId: event.channel_id,
+          thought: event.thought,
+        });
+        const agentId = event.agent_id;
+        setAgents((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(agentId);
+          const timer = completedTimers.current.get(agentId);
+          if (timer) {
+            clearTimeout(timer);
+            completedTimers.current.delete(agentId);
+          }
+          next.set(agentId, {
+            agentId,
+            agentName: event.agent_name ?? existing?.agentName ?? '...',
+            status: 'thinking',
+            activityText: event.thought ?? '思考中…',
+            toolName: existing?.toolName ?? null,
+            toolInputSummary: existing?.toolInputSummary ?? null,
+            source: existing?.source ?? null,
+            updatedAt: Date.now(),
+            isActive: true,
+            completedAt: null,
+            finalState: null,
+          });
+          return next;
+        });
         return;
       }
 
       // agent.activity — primary event. Update or insert the per-agent view.
       if (event.type === 'agent.activity' && event.agent_id) {
+        console.debug('[useAgentIsland] RECEIVED agent.activity', {
+          agentId: event.agent_id,
+          agentName: event.agent_name,
+          channelId: event.channel_id,
+          status: event.status,
+        });
         const agentId = event.agent_id;
         setAgents((prev) => {
           const next = new Map(prev);

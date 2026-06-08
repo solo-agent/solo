@@ -1140,6 +1140,7 @@ func (h *daemonHandler) pushAgentActivity(req runTaskRequest, agentName, provide
 		payload["source"] = provider
 	}
 
+	slog.Debug("daemon: pushing agent.activity", "task_id", req.TaskID, "channel_id", req.ChannelID, "agent_id", req.AgentID, "status", status, "activity_text", activityText)
 	h.pushEventJSON(req.TaskID, "agent.activity", payload)
 }
 
