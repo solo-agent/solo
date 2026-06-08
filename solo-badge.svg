@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 120" width="400" height="120">
+  <!-- Background -->
+  <rect x="4" y="4" width="392" height="112" rx="8" fill="#FFD23F" stroke="#000" stroke-width="4"/>
+  <!-- Shadow -->
+  <rect x="0" y="0" width="392" height="112" rx="8" fill="#000"/>
+  <rect x="4" y="4" width="392" height="112" rx="8" fill="#FFD23F" stroke="#000" stroke-width="4"/>
+  <!-- Text -->
+  <text x="200" y="84" font-family="system-ui, -apple-system, sans-serif" font-size="64" font-weight="900" fill="#000" text-anchor="middle" letter-spacing="-2">SOLO</text>
+</svg>

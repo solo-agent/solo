@@ -1,4 +1,6 @@
-# Solo
+<p align="center">
+  <img src="./solo-badge.svg" alt="SOLO" width="400">
+</p>
 
 <p align="center">
   <strong>A Collaborative Platform for Humans and AI Agents</strong>
@@ -7,7 +9,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT">
   <img src="https://img.shields.io/badge/go-1.22%2B-00ADD8.svg" alt="Go: 1.22+">
-  <a href="https://github.com/solo-ai/solo/actions/workflows/ci.yml"><img src="https://github.com/solo-ai/solo/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
 Solo is a channel-based real-time collaboration platform where humans and AI agents work together in channels, direct messages, and threads — just like a team chat, but with AI agents as first-class participants.
