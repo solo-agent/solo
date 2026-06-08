@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // AgentConfig is the local cache of Agent configuration stored in
@@ -115,14 +114,6 @@ func (wm *WorkspaceManager) Prepare(agentID string, config *AgentConfig) (*Works
 		}
 	}
 
-	// Write an initial CLAUDE.md only if one does not already exist.
-	// This ensures agents created after the workspace already exists
-	// (e.g. after a Daemon restart) still get a baseline config without
-	// overwriting manual modifications.
-	if err := writeInitialCLAUDE(workDir, config); err != nil {
-		return nil, fmt.Errorf("workspace: write initial CLAUDE.md: %w", err)
-	}
-
 	return ws, nil
 }
 
@@ -208,47 +199,3 @@ func readConfig(wm *WorkspaceManager, agentID string) (*AgentConfig, error) {
 	return &cfg, nil
 }
 
-// writeInitialCLAUDE writes a baseline CLAUDE.md into the workspace directory
-// if one does not already exist. This ensures agents have a starting
-// configuration without overwriting user or agent modifications.
-func writeInitialCLAUDE(workDir string, config *AgentConfig) error {
-	path := filepath.Join(workDir, "CLAUDE.md")
-	if _, err := os.Stat(path); err == nil {
-		return nil // already exists — do not overwrite
-	}
-
-	var b strings.Builder
-	b.WriteString("# Solo Agent Configuration\n\n")
-
-	if config != nil && config.Name != "" {
-		b.WriteString("## Agent Identity\n\n")
-		fmt.Fprintf(&b, "You are **%s**", config.Name)
-		if config.AgentID != "" {
-			fmt.Fprintf(&b, " (ID: `%s`)", config.AgentID)
-		}
-		b.WriteString(" on the Solo platform.\n\n")
-	}
-
-	if config != nil && config.SystemPrompt != "" {
-		b.WriteString(config.SystemPrompt)
-		b.WriteString("\n\n")
-	}
-
-	b.WriteString("## Solo Platform Rules\n\n")
-	b.WriteString("- You participate in channel conversations as a team member.\n")
-	b.WriteString("- You are triggered when a user sends a message or @mentions you.\n")
-	b.WriteString("- Respond naturally and concisely using Markdown formatting.\n")
-	b.WriteString("- Use MEMORY.md to store information you learn across conversations.\n")
-	b.WriteString("- Update MEMORY.md when you learn important information about users, decisions, or facts.\n")
-	b.WriteString("- Your workspace is at `./workspace/`; use this directory for file operations.\n")
-	b.WriteString("- Output files go to `../output/` for the user to access.\n\n")
-
-	b.WriteString("## Communication\n\n")
-	b.WriteString("- Messages are delivered via stdin as structured JSON (stream-json format).\n")
-	b.WriteString("- Your response is streamed back via stdout, token by token.\n")
-	b.WriteString("- To call a tool, output a tool_use event. Tool results come back as tool_result events.\n")
-
-	return os.WriteFile(path, []byte(b.String()), 0o644)
-}
-
-// buildRuntimeCLAUDE generates the CLAUDE.md content for a specific

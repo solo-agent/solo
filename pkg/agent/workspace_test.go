@@ -62,11 +62,6 @@ func TestPrepare(t *testing.T) {
 		t.Fatal("solo-config.json was not created")
 	}
 
-	// Verify CLAUDE.md exists.
-	claudePath := filepath.Join(ws.WorkDir, "CLAUDE.md")
-	if _, err := os.Stat(claudePath); os.IsNotExist(err) {
-		t.Fatal("CLAUDE.md was not created")
-	}
 }
 
 func TestPrepare_Idempotent(t *testing.T) {
@@ -132,12 +127,6 @@ func TestPrepare_NilConfig(t *testing.T) {
 	configPath := filepath.Join(ws.RootDir, "solo-config.json")
 	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
 		t.Error("solo-config.json should not exist for nil config")
-	}
-
-	// CLAUDE.md should still be created (with minimal content).
-	claudePath := filepath.Join(ws.WorkDir, "CLAUDE.md")
-	if _, err := os.Stat(claudePath); os.IsNotExist(err) {
-		t.Fatal("CLAUDE.md should exist even with nil config")
 	}
 }
 
