@@ -108,6 +108,11 @@ type Result struct {
 	Error      string                 `json:"error,omitempty"`      // error message if failed
 	DurationMs int64                  `json:"duration_ms"`          // execution duration in milliseconds
 	Usage      map[string]TokenUsage  `json:"usage,omitempty"`      // token usage keyed by model name
+	// InitInfo carries backend-specific session initialization metadata —
+	// e.g. the Claude Code `system/init` event payload (model name, loaded
+	// MCP servers with their status, plugin errors). Keyed by field name.
+	// Backends that do not emit init metadata leave this nil.
+	InitInfo map[string]any `json:"init_info,omitempty"`
 }
 
 // TokenUsage tracks token consumption for a single LLM model invocation.

@@ -207,6 +207,13 @@ type claudePersistentState struct {
 	// sessionID from Claude Code's "system" init message.
 	sessionID string
 
+	// initInfo captures the Claude Code `system/init` event payload
+	// (model, MCP servers, plugin errors) for the lifetime of the
+	// session. Attached to every turn's Result.InitInfo so the UI can
+	// surface MCP / plugin load failures regardless of when the turn
+	// completes. Set once on the first init event, never mutated after.
+	initInfo *claudeInitInfo
+
 	totalUsage map[string]TokenUsage
 	usageMu    sync.Mutex
 
@@ -366,9 +373,10 @@ func (b *ClaudeBackend) persistentStreamLoop(
 		if line == "" {
 			continue
 		}
+		rawLine := []byte(line)
 
 		var msg claudeSDKMessage
-		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+		if err := json.Unmarshal(rawLine, &msg); err != nil {
 			continue
 		}
 
@@ -386,6 +394,26 @@ func (b *ClaudeBackend) persistentStreamLoop(
 			}
 
 		case "system":
+			// system/init arrives exactly once on the very first turn;
+			// system/api_retry can arrive on any turn. We dispatch by
+			// subtype and store init info on the persistent state so it
+			// rides along on every subsequent turn's Result.InitInfo.
+			switch msg.Subtype {
+			case "init":
+				var initEvt claudeInitEvent
+				if err := json.Unmarshal(rawLine, &initEvt); err == nil {
+					if info := b.handleSystemInit(initEvt); info != nil {
+						state.initInfo = info
+					}
+				}
+			case "api_retry":
+				var retryEvt claudeApiRetryEvent
+				if err := json.Unmarshal(rawLine, &retryEvt); err == nil {
+					if turn != nil {
+						b.handleSystemApiRetry(retryEvt, turn.msgCh)
+					}
+				}
+			}
 			if msg.SessionID != "" && state.sessionID == "" {
 				state.sessionID = msg.SessionID
 			}
@@ -411,6 +439,9 @@ func (b *ClaudeBackend) persistentStreamLoop(
 					res.Error = msg.ResultText
 				}
 				res.DurationMs = time.Since(startTime).Milliseconds()
+				if state.initInfo != nil {
+					res.InitInfo = state.initInfo.toMap()
+				}
 				close(turn.msgCh)
 				turn.resCh <- res
 				close(turn.resCh)
@@ -420,12 +451,16 @@ func (b *ClaudeBackend) persistentStreamLoop(
 
 		case "error":
 			if turn != nil {
-				close(turn.msgCh)
-				turn.resCh <- &Result{
+				res := &Result{
 					Status: "failed",
 					Error:  msg.ErrorText,
 					Usage:  b.snapshotUsage(state),
 				}
+				if state.initInfo != nil {
+					res.InitInfo = state.initInfo.toMap()
+				}
+				close(turn.msgCh)
+				turn.resCh <- res
 				close(turn.resCh)
 				state.turn.Store(nil)
 			}
@@ -635,6 +670,7 @@ func (b *ClaudeBackend) streamLoop(
 	startTime := time.Now()
 	var output strings.Builder
 	var sessionID string
+	var initInfo *claudeInitInfo
 	finalStatus := "completed"
 	var finalError string
 	usage := make(map[string]TokenUsage)
@@ -653,9 +689,10 @@ func (b *ClaudeBackend) streamLoop(
 		if line == "" {
 			continue
 		}
+		rawLine := []byte(line)
 
 		var msg claudeSDKMessage
-		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+		if err := json.Unmarshal(rawLine, &msg); err != nil {
 			continue
 		}
 
@@ -665,6 +702,24 @@ func (b *ClaudeBackend) streamLoop(
 		case "user":
 			b.handleUser(msg, msgCh)
 		case "system":
+			// System events are the protocol's control channel. They carry
+			// a `subtype` discriminator; we currently recognise `init` and
+			// `api_retry` (see claudeInitEvent / claudeApiRetryEvent). Any
+			// other subtype falls through to the original "running" status
+			// emit so we stay backwards-compatible with future protocol
+			// additions.
+			switch msg.Subtype {
+			case "init":
+				var initEvt claudeInitEvent
+				if err := json.Unmarshal(rawLine, &initEvt); err == nil {
+					initInfo = b.handleSystemInit(initEvt)
+				}
+			case "api_retry":
+				var retryEvt claudeApiRetryEvent
+				if err := json.Unmarshal(rawLine, &retryEvt); err == nil {
+					b.handleSystemApiRetry(retryEvt, msgCh)
+				}
+			}
 			if msg.SessionID != "" {
 				sessionID = msg.SessionID
 			}
@@ -720,6 +775,7 @@ func (b *ClaudeBackend) streamLoop(
 		Error:      finalError,
 		DurationMs: duration.Milliseconds(),
 		Usage:      usage,
+		InitInfo:   initInfo.toMap(),
 	}
 }
 
@@ -836,11 +892,19 @@ func buildClaudeArgs(req *ExecuteRequest, opts *ExecuteOptions) []string {
 	if opts.SystemPrompt != "" {
 		// Write system prompt to .solo/system-prompt.md (Slock-aligned).
 		// The file IS the system prompt — single source of truth.
+		//
+		// Use --append-system-prompt-file (NOT --system-prompt-file) so the
+		// custom prompt is APPENDED to Claude Code's default system prompt.
+		// This preserves Claude Code's built-in tool descriptions, safety
+		// rules, and protocol knowledge — overwriting with --system-prompt-file
+		// would silently strip those, causing tools like TodoWrite / Read /
+		// Bash to be invoked with no instructions and triggering confusing
+		// permission prompts.
 		soloDir := filepath.Join(opts.WorkspaceDir, ".solo")
 		os.MkdirAll(soloDir, 0755)
 		promptPath := filepath.Join(soloDir, "system-prompt.md")
 		os.WriteFile(promptPath, []byte(opts.SystemPrompt), 0644)
-		args = append(args, "--system-prompt-file", promptPath)
+		args = append(args, "--append-system-prompt-file", promptPath)
 	}
 
 	args = append(args, filterCustomArgs(opts.CustomArgs, claudeBlockedArgs)...)
@@ -1001,6 +1065,7 @@ func filterCustomArgs(args []string, blocked map[string]blockedArgMode) []string
 // ── Channel helper ──
 
 func trySend(ch chan<- OutputChunk, chunk OutputChunk) {
+	defer func() { recover() }() // channel may be closed by the turn-completion path
 	select {
 	case ch <- chunk:
 	default:
@@ -1013,12 +1078,196 @@ func trySend(ch chan<- OutputChunk, chunk OutputChunk) {
 // ── Claude SDK JSON types ──
 
 type claudeSDKMessage struct {
-	Type      string          `json:"type"`
-	Message   json.RawMessage `json:"message,omitempty"`
-	SessionID string          `json:"session_id,omitempty"`
-	ResultText string         `json:"result,omitempty"`
-	IsError   bool            `json:"is_error,omitempty"`
-	ErrorText string          `json:"error,omitempty"`
+	Type       string          `json:"type"`
+	Subtype    string          `json:"subtype,omitempty"` // system event sub-discriminator: "init", "api_retry", etc.
+	Message    json.RawMessage `json:"message,omitempty"`
+	SessionID  string          `json:"session_id,omitempty"`
+	ResultText string          `json:"result,omitempty"`
+	IsError    bool            `json:"is_error,omitempty"`
+	ErrorText  string          `json:"error,omitempty"`
+}
+
+// claudeInitEvent is the payload of the Claude Code `system/init` event —
+// the very first event emitted when stream-json mode starts. It reports the
+// resolved model, available tools, MCP server connection status, and any
+// plugin load errors. We capture this so the daemon can surface "an MCP
+// server failed to connect" or "a plugin failed to load" in the final
+// Result, instead of failing silently mid-task.
+//
+// See: https://code.claude.com/docs/en/agent-sdk/overview (stream-json protocol)
+type claudeInitEvent struct {
+	Subtype      string          `json:"subtype"`
+	Model        string          `json:"model,omitempty"`
+	Tools        []string        `json:"tools,omitempty"`
+	MCPServers   []claudeMCPServ `json:"mcp_servers,omitempty"`
+	Plugins      []string        `json:"plugins,omitempty"`
+	PluginErrors []claudePluginError `json:"plugin_errors,omitempty"`
+}
+
+// claudeMCPServ is one entry in claudeInitEvent.MCPServers. A server with
+// status != "connected" indicates the daemon should warn the user, since
+// tool calls routed to that MCP server will fail.
+type claudeMCPServ struct {
+	Name   string `json:"name"`
+	Status string `json:"status"` // "connected" | "failed" | "pending" | ...
+	Error  string `json:"error,omitempty"`
+}
+
+// claudePluginError is one entry in claudeInitEvent.PluginErrors. Each
+// non-empty error here is surfaced as a warning in Result.InitInfo.
+type claudePluginError struct {
+	Plugin string `json:"plugin"`
+	Error  string `json:"error"`
+}
+
+// claudeApiRetryEvent is the payload of the Claude Code `system/api_retry`
+// event, emitted when the upstream API call fails and Claude is about to
+// retry. We forward a status chunk so the frontend can show
+// "retrying (2/5)..." progress to the user.
+//
+// See: https://code.claude.com/docs/en/headless (api_retry event)
+type claudeApiRetryEvent struct {
+	Subtype      string `json:"subtype"`
+	Attempt      int    `json:"attempt"`
+	MaxRetries   int    `json:"max_retries"`
+	RetryDelayMs int    `json:"retry_delay_ms"`
+	ErrorStatus  int    `json:"error_status,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
+// claudeInitInfo is the parsed shape of a `system/init` event, retained by
+// streamLoop / persistentStreamLoop and attached to the final Result.InitInfo.
+// We keep it as a struct (not a map) so call sites can read individual fields
+// for structured logging without re-parsing the raw event.
+type claudeInitInfo struct {
+	Model        string
+	Tools        []string
+	MCPServers   []claudeMCPServ
+	Plugins      []string
+	PluginErrors []claudePluginError
+}
+
+// toMap converts the init info into the Result.InitInfo shape (a generic
+// map[string]any) so it can be JSON-serialized into the daemon's wire
+// protocol without tying it to a Claude-specific schema. Returns nil if
+// the struct holds no useful data, so the omitempty tag on Result.InitInfo
+// keeps the wire payload clean for backends that do not populate it.
+func (i *claudeInitInfo) toMap() map[string]any {
+	if i == nil {
+		return nil
+	}
+	out := map[string]any{}
+	if i.Model != "" {
+		out["model"] = i.Model
+	}
+	if len(i.MCPServers) > 0 {
+		servers := make([]map[string]any, 0, len(i.MCPServers))
+		for _, s := range i.MCPServers {
+			entry := map[string]any{
+				"name":   s.Name,
+				"status": s.Status,
+			}
+			if s.Error != "" {
+				entry["error"] = s.Error
+			}
+			servers = append(servers, entry)
+		}
+		out["mcp_servers"] = servers
+	}
+	if len(i.PluginErrors) > 0 {
+		errs := make([]map[string]any, 0, len(i.PluginErrors))
+		for _, p := range i.PluginErrors {
+			errs = append(errs, map[string]any{
+				"plugin": p.Plugin,
+				"error":  p.Error,
+			})
+		}
+		out["plugin_errors"] = errs
+	}
+	if len(i.Tools) > 0 {
+		out["tools"] = i.Tools
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// handleSystemInit parses a Claude Code `system/init` event and returns the
+// captured init info. It also logs MCP-server connection failures and
+// plugin load errors at warn level so the daemon operator can see them in
+// the log stream even when the task itself completes successfully.
+//
+// We do NOT fail the task on init errors: a non-connected MCP server or a
+// failed plugin may be tolerable for tasks that do not need them. The
+// failures are surfaced via Result.InitInfo so the UI can decide how
+// prominently to display them.
+func (b *ClaudeBackend) handleSystemInit(evt claudeInitEvent) *claudeInitInfo {
+	info := &claudeInitInfo{
+		Model:        evt.Model,
+		Tools:        evt.Tools,
+		MCPServers:   evt.MCPServers,
+		Plugins:      evt.Plugins,
+		PluginErrors: evt.PluginErrors,
+	}
+	b.logger.Info("claude: system/init received",
+		"model", evt.Model,
+		"tools", len(evt.Tools),
+		"mcp_servers", len(evt.MCPServers),
+		"plugins", len(evt.Plugins),
+		"plugin_errors", len(evt.PluginErrors),
+	)
+	for _, s := range evt.MCPServers {
+		// Status is "connected" on success; anything else (failed, pending,
+		// unknown, or empty) is a warning — those MCP servers will not
+		// answer tool calls routed to them.
+		if s.Status != "" && s.Status != "connected" {
+			b.logger.Warn("claude: mcp server not connected",
+				"name", s.Name,
+				"status", s.Status,
+				"error", s.Error,
+			)
+		}
+	}
+	for _, p := range evt.PluginErrors {
+		if p.Error != "" {
+			b.logger.Warn("claude: plugin load error",
+				"plugin", p.Plugin,
+				"error", p.Error,
+			)
+		}
+	}
+	return info
+}
+
+// handleSystemApiRetry forwards a `system/api_retry` event to msgCh as a
+// status chunk so the frontend can display retry progress (e.g.
+// "retrying 2/5 after 1000ms (status=429): rate limit"). The final
+// Result.Status is intentionally NOT modified — api_retry is a normal
+// in-flight event, not a failure indicator.
+func (b *ClaudeBackend) handleSystemApiRetry(evt claudeApiRetryEvent, msgCh chan<- OutputChunk) {
+	var content string
+	if evt.MaxRetries > 0 {
+		content = fmt.Sprintf("retrying (%d/%d) after %dms", evt.Attempt, evt.MaxRetries, evt.RetryDelayMs)
+	} else {
+		content = fmt.Sprintf("retrying after %dms", evt.RetryDelayMs)
+	}
+	if evt.ErrorStatus > 0 {
+		content += fmt.Sprintf(" (status=%d)", evt.ErrorStatus)
+	}
+	if evt.Error != "" {
+		content += ": " + evt.Error
+	}
+	b.logger.Info("claude: api retry",
+		"attempt", evt.Attempt,
+		"max_retries", evt.MaxRetries,
+		"retry_delay_ms", evt.RetryDelayMs,
+		"error_status", evt.ErrorStatus,
+	)
+	trySend(msgCh, OutputChunk{
+		Type:    string(MessageStatus),
+		Content: content,
+	})
 }
 
 type claudeMessageContent struct {
@@ -1102,7 +1351,7 @@ func newLogWriter(logger *slog.Logger, prefix string) *logWriter {
 func (w *logWriter) Write(p []byte) (int, error) {
 	text := strings.TrimSpace(string(p))
 	if text != "" {
-		w.logger.Debug(w.prefix + text)
+		w.logger.Info(w.prefix + text)
 	}
 	return len(p), nil
 }

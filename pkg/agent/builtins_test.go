@@ -87,8 +87,11 @@ func TestBuiltins_UnknownTypeError(t *testing.T) {
 func TestBuiltins_PersistentBackend(t *testing.T) {
 	reg := GlobalRegistry()
 
-	// claude, local, codex, opencode, openclaw, and hermes should implement PersistentBackend (v1.4).
-	for _, typ := range []string{"claude", "local", "codex", "opencode", "openclaw", "hermes"} {
+	// claude, local, codex, opencode, hermes, kimi, kiro, and openclaw
+	// implement PersistentBackend. v1.4 added codex, opencode, hermes;
+	// v1.5 added kimi, kiro; v1.6 added openclaw (openclaw-acp-migration).
+	// claude/local predate the persistent era.
+	for _, typ := range []string{"claude", "local", "codex", "opencode", "hermes", "kimi", "kiro", "openclaw"} {
 		b, err := reg.Create(typ, BackendConfig{ProviderType: typ})
 		if err != nil {
 			t.Fatalf("Create(%q): %v", typ, err)
@@ -99,7 +102,7 @@ func TestBuiltins_PersistentBackend(t *testing.T) {
 	}
 
 	// All other built-in types should NOT implement PersistentBackend.
-	for _, typ := range []string{"cursor", "gemini", "kimi", "kiro", "copilot", "pi"} {
+	for _, typ := range []string{"cursor", "gemini", "copilot", "pi"} {
 		b, err := reg.Create(typ, BackendConfig{ProviderType: typ})
 		if err != nil {
 			t.Fatalf("Create(%q): %v", typ, err)
@@ -113,8 +116,8 @@ func TestBuiltins_PersistentBackend(t *testing.T) {
 // ── PersistentBackend detection via NewPersistentBackend ──────────────────────
 
 func TestBuiltins_NewPersistentBackend(t *testing.T) {
-	// Persistent types should succeed (v1.4: codex, opencode, openclaw, hermes added).
-	for _, typ := range []string{"claude", "local", "codex", "opencode", "openclaw", "hermes"} {
+	// Persistent types should succeed.
+	for _, typ := range []string{"claude", "local", "codex", "opencode", "hermes", "kimi", "kiro", "openclaw"} {
 		pb, err := NewPersistentBackend(typ)
 		if err != nil {
 			t.Fatalf("NewPersistentBackend(%q): unexpected error: %v", typ, err)
@@ -125,7 +128,7 @@ func TestBuiltins_NewPersistentBackend(t *testing.T) {
 	}
 
 	// Non-persistent types should return an error.
-	for _, typ := range []string{"cursor", "gemini", "kimi", "kiro", "copilot", "pi"} {
+	for _, typ := range []string{"cursor", "gemini", "copilot", "pi"} {
 		pb, err := NewPersistentBackend(typ)
 		if err == nil {
 			t.Errorf("NewPersistentBackend(%q): expected error, got nil", typ)

@@ -13,12 +13,6 @@ import (
 	"time"
 )
 
-// opencodeBlockedArgs are flags hardcoded by the backend that must not be
-// overridden by user-configured CustomArgs.
-var opencodeBlockedArgs = map[string]blockedArgMode{
-	"--format": blockedWithValue, // json output format for daemon communication
-}
-
 // OpenCodeBackend implements Backend by spawning `opencode run --format json`
 // and reading streaming JSON events from stdout.
 type OpenCodeBackend struct {
@@ -260,15 +254,16 @@ func (b *OpenCodeBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 	finalOutput := output.String()
 	outputMu.Unlock()
 
-	resCh <- &Result{
-		Status:     "completed",
-		Output:     finalOutput,
-		DurationMs: duration.Milliseconds(),
-		Usage:      buildHermesUsageMap(usage, opts.Model),
+	if state.turnFin.CompareAndSwap(false, true) {
+		resCh <- &Result{
+			Status:     "completed",
+			Output:     finalOutput,
+			DurationMs: duration.Milliseconds(),
+			Usage:      buildACPUsageMap(usage, opts.Model),
+		}
+		close(msgCh)
+		close(resCh)
 	}
-	close(msgCh)
-	close(resCh)
-	state.turnFin.Store(true)
 
 	b.logger.Info("opencode: initial persistent turn completed",
 		"session_id", sessionID,
@@ -304,20 +299,22 @@ func (b *OpenCodeBackend) Send(ctx context.Context, ps *PersistentSession, messa
 	var output strings.Builder
 	turnDone := make(chan acpPromptResult, 1)
 
-	state.client.onChunk = func(chunk OutputChunk) {
+	state.client.setCallbacks(
+		func(chunk OutputChunk) {
 		if chunk.Type == string(MessageText) && chunk.Content != "" {
 			outputMu.Lock()
 			output.WriteString(chunk.Content)
 			outputMu.Unlock()
 		}
 		trySend(msgCh, chunk)
-	}
-	state.client.onPromptDone = func(pr acpPromptResult) {
+	},
+		func(pr acpPromptResult) {
 		select {
 		case turnDone <- pr:
 		default:
 		}
-	}
+	},
+	)
 
 	startTime := time.Now()
 	state.turnFin.Store(false)
@@ -328,9 +325,10 @@ func (b *OpenCodeBackend) Send(ctx context.Context, ps *PersistentSession, messa
 			{"type": "text", "text": prompt, "role": "user"},
 		},
 	}); err != nil {
-		state.turnFin.Store(true)
-		close(msgCh)
-		close(resCh)
+		if state.turnFin.CompareAndSwap(false, true) {
+			close(msgCh)
+			close(resCh)
+		}
 		return nil, fmt.Errorf("opencode persistent session/prompt: %w", err)
 	}
 
@@ -346,15 +344,16 @@ func (b *OpenCodeBackend) Send(ctx context.Context, ps *PersistentSession, messa
 	finalOutput := output.String()
 	outputMu.Unlock()
 
-	resCh <- &Result{
-		Status:     "completed",
-		Output:     finalOutput,
-		DurationMs: duration.Milliseconds(),
-		Usage:      buildHermesUsageMap(usage, ""),
+	if state.turnFin.CompareAndSwap(false, true) {
+		resCh <- &Result{
+			Status:     "completed",
+			Output:     finalOutput,
+			DurationMs: duration.Milliseconds(),
+			Usage:      buildACPUsageMap(usage, ""),
+		}
+		close(msgCh)
+		close(resCh)
 	}
-	close(msgCh)
-	close(resCh)
-	state.turnFin.Store(true)
 
 	b.logger.Info("opencode: persistent turn completed via Send",
 		"session_id", state.sessionID,

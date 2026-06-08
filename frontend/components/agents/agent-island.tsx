@@ -279,51 +279,59 @@ function CollapsedPill({
     <button
       type="button"
       onClick={onClick}
-      className="group flex w-full items-center gap-2 border-t-2 border-black bg-brutal-cream px-3 py-2 transition-colors hover:bg-brutal-muted-light"
+      className="group flex w-full flex-col border-t-2 border-black bg-brutal-cream px-3 py-2 transition-colors hover:bg-brutal-muted-light"
       aria-label={`Agent ${primary.agentName} ${STATUS_VISUALS[primary.status].label},点击查看详情`}
     >
-      {/* Pixel avatar */}
-      <PixelAvatar agentId={primary.agentId} avatarUrl={null} size="sm" />
+      {/* Row 1: Avatar + Name */}
+      <div className="flex w-full items-center gap-2">
+        <PixelAvatar agentId={primary.agentId} avatarUrl={null} size="sm" />
 
-      {/* Status indicator dot */}
-      <span
-        className={cn(
-          'h-2 w-2 flex-shrink-0 rounded-full',
-          vis.dotClass,
-          vis.pulse && 'animate-pulse',
-        )}
-        aria-hidden
-      />
-
-      {/* Status icon */}
-      <Icon
-        className={cn(
-          'h-3 w-3 flex-shrink-0',
-          vis.iconClass,
-          vis.spin && 'animate-spin',
-        )}
-        aria-hidden
-      />
-
-      {/* Agent name + activity — compact single line */}
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <span className="truncate font-heading text-xs font-bold text-foreground">
+        <span className="min-w-0 flex-1 truncate text-left font-heading text-xs font-bold text-foreground">
           {primary.agentName}
         </span>
-        <span className="truncate font-mono text-[10px] text-foreground">
-          {primary.activityText || STATUS_VISUALS[primary.status].label}
+
+        {/* Overflow indicator */}
+        {overflow > 0 && (
+          <span className="flex h-4 min-w-[16px] flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-primary px-1 font-mono text-[9px] font-bold text-black">
+            +{overflow}
+          </span>
+        )}
+
+        {/* Expand hint — reserved space */}
+        <span className="w-3 flex-shrink-0">
+          <Eye className="h-3 w-3 text-foreground opacity-0 transition-opacity group-hover:opacity-100" />
         </span>
       </div>
 
-      {/* Overflow indicator */}
-      {overflow > 0 && (
-        <span className="flex h-4 min-w-[16px] flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-primary px-1 font-mono text-[9px] font-bold text-black">
-          +{overflow}
+      {/* Row 2: Status + Activity */}
+      <div className="mt-1 flex w-full items-center gap-2">
+        {/* Left decoration: dot + icon, same width as avatar column (28px) */}
+        <span className="inline-flex w-7 flex-shrink-0 items-center justify-center gap-0.5">
+          <span
+            className={cn(
+              'h-2.5 w-2.5 flex-shrink-0 rounded-full',
+              vis.dotClass,
+              vis.pulse && 'animate-pulse',
+            )}
+            aria-hidden
+          />
+          <Icon
+            className={cn(
+              'h-3.5 w-3.5 flex-shrink-0',
+              vis.iconClass,
+              vis.spin && 'animate-spin',
+            )}
+            aria-hidden
+          />
         </span>
-      )}
 
-      {/* Expand hint */}
-      <Eye className="h-3 w-3 flex-shrink-0 text-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+        <span className="min-w-0 flex-1 truncate text-left font-heading text-xs font-bold text-foreground">
+          {primary.activityText || STATUS_VISUALS[primary.status].label}
+        </span>
+
+        {/* Mirror right-side reserved space from row 1 */}
+        <span className="w-3 flex-shrink-0" />
+      </div>
     </button>
   );
 }

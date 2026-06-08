@@ -81,13 +81,13 @@ func init() {
 		Protocols:      []string{"jsonl"},
 	}, copilotFactory)
 
-	// ── openclaw — OpenClaw Agent CLI via stream-json ───────────────
+	// ── openclaw — OpenClaw Agent CLI via ACP ───────────────────────
 	r.Register(AdapterMeta{
 		Type:           "openclaw",
 		DisplayName:    "OpenClaw Agent",
 		RequiresBinary: "openclaw",
 		DetectCommand:  "--version",
-		Protocols:      []string{"stream-json"},
+		Protocols:      []string{"acp"},
 	}, openclawFactory)
 
 	// ── hermes — Hermes CLI via ACP ─────────────────────────────────

@@ -864,7 +864,7 @@ export function MessageList({
             message.status === 'streaming' ? (
               <StreamingMessage key={message.id} message={message} />
             ) : message.sender_type === 'agent' ? (
-              <AgentMessage key={message.id} message={message} />
+              <AgentMessage key={message.id} message={message} onReply={onReply} />
             ) : (
               <MessageItem
                 key={message.id}

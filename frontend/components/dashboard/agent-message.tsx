@@ -13,6 +13,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { MessageSquare } from 'lucide-react';
 import type { Message } from '@/lib/types';
+import { cn } from '@/lib/utils';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 
 interface AgentMessageProps {
@@ -194,7 +195,42 @@ export function AgentMessage({ message, onReply }: AgentMessageProps) {
             {highlightSpecials(message.content)}
           </ReactMarkdown>
         </div>
+
+        {/* Thread reply count — brutalist badge */}
+        {(message.reply_count ?? 0) > 0 && onReply && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onReply(message); }}
+            className={cn(
+              'mt-2 badge-brutal cursor-pointer transition-all',
+              hasUnreadThread
+                ? 'bg-brutal-primary text-black border-brutal-primary'
+                : 'bg-white text-black hover:bg-brutal-primary hover:-translate-y-px hover:shadow-brutal',
+            )}
+          >
+            <MessageSquare className="mr-1 h-3 w-3" />
+            <span>{message.reply_count} REPLIES</span>
+          </button>
+        )}
       </div>
+
+      {/* Hover reply button */}
+      {onReply && (
+        <div className="absolute right-3 top-2 flex items-center gap-1
+                        opacity-0 group-hover:opacity-100
+                        translate-x-2 group-hover:translate-x-0
+                        transition-all duration-200">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onReply(message); }}
+            className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
+            aria-label={`回复 ${message.display_name} 的消息`}
+            title="回复"
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

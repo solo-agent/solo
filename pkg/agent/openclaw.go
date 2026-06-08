@@ -3,41 +3,37 @@ package agent
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
-// minOpenclawVersion is the lowest openclaw version that emits its
-// --json result on stdout.
-const minOpenclawVersion = "2026.5.5"
-
-// openclawVersionPattern extracts a three-segment dotted version from
-// `openclaw --version` output.
-var openclawVersionPattern = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
-
 // openclawBlockedArgs are flags hardcoded by the backend that must not be
-// overridden by user-configured CustomArgs.
+// overridden by user-configured CustomArgs. The "acp" subcommand is the
+// entrypoint we use to drive OpenClaw; the rest of the CLI flags
+// (--session, --token, --url, etc.) are openclaw-specific connection
+// settings that users may still want to override via CustomArgs.
 var openclawBlockedArgs = map[string]blockedArgMode{
-	"--local":         blockedStandalone,
-	"--json":          blockedStandalone,
-	"--session-id":    blockedWithValue,
-	"--message":       blockedWithValue,
-	"--model":         blockedWithValue,
-	"--system-prompt": blockedWithValue,
-	"--thinking":      blockedWithValue,
+	"acp": blockedStandalone,
 }
 
-// OpenClawBackend implements Backend by spawning `openclaw agent --json`
-// and reading streaming NDJSON events from stdout.
+// OpenClawBackend implements Backend by spawning `openclaw acp` and
+// communicating via the ACP (Agent Communication Protocol) JSON-RPC 2.0
+// over stdin/stdout. This is the same pattern as Hermes / Kimi / Kiro.
+//
+// OpenClaw's `acp` subcommand is a Gateway-backed ACP bridge: it accepts
+// JSON-RPC 2.0 frames on stdin and routes prompts to a Gateway session
+// (default: isolated `acp:<uuid>`). It supports the core ACP flow
+// (initialize / newSession / prompt / cancel) plus partial session
+// resume and tool streaming. See https://docs.openclaw.ai/zh-CN/cli/acp
+// for the full compatibility matrix.
 type OpenClawBackend struct {
 	executablePath string
 	logger         *slog.Logger
@@ -59,112 +55,41 @@ func NewOpenClawBackend(executablePath string, logger *slog.Logger) *OpenClawBac
 // Name returns "openclaw".
 func (b *OpenClawBackend) Name() string { return "openclaw" }
 
-// Execute launches the openclaw CLI subprocess, sends the prompt, streams
-// output events through Session.Messages, and delivers the final result
-// on Session.Result.
+// Execute launches the openclaw CLI subprocess, sends the prompt via ACP,
+// streams output events through Session.Messages, and delivers the final
+// result on Session.Result.
+//
+// Execute is implemented in terms of Start + drain. The single-shot
+// behavior (subprocess exits after the first turn completes) is preserved
+// by closing the runner once the first turn's Result has been delivered.
 func (b *OpenClawBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *ExecuteOptions) (*Session, error) {
-	execPath := b.executablePath
-	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("openclaw executable not found at %q: %w", execPath, err)
-	}
-
-	if err := checkOpenclawVersion(ctx, execPath); err != nil {
+	ps, err := b.Start(ctx, req, opts)
+	if err != nil {
 		return nil, err
 	}
-
-	timeout := 20 * time.Minute
-	if d, ok := ctx.Deadline(); ok {
-		if t := time.Until(d); t > 0 {
-			timeout = t
-		}
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
-
-	prompt := buildPrompt(req, opts)
-	sessionID := fmt.Sprintf("solo-%d", time.Now().UnixNano())
-	args := buildOpenClawArgs(prompt, sessionID, opts)
-	b.logger.Info("openclaw: starting", "exec", execPath, "args", args)
-
-	cmd := exec.CommandContext(runCtx, execPath, args...)
-	cmd.WaitDelay = 10 * time.Second
-	if opts.WorkspaceDir != "" {
-		cmd.Dir = opts.WorkspaceDir
-	}
-	cmd.Env = buildEnvAt(opts.WorkspaceDir, opts.Env)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("openclaw: stdout pipe: %w", err)
-	}
-	cmd.Stderr = newLogWriter(b.logger, "[openclaw:stderr] ")
-
-	if err := cmd.Start(); err != nil {
-		cancel()
-		return nil, fmt.Errorf("openclaw: start: %w", err)
-	}
-	b.logger.Info("openclaw: started", "pid", cmd.Process.Pid, "cwd", cmd.Dir)
 
 	msgCh := make(chan OutputChunk, 256)
 	resCh := make(chan *Result, 1)
 
 	var stopOnce sync.Once
 	stop := func() error {
-		stopOnce.Do(func() {
-			cancel()
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
-			}
-		})
+		stopOnce.Do(func() { _ = b.Close(ps) })
 		return nil
 	}
 
 	go func() {
-		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
+		defer b.Close(ps)
 
-		startTime := time.Now()
-		scanResult := b.processOutput(stdout, msgCh)
-
-		go func() {
-			<-runCtx.Done()
-			_ = stdout.Close()
-		}()
-
-		exitErr := cmd.Wait()
-		duration := time.Since(startTime)
-
-		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-			scanResult.status = "timeout"
-			scanResult.errMsg = fmt.Sprintf("openclaw timed out after %s", timeout)
-		} else if errors.Is(runCtx.Err(), context.Canceled) {
-			scanResult.status = "cancelled"
-			scanResult.errMsg = "execution cancelled"
-		} else if exitErr != nil && scanResult.status == "completed" {
-			scanResult.status = "failed"
-			scanResult.errMsg = fmt.Sprintf("openclaw exited with error: %v", exitErr)
+		for chunk := range ps.Messages {
+			trySend(msgCh, chunk)
 		}
-
-		b.logger.Info("openclaw: finished",
-			"status", scanResult.status,
-			"session_id", scanResult.sessionID,
-			"duration", duration.Round(time.Millisecond).String(),
-		)
-
-		var usage map[string]TokenUsage
-		u := scanResult.usage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-			usage = map[string]TokenUsage{opts.Model: u}
+		res, ok := <-ps.Result
+		if !ok {
+			return
 		}
-
-		resCh <- &Result{
-			Status:     scanResult.status,
-			Output:     scanResult.output,
-			Error:      scanResult.errMsg,
-			DurationMs: duration.Milliseconds(),
-			Usage:      usage,
-		}
+		resCh <- res
 	}()
 
 	return &Session{
@@ -174,296 +99,343 @@ func (b *OpenClawBackend) Execute(ctx context.Context, req *ExecuteRequest, opts
 	}, nil
 }
 
-// ── Event processing ──
+// ── Persistent Backend ────────────────────────────────────────────────────────
 
-type openclawEventResult struct {
-	status    string
-	errMsg    string
-	output    string
+// openclawPersistentState holds the runtime state of a long-running OpenClaw
+// ACP subprocess across multiple turns.
+type openclawPersistentState struct {
+	runner    *persistentRunner
+	client    *acpClient
 	sessionID string
-	usage     TokenUsage
+	turnFin   atomic.Bool // guards duplicate onPromptDone calls per turn
 }
 
-func (b *OpenClawBackend) processOutput(r io.Reader, ch chan<- OutputChunk) openclawEventResult {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+// Compile-time check.
+var _ SessionStater = (*openclawPersistentState)(nil)
 
+func (s *openclawPersistentState) IsAlive() bool            { return s.runner.isAlive() }
+func (s *openclawPersistentState) SessionID() string        { return s.sessionID }
+func (s *openclawPersistentState) Done() <-chan struct{}    { return s.runner.done }
+func (s *openclawPersistentState) Notify(msg string) error  { return s.runner.write([]byte(msg)) }
+
+// Start creates a persistent OpenClaw session via ACP. The initial
+// handshake and prompt are processed synchronously before Start returns.
+func (b *OpenClawBackend) Start(ctx context.Context, req *ExecuteRequest, opts *ExecuteOptions) (*PersistentSession, error) {
+	execPath := b.executablePath
+	if _, err := exec.LookPath(execPath); err != nil {
+		return nil, fmt.Errorf("openclaw executable not found at %q: %w", execPath, err)
+	}
+
+	if err := checkOpenclawAcpSupport(ctx, execPath); err != nil {
+		return nil, err
+	}
+
+	openclawArgs := append([]string{"acp"}, filterCustomArgs(opts.ExtraArgs, openclawBlockedArgs)...)
+	openclawArgs = append(openclawArgs, filterCustomArgs(opts.CustomArgs, openclawBlockedArgs)...)
+
+	runner, err := startPersistent(ctx, execPath, openclawArgs, opts.WorkspaceDir, opts.Env, b.logger)
+	if err != nil {
+		return nil, err
+	}
+
+	prompt := buildPrompt(req, opts)
+	msgCh := make(chan OutputChunk, 256)
+	resCh := make(chan *Result, 1)
+
+	var outputMu sync.Mutex
 	var output strings.Builder
+	turnDone := make(chan acpPromptResult, 1)
+
+	cl := &acpClient{
+		logger:  b.logger,
+		stdin:   runner.stdin,
+		pending: make(map[int]*pendingRPC),
+		onChunk: func(chunk OutputChunk) {
+			if chunk.Type == string(MessageText) && chunk.Content != "" {
+				outputMu.Lock()
+				output.WriteString(chunk.Content)
+				outputMu.Unlock()
+			}
+			trySend(msgCh, chunk)
+		},
+		onPromptDone: func(pr acpPromptResult) {
+			select {
+			case turnDone <- pr:
+			default:
+			}
+		},
+	}
+
+	state := &openclawPersistentState{
+		runner: runner,
+		client: cl,
+	}
+
+	// Start reader goroutine for process lifetime.
+	go func() {
+		defer close(state.runner.done)
+		scanner := bufio.NewScanner(runner.stdout)
+		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			cl.handleLine(line)
+		}
+		cl.closeAllPending(fmt.Errorf("openclaw process exited"))
+
+		// If a turn is still active, signal failure.
+		if state.turnFin.CompareAndSwap(false, true) {
+			resCh <- &Result{Status: "failed", Error: "openclaw process exited unexpectedly"}
+			close(msgCh)
+			close(resCh)
+		}
+	}()
+
+	// Drive the initial handshake and prompt synchronously.
+	startTime := time.Now()
+	handleError := func(errMsg string) {
+		if state.turnFin.CompareAndSwap(false, true) {
+			resCh <- &Result{Status: "failed", Error: errMsg, DurationMs: time.Since(startTime).Milliseconds()}
+			close(msgCh)
+			close(resCh)
+		}
+	}
+
+	// 1. Initialize handshake.
+	if _, err := cl.request(ctx, "initialize", map[string]any{
+		"protocolVersion": 1,
+		"clientInfo": map[string]any{
+			"name":    "solo-agent-sdk",
+			"version": "1.0.0",
+		},
+		"clientCapabilities": map[string]any{},
+	}); err != nil {
+		runner.close()
+		handleError(fmt.Sprintf("openclaw initialize failed: %v", err))
+		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+	}
+
+	// 2. Create or resume session.
+	cwd := opts.WorkspaceDir
+	if cwd == "" {
+		cwd = "."
+	}
 	var sessionID string
+	if opts.ResumeSessionID != "" {
+		result, err := cl.request(ctx, "session/resume", map[string]any{
+			"sessionId": opts.ResumeSessionID,
+		})
+		if err == nil {
+			sessionID, _ = resolveResumedSessionID(opts.ResumeSessionID, result)
+		}
+	}
+	if sessionID == "" {
+		result, err := cl.request(ctx, "session/new", buildOpenclawSessionParams(cwd, opts.Model))
+		if err != nil {
+			runner.close()
+			handleError(fmt.Sprintf("openclaw session/new failed: %v", err))
+			return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		}
+		sessionID = extractACPSessionID(result)
+		if sessionID == "" {
+			runner.close()
+			handleError("openclaw session/new returned no session ID")
+			return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		}
+	}
+	cl.sessionID = sessionID
+	state.sessionID = sessionID
+	b.logger.Info("openclaw: persistent session created", "session_id", sessionID)
+
+	// 3. Model selection: OpenClaw's bridge does not currently expose
+	// modelId as an ACP session config option (only a focused subset of
+	// Gateway knobs — think-level, tool verbosity, reasoning, usage
+	// detail, escalation — are exposed). The model passed to
+	// session/new is best-effort. We skip a separate session/set_model
+	// call to avoid a guaranteed failure.
+
+	// 4. Build prompt blocks with role-based format so the agent
+	// treats system instructions as authoritative.
+	promptBlocks := []map[string]any{
+		{"type": "text", "text": prompt, "role": "user"},
+	}
+	if opts.SystemPrompt != "" {
+		promptBlocks = append([]map[string]any{
+			{"type": "text", "text": opts.SystemPrompt, "role": "system"},
+		}, promptBlocks...)
+	}
+
+	// 5. Send the initial prompt.
+	if _, err := cl.request(ctx, "session/prompt", map[string]any{
+		"sessionId": sessionID,
+		"prompt":    promptBlocks,
+	}); err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			handleError("openclaw timed out during initial prompt")
+		} else if errors.Is(ctx.Err(), context.Canceled) {
+			handleError("execution cancelled")
+		} else {
+			handleError(fmt.Sprintf("openclaw session/prompt failed: %v", err))
+		}
+		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+	}
+
+	// Collect prompt result (usage, stop reason).
 	var usage TokenUsage
-	finalStatus := "completed"
-	var finalError string
-	gotEvents := false
-
-	var rawLines []string
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-
-		if event, ok := tryParseOpenclawEvent(line); ok {
-			gotEvents = true
-			if event.SessionID != "" {
-				sessionID = event.SessionID
-			}
-			switch event.Type {
-			case "text":
-				if event.Text != "" {
-					output.WriteString(event.Text)
-					trySend(ch, OutputChunk{Type: string(MessageText), Content: event.Text})
-				}
-			case "tool_use":
-				var input map[string]any
-				if event.Input != nil {
-					_ = json.Unmarshal(event.Input, &input)
-				}
-				trySend(ch, OutputChunk{
-					Type: string(MessageToolUse),
-					Tool: &ToolInfo{Name: event.Tool, CallID: event.CallID, Input: input},
-				})
-			case "tool_result":
-				trySend(ch, OutputChunk{
-					Type: string(MessageToolResult),
-					Tool: &ToolInfo{CallID: event.CallID, Output: event.Text},
-				})
-			case "error":
-				errMsg := event.errorMessage()
-				b.logger.Warn("openclaw: error event", "error", errMsg)
-				trySend(ch, OutputChunk{Type: string(MessageError), Content: errMsg})
-				finalStatus = "failed"
-				finalError = errMsg
-			case "lifecycle":
-				phase := event.Phase
-				if phase == "error" || phase == "failed" || phase == "cancelled" {
-					errMsg := event.errorMessage()
-					b.logger.Warn("openclaw: lifecycle failure", "phase", phase, "error", errMsg)
-					trySend(ch, OutputChunk{Type: string(MessageError), Content: errMsg})
-					finalStatus = "failed"
-					finalError = errMsg
-				}
-			case "step_start":
-				trySend(ch, OutputChunk{Type: string(MessageStatus), Content: "running"})
-			case "step_finish":
-				if event.Usage != nil {
-					u := parseOpenclawUsage(event.Usage)
-					usage.InputTokens += u.InputTokens
-					usage.OutputTokens += u.OutputTokens
-					usage.CacheReadTokens += u.CacheReadTokens
-					usage.CacheWriteTokens += u.CacheWriteTokens
-				}
-			}
-			continue
-		}
-
-		if result, ok := tryParseOpenclawResult(line); ok {
-			gotEvents = true
-			res := b.buildOpenclawResult(result, ch, &output)
-			if res.sessionID != "" {
-				sessionID = res.sessionID
-			}
-			u := res.usage
-			if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-				usage = u
-			}
-			continue
-		}
-
-		b.logger.Debug("[openclaw:stdout] " + line)
-		rawLines = append(rawLines, line)
-	}
-
-	if err := scanner.Err(); err != nil {
-		return openclawEventResult{status: "failed", errMsg: fmt.Sprintf("read stdout: %v", err)}
-	}
-
-	if !gotEvents {
-		trimmed := strings.TrimSpace(strings.Join(rawLines, "\n"))
-		if trimmed != "" {
-			if result, ok := tryParseOpenclawResult(trimmed); ok {
-				return b.buildOpenclawResult(result, ch, &output)
-			}
-			for i, line := range rawLines {
-				if len(line) > 0 && line[0] == '{' {
-					candidate := strings.TrimSpace(strings.Join(rawLines[i:], "\n"))
-					if result, ok := tryParseOpenclawResult(candidate); ok {
-						return b.buildOpenclawResult(result, ch, &output)
-					}
-					break
-				}
-			}
-			return openclawEventResult{status: "completed", output: trimmed}
-		}
-		return openclawEventResult{status: "failed", errMsg: "openclaw returned no parseable output"}
-	}
-
-	return openclawEventResult{
-		status:    finalStatus,
-		errMsg:    finalError,
-		output:    output.String(),
-		sessionID: sessionID,
-		usage:     usage,
-	}
-}
-
-func tryParseOpenclawEvent(line string) (openclawEvent, bool) {
-	if len(line) == 0 || line[0] != '{' {
-		return openclawEvent{}, false
-	}
-	var event openclawEvent
-	if err := json.Unmarshal([]byte(line), &event); err != nil {
-		return openclawEvent{}, false
-	}
-	if event.Type == "" {
-		return openclawEvent{}, false
-	}
-	return event, true
-}
-
-func tryParseOpenclawResult(raw string) (openclawResult, bool) {
-	if len(raw) == 0 || raw[0] != '{' {
-		return openclawResult{}, false
-	}
-	var result openclawResult
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		return openclawResult{}, false
-	}
-	if result.Payloads == nil && result.Meta.DurationMs == 0 {
-		return openclawResult{}, false
-	}
-	return result, true
-}
-
-func (b *OpenClawBackend) buildOpenclawResult(result openclawResult, ch chan<- OutputChunk, output *strings.Builder) openclawEventResult {
-	for _, p := range result.Payloads {
-		if p.Text != "" {
-			output.WriteString(p.Text)
-			trySend(ch, OutputChunk{Type: string(MessageText), Content: p.Text})
-		}
-	}
-
-	var sessionID string
-	var usage TokenUsage
-	if result.Meta.AgentMeta != nil {
-		if sid, ok := result.Meta.AgentMeta["sessionId"].(string); ok {
-			sessionID = sid
-		}
-		if u, ok := result.Meta.AgentMeta["usage"].(map[string]any); ok {
-			usage = parseOpenclawUsage(u)
-		}
-	}
-
-	return openclawEventResult{
-		status:    "completed",
-		output:    output.String(),
-		sessionID: sessionID,
-		usage:     usage,
-	}
-}
-
-func parseOpenclawUsage(data map[string]any) TokenUsage {
-	return TokenUsage{
-		InputTokens:      openclawInt64FirstOf(data, "input", "inputTokens", "input_tokens"),
-		OutputTokens:     openclawInt64FirstOf(data, "output", "outputTokens", "output_tokens"),
-		CacheReadTokens:  openclawInt64FirstOf(data, "cacheRead", "cachedInputTokens", "cached_input_tokens", "cache_read", "cache_read_input_tokens"),
-		CacheWriteTokens: openclawInt64FirstOf(data, "cacheWrite", "cacheCreationInputTokens", "cache_creation_input_tokens", "cache_write"),
-	}
-}
-
-func openclawInt64FirstOf(data map[string]any, keys ...string) int64 {
-	for _, key := range keys {
-		if v := openclawInt64(data, key); v != 0 {
-			return v
-		}
-	}
-	return 0
-}
-
-func openclawInt64(data map[string]any, key string) int64 {
-	v, ok := data[key]
-	if !ok {
-		return 0
-	}
-	switch n := v.(type) {
-	case float64:
-		return int64(n)
-	case int64:
-		return n
+	select {
+	case pr := <-turnDone:
+		usage = pr.usage
 	default:
-		return 0
 	}
-}
 
-// ── OpenClaw JSON types ──
+	duration := time.Since(startTime)
+	outputMu.Lock()
+	finalOutput := output.String()
+	outputMu.Unlock()
 
-type openclawEvent struct {
-	Type      string          `json:"type"`
-	SessionID string          `json:"sessionId,omitempty"`
-	Text      string          `json:"text,omitempty"`
-	Tool      string          `json:"tool,omitempty"`
-	CallID    string          `json:"callId,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	Usage     map[string]any  `json:"usage,omitempty"`
-	Phase     string          `json:"phase,omitempty"`
-	Error     *openclawErrObj `json:"error,omitempty"`
-	Message   string          `json:"message,omitempty"`
-}
-
-func (e openclawEvent) errorMessage() string {
-	if e.Error != nil {
-		if msg := e.Error.message(); msg != "" {
-			return msg
+	if state.turnFin.CompareAndSwap(false, true) {
+		resCh <- &Result{
+			Status:     "completed",
+			Output:     finalOutput,
+			DurationMs: duration.Milliseconds(),
+			Usage:      buildACPUsageMap(usage, opts.Model),
 		}
+		close(msgCh)
+		close(resCh)
 	}
-	if e.Text != "" {
-		return e.Text
+
+	b.logger.Info("openclaw: initial persistent turn completed",
+		"session_id", sessionID,
+		"duration", duration.Round(time.Millisecond).String(),
+	)
+
+	var stopOnce sync.Once
+	stop := func() error { stopOnce.Do(func() { runner.cancel() }); return nil }
+
+	return &PersistentSession{
+		Messages:  msgCh,
+		Result:    resCh,
+		Stop:      stop,
+		SessionID: sessionID,
+		state:     state,
+	}, nil
+}
+
+// Send delivers new messages to a running persistent OpenClaw session on
+// the existing ACP session.
+func (b *OpenClawBackend) Send(ctx context.Context, ps *PersistentSession, messages []Message) (*PersistentSession, error) {
+	state, ok := ps.state.(*openclawPersistentState)
+	if !ok || state == nil {
+		return nil, fmt.Errorf("openclaw: invalid session state")
 	}
-	if e.Message != "" {
-		return e.Message
+	if !state.runner.isAlive() {
+		return nil, fmt.Errorf("openclaw: session process has exited")
 	}
-	return "unknown openclaw error"
-}
 
-type openclawErrObj struct {
-	Name    string              `json:"name,omitempty"`
-	Data    *openclawErrorData  `json:"data,omitempty"`
-	Message string              `json:"message,omitempty"`
-}
+	prompt := buildPromptFromMessages(messages)
 
-func (e *openclawErrObj) message() string {
-	if e.Data != nil && e.Data.Message != "" {
-		return e.Data.Message
+	msgCh := make(chan OutputChunk, 256)
+	resCh := make(chan *Result, 1)
+
+	var outputMu sync.Mutex
+	var output strings.Builder
+	turnDone := make(chan acpPromptResult, 1)
+
+	// Redirect client callbacks to this turn's channels.
+	state.client.setCallbacks(
+		func(chunk OutputChunk) {
+		if chunk.Type == string(MessageText) && chunk.Content != "" {
+			outputMu.Lock()
+			output.WriteString(chunk.Content)
+			outputMu.Unlock()
+		}
+		trySend(msgCh, chunk)
+	},
+		func(pr acpPromptResult) {
+		select {
+		case turnDone <- pr:
+		default:
+		}
+	},
+	)
+
+	startTime := time.Now()
+	state.turnFin.Store(false)
+
+	if _, err := state.client.request(ctx, "session/prompt", map[string]any{
+		"sessionId": state.sessionID,
+		"prompt": []map[string]any{
+			{"type": "text", "text": prompt, "role": "user"},
+		},
+	}); err != nil {
+		if state.turnFin.CompareAndSwap(false, true) {
+			close(msgCh)
+			close(resCh)
+		}
+		return nil, fmt.Errorf("openclaw persistent session/prompt: %w", err)
 	}
-	if e.Message != "" {
-		return e.Message
+
+	var usage TokenUsage
+	select {
+	case pr := <-turnDone:
+		usage = pr.usage
+	default:
 	}
-	if e.Name != "" {
-		return e.Name
+
+	duration := time.Since(startTime)
+	outputMu.Lock()
+	finalOutput := output.String()
+	outputMu.Unlock()
+
+	if state.turnFin.CompareAndSwap(false, true) {
+		resCh <- &Result{
+			Status:     "completed",
+			Output:     finalOutput,
+			DurationMs: duration.Milliseconds(),
+			Usage:      buildACPUsageMap(usage, ""),
+		}
+		close(msgCh)
+		close(resCh)
 	}
-	return ""
+
+	b.logger.Info("openclaw: persistent turn completed via Send",
+		"session_id", state.sessionID,
+		"duration", duration.Round(time.Millisecond).String(),
+	)
+
+	var stopOnce sync.Once
+	stop := func() error { stopOnce.Do(func() {}); return nil }
+
+	return &PersistentSession{
+		Messages:  msgCh,
+		Result:    resCh,
+		Stop:      stop,
+		SessionID: state.sessionID,
+		state:     state,
+	}, nil
 }
 
-type openclawErrorData struct {
-	Message string `json:"message,omitempty"`
+// Close terminates the persistent OpenClaw session.
+func (b *OpenClawBackend) Close(ps *PersistentSession) error {
+	state, ok := ps.state.(*openclawPersistentState)
+	if !ok || state == nil {
+		return fmt.Errorf("openclaw: invalid session state")
+	}
+	return state.runner.close()
 }
 
-type openclawResult struct {
-	Payloads []openclawPayload `json:"payloads"`
-	Meta     openclawMeta      `json:"meta"`
-}
+// ── Helpers ──
 
-type openclawPayload struct {
-	Text string `json:"text"`
-}
+// minOpenclawAcpVersion is the minimum openclaw version known to support
+// the `acp` subcommand. Older versions only support `agent --json` and
+// will fail the ACP handshake with a cryptic error.
+const minOpenclawAcpVersion = "2026.5.5"
 
-type openclawMeta struct {
-	DurationMs int64          `json:"durationMs"`
-	AgentMeta  map[string]any `json:"agentMeta"`
-}
+var openclawVersionPattern = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
 
-// ── Version check ──
-
-func checkOpenclawVersion(ctx context.Context, execPath string) error {
+func checkOpenclawAcpSupport(ctx context.Context, execPath string) error {
 	cmd := exec.CommandContext(ctx, execPath, "--version")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -473,8 +445,8 @@ func checkOpenclawVersion(ctx context.Context, execPath string) error {
 	if !ok {
 		return fmt.Errorf("could not parse openclaw version from output: %q", strings.TrimSpace(string(out)))
 	}
-	if compareOpenclawVersion(detected, minOpenclawVersion) < 0 {
-		return fmt.Errorf("openclaw %s is below the minimum supported version %s. Run `openclaw update` to upgrade and try again.", detected, minOpenclawVersion)
+	if compareOpenclawVersion(detected, minOpenclawAcpVersion) < 0 {
+		return fmt.Errorf("openclaw %s is below the minimum supported version %s for ACP support — run `openclaw update` to upgrade", detected, minOpenclawAcpVersion)
 	}
 	return nil
 }
@@ -503,25 +475,26 @@ func compareOpenclawVersion(a, b string) int {
 	return 0
 }
 
-// ── CLI argument construction ──
-
-func buildOpenClawArgs(prompt, sessionID string, opts *ExecuteOptions) []string {
-	args := []string{
-		"agent",
-		"--local",
-		"--json",
-		"--session-id", sessionID,
+// buildOpenclawSessionParams constructs the params for ACP session/new.
+//
+// The OpenClaw bridge requires mcpServers to be present (even as an empty
+// array). Per-session MCP server config is not supported in bridge mode,
+// so we always send an empty list.
+// Model is best-effort — see the comment in Start for why session/set_model
+// is not invoked.
+func buildOpenclawSessionParams(cwd, model string) map[string]any {
+	params := map[string]any{
+		"cwd":        cwd,
+		"mcpServers": []any{},
 	}
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
+	if model != "" {
+		params["model"] = model
 	}
-	if opts.Effort != "" {
-		args = append(args, "--thinking", opts.Effort)
-	}
-	if opts.SystemPrompt != "" {
-		prompt = opts.SystemPrompt + "\n\n" + prompt
-	}
-	args = append(args, "--message", prompt)
-	args = append(args, filterCustomArgs(opts.CustomArgs, openclawBlockedArgs)...)
-	return args
+	return params
 }
+
+// Compile-time interface assertions.
+var (
+	_ Backend           = (*OpenClawBackend)(nil)
+	_ PersistentBackend = (*OpenClawBackend)(nil)
+)

@@ -42,8 +42,11 @@ type acpClient struct {
 	nextID       int
 	pending      map[int]*pendingRPC
 	sessionID    string
+
+	cbMu         sync.Mutex // protects onChunk + onPromptDone (replaced per-turn by Send)
 	onChunk      func(OutputChunk)
 	onPromptDone func(acpPromptResult)
+
 	acceptNotification func(updateType string) bool
 
 	toolMu       sync.Mutex
@@ -51,6 +54,37 @@ type acpClient struct {
 
 	usageMu sync.Mutex
 	usage   TokenUsage
+}
+
+// setCallbacks replaces the per-turn chunk and prompt-done callbacks.
+// It is called from Send to redirect output to the new turn's channels.
+// Must NOT be called concurrently with the reader goroutine dispatching
+// events for the same turn — the caller (Send) serialises this by waiting
+// for the previous turn's Result channel to close before issuing a new
+// session/prompt request.
+func (c *acpClient) setCallbacks(onChunk func(OutputChunk), onPromptDone func(acpPromptResult)) {
+	c.cbMu.Lock()
+	c.onChunk = onChunk
+	c.onPromptDone = onPromptDone
+	c.cbMu.Unlock()
+}
+
+func (c *acpClient) invokeOnChunk(chunk OutputChunk) {
+	c.cbMu.Lock()
+	fn := c.onChunk
+	c.cbMu.Unlock()
+	if fn != nil {
+		fn(chunk)
+	}
+}
+
+func (c *acpClient) invokeOnPromptDone(pr acpPromptResult) {
+	c.cbMu.Lock()
+	fn := c.onPromptDone
+	c.cbMu.Unlock()
+	if fn != nil {
+		fn(pr)
+	}
 }
 
 type pendingToolCall struct {
@@ -264,9 +298,7 @@ func (c *acpClient) extractPromptResult(data json.RawMessage) {
 		}
 	}
 
-	if c.onPromptDone != nil {
-		c.onPromptDone(pr)
-	}
+	c.invokeOnPromptDone(pr)
 }
 
 func (c *acpClient) handleNotification(raw map[string]json.RawMessage) {
@@ -362,9 +394,7 @@ func (c *acpClient) handleAgentMessage(data json.RawMessage) {
 	if err := json.Unmarshal(data, &msg); err != nil || msg.Content.Text == "" {
 		return
 	}
-	if c.onChunk != nil {
-		c.onChunk(OutputChunk{Type: string(MessageText), Content: msg.Content.Text})
-	}
+	c.invokeOnChunk(OutputChunk{Type: string(MessageText), Content: msg.Content.Text})
 }
 
 func (c *acpClient) handleAgentThought(data json.RawMessage) {
@@ -377,9 +407,7 @@ func (c *acpClient) handleAgentThought(data json.RawMessage) {
 	if err := json.Unmarshal(data, &msg); err != nil || msg.Content.Text == "" {
 		return
 	}
-	if c.onChunk != nil {
-		c.onChunk(OutputChunk{Type: string(MessageThinking), Content: msg.Content.Text})
-	}
+	c.invokeOnChunk(OutputChunk{Type: string(MessageThinking), Content: msg.Content.Text})
 }
 
 func (c *acpClient) handleToolCallStart(data json.RawMessage) {
@@ -415,12 +443,10 @@ func (c *acpClient) handleToolCallStart(data json.RawMessage) {
 			input:    rawInput,
 			emitted:  true,
 		})
-		if c.onChunk != nil {
-			c.onChunk(OutputChunk{
-				Type: string(MessageToolUse),
-				Tool: &ToolInfo{Name: toolName, CallID: msg.ToolCallID, Input: rawInput},
-			})
-		}
+		c.invokeOnChunk(OutputChunk{
+			Type: string(MessageToolUse),
+			Tool: &ToolInfo{Name: toolName, CallID: msg.ToolCallID, Input: rawInput},
+		})
 		return
 	}
 
@@ -480,12 +506,10 @@ func (c *acpClient) handleToolCallUpdate(data json.RawMessage) {
 	if output == "" {
 		output = extractACPToolCallText(msg.Content)
 	}
-	if c.onChunk != nil {
-		c.onChunk(OutputChunk{
-			Type: string(MessageToolResult),
-			Tool: &ToolInfo{CallID: msg.ToolCallID, Output: output},
-		})
-	}
+	c.invokeOnChunk(OutputChunk{
+		Type: string(MessageToolResult),
+		Tool: &ToolInfo{CallID: msg.ToolCallID, Output: output},
+	})
 }
 
 func (c *acpClient) trackTool(callID string, p *pendingToolCall) {
@@ -541,10 +565,7 @@ func (c *acpClient) emitDeferredToolUse(
 		input = updateRawInput
 	}
 
-	if c.onChunk == nil {
-		return
-	}
-	c.onChunk(OutputChunk{
+	c.invokeOnChunk(OutputChunk{
 		Type: string(MessageToolUse),
 		Tool: &ToolInfo{Name: toolName, CallID: callID, Input: input},
 	})
@@ -676,14 +697,56 @@ func resolveResumedSessionID(requested string, response json.RawMessage) (string
 	return got, got != requested
 }
 
-func acpToolNameFromTitle(title string, kind string) string {
+// buildACPUsageMap returns a usage map keyed by the given model, or nil if
+// there are no tokens. It is shared by all ACP-family backends (hermes,
+// kimi, kiro, openclaw, opencode) — they all wrap their per-turn usage
+// the same way before emitting it to the daemon.
+func buildACPUsageMap(usage TokenUsage, model string) map[string]TokenUsage {
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 {
+		return nil
+	}
+	return map[string]TokenUsage{model: usage}
+}
+
+// acpToolNameFromTitle normalises an ACP tool title (and optional kind
+// hint) into a canonical snake_case identifier used across the daemon
+// and UI.
+//
+// Each ACP backend emits slightly different title strings — Hermes
+// sends "execute code" with a structured kind, Kimi / Kiro send
+// server-specific labels like "Bash" or "Read File" with no kind. The
+// optional extras slice lets each backend append its own title→name
+// mappings without forking this function. extras entries are matched
+// case-insensitively against the trimmed title and (when present) the
+// text before the first ":".
+func acpToolNameFromTitle(title string, kind string, extras ...map[string]string) string {
+	lookupExtras := func(s string) (string, bool) {
+		lower := strings.ToLower(strings.TrimSpace(s))
+		if lower == "" {
+			return "", false
+		}
+		for _, m := range extras {
+			if v, ok := m[lower]; ok {
+				return v, true
+			}
+		}
+		return "", false
+	}
+
 	switch title {
 	case "execute code":
 		return "execute_code"
 	}
 
+	if v, ok := lookupExtras(title); ok {
+		return v
+	}
+
 	if idx := strings.Index(title, ":"); idx > 0 {
 		name := strings.TrimSpace(title[:idx])
+		if v, ok := lookupExtras(name); ok {
+			return v
+		}
 		switch {
 		case name == "terminal":
 			return "terminal"
