@@ -16,6 +16,7 @@
 // ============================================================================
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { t } from '@/lib/i18n';
 import { useWebSocket } from '@/lib/ws-context';
 
 export type IslandAgentStatus =
@@ -103,7 +104,7 @@ export function useAgentIsland(channelId: string | null) {
             agentId,
             agentName: event.agent_name ?? existing?.agentName ?? '...',
             status: 'thinking',
-            activityText: event.thought ?? '思考中…',
+            activityText: event.thought ?? t('agentThinkingShort'),
             toolName: existing?.toolName ?? null,
             toolInputSummary: existing?.toolInputSummary ?? null,
             source: existing?.source ?? null,
@@ -175,7 +176,7 @@ export function useAgentIsland(channelId: string | null) {
             ...existing,
             status: 'idle',
             isActive: false,
-            activityText: '完成',
+            activityText: t('agentDone'),
             completedAt: Date.now(),
             // message.new alone doesn't tell us completed vs failed — leave
             // finalState untouched (could be set later by agent.done).

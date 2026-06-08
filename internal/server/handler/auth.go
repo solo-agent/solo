@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/solo-ai/solo/internal/auth"
+	"github.com/solo-ai/solo/internal/i18n"
 	"github.com/solo-ai/solo/internal/server/service"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -351,9 +352,9 @@ func (h *AuthHandler) createWelcomeChannel(ctx context.Context, userID, displayN
 		shortID = shortID[:8]
 	}
 	channelName := "welcome-" + shortID
-	channelDesc := "欢迎来到 Solo！这是你的第一个频道。"
+	channelDesc := i18n.Active.DefaultChannelDesc
 	if displayName == "" {
-		displayName = "新用户"
+		displayName = i18n.Active.DefaultDisplayName
 	}
 
 	_, err := h.svc.CreateChannel(ctx, channelName, channelDesc, "channel", userID)

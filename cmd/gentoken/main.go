@@ -10,7 +10,7 @@ func main() {
 	token, err := auth.GenerateAccessToken(
 		"88435f49-beca-4fb7-a521-28b85b9fb8dd",
 		"agent@mazi.solo",
-		"麻子",
+		"Test User",
 	)
 	if err != nil {
 		fmt.Println("Error:", err)

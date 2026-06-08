@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
+import { t } from '@/lib/i18n';
 import type { DMChannel, CreateDMInput } from '@/lib/types';
 
 // ---- Mock data ----
@@ -21,11 +22,11 @@ const MOCK_DMS: DMChannel[] = [
   {
     id: 'dm-1',
     type: 'dm',
-    other_user: { id: 'user-2', display_name: '张三' },
+    other_user: { id: 'user-2', display_name: 'Alice' },
     last_message: {
-      content: '明天下午的会议别忘了',
+      content: "Don't forget the meeting tomorrow afternoon",
       sender_id: 'user-2',
-      sender_name: '张三',
+      sender_name: 'Alice',
       created_at: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
     },
     last_reply_at: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
@@ -35,11 +36,11 @@ const MOCK_DMS: DMChannel[] = [
   {
     id: 'dm-2',
     type: 'dm',
-    other_agent: { id: 'agent-1', name: 'AI 助手' },
+    other_agent: { id: 'agent-1', name: 'AI Assistant' },
     last_message: {
-      content: '好的，我已经分析了数据，以下是详细的报告...',
+      content: "I've analyzed the data. Here's the detailed report...",
       sender_id: 'agent-1',
-      sender_name: 'AI 助手',
+      sender_name: 'AI Assistant',
       created_at: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
     },
     last_reply_at: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
@@ -49,11 +50,11 @@ const MOCK_DMS: DMChannel[] = [
   {
     id: 'dm-3',
     type: 'dm',
-    other_user: { id: 'user-3', display_name: '李四' },
+    other_user: { id: 'user-3', display_name: 'Bob' },
     last_message: {
-      content: '收到，谢谢！',
+      content: 'Got it, thanks!',
       sender_id: 'user-1',
-      sender_name: '我',
+      sender_name: 'Me',
       created_at: new Date(Date.now() - 86400000).toISOString(),
     },
     last_reply_at: new Date(Date.now() - 86400000).toISOString(),
@@ -72,13 +73,13 @@ export interface DMCreateParticipant {
 }
 
 const MOCK_PARTICIPANTS: DMCreateParticipant[] = [
-  { id: 'user-2', type: 'user', display_name: '张三', online: true },
-  { id: 'user-3', type: 'user', display_name: '李四', online: false },
-  { id: 'user-4', type: 'user', display_name: '王五', online: true },
-  { id: 'user-5', type: 'user', display_name: '赵六', online: false },
-  { id: 'agent-1', type: 'agent', display_name: 'AI 助手', online: true },
-  { id: 'agent-2', type: 'agent', display_name: '数据分析师', online: true },
-  { id: 'agent-3', type: 'agent', display_name: '代码审查员', online: false },
+  { id: 'user-2', type: 'user', display_name: 'Alice', online: true },
+  { id: 'user-3', type: 'user', display_name: 'Bob', online: false },
+  { id: 'user-4', type: 'user', display_name: 'Charlie', online: true },
+  { id: 'user-5', type: 'user', display_name: 'Diana', online: false },
+  { id: 'agent-1', type: 'agent', display_name: 'AI Assistant', online: true },
+  { id: 'agent-2', type: 'agent', display_name: 'Data Analyst', online: true },
+  { id: 'agent-3', type: 'agent', display_name: 'Code Reviewer', online: false },
 ];
 
 // ---- Simulate async network delay ----
@@ -106,7 +107,7 @@ export function useDMs() {
         setDms(MOCK_DMS);
       }
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : '加载私信列表失败';
+      const message = err instanceof ApiError ? err.message : t('dmLoadError');
       if (mountedRef.current) {
         setError(message);
       }
@@ -164,7 +165,7 @@ export function useDMs() {
         id: newId,
         type: 'dm',
         ...(input.user_id
-          ? { other_user: { id: input.user_id, display_name: participant?.display_name ?? '用户' } }
+          ? { other_user: { id: input.user_id, display_name: participant?.display_name ?? t('user') } }
           : { other_agent: { id: input.agent_id!, name: participant?.display_name ?? 'Agent' } }),
         last_reply_at: new Date().toISOString(),
         unread_count: 0,

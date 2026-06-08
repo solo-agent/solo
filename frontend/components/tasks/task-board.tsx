@@ -13,6 +13,7 @@ import { useCallback, useMemo } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { TaskColumn } from './task-column';
 import type { Task, TaskStatus } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
 // ---- Constants ----
 
@@ -104,7 +105,7 @@ export function TaskBoard({
           className="btn-brutal btn-brutal-sm flex items-center gap-1.5"
         >
           <RefreshCw className="h-3.5 w-3.5" />
-          重试
+          {t('retry')}
         </button>
       </div>
     );

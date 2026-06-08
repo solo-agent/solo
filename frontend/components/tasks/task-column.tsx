@@ -12,6 +12,7 @@ import { useState, useRef, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { Clock, ChevronRight, ChevronDown } from 'lucide-react';
 import type { Task, TaskStatus } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
 // ---- Valid status transitions ----
 
@@ -72,15 +73,15 @@ function formatRelativeTime(iso?: string): string {
     const now = Date.now();
     const d = new Date(iso).getTime();
     const diffMs = now - d;
-    if (diffMs < 0) return '刚刚';
+    if (diffMs < 0) return t('justNow');
     const secs = Math.floor(diffMs / 1000);
-    if (secs < 60) return '刚刚';
+    if (secs < 60) return t('justNow');
     const mins = Math.floor(secs / 60);
-    if (mins < 60) return `${mins}分钟前`;
+    if (mins < 60) return t('minutesAgo', { n: mins });
     const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}小时前`;
+    if (hours < 24) return t('hoursAgo', { n: hours });
     const days = Math.floor(hours / 24);
-    if (days < 30) return `${days}天前`;
+    if (days < 30) return t('daysAgo', { n: days });
     const pad = (n: number) => String(n).padStart(2, '0');
     const date = new Date(iso);
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -134,7 +135,7 @@ function StatusBadge({
           config.bgClass,
           config.textClass,
         )}
-        aria-label={`状态: ${config.label}`}
+        aria-label={config.label}
         tabIndex={0}
       >
         {config.label}
@@ -244,12 +245,12 @@ function TaskCard({
                 className="text-[10px] text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-primary"
               >
                 <ChevronRight className="inline h-3 w-3 -mt-px" />
-                {' '}子任务 of {parentTaskNumber ? `#${parentTaskNumber}` : '父任务'}
+                {' '}{t('subTask')} of {parentTaskNumber ? `#${parentTaskNumber}` : t('parentTask')}
               </span>
             ) : (
               <span className="text-[10px] text-muted-foreground">
                 <ChevronRight className="inline h-3 w-3 -mt-px" />
-                {' '}子任务{parentTaskNumber ? ` of #${parentTaskNumber}` : ''}
+                {' '}{t('subTask')}{parentTaskNumber ? ` of #${parentTaskNumber}` : ''}
               </span>
             )}
           </div>
@@ -265,7 +266,7 @@ function TaskCard({
         {isTerminal ? (
           <div className="mt-2">
             <span className="font-mono text-[11px] font-bold text-muted-foreground">
-              {task.status === 'done' ? '✓ 已完成' : '✕ 已关闭'}
+              {task.status === 'done' ? `✓ ${t('statusDone')}` : `✕ ${t('statusCancelled')}`}
             </span>
           </div>
         ) : (
@@ -280,12 +281,12 @@ function TaskCard({
                   {claimerDisplay}
                 </span>
                 <span className="flex-shrink-0 badge-brutal bg-brutal-success text-black text-[10px]">
-                  已认领
+                  {t('claimed')}
                 </span>
               </>
             ) : (
               <span className="font-body text-[11px] text-muted-foreground">
-                待认领
+                {t('unclaimed')}
               </span>
             )}
           </div>
@@ -295,7 +296,7 @@ function TaskCard({
         {hasSubtasks && (
           <div className="mt-2 pt-2 border-t-2 border-brutal-muted">
             <div className="flex items-center gap-1.5 text-[10px]">
-              <span className="text-muted-foreground">子任务:</span>
+              <span className="text-muted-foreground">{t('subTaskLabel')}</span>
               <span className="font-bold">{task.done_subtask_count ?? 0}/{task.subtask_count}</span>
               <div className="flex-1 h-1 border border-brutal-muted bg-muted">
                 <div
@@ -405,7 +406,7 @@ export function TaskColumn({
         {count === 0 && (
           <div className="flex items-center justify-center rounded-none border-2 border-dashed border-black py-12 px-4">
             <p className="text-center font-body text-xs text-muted-foreground">
-              暂无{label}任务
+              {t('noTasks')}
             </p>
           </div>
         )}

@@ -6,6 +6,7 @@
 
 'use client';
 
+import { t } from '@/lib/i18n';
 import { useState, useCallback, useRef } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import type { WorkspaceFileNode } from '@/lib/types';
@@ -48,7 +49,7 @@ export function useWorkspaceFiles(agentId: string) {
       if (err instanceof ApiError) {
         setError(err.message);
       } else {
-        setError('加载工作空间文件失败');
+        setError(`${t('workspaceFileLoadError')}`);
       }
       if (!loadedRef.current) {
         setTree([]);

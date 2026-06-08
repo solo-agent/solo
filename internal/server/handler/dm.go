@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/solo-ai/solo/internal/i18n"
 	"github.com/solo-ai/solo/internal/server/service"
 	"github.com/solo-ai/solo/internal/server/ws"
 )
@@ -1782,7 +1783,7 @@ func (h *DMHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Broadcast system message
-	h.broadcastDMTaskSystemMessage(dmID, task.TaskNumber, task.Title, "已删除")
+	h.broadcastDMTaskSystemMessage(dmID, task.TaskNumber, task.Title, i18n.Active.SysTaskDeleted)
 
 	// Broadcast task.deleted event
 	ws.BroadcastTaskDeleted(h.hub, ws.TaskDeletedPayload{

@@ -10,6 +10,7 @@
 import { cn } from '@/lib/utils';
 import { Calendar, User, ChevronRight } from 'lucide-react';
 import type { Task, TaskStatus, TaskPriority } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
 // ---- Status display config ----
 
@@ -22,10 +23,10 @@ const STATUS_CONFIG: Record<TaskStatus, { label: string; bgClass: string }> = {
 };
 
 const PRIORITY_CONFIG: Record<TaskPriority, { label: string; bgClass: string }> = {
-  urgent: { label: '紧急', bgClass: 'bg-brutal-danger text-white' },
-  high: { label: '高', bgClass: 'bg-brutal-warning text-black' },
-  normal: { label: '普通', bgClass: 'bg-brutal-cream text-foreground border-2 border-black' },
-  low: { label: '低', bgClass: 'bg-brutal-muted text-black' },
+  urgent: { label: t('priorityUrgent'), bgClass: 'bg-brutal-danger text-white' },
+  high: { label: t('priorityHigh'), bgClass: 'bg-brutal-warning text-black' },
+  normal: { label: t('priorityNormal'), bgClass: 'bg-brutal-cream text-foreground border-2 border-black' },
+  low: { label: t('priorityLow'), bgClass: 'bg-brutal-muted text-black' },
 };
 
 // ---- Helpers ----
@@ -118,12 +119,12 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
                 className="text-xs text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2 transition-colors"
               >
                 <ChevronRight className="inline h-3 w-3 -mt-px" />
-                {' '}子任务 of {parentTaskNumber ? `#${parentTaskNumber}` : '父任务'}
+                {' '}{t('subTask')} of {parentTaskNumber ? `#${parentTaskNumber}` : t('parentTask')}
               </span>
             ) : (
               <span className="text-xs text-muted-foreground">
                 <ChevronRight className="inline h-3 w-3 -mt-px" />
-                {' '}子任务{parentTaskNumber ? ` of #${parentTaskNumber}` : ''}
+                {' '}{t('subTask')}{parentTaskNumber ? ` of #${parentTaskNumber}` : ''}
               </span>
             )}
           </div>
@@ -133,7 +134,7 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
         {hasSubtasks && (
           <div className="mt-2 pt-2 border-t-2 border-brutal-muted">
             <div className="flex items-center gap-2 text-xs">
-              <span className="text-muted-foreground">子任务:</span>
+              <span className="text-muted-foreground">{t('subTaskLabel')}</span>
               <span className="font-bold">{task.done_subtask_count ?? 0}/{task.subtask_count}</span>
               <div className="flex-1 h-1.5 border-2 border-black bg-brutal-cream">
                 <div

@@ -9,6 +9,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { User, Mail, Calendar, AlertCircle, RefreshCw } from 'lucide-react';
 import { apiClient, ApiError } from '@/lib/api-client';
+import { t } from '@/lib/i18n';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 
@@ -36,13 +37,13 @@ export function TeamsHumanProfile({ userId }: TeamsHumanProfileProps) {
       // match, the row is treated as inaccessible (multi-user not yet supported).
       const me = await apiClient.get<UserInfo>('/api/v1/users/me');
       if (me.id !== userId) {
-        setError('该用户不存在或当前不可访问');
+        setError(t('teamsUserNotFound'));
         setUser(null);
       } else {
         setUser(me);
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : '加载用户信息失败');
+      setError(err instanceof ApiError ? err.message : t('userLoadError'));
     } finally {
       setIsLoading(false);
     }
@@ -69,7 +70,7 @@ export function TeamsHumanProfile({ userId }: TeamsHumanProfileProps) {
         <p className="font-body text-sm text-brutal-danger">{error}</p>
         <Button onClick={load} size="sm" className="mt-4">
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-          重试
+          Retry
         </Button>
       </div>
     );
@@ -101,7 +102,7 @@ export function TeamsHumanProfile({ userId }: TeamsHumanProfileProps) {
             <div className="flex items-center gap-3 border-2 border-black bg-brutal-cream p-3">
               <Calendar className="h-4 w-4 text-muted-foreground" />
               <span className="font-body text-sm">
-                注册于 {new Date(user.created_at).toLocaleDateString('zh-CN')}
+                Registered on {new Date(user.created_at).toLocaleDateString('en-US')}
               </span>
             </div>
           )}

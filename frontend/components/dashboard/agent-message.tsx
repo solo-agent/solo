@@ -15,6 +15,7 @@ import { MessageSquare } from 'lucide-react';
 import type { Message } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
+import { t } from '@/lib/i18n';
 
 interface AgentMessageProps {
   message: Message;
@@ -60,7 +61,7 @@ function highlightSpecials(text: string): string {
 }
 
 export function AgentMessage({ message, onReply }: AgentMessageProps) {
-  const time = new Date(message.created_at).toLocaleString('zh-CN', {
+  const time = new Date(message.created_at).toLocaleString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
   });
@@ -224,8 +225,8 @@ export function AgentMessage({ message, onReply }: AgentMessageProps) {
             type="button"
             onClick={(e) => { e.stopPropagation(); onReply(message); }}
             className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
-            aria-label={`回复 ${message.display_name} 的消息`}
-            title="回复"
+            aria-label={t('replyToMessage', { name: message.display_name })}
+            title="Reply"
           >
             <MessageSquare className="h-3.5 w-3.5" />
           </button>

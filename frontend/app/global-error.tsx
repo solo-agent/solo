@@ -14,15 +14,15 @@ export default function GlobalError({
   }, [error]);
 
   return (
-    <html lang="zh-CN">
+    <html lang="en">
       <body className="min-h-screen bg-brutal-cream font-sans">
         <div className="flex min-h-screen items-center justify-center p-8">
           <div className="border-4 border-black shadow-brutal-xl bg-white rounded-none p-8 max-w-lg w-full">
             <h1 className="font-heading font-bold text-3xl text-black mb-4">
-              出了点问题
+              Something went wrong
             </h1>
             <p className="font-body text-lg text-black/70 mb-2">
-              应用遇到了一个意外错误，请尝试重试。
+              An unexpected error occurred. Please try again.
             </p>
             {error.digest && (
               <p className="font-mono text-xs text-black/40 mb-6">
@@ -33,7 +33,7 @@ export default function GlobalError({
               onClick={reset}
               className="btn-brutal w-full"
             >
-              重试
+              Retry
             </button>
           </div>
         </div>

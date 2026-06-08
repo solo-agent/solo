@@ -4,6 +4,7 @@
 
 'use client';
 
+import { t } from '@/lib/i18n';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import type { Channel, CreateChannelInput } from '@/lib/types';
@@ -51,7 +52,7 @@ export function useChannels() {
         setChannels(res.map(mapChannel));
       }
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : '加载频道列表失败';
+      const message = err instanceof ApiError ? err.message : `${t('channelLoadError')}`;
       setError(message);
     } finally {
       setIsLoading(false);

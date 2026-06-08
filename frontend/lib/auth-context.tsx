@@ -9,6 +9,7 @@
 
 'use client';
 
+import { t } from '@/lib/i18n';
 import {
   createContext,
   useContext,
@@ -142,7 +143,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     clearAuthTokens();
           dispatch({
             type: 'AUTH_FAILURE',
-            error: err instanceof Error ? err.message : '认证初始化失败',
+            error: err instanceof Error ? err.message : t('authInitError'),
           });
         }
       });
@@ -158,7 +159,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       dispatch({ type: 'AUTH_SUCCESS', user: data.user });
     } catch (err: unknown) {
       const message =
-        err instanceof ApiError ? err.message : '登录失败，请稍后再试';
+        err instanceof ApiError ? err.message : t('authLoginError');
       dispatch({ type: 'AUTH_FAILURE', error: message });
       throw err;
     }
@@ -174,7 +175,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       dispatch({ type: 'AUTH_SUCCESS', user: data.user });
     } catch (err: unknown) {
       const message =
-        err instanceof ApiError ? err.message : '注册失败，请稍后再试';
+        err instanceof ApiError ? err.message : t('authRegisterError');
       dispatch({ type: 'AUTH_FAILURE', error: message });
       throw err;
     }
@@ -223,7 +224,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth 必须在 AuthProvider 内使用');
+    throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
 }

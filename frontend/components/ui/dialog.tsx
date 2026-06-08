@@ -5,6 +5,7 @@
 'use client';
 
 import { useEffect, useRef, type ReactNode } from 'react';
+import { t } from '@/lib/i18n';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -72,7 +73,7 @@ export function DialogCloseButton({ onClick }: { onClick: () => void }) {
     <button
       onClick={onClick}
       className="flex h-7 w-7 items-center justify-center rounded-none border-2 border-black bg-white shadow-brutal-sm hover:bg-brutal-primary-light active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
-      aria-label="关闭"
+      aria-label={t('close')}
     >
       <X className="h-4 w-4" />
     </button>

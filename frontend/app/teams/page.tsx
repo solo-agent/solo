@@ -12,6 +12,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertCircle, RefreshCw, Plus, MessageSquare, User, FolderOpen } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { t } from '@/lib/i18n';
 import { useAgents } from '@/lib/hooks/use-agents';
 import { useUser } from '@/lib/hooks/use-user';
 import { useDM } from '@/lib/hooks/use-dm';
@@ -103,7 +104,7 @@ export default function TeamsPage() {
       const dm = await createOrGetDM({ agent_id: selectedAgent.id });
       router.push(`/dashboard?dm=${dm.id}`);
     } catch {
-      showToast('无法发起会话，请稍后再试', 'error');
+      showToast(t('createDMError'), 'error');
     } finally {
       setIsDMLoading(false);
     }
@@ -122,13 +123,13 @@ export default function TeamsPage() {
         custom_env: values.custom_env,
         custom_args: values.custom_args,
       });
-      showToast('Agent 创建成功', 'success');
+      showToast(t('teamsAgentCreated'), 'success');
       setIsCreateModalOpen(false);
       // Auto-select the new agent to open detail panel
       setSelection({ kind: 'agent', id: agent.id });
       setAgentTab('profile');
     } catch {
-      showToast('创建 Agent 失败，请稍后再试', 'error');
+      showToast(t('teamsAgentCreateError'), 'error');
     } finally {
       setIsCreating(false);
     }
@@ -140,7 +141,7 @@ export default function TeamsPage() {
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
           <Spinner size="md" />
-          <p className="font-mono text-sm text-muted-foreground">加载中...</p>
+          <p className="font-mono text-sm text-muted-foreground">{t('loading')}</p>
         </div>
       </div>
     );
@@ -172,7 +173,7 @@ export default function TeamsPage() {
               onClick={() => refetchAgents()}
             >
               <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-              重试
+              {t('retry')}
             </Button>
           </div>
         )}
@@ -185,7 +186,7 @@ export default function TeamsPage() {
               onClick={() => refetchUser()}
             >
               <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-              重试
+              {t('retry')}
             </Button>
           </div>
         )}
@@ -217,7 +218,7 @@ export default function TeamsPage() {
                 disabled={isDMLoading}
               >
                 <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
-                {isDMLoading ? '跳转中...' : 'Message'}
+                {isDMLoading ? t('teamsJumping') : 'Message'}
               </Button>
             </div>
             <TabBar
@@ -243,9 +244,9 @@ export default function TeamsPage() {
               <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm">
                 <Plus className="h-7 w-7 text-white" />
               </div>
-              <h2 className="font-heading text-lg font-bold">还没有 Agent</h2>
+              <h2 className="font-heading text-lg font-bold">{t('teamsNoAgents')}</h2>
               <p className="mt-2 font-body text-sm text-muted-foreground">
-                请先创建一个 Agent,然后回到 Teams 页面
+                {t('teamsNoAgentsDesc')}
               </p>
             </div>
           </div>
@@ -261,13 +262,13 @@ export default function TeamsPage() {
         width="lg"
       >
         <DialogHeader>
-          <DialogTitle>创建 Agent</DialogTitle>
+          <DialogTitle>{t('teamsCreateAgent')}</DialogTitle>
           <DialogCloseButton onClick={() => setIsCreateModalOpen(false)} />
         </DialogHeader>
         <AgentForm
           onSubmit={handleCreateAgent}
           isSubmitting={isCreating}
-          submitLabel="创建 Agent"
+          submitLabel={t('teamsCreateAgent')}
         />
       </Dialog>
     </div>

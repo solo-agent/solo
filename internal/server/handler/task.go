@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/solo-ai/solo/internal/realtime"
+	"github.com/solo-ai/solo/internal/i18n"
 	"github.com/solo-ai/solo/internal/server/service"
 	"github.com/solo-ai/solo/internal/server/ws"
 )
@@ -170,7 +171,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var threadID string
 	msgID := uuid.New().String()
 	now := time.Now()
-	sysContent := formatSystemMessage(task.TaskNumber, task.Title, "已创建")
+	sysContent := formatSystemMessage(task.TaskNumber, task.Title, i18n.Active.SysTaskCreated)
 	_, dbErr := h.pool.Exec(r.Context(),
 		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, created_at, updated_at)
 		 VALUES ($1, $2, 'system', '00000000-0000-0000-0000-000000000000', $3, 'system', $4, $4)`,
@@ -237,7 +238,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if task.MessageID != "" {
 		}
 
-	h.broadcastSystemMessageWithID(task.ChannelID, threadID, task.TaskNumber, task.Title, "已创建", msgID, now, true)
+	h.broadcastSystemMessageWithID(task.ChannelID, threadID, task.TaskNumber, task.Title, i18n.Active.SysTaskCreated, msgID, now, true)
 
 	// Trigger all channel agents for auto-claim (same as asTask message flow)
 	if h.agentSvc != nil {
@@ -405,7 +406,7 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 		statusText := formatStatusDisplay(*req.Status)
 		h.broadcastSystemMessage(task.ChannelID, threadID, task.TaskNumber, task.Title, "状态已更新为 "+statusText)
 	} else {
-		h.broadcastSystemMessage(task.ChannelID, threadID, task.TaskNumber, task.Title, "已更新")
+		h.broadcastSystemMessage(task.ChannelID, threadID, task.TaskNumber, task.Title, i18n.Active.SysTaskUpdated)
 	}
 
 }
@@ -462,7 +463,7 @@ func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Broadcast system message before task is deleted
-	h.broadcastSystemMessage(channelID, threadID, task.TaskNumber, task.Title, "已删除")
+	h.broadcastSystemMessage(channelID, threadID, task.TaskNumber, task.Title, i18n.Active.SysTaskDeleted)
 
 	// Broadcast task.deleted event to channel subscribers
 	ws.BroadcastTaskDeleted(h.hub, ws.TaskDeletedPayload{
@@ -795,7 +796,7 @@ func (h *TaskHandler) ConvertToTask(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Broadcast system message
-	h.broadcastSystemMessageWithID(task.ChannelID, threadID, task.TaskNumber, task.Title, "已创建（从消息转换）", uuid.New().String(), time.Now(), true)
+	h.broadcastSystemMessageWithID(task.ChannelID, threadID, task.TaskNumber, task.Title, i18n.Active.SysTaskCreatedFromMsg, uuid.New().String(), time.Now(), true)
 }
 
 // --- System message helpers ---
@@ -843,7 +844,7 @@ func (h *TaskHandler) broadcastSystemMessageWithID(channelID, threadID string, t
 	}
 
 	if threadID != "" {
-		// Persist to DB. "已创建" stays as channel message (thread_id=NULL)
+		// Persist to DB. i18n.Active.SysTaskCreated stays as channel message (thread_id=NULL)
 		// so it appears in the channel list. Other actions go into the thread.
 		var nullableThreadID interface{}
 		if !showInChannel {
@@ -1059,7 +1060,7 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 
 	// Broadcast system notification only to thread
 	if threadID != "" {
-		h.broadcastSystemMessageWithID(task.ChannelID, threadID, task.TaskNumber, task.Title, "已创建", uuid.New().String(), now, false)
+		h.broadcastSystemMessageWithID(task.ChannelID, threadID, task.TaskNumber, task.Title, i18n.Active.SysTaskCreated, uuid.New().String(), now, false)
 	}
 
 	// Trigger agents for auto-claim
@@ -1200,7 +1201,7 @@ func (h *TaskHandler) UpdateGlobal(w http.ResponseWriter, r *http.Request) {
 		statusText := formatStatusDisplay(*req.Status)
 		h.broadcastSystemMessage(updated.ChannelID, threadID, updated.TaskNumber, updated.Title, "状态已更新为 "+statusText)
 	} else {
-		h.broadcastSystemMessage(updated.ChannelID, threadID, updated.TaskNumber, updated.Title, "已更新")
+		h.broadcastSystemMessage(updated.ChannelID, threadID, updated.TaskNumber, updated.Title, i18n.Active.SysTaskUpdated)
 	}
 
 }

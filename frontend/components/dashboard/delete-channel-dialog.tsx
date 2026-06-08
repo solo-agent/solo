@@ -12,6 +12,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { t } from '@/lib/i18n';
 
 interface DeleteChannelDialogProps {
   open: boolean;
@@ -40,9 +41,9 @@ export function DeleteChannelDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTitle>删除频道</DialogTitle>
+      <DialogTitle>Delete Channel</DialogTitle>
       <DialogDescription>
-        确定要删除 <strong>#{channelName}</strong> 吗？删除后频道内所有消息将被移除，且不可恢复。
+        Are you sure you want to delete <strong>#{channelName}</strong>? All messages in the channel will be permanently removed.
       </DialogDescription>
 
       <DialogFooter>
@@ -52,7 +53,7 @@ export function DeleteChannelDialog({
           onClick={() => onOpenChange(false)}
           disabled={isDeleting}
         >
-          取消
+          Cancel
         </Button>
         <Button
           type="button"
@@ -60,7 +61,7 @@ export function DeleteChannelDialog({
           onClick={handleDelete}
           disabled={isDeleting}
         >
-          {isDeleting ? '删除中...' : '删除频道'}
+          {isDeleting ? 'Deleting...' : 'Delete Channel'}
         </Button>
       </DialogFooter>
     </Dialog>

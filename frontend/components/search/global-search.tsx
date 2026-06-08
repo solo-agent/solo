@@ -16,6 +16,7 @@ import { apiClient } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 import type { SearchResult, SearchResponse } from '@/lib/types';
 import { sanitizeHtml } from '@/lib/sanitize';
+import { t } from '@/lib/i18n';
 
 interface GlobalSearchProps {
   open: boolean;
@@ -49,8 +50,8 @@ function formatDate(iso: string): string {
     const now = new Date();
     const diffMs = now.getTime() - d.getTime();
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    if (diffDays === 0) return '今天';
-    if (diffDays === 1) return '昨天';
+    if (diffDays === 0) return t('today');
+    if (diffDays === 1) return t('yesterday');
     return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
   } catch {
     return '';
@@ -111,7 +112,7 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
         setActiveIndex(items.length > 0 ? 0 : -1);
       } catch (err: unknown) {
         const message =
-          err instanceof Error ? err.message : '搜索请求失败';
+          err instanceof Error ? err.message : t('searchError');
         setError(message);
         setResults([]);
         setActiveIndex(-1);
@@ -197,7 +198,7 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
       onKeyDown={() => {}} // Suppress keyboard events on backdrop
       role="dialog"
       aria-modal="true"
-      aria-label="全局搜索"
+      aria-label={t('globalSearch')}
     >
       <div
         ref={panelRef}
@@ -213,9 +214,9 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入关键词搜索所有消息..."
+            placeholder={t('searchPlaceholder')}
             className="flex-1 bg-transparent py-3 text-lg font-body outline-none placeholder:text-muted-foreground"
-            aria-label="搜索关键词"
+            aria-label={t('searchKeyword')}
             autoComplete="off"
             spellCheck={false}
           />
@@ -223,7 +224,7 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
             type="button"
             onClick={onClose}
             className="ml-2 flex h-8 w-8 flex-shrink-0 items-center justify-center border-2 border-black bg-white shadow-brutal-sm hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
-            aria-label="关闭搜索"
+            aria-label={t('channelSearchClose')}
           >
             <X className="h-4 w-4" />
           </button>
@@ -236,7 +237,7 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
             <div className="flex items-center justify-center py-12">
               <div className="h-6 w-6 animate-spin rounded-full border-3 border-brutal-primary border-t-transparent" />
               <span className="ml-3 font-body text-sm text-muted-foreground">
-                搜索中...
+                {t('searchLoading')}
               </span>
             </div>
           )}
@@ -253,13 +254,13 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
             <div className="flex flex-col items-center py-12 text-muted-foreground">
               <Search className="mb-3 h-8 w-8 opacity-30" />
               <p className="font-body text-sm">
-                输入关键词搜索所有频道中的消息
+                {t('searchEmpty')}
               </p>
               <p className="mt-1 font-mono text-xs text-muted-foreground/60">
                 <kbd className="inline-block border border-brutal-muted bg-muted px-1.5 py-0.5 font-mono text-xs">
                   Esc
                 </kbd>{' '}
-                关闭搜索
+                {t('channelSearchClose')}
               </p>
             </div>
           )}
@@ -267,13 +268,13 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
           {/* No results */}
           {!isLoading && !error && query.trim() !== '' && results.length === 0 && (
             <div className="flex flex-col items-center py-12 text-muted-foreground">
-              <p className="font-body text-sm">未找到匹配的消息</p>
+              <p className="font-body text-sm">{t('searchNoResults')}</p>
             </div>
           )}
 
           {/* Results list */}
           {!isLoading && results.length > 0 && (
-            <ul role="listbox" aria-label="搜索结果">
+            <ul role="listbox" aria-label={t('searchResults')}>
               {results.map((result, index) => (
                 <li key={result.id} role="option" aria-selected={index === activeIndex}>
                   <button
@@ -325,7 +326,7 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
         {!isLoading && results.length > 0 && (
           <div className="border-t-2 border-black px-4 py-2">
             <p className="font-mono text-xs text-muted-foreground">
-              找到 {results.length} 条结果
+              {t('searchResultsCount', { n: results.length })}
             </p>
           </div>
         )}

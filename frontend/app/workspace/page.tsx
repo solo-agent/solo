@@ -9,6 +9,7 @@ import { FileTree } from '@/components/workspace/file-tree';
 import { FilePreview } from '@/components/workspace/file-preview';
 import { ResizablePanel } from '@/components/workspace/resizable-panel';
 import { Breadcrumb } from '@/components/workspace/breadcrumb';
+import { t } from '@/lib/i18n';
 import { useWorkspaceFiles } from '@/lib/hooks/use-workspace-files';
 import { useAgents } from '@/lib/hooks/use-agents';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -52,7 +53,7 @@ function WorkspaceLeftColumn({
           type="button"
           onClick={() => setExpanded((v) => !v)}
           className={cn(SECTION_HEADER, 'text-muted-foreground')}
-          aria-label="展开或折叠 Agents"
+          aria-label={t('workspaceExpandAgents')}
           aria-expanded={expanded}
         >
           <ChevronDown
@@ -82,12 +83,12 @@ function WorkspaceLeftColumn({
                   onClick={onRetry}
                   className="font-mono text-[10px] font-bold underline hover:text-brutal-primary"
                 >
-                  重试
+                  {t('retry')}
                 </button>
               </div>
             ) : agents.length === 0 ? (
               <p className="px-6 py-2 font-mono text-[10px] italic text-muted-foreground">
-                暂无 agent
+                {t('workspaceNoAgents')}
               </p>
             ) : (
               agents.map((agent) => (
@@ -205,7 +206,7 @@ export default function WorkspacePage() {
               </div>
               <h2 className="font-heading text-lg font-bold text-foreground">Workspace</h2>
               <p className="mt-2 font-mono text-sm text-muted-foreground">
-                从左侧选择一个 Agent 浏览其工作空间文件
+                {t('workspaceSelectAgent')}
               </p>
             </div>
           </div>
@@ -224,7 +225,7 @@ export default function WorkspacePage() {
                 size="sm"
                 onClick={() => loadTree()}
                 className="h-8 w-8 p-0"
-                aria-label="刷新文件树"
+                aria-label={t('workspaceRefreshTree')}
               >
                 <RefreshCw className="h-3.5 w-3.5" />
               </Button>
@@ -241,7 +242,7 @@ export default function WorkspacePage() {
                 </BrutalAlert>
                 <Button variant="outline" size="sm" onClick={() => loadTree()}>
                   <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                  重试
+                  {t('retry')}
                 </Button>
               </div>
             )}
@@ -260,9 +261,9 @@ export default function WorkspacePage() {
               <div className="flex flex-1 items-center justify-center">
                 <div className="text-center">
                   <FolderOpen className="mx-auto h-10 w-10 text-muted-foreground" />
-                  <p className="mt-2 font-heading text-sm font-bold text-foreground">Agent workspace 尚无文件</p>
+                  <p className="mt-2 font-heading text-sm font-bold text-foreground">{t('workspaceNoFiles')}</p>
                   <p className="mt-1 font-mono text-xs text-muted-foreground">
-                    运行 Agent 任务后文件将出现在此处
+                    {t('workspaceNoFilesDesc')}
                   </p>
                 </div>
               </div>
@@ -279,7 +280,7 @@ export default function WorkspacePage() {
                     <div className="h-full overflow-y-auto border-r-2 border-black bg-white">
                       <div className="border-b-2 border-black px-3 py-2">
                         <span className="font-heading text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                          文件
+                          {t('workspaceFiles')}
                         </span>
                       </div>
                       <FileTree
@@ -305,7 +306,7 @@ export default function WorkspacePage() {
                           <div className="text-center">
                             <FileText className="mx-auto h-6 w-6 text-muted-foreground" />
                             <p className="mt-2 font-mono text-xs text-muted-foreground">
-                              选择文件以预览内容
+                              {t('workspaceSelectFile')}
                             </p>
                           </div>
                         </div>

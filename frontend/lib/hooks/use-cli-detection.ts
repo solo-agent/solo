@@ -6,6 +6,7 @@
 
 'use client';
 
+import { t } from '@/lib/i18n';
 import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '@/lib/api-client';
 import type { AgentBackendDetectItem } from '@/lib/types';
@@ -62,7 +63,7 @@ export function useCliDetection(): CliDetectionState {
       .catch((err) => {
         if (!mountedRef.current) return;
         setError(
-          err instanceof Error ? err.message : 'CLI 检测失败',
+          err instanceof Error ? err.message : `${t('cliDetectionError')}`,
         );
       })
       .finally(() => {

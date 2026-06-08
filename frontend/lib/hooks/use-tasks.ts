@@ -9,6 +9,7 @@
 
 'use client';
 
+import { t } from '@/lib/i18n';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
@@ -96,7 +97,7 @@ export function useTasks(filters?: TaskFilters) {
         setTasks(Array.isArray(res) ? res.map(mapTask) : []);
       }
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : '加载任务列表失败';
+      const message = err instanceof ApiError ? err.message : `${t('taskLoadError')}`;
       if (mountedRef.current) setError(message);
     } finally {
       if (mountedRef.current) setIsLoading(false);
@@ -358,7 +359,7 @@ export function useDMTasks(dmId: string | null) {
         setTasks(Array.isArray(res) ? res.map(mapDMTask) : []);
       }
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : '加载任务列表失败';
+      const message = err instanceof ApiError ? err.message : `${t('taskLoadError')}`;
       if (mountedRef.current) setError(message);
     } finally {
       if (mountedRef.current) setIsLoading(false);
@@ -545,9 +546,9 @@ export function useTask(id: string) {
       if (mountedRef.current) setTask(mapTask(res));
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.status === 404 ? '任务不存在' : err.message);
+        setError(err.status === 404 ? `${t('taskNotFound')}` : err.message);
       } else {
-        setError('加载任务信息失败');
+        setError(`${t('taskDetailLoadError')}`);
       }
     } finally {
       if (mountedRef.current) setIsLoading(false);

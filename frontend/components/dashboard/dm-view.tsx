@@ -22,6 +22,7 @@ import { PixelAvatar } from '@/components/ui/pixel-avatar';
 const ThreadPanel = lazy(() =>
   import('./thread-panel').then((m) => ({ default: m.ThreadPanel })),
 );
+import { t } from '@/lib/i18n';
 import type { DMChannel, ChannelMember, Message, Task, TaskStatus } from '@/lib/types';
 
 interface DMViewProps {
@@ -63,7 +64,7 @@ interface DMViewProps {
 function getDisplayName(dm: DMChannel): string {
   if (dm.other_user) return dm.other_user.display_name;
   if (dm.other_agent) return dm.other_agent.name;
-  return '未知用户';
+  return t('unknown');
 }
 
 function isAgentDM(dm: DMChannel): boolean {
@@ -163,7 +164,7 @@ export function DMView({
         member_type: 'user',
         member_id: 'user-1',
         role: 'member',
-        display_name: '我',
+        display_name: t('selfRef'),
         status: 'online',
       },
     ];
@@ -317,7 +318,7 @@ export function DMView({
                 )}
               >
                 <MessageSquare className="h-3.5 w-3.5" />
-                消息
+                {t('messages')}
               </button>
               <button
                 type="button"
@@ -331,7 +332,7 @@ export function DMView({
                 )}
               >
                 <ClipboardList className="h-3.5 w-3.5" />
-                任务
+                {t('tasks')}
               </button>
             </div>
           </div>
@@ -345,7 +346,7 @@ export function DMView({
               <div className="flex items-center gap-2 font-body text-sm text-muted-foreground">
                 <MessageSquare className="h-4 w-4" />
                 <span>
-                  这是你与 <strong className="text-foreground">{name}</strong> 的私信
+                  {t('systemMessageDM', { name })}
                 </span>
               </div>
             </div>
@@ -362,7 +363,7 @@ export function DMView({
                     className="btn-brutal btn-brutal-sm gap-2"
                   >
                     <RefreshCw className="h-4 w-4" />
-                    重试
+                    {t('retry')}
                   </button>
                 </div>
               </div>
@@ -398,7 +399,7 @@ export function DMView({
                   return result;
                 }}
                 members={members}
-                placeholder={`发送消息给 ${name}...`}
+                placeholder={t('sendMessageTo', { name })}
                 showAsTaskToggle
               />
             )}
@@ -408,7 +409,7 @@ export function DMView({
                   DELETED
                 </span>
                 <p className="mt-2 font-body text-xs text-muted-foreground">
-                  此 Agent 已被删除，无法发送消息
+                  {t('agentDeletedDM')}
                 </p>
               </div>
             )}
@@ -423,7 +424,7 @@ export function DMView({
                 <div className="flex items-center gap-2 font-body text-sm text-muted-foreground">
                   <ClipboardList className="h-4 w-4" />
                   <span>
-                    与 <strong className="text-foreground">{name}</strong> 的任务
+                    {t('dmTasks', { name })}
                   </span>
                 </div>
               </div>

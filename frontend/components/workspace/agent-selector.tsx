@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { Select, type SelectOption } from '@/components/ui/select';
+import { t } from '@/lib/i18n';
 
 interface AgentSummary {
   id: string;
@@ -45,7 +46,7 @@ export function AgentSelector({ agentId }: AgentSelectorProps) {
       value={agentId || ''}
       onChange={handleChange}
       options={options}
-      placeholder="选择一个 Agent..."
+      placeholder={t('workspaceSelectAgentPlaceholder')}
       size="sm"
     />
   );

@@ -14,14 +14,15 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import type { CreateTaskInput, TaskPriority } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
 // ---- Constants ----
 
 const PRIORITY_OPTIONS: { value: TaskPriority; label: string }[] = [
-  { value: 'urgent', label: '紧急' },
-  { value: 'high', label: '高' },
-  { value: 'normal', label: '普通' },
-  { value: 'low', label: '低' },
+  { value: 'urgent', label: t('priorityUrgent') },
+  { value: 'high', label: t('priorityHigh') },
+  { value: 'normal', label: t('priorityNormal') },
+  { value: 'low', label: t('priorityLow') },
 ];
 
 // ---- Props ----
@@ -48,7 +49,7 @@ export function TaskForm({
   assigneeOptions,
   onSubmit,
   isSubmitting,
-  submitLabel = '创建任务',
+  submitLabel = t('createTask'),
   error,
 }: TaskFormProps) {
   const [title, setTitle] = useState('');
@@ -67,7 +68,7 @@ export function TaskForm({
       setValidationError(null);
 
       if (!title.trim()) {
-        setValidationError('请输入任务标题');
+        setValidationError(t('taskTitleRequired'));
         return;
       }
 
@@ -93,13 +94,13 @@ export function TaskForm({
       {/* Title */}
       <div>
         <Label htmlFor="task-title" className="mb-1.5 block">
-          任务标题 <span className="text-brutal-danger">*</span>
+          {t('taskTitle')} <span className="text-brutal-danger">*</span>
         </Label>
         <Input
           id="task-title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="输入任务标题..."
+          placeholder={t('taskTitlePlaceholder')}
           aria-required="true"
           disabled={isSubmitting}
         />
@@ -109,13 +110,13 @@ export function TaskForm({
       <div>
         <Label htmlFor="task-description" className="mb-1.5 block">
           <AlignLeft className="mr-1 inline h-3.5 w-3.5" />
-          描述
+          {t('taskDesc')}
         </Label>
         <Textarea
           id="task-description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="详细描述任务内容..."
+          placeholder={t('taskDescPlaceholder')}
           rows={4}
           disabled={isSubmitting}
         />
@@ -124,7 +125,7 @@ export function TaskForm({
       {/* Priority */}
       <div>
         <Label htmlFor="task-priority" className="mb-1.5 block">
-          优先级
+          {t('taskPriority')}
         </Label>
         <Select
           id="task-priority"
@@ -141,7 +142,7 @@ export function TaskForm({
         <div>
           <Label className="mb-1.5 block">
             <User className="mr-1 inline h-3.5 w-3.5" />
-            指派人
+            {t('taskAssignee')}
           </Label>
           <div className="flex gap-2">
             <Select
@@ -151,7 +152,7 @@ export function TaskForm({
                 setAssigneeId('');
               }}
               options={[
-                { value: 'user', label: '用户' },
+                { value: 'user', label: t('user') },
                 { value: 'agent', label: 'Agent' },
               ]}
               size="md"
@@ -162,7 +163,7 @@ export function TaskForm({
               value={assigneeId}
               onChange={(v) => setAssigneeId(v)}
               options={[
-                { value: '', label: '不指定' },
+                { value: '', label: t('unassigned') },
                 ...filteredOptions.map((opt) => ({ value: opt.id, label: opt.name })),
               ]}
               size="md"
@@ -177,7 +178,7 @@ export function TaskForm({
       <div>
         <Label htmlFor="task-due-date" className="mb-1.5 block">
           <Calendar className="mr-1 inline h-3.5 w-3.5" />
-          截止日期
+          {t('taskDueDate')}
         </Label>
         <Input
           id="task-due-date"
@@ -204,7 +205,7 @@ export function TaskForm({
           disabled={isSubmitting}
           className="btn-brutal btn-brutal-primary px-6"
         >
-          {isSubmitting ? '提交中...' : submitLabel}
+          {isSubmitting ? t('submitting') : submitLabel}
         </button>
       </div>
     </form>

@@ -15,6 +15,7 @@ import { AgentSkillsTab } from './agent-skills-tab';
 import { AgentWorkspaceTab } from './agent-workspace-tab';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TabBar } from '@/components/ui/tab-bar';
+import { t } from '@/lib/i18n';
 import type { TabBarTab } from '@/components/ui/tab-bar';
 import type { Agent } from '@/lib/types';
 
@@ -48,7 +49,7 @@ export function AgentDetailPanel({ agentId, onClose }: AgentDetailPanelProps) {
       className="fixed inset-y-0 right-0 z-40 flex w-full max-w-lg flex-col border-l-2 border-black bg-white shadow-brutal-xl"
       role="dialog"
       aria-modal="true"
-      aria-label="Agent 详情面板"
+      aria-label={t('agentDetailPanel')}
       onKeyDown={handleKeyDown}
     >
       {/* Header */}
@@ -58,19 +59,19 @@ export function AgentDetailPanel({ agentId, onClose }: AgentDetailPanelProps) {
             type="button"
             onClick={onClose}
             className="flex h-8 w-8 items-center justify-center border-2 border-black bg-white shadow-brutal-sm hover:shadow-brutal transition-all"
-            aria-label="关闭 Agent 详情面板"
+            aria-label={t('agentDetailPanelClose')}
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
           <h2 className="font-heading text-base font-bold text-foreground">
-            Agent 详情
+            {t('agentDetailTitle')}
           </h2>
         </div>
         <button
           type="button"
           onClick={onClose}
           className="flex h-8 w-8 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm hover:shadow-brutal transition-all"
-          aria-label="关闭"
+          aria-label={t('close')}
         >
           <X className="h-4 w-4" />
         </button>

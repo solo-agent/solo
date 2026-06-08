@@ -3,12 +3,14 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/solo-ai/solo/internal/i18n"
 	"github.com/solo-ai/solo/internal/realtime"
 	"github.com/solo-ai/solo/internal/server/service"
 	"github.com/solo-ai/solo/internal/server/ws"
@@ -325,14 +327,14 @@ func TestTaskNumber_ResponseJSON(t *testing.T) {
 }
 
 func TestFormatSystemMessage(t *testing.T) {
-	msg := formatSystemMessage(3, "修复登录页面", "已创建")
-	expected := "📋 Task #3 已创建: 修复登录页面"
+	msg := formatSystemMessage(3, "Fix login page", i18n.Active.SysTaskCreated)
+	expected := fmt.Sprintf("📋 Task #%d %s: %s", 3, i18n.Active.SysTaskCreated, "Fix login page")
 	if msg != expected {
 		t.Errorf("expected %q, got %q", expected, msg)
 	}
 
-	msg2 := formatSystemMessage(1, "测试任务", "已删除")
-	expected2 := "📋 Task #1 已删除: 测试任务"
+	msg2 := formatSystemMessage(1, "Test task", i18n.Active.SysTaskDeleted)
+	expected2 := fmt.Sprintf("📋 Task #%d %s: %s", 1, i18n.Active.SysTaskDeleted, "Test task")
 	if msg2 != expected2 {
 		t.Errorf("expected %q, got %q", expected2, msg2)
 	}
@@ -401,7 +403,7 @@ func TestCreateTask_SystemMessage(t *testing.T) {
 
 	// Phase 5: broadcastSystemMessage only sends to threads. For channel-level
 	// broadcasts, use broadcastSystemMessageWithID with showInChannel=true.
-	h.broadcastSystemMessageWithID("ch-test", "", 5, "任务标题", "已创建", "msg-fixed-id", time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), true)
+	h.broadcastSystemMessageWithID("ch-test", "", 5, "Task title", i18n.Active.SysTaskCreated, "msg-fixed-id", time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), true)
 
 	// Verify broadcast was sent
 	msgs := spy.channelMessages["ch-test"]
@@ -441,8 +443,9 @@ func TestCreateTask_SystemMessage(t *testing.T) {
 	if payload.ID == "" {
 		t.Error("expected non-empty message ID")
 	}
-	if payload.Content != "📋 Task #5 已创建: 任务标题" {
-		t.Errorf("unexpected content: %q", payload.Content)
+	expectedContent := fmt.Sprintf("📋 Task #%d %s: %s", 5, i18n.Active.SysTaskCreated, "Task title")
+	if payload.Content != expectedContent {
+		t.Errorf("unexpected content: got %q, want %q", payload.Content, expectedContent)
 	}
 }
 

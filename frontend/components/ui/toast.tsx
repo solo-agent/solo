@@ -7,6 +7,7 @@
 
 'use client';
 
+import { t } from '@/lib/i18n';
 import {
   createContext,
   useContext,
@@ -109,7 +110,7 @@ function ToastItem({
         type="button"
         onClick={() => onDismiss(toast.id)}
         className="flex-shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-        aria-label="关闭提示"
+        aria-label={t('toastDismiss')}
       >
         <X className="h-3.5 w-3.5" />
       </button>

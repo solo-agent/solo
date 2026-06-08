@@ -22,7 +22,7 @@ const SIZE_CLASSES: Record<SpinnerSize, string> = {
   md: 'h-5 w-5 border-[3px]',
 };
 
-export function Spinner({ size = 'sm', className, label = '加载中' }: SpinnerProps) {
+export function Spinner({ size = 'sm', className, label = 'Loading' }: SpinnerProps) {
   return (
     <span
       role="status"

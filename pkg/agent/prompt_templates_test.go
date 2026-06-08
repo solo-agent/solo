@@ -8,8 +8,8 @@ import (
 func TestRoleTemplateCharCounts(t *testing.T) {
 	for _, tmpl := range RoleTemplateList() {
 		n := utf8.RuneCountInString(tmpl.Prompt)
-		if n < 80 || n > 120 {
-			t.Errorf("%s: prompt has %d chars, want 80-120", tmpl.Key, n)
+		if n < 200 || n > 700 {
+			t.Errorf("%s: prompt has %d chars, want 200-700", tmpl.Key, n)
 		} else {
 			t.Logf("%-10s %-12s  %3d chars  OK", tmpl.Key, tmpl.DisplayName, n)
 		}

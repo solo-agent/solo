@@ -12,6 +12,7 @@ import { apiClient, ApiError } from '@/lib/api-client';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 import { AVAILABLE_TOOLS } from '@/lib/types';
 import type { Agent } from '@/lib/types';
 
@@ -55,9 +56,9 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
       setEnabledTools(tools);
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.status === 404 ? 'Agent 不存在' : err.message);
+        setError(err.status === 404 ? t('agentProfileAgentNotFound') : err.message);
       } else {
-        setError('加载 Skills 配置失败');
+        setError(t('agentSkillsError'));
       }
     } finally {
       setIsLoading(false);
@@ -124,7 +125,7 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
         <p className="font-body text-sm text-brutal-danger">{error}</p>
         <Button type="button" onClick={loadAgent} size="sm" className="mt-4">
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-          重试
+          {t('retry')}
         </Button>
       </div>
     );
@@ -141,7 +142,7 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
           </h3>
         </div>
         <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-          切换开关来启用/禁用 Agent 拥有的工具。修改即时生效。
+          {t('agentSkillsToggle')}
         </p>
       </div>
 
@@ -168,7 +169,7 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
                 )}
                 role="switch"
                 aria-checked={isEnabled}
-                aria-label={`${isEnabled ? '禁用' : '启用'} ${tool.name}`}
+                aria-label={t(isEnabled ? 'agentSkillsDisable' : 'agentSkillsEnable', { tool: tool.name })}
               >
                 <span
                   className={cn(
@@ -194,7 +195,7 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
                           : 'bg-brutal-muted text-white',
                     )}
                   >
-                    {isSaving ? '保存中...' : isEnabled ? '已启用' : '未启用'}
+                    {isSaving ? t('agentSkillsSaving') : isEnabled ? t('agentSkillsEnabled') : t('agentSkillsNotEnabled')}
                   </span>
                 </div>
                 <p className="mt-0.5 font-mono text-[11px] text-muted-foreground leading-relaxed">
@@ -216,7 +217,7 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
         </div>
         <div className="mt-2 card-brutal bg-brutal-cream p-4 text-center">
           <p className="font-mono text-xs italic text-muted-foreground">
-            Workspace skills 将在后续版本中支持
+            {t('agentSkillsComingSoon')}
           </p>
         </div>
       </div>

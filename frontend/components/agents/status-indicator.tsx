@@ -9,6 +9,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 
 export type AgentStatus = 'online' | 'thinking' | 'outputting' | 'offline';
 
@@ -26,10 +27,10 @@ const STATUS_CONFIG: Record<
   AgentStatus,
   { color: string; label: string; animate: boolean }
 > = {
-  online: { color: '#a9d877', label: '在线', animate: true },
-  thinking: { color: '#ffd440', label: '思考中', animate: true },
-  outputting: { color: '#27ccf3', label: '输出中', animate: false },
-  offline: { color: '#c0b9b1', label: '离线', animate: false },
+  online: { color: '#a9d877', label: t('statusOnline'), animate: true },
+  thinking: { color: '#ffd440', label: t('statusThinking'), animate: true },
+  outputting: { color: '#27ccf3', label: t('statusStreaming'), animate: false },
+  offline: { color: '#c0b9b1', label: t('statusOffline'), animate: false },
 };
 
 export function StatusIndicator({

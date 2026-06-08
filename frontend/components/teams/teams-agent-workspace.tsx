@@ -13,6 +13,7 @@ import { useWorkspaceFiles } from '@/lib/hooks/use-workspace-files';
 import { FileTree } from '@/components/workspace/file-tree';
 import { FilePreview } from '@/components/workspace/file-preview';
 import { Skeleton } from '@/components/ui/skeleton';
+import { t } from '@/lib/i18n';
 
 interface TeamsAgentWorkspaceProps {
   agentId: string;
@@ -101,7 +102,7 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
           className="btn-brutal btn-brutal-sm mt-4"
         >
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-          重试
+          Retry
         </button>
       </div>
     );
@@ -113,9 +114,9 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
       <div className="flex h-full items-center justify-center">
         <div className="text-center">
           <FolderOpen className="mx-auto h-10 w-10 text-muted-foreground" />
-          <p className="mt-2 font-heading text-sm font-bold">Agent workspace 尚无文件</p>
+          <p className="mt-2 font-heading text-sm font-bold">Agent workspace has no files yet</p>
           <p className="mt-1 font-mono text-xs text-muted-foreground">
-            运行 Agent 任务后文件将出现在此处
+            Files will appear here after running agent tasks
           </p>
         </div>
       </div>
@@ -137,7 +138,7 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
           type="button"
           onClick={() => loadTree()}
           className="btn-brutal btn-brutal-xs"
-          aria-label="刷新文件树"
+          aria-label={t('workspaceRefreshTree')}
         >
           <RefreshCw className="h-3 w-3" />
         </button>
@@ -148,7 +149,7 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
         <div className="h-full w-[260px] flex-shrink-0 overflow-y-auto border-r-2 border-black bg-white">
           <div className="border-b-2 border-black px-3 py-2">
             <span className="font-heading text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-              文件
+              Files
             </span>
           </div>
           <FileTree
@@ -172,7 +173,7 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
               <div className="text-center">
                 <FileText className="mx-auto h-6 w-6 text-muted-foreground" />
                 <p className="mt-2 font-mono text-xs text-muted-foreground">
-                  选择文件以预览内容
+                  Select a file to preview its content
                 </p>
               </div>
             </div>

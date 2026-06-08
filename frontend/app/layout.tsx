@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Space_Grotesk, Space_Mono } from "next/font/google";
 import { AuthProvider } from "@/lib/auth-context";
+import { t } from '@/lib/i18n';
 import { WSProvider } from "@/lib/ws-context";
 import { WSAuthBridge } from "@/components/ws-auth-bridge";
 import { ConnectionBanner } from "@/components/connection-banner";
@@ -26,8 +27,8 @@ const spaceMono = Space_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Solo - 频道式多 Agent 协作平台",
-  description: "像 Slack 一样组织人+AI 的协作空间",
+  title: t('appTitle'),
+  description: t('appDescription'),
   icons: {
     icon: "/favicon.svg",
   },

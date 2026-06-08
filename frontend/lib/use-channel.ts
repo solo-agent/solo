@@ -8,6 +8,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { t } from '@/lib/i18n';
 import { apiClient, ApiError } from './api-client';
 import { useWebSocket } from './ws-context';
 import type { WSMessage, WSMessageSource } from './ws-types';
@@ -113,7 +114,7 @@ export function useChannel(channelId: string | null): UseChannelReturn {
   const sendMessage = useCallback(
     async (content: string, threadParentId?: string): Promise<WSMessage> => {
       if (!channelId) {
-        throw new Error('无法发送消息：未指定频道');
+        throw new Error(t('channelSendError'));
       }
 
       try {
@@ -125,7 +126,7 @@ export function useChannel(channelId: string | null): UseChannelReturn {
         return msg;
       } catch (err) {
         const message =
-          err instanceof ApiError ? err.message : '消息发送失败';
+          err instanceof ApiError ? err.message : t('messageSendError');
         setError(message);
         throw err;
       }

@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"fmt"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/solo-ai/solo/internal/i18n"
 )
 
 // ============================================================================
@@ -93,53 +96,53 @@ func TestInferActivityText(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "thinking → 思考中…",
+			name:  "thinking → thinking...",
 			chunk: OutputChunk{Type: string(MessageThinking)},
-			want:  "思考中…",
+			want:  i18n.Active.PillThinking,
 		},
 		{
-			name:  "text → 生成回复中…",
+			name:  "text → generating...",
 			chunk: OutputChunk{Type: string(MessageText)},
-			want:  "生成回复中…",
+			want:  i18n.Active.PillGenerating,
 		},
 		{
-			name: "tool_use with name → 调用 <name>",
+			name: "tool_use with name → calling <name>",
 			chunk: OutputChunk{
 				Type: string(MessageToolUse),
 				Tool: &ToolInfo{Name: "Bash"},
 			},
-			want: "调用 Bash",
+			want: fmt.Sprintf(i18n.Active.PillCallingTool, "Bash"),
 		},
 		{
-			name:  "tool_use without name → 使用工具",
+			name:  "tool_use without name → using tool",
 			chunk: OutputChunk{Type: string(MessageToolUse)},
-			want:  "使用工具",
+			want:  i18n.Active.PillUsingTool,
 		},
 		{
-			name: "tool_result success → <name> 完成",
+			name: "tool_result success → <name> done",
 			chunk: OutputChunk{
 				Type: string(MessageToolResult),
 				Tool: &ToolInfo{Name: "Edit", IsError: false},
 			},
-			want: "Edit 完成",
+			want: fmt.Sprintf(i18n.Active.PillToolDone, "Edit"),
 		},
 		{
-			name: "tool_result error → <name> 失败",
+			name: "tool_result error → <name> failed",
 			chunk: OutputChunk{
 				Type: string(MessageToolResult),
 				Tool: &ToolInfo{Name: "Edit", IsError: true},
 			},
-			want: "Edit 失败",
+			want: fmt.Sprintf(i18n.Active.PillToolFailed, "Edit"),
 		},
 		{
-			name:  "tool_result without name → 工具结果",
+			name:  "tool_result without name → tool result",
 			chunk: OutputChunk{Type: string(MessageToolResult)},
-			want:  "工具结果",
+			want:  i18n.Active.PillToolResult,
 		},
 		{
-			name:  "error → 出错了",
+			name:  "error → error",
 			chunk: OutputChunk{Type: string(MessageError)},
-			want:  "出错了",
+			want:  i18n.Active.PillError,
 		},
 		{
 			name:  "status → empty (caller skips push)",
@@ -305,7 +308,7 @@ func TestTruncateRunes(t *testing.T) {
 // Sanity: InferIslandStatusFromChunk and InferActivityText should
 // agree that a non-empty activity text corresponds to a non-idle
 // status. If one of them drifts, the frontend's pill will look
-// incoherent (e.g. "调用 Bash" with an idle status dot).
+// incoherent (e.g. "Bash running" with an idle status dot).
 func TestInferStatusAndActivityText_Consistency(t *testing.T) {
 	chunks := []OutputChunk{
 		{Type: string(MessageThinking)},
@@ -419,8 +422,8 @@ func TestInferActivityTextForBackend_StreamJSON(t *testing.T) {
 				Tool: &ToolInfo{Name: "default_api:Bash"},
 			}
 			got := InferActivityTextForBackend(provider, chunk)
-			if got != "调用 Bash" {
-				t.Errorf("got %q, want %q", got, "调用 Bash")
+			if got != fmt.Sprintf(i18n.Active.PillCallingTool, "Bash") {
+				t.Errorf("got %q, want %q", got, fmt.Sprintf(i18n.Active.PillCallingTool, "Bash"))
 			}
 		})
 	}
@@ -436,8 +439,8 @@ func TestInferActivityTextForBackend_ACP(t *testing.T) {
 			// Strip prefix: mcp__run_shell → run_shell
 			// Then ACP Title-Case: run_shell → Run_Shell
 			got := InferActivityTextForBackend(provider, chunk)
-			if got != "调用 Run_Shell" {
-				t.Errorf("got %q, want %q", got, "调用 Run_Shell")
+			if got != fmt.Sprintf(i18n.Active.PillCallingTool, "Run_Shell") {
+				t.Errorf("got %q, want %q", got, fmt.Sprintf(i18n.Active.PillCallingTool, "Run_Shell"))
 			}
 		})
 
@@ -448,8 +451,8 @@ func TestInferActivityTextForBackend_ACP(t *testing.T) {
 			}
 			// Strip acp__ → Read (already TitleCase)
 			got := InferActivityTextForBackend(provider, chunk)
-			if got != "Read 完成" {
-				t.Errorf("got %q, want %q", got, "Read 完成")
+			if got != fmt.Sprintf(i18n.Active.PillToolDone, "Read") {
+				t.Errorf("got %q, want %q", got, fmt.Sprintf(i18n.Active.PillToolDone, "Read"))
 			}
 		})
 
@@ -459,8 +462,8 @@ func TestInferActivityTextForBackend_ACP(t *testing.T) {
 				Tool: &ToolInfo{Name: "run_command", IsError: true},
 			}
 			got := InferActivityTextForBackend(provider, chunk)
-			if got != "Run_Command 失败" {
-				t.Errorf("got %q, want %q", got, "Run_Command 失败")
+			if got != fmt.Sprintf(i18n.Active.PillToolFailed, "Run_Command") {
+				t.Errorf("got %q, want %q", got, fmt.Sprintf(i18n.Active.PillToolFailed, "Run_Command"))
 			}
 		})
 	}
@@ -474,8 +477,8 @@ func TestInferActivityTextForBackend_JSONL(t *testing.T) {
 				Tool: &ToolInfo{Name: "Read"},
 			}
 			got := InferActivityTextForBackend(provider, chunk)
-			if got != "调用 Read" {
-				t.Errorf("got %q, want %q", got, "调用 Read")
+			if got != fmt.Sprintf(i18n.Active.PillCallingTool, "Read") {
+				t.Errorf("got %q, want %q", got, fmt.Sprintf(i18n.Active.PillCallingTool, "Read"))
 			}
 		})
 	}
@@ -487,14 +490,14 @@ func TestInferActivityTextForBackend_Other(t *testing.T) {
 		Type: string(MessageToolUse),
 		Tool: &ToolInfo{Name: "Bash"},
 	}
-	if got := InferActivityTextForBackend("codex", chunk); got != "调用 Bash" {
-		t.Errorf("codex: got %q, want %q", got, "调用 Bash")
+	if got := InferActivityTextForBackend("codex", chunk); got != fmt.Sprintf(i18n.Active.PillCallingTool, "Bash") {
+		t.Errorf("codex: got %q, want %q", got, fmt.Sprintf(i18n.Active.PillCallingTool, "Bash"))
 	}
-	if got := InferActivityTextForBackend("unknown", chunk); got != "调用 Bash" {
-		t.Errorf("unknown: got %q, want %q", got, "调用 Bash")
+	if got := InferActivityTextForBackend("unknown", chunk); got != fmt.Sprintf(i18n.Active.PillCallingTool, "Bash") {
+		t.Errorf("unknown: got %q, want %q", got, fmt.Sprintf(i18n.Active.PillCallingTool, "Bash"))
 	}
-	if got := InferActivityTextForBackend("", chunk); got != "调用 Bash" {
-		t.Errorf("empty provider: got %q, want %q", got, "调用 Bash")
+	if got := InferActivityTextForBackend("", chunk); got != fmt.Sprintf(i18n.Active.PillCallingTool, "Bash") {
+		t.Errorf("empty provider: got %q, want %q", got, fmt.Sprintf(i18n.Active.PillCallingTool, "Bash"))
 	}
 }
 
@@ -503,27 +506,27 @@ func TestInferActivityTextForBackend_NonToolChunks(t *testing.T) {
 	for _, provider := range []string{"claude", "kiro", "copilot", "codex", ""} {
 		t.Run(provider+"/thinking", func(t *testing.T) {
 			chunk := OutputChunk{Type: string(MessageThinking)}
-			if got := InferActivityTextForBackend(provider, chunk); got != "思考中…" {
-				t.Errorf("got %q, want %q", got, "思考中…")
+			if got := InferActivityTextForBackend(provider, chunk); got != i18n.Active.PillThinking {
+				t.Errorf("got %q, want %q", got, i18n.Active.PillThinking)
 			}
 		})
 		t.Run(provider+"/text", func(t *testing.T) {
 			chunk := OutputChunk{Type: string(MessageText)}
-			if got := InferActivityTextForBackend(provider, chunk); got != "生成回复中…" {
-				t.Errorf("got %q, want %q", got, "生成回复中…")
+			if got := InferActivityTextForBackend(provider, chunk); got != i18n.Active.PillGenerating {
+				t.Errorf("got %q, want %q", got, i18n.Active.PillGenerating)
 			}
 		})
 		t.Run(provider+"/error", func(t *testing.T) {
 			chunk := OutputChunk{Type: string(MessageError)}
-			if got := InferActivityTextForBackend(provider, chunk); got != "出错了" {
-				t.Errorf("got %q, want %q", got, "出错了")
+			if got := InferActivityTextForBackend(provider, chunk); got != i18n.Active.PillError {
+				t.Errorf("got %q, want %q", got, i18n.Active.PillError)
 			}
 		})
 	}
 }
 
 func TestInferActivityTextForBackend_EmptyToolName(t *testing.T) {
-	// Tool_use with empty tool name should fall back to "使用工具"
+	// Tool_use with empty tool name should fall back to i18n.Active.PillUsingTool
 	// across all providers.
 	for _, provider := range []string{"claude", "kimi", "copilot"} {
 		t.Run(provider, func(t *testing.T) {
@@ -531,8 +534,8 @@ func TestInferActivityTextForBackend_EmptyToolName(t *testing.T) {
 				Type: string(MessageToolUse),
 				Tool: &ToolInfo{Name: ""},
 			}
-			if got := InferActivityTextForBackend(provider, chunk); got != "使用工具" {
-				t.Errorf("got %q, want %q", got, "使用工具")
+			if got := InferActivityTextForBackend(provider, chunk); got != i18n.Active.PillUsingTool {
+				t.Errorf("got %q, want %q", got, i18n.Active.PillUsingTool)
 			}
 		})
 	}

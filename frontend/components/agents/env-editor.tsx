@@ -9,6 +9,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 
 interface EnvEntry {
   id: string;
@@ -108,7 +109,7 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
             onChange={(e) => updateEntry(entry.id, 'key', e.target.value)}
             placeholder="KEY"
             disabled={disabled}
-            aria-label={`环境变量名 #${idx + 1}`}
+            aria-label={t('agentEnvKey', { n: idx + 1 })}
             className={cn(
               'input-brutal h-9 flex-[1.2] font-mono text-xs uppercase tracking-wider',
               'placeholder:text-muted-foreground placeholder:font-body placeholder:normal-case placeholder:tracking-normal',
@@ -123,7 +124,7 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
             onChange={(e) => updateEntry(entry.id, 'value', e.target.value)}
             placeholder="VALUE"
             disabled={disabled}
-            aria-label={`环境变量值 #${idx + 1}`}
+            aria-label={t('agentEnvValue', { n: idx + 1 })}
             className={cn(
               'input-brutal h-9 flex-[2] font-mono text-xs',
               'placeholder:text-muted-foreground placeholder:font-body',
@@ -136,7 +137,7 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
             type="button"
             onClick={() => removeEntry(entry.id)}
             disabled={disabled}
-            aria-label={`移除环境变量 #${idx + 1}`}
+            aria-label={t('agentEnvRemove', { n: idx + 1 })}
             className={cn(
               'flex h-9 w-9 flex-shrink-0 items-center justify-center',
               'border-2 border-black bg-white shadow-brutal-sm',

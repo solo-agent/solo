@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { Users, Bot, Circle, Plus, User as UserIcon, X } from 'lucide-react';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
+import { t } from '@/lib/i18n';
 import type { ChannelMember } from '@/lib/types';
 
 interface MemberListProps {
@@ -30,11 +31,11 @@ function MemberItem({ member, onRemove }: { member: ChannelMember; onRemove?: (i
   }[member.status] || 'fill-brutal-muted text-brutal-muted';
 
   const statusLabel = {
-    online: '在线',
-    offline: '离线',
-    thinking: '思考中',
-    typing: '输入中',
-  }[member.status] || '离线';
+    online: t('online'),
+    offline: t('offline'),
+    thinking: t('thinking'),
+    typing: t('typing'),
+  }[member.status] || t('offline');
 
   return (
     <div className="group flex items-center gap-2 border-2 border-transparent px-2 py-1.5 transition-colors hover:border-black hover:bg-brutal-primary-light">
@@ -74,7 +75,7 @@ function MemberItem({ member, onRemove }: { member: ChannelMember; onRemove?: (i
             <button
               onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
               className="flex-shrink-0 border-2 border-black bg-white px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-all shadow-brutal-sm hover:bg-brutal-danger hover:text-black"
-              title="移除 Agent"
+              title={t('removeAgent')}
             >
               <X className="h-3 w-3" />
             </button>
@@ -111,7 +112,7 @@ export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent
       <div className="flex items-center justify-between border-b-2 border-black px-4 py-3">
         <div className="flex items-center gap-2 text-sm font-medium text-foreground">
           <Users className="h-4 w-4" />
-          <span>成员</span>
+          <span>{t('members')}</span>
           <span className="text-xs text-muted-foreground">
             {users.length + agents.length}
           </span>
@@ -119,7 +120,7 @@ export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent
         <button
           onClick={onAddAgent}
           className="btn-brutal flex h-6 w-6 items-center justify-center border-2 border-black font-heading font-bold"
-          aria-label="添加 Agent 到频道"
+          aria-label={t('addAgentToChannel')}
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
@@ -138,7 +139,7 @@ export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent
                 <div className="mb-1 flex items-center gap-1.5 px-2">
                   <UserIcon className="h-3 w-3 text-muted-foreground" />
                   <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                    用户 ({users.length})
+                    {t('membersUsers', { n: users.length })}
                   </span>
                 </div>
                 {users.map((member) => (
@@ -153,7 +154,7 @@ export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent
                 <div className="mb-1 flex items-center gap-1.5 px-2">
                   <Bot className="h-3 w-3 text-muted-foreground" />
                   <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                    Agent ({agents.length})
+                    {t('agent')} ({agents.length})
                   </span>
                 </div>
                 {agents.map((member) => (
@@ -165,7 +166,7 @@ export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent
             {/* Empty state */}
             {users.length === 0 && agents.length === 0 && (
               <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-                暂无成员
+                {t('noMembersYet')}
               </div>
             )}
           </div>

@@ -28,6 +28,7 @@ import {
   EyeOff,
 } from 'lucide-react';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
+import { t } from '@/lib/i18n';
 import { useAgentIsland, type IslandAgent, type IslandAgentStatus } from '@/lib/hooks/use-agent-island';
 import { cn } from '@/lib/utils';
 
@@ -37,11 +38,11 @@ const FINAL_STATE_BADGE: Record<
   NonNullable<IslandAgent['finalState']>,
   { label: string; className: string }
 > = {
-  completed: { label: '完成', className: 'bg-brutal-success text-black' },
-  failed: { label: '失败', className: 'bg-brutal-danger text-white' },
-  aborted: { label: '中断', className: 'bg-brutal-muted text-white' },
-  timeout: { label: '超时', className: 'bg-brutal-warning text-black' },
-  cancelled: { label: '已取消', className: 'bg-brutal-muted text-white' },
+  completed: { label: t('runCompleted'), className: 'bg-brutal-success text-black' },
+  failed: { label: t('runFailed'), className: 'bg-brutal-danger text-white' },
+  aborted: { label: t('runInterrupted'), className: 'bg-brutal-muted text-white' },
+  timeout: { label: t('runTimeout'), className: 'bg-brutal-warning text-black' },
+  cancelled: { label: t('runCancelled'), className: 'bg-brutal-muted text-white' },
 };
 
 // ---- Status visual config ----
@@ -70,7 +71,7 @@ const STATUS_VISUALS: Record<IslandAgentStatus, StatusVisuals> = {
     iconClass: 'text-foreground',
     spin: false,
     pulse: false,
-    label: '空闲',
+    label: t('agentIdle'),
     badgeClass: 'bg-brutal-muted text-white',
   },
   thinking: {
@@ -79,7 +80,7 @@ const STATUS_VISUALS: Record<IslandAgentStatus, StatusVisuals> = {
     iconClass: 'text-yellow-600',
     spin: false,
     pulse: true,
-    label: '思考中',
+    label: t('agentThinkingShort'),
     badgeClass: 'bg-brutal-accent text-black',
   },
   running: {
@@ -88,7 +89,7 @@ const STATUS_VISUALS: Record<IslandAgentStatus, StatusVisuals> = {
     iconClass: 'text-cyan-600',
     spin: true,
     pulse: false,
-    label: '执行中',
+    label: t('agentExecuting'),
     badgeClass: 'bg-brutal-info text-black',
   },
   streaming: {
@@ -97,7 +98,7 @@ const STATUS_VISUALS: Record<IslandAgentStatus, StatusVisuals> = {
     iconClass: 'text-green-600',
     spin: false,
     pulse: true,
-    label: '生成中',
+    label: t('agentGenerating'),
     badgeClass: 'bg-brutal-success text-black',
   },
   // waiting_approval: reserved per PRD v1.x approval flow — UI not implemented yet
@@ -107,7 +108,7 @@ const STATUS_VISUALS: Record<IslandAgentStatus, StatusVisuals> = {
     iconClass: 'text-orange-600',
     spin: false,
     pulse: true,
-    label: '等审批',
+    label: t('agentWaitingApproval'),
     badgeClass: 'bg-brutal-warning text-black',
   },
   error: {
@@ -116,7 +117,7 @@ const STATUS_VISUALS: Record<IslandAgentStatus, StatusVisuals> = {
     iconClass: 'text-red-600',
     spin: false,
     pulse: false,
-    label: '出错',
+    label: t('agentErrored'),
     badgeClass: 'bg-brutal-danger text-white',
   },
 };
@@ -235,7 +236,7 @@ export function AgentIsland({ channelId, onInvokeAgent }: AgentIslandProps) {
           : 'max-h-[500px] opacity-100',
       )}
       role="region"
-      aria-label="Agent 实时状态"
+      aria-label={t('agentRealTimeStatus')}
       aria-hidden={closing}
     >
       {expanded ? (
@@ -282,7 +283,7 @@ function CollapsedPill({
       type="button"
       onClick={onClick}
       className="group flex w-full flex-col border-t-2 border-black bg-brutal-cream px-3 py-2 transition-colors hover:bg-brutal-muted-light"
-      aria-label={`Agent ${primary.agentName} ${STATUS_VISUALS[primary.status].label},点击查看详情`}
+      aria-label={t('agentClickForDetail', { name: primary.agentName, status: STATUS_VISUALS[primary.status].label })}
     >
       {/* Row 1: Avatar + Name */}
       <div className="flex w-full items-center gap-2">
@@ -371,17 +372,17 @@ function ExpandedPanel({
             type="button"
             onClick={onClearAll}
             className="btn-flat h-5 px-1.5 text-[9px]"
-            aria-label="清除全部"
-            title="清除全部"
+            aria-label={t('agentClearAll')}
+            title={t('agentClearAll')}
           >
-            清除
+            {t('clear')}
           </button>
           <button
             type="button"
             onClick={onCollapse}
             className="flex h-5 w-5 items-center justify-center border-2 border-black bg-brutal-cream hover:bg-brutal-muted-light"
-            aria-label="收起"
-            title="收起"
+            aria-label={t('agentCollapse')}
+            title={t('agentCollapse')}
           >
             <EyeOff className="h-2.5 w-2.5" />
           </button>
@@ -431,7 +432,7 @@ function AgentRow({ agent, onClick }: { agent: IslandAgent; onClick?: () => void
             }
           : undefined
       }
-      aria-label={interactive ? `查看 ${agent.agentName} 完整 trace` : undefined}
+      aria-label={interactive ? t('agentViewTrace', { name: agent.agentName }) : undefined}
     >
       <PixelAvatar agentId={agent.agentId} avatarUrl={null} size="sm" />
       <div className="min-w-0 flex-1">

@@ -8,6 +8,7 @@ import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Filter, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { t } from '@/lib/i18n';
 import { useTasks, useDMTasks } from '@/lib/hooks/use-tasks';
 import { useChannels } from '@/lib/hooks/use-channels';
 import { useDM } from '@/lib/hooks/use-dm';
@@ -216,7 +217,7 @@ export default function TasksPage() {
           ? await dmUpdateTask(task.id, { status: newStatus })
           : await updateTask(task.channel_id, task.id, { status: newStatus });
         setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
-        showToast(`任务状态已更新: ${newStatus}`, 'success');
+        showToast(t('taskStatusUpdated', { status: newStatus }), 'success');
       } catch {
         // Error handled by hook
       }
@@ -232,7 +233,7 @@ export default function TasksPage() {
           ? await dmClaimTask(task.channel_id, task.id)
           : await claimTask(task.channel_id, task.id);
         setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
-        showToast(`已认领任务 #${task.task_number ?? '?'}`, 'success');
+        showToast(t('taskClaimed', { n: task.task_number ?? '?' }), 'success');
       } catch {
         // 409: silent
       }
@@ -247,7 +248,7 @@ export default function TasksPage() {
           ? await dmUnclaimTask(task.channel_id, task.id)
           : await unclaimTask(task.channel_id, task.id);
         setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
-        showToast(`已释放任务 #${task.task_number ?? '?'}`, 'info');
+        showToast(t('taskReleased', { n: task.task_number ?? '?' }), 'info');
       } catch {
         // silent
       }
@@ -277,14 +278,14 @@ export default function TasksPage() {
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
           <Spinner size="md" />
-          <p className="font-mono text-sm text-muted-foreground">加载中...</p>
+          <p className="font-mono text-sm text-muted-foreground">{t('loading')}</p>
         </div>
       </div>
     );
   }
 
   // Per-source empty-state message for "selected source has 0 tasks"
-  const selectedSourceEmptyMessage = filterDmId ? '该 DM 没有任务' : '该频道没有任务';
+  const selectedSourceEmptyMessage = filterDmId ? t('noTasksInDM') : t('noTasksInChannel');
 
   return (
     <div className="flex h-screen min-w-[1024px] overflow-hidden bg-brutal-cream">
@@ -331,12 +332,12 @@ export default function TasksPage() {
                 value={filterAssignee}
                 onChange={(v) => handleFilterChange('assignee', v)}
                 options={[
-                  { value: '', label: '认领人: 全部' },
+                  { value: '', label: t('allAssignees') },
                   ...assigneeOptions.map((a) => ({ value: a.id, label: a.name })),
                 ]}
                 size="sm"
                 className="min-w-[120px]"
-                aria-label="按认领人筛选"
+                aria-label={t('filterByClaimer')}
               />
 
               {/* Creator dropdown */}
@@ -344,12 +345,12 @@ export default function TasksPage() {
                 value={filterCreator}
                 onChange={(v) => handleFilterChange('creator', v)}
                 options={[
-                  { value: '', label: '创建者: 全部' },
+                  { value: '', label: t('allCreators') },
                   ...creatorOptions.map((c) => ({ value: c.id, label: c.name })),
                 ]}
                 size="sm"
                 className="min-w-[120px]"
-                aria-label="按创建者筛选"
+                aria-label={t('filterByCreator')}
               />
 
               {/* Clear filters button */}
@@ -361,7 +362,7 @@ export default function TasksPage() {
                   className="flex items-center gap-1"
                 >
                   <X className="h-3 w-3" />
-                  清除筛选
+                  {t('clearFilter')}
                 </Button>
               )}
             </div>
@@ -374,14 +375,14 @@ export default function TasksPage() {
                   <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-cream">
                     <Filter className="h-6 w-6 text-muted-foreground" />
                   </div>
-                  <p className="font-body text-sm text-muted-foreground">没有符合筛选条件的任务</p>
+                  <p className="font-body text-sm text-muted-foreground">{t('noTasksMatchingFilter')}</p>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={handleClearFilters}
                     className="mt-4"
                   >
-                    清除筛选
+                    {t('clearFilter')}
                   </Button>
                 </div>
               ) : !sourceIsLoading && !sourceError && tasks.length === 0 && hasFilters ? (
@@ -397,7 +398,7 @@ export default function TasksPage() {
                     onClick={handleClearFilters}
                     className="mt-4"
                   >
-                    清除筛选
+                    {t('clearFilter')}
                   </Button>
                 </div>
               ) : !sourceIsLoading && !sourceError && tasks.length === 0 ? (
@@ -406,7 +407,7 @@ export default function TasksPage() {
                   <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-cream">
                     <Plus className="h-6 w-6 text-muted-foreground" />
                   </div>
-                  <p className="font-body text-sm text-muted-foreground">还没有任务</p>
+                  <p className="font-body text-sm text-muted-foreground">{t('noTasks')}</p>
                 </div>
               ) : (
                 <TaskBoard

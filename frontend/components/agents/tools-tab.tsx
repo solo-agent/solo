@@ -12,6 +12,7 @@
 import { useState } from 'react';
 import { Save } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 import { AVAILABLE_TOOLS } from '@/lib/types';
 import type { Agent } from '@/lib/types';
 
@@ -52,10 +53,10 @@ export function ToolsTab({ agent, onSave, isSaving = false }: ToolsTabProps) {
       {/* Header */}
       <div>
         <h3 className="font-heading font-bold text-sm text-muted-foreground uppercase tracking-wider">
-          可用工具
+          {t('agentToolsAvailable')}
         </h3>
         <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-          启用后，Agent 在响应时可使用这些工具操作服务器文件系统。
+          {t('agentToolsHelp')}
         </p>
       </div>
 
@@ -78,7 +79,7 @@ export function ToolsTab({ agent, onSave, isSaving = false }: ToolsTabProps) {
                 )}
                 role="switch"
                 aria-checked={isEnabled}
-                aria-label={`${isEnabled ? '禁用' : '启用'} ${tool.name}`}
+                aria-label={t(isEnabled ? 'agentSkillsDisable' : 'agentSkillsEnable', { tool: tool.name })}
               >
                 <span
                   className={cn(
@@ -102,7 +103,7 @@ export function ToolsTab({ agent, onSave, isSaving = false }: ToolsTabProps) {
                         : 'bg-brutal-muted text-white',
                     )}
                   >
-                    {isEnabled ? '已启用' : '未启用'}
+                    {isEnabled ? t('agentToolsEnabled') : t('agentToolsNotEnabled')}
                   </span>
                 </div>
                 <p className="mt-0.5 font-mono text-[11px] text-muted-foreground leading-relaxed">
@@ -125,12 +126,12 @@ export function ToolsTab({ agent, onSave, isSaving = false }: ToolsTabProps) {
           {isSaving ? (
             <>
               <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              保存中...
+              {t('agentToolsSaving')}
             </>
           ) : (
             <>
               <Save className="mr-1.5 h-4 w-4" />
-              保存工具配置
+              {t('agentToolsSave')}
             </>
           )}
         </button>

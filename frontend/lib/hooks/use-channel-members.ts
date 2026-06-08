@@ -6,6 +6,7 @@
 
 'use client';
 
+import { t } from '@/lib/i18n';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import type { ChannelMember } from '@/lib/types';
@@ -64,7 +65,7 @@ export function useChannelMembers(channelId: string | null) {
         setMembers(res.map(mapMember));
       }
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : '加载成员列表失败';
+      const message = err instanceof ApiError ? err.message : `${t('memberLoadError')}`;
       setError(message);
     } finally {
       setIsLoading(false);

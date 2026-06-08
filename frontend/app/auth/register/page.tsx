@@ -8,6 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
 import { useAuth } from "@/lib/auth-context";
+import { t } from '@/lib/i18n';
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { BrutalAlert } from "@/components/ui/brutal-alert";
@@ -16,16 +17,16 @@ const registerFormSchema = z
   .object({
     email: z
       .string()
-      .min(1, "请输入邮箱地址")
-      .email("请输入有效的邮箱地址"),
+      .min(1, t('emailRequired'))
+      .email(t('emailInvalid')),
     password: z
       .string()
-      .min(1, "请输入密码")
-      .min(8, "密码至少需要 8 位字符"),
-    confirmPassword: z.string().min(1, "请确认密码"),
+      .min(1, t('passwordRequired'))
+      .min(8, t('passwordMinLength')),
+    confirmPassword: z.string().min(1, t('confirmPasswordRequired')),
   })
   .refine((data) => data.password === data.confirmPassword, {
-    message: "两次输入的密码不一致",
+    message: t('passwordsMismatch'),
     path: ["confirmPassword"],
   });
 
@@ -74,7 +75,7 @@ export default function RegisterPage() {
       <div className="card-brutal p-12 w-full">
         <div className="flex flex-col items-center gap-3">
           <Spinner size="md" />
-          <p className="font-sans text-sm text-muted-foreground">检查登录状态...</p>
+          <p className="font-sans text-sm text-muted-foreground">{t('checkingAuth')}</p>
         </div>
       </div>
     );
@@ -87,8 +88,8 @@ export default function RegisterPage() {
         <div className="inline-flex h-10 w-10 items-center justify-center bg-brutal-primary border-2 border-black shadow-brutal-sm mb-3">
           <span className="font-heading font-bold text-lg text-black">S</span>
         </div>
-        <h1 className="font-heading font-bold text-xl text-black">创建账号</h1>
-        <p className="font-sans text-sm text-muted-foreground mt-1">注册 Solo 开始协作</p>
+        <h1 className="font-heading font-bold text-xl text-black">{t('createAccount')}</h1>
+        <p className="font-sans text-sm text-muted-foreground mt-1">{t('registerToSolo')}</p>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -101,7 +102,7 @@ export default function RegisterPage() {
             htmlFor="email"
             className="font-heading font-bold text-sm block"
           >
-            邮箱
+            {t('email')}
           </label>
           <input
             id="email"
@@ -126,12 +127,12 @@ export default function RegisterPage() {
             htmlFor="password"
             className="font-heading font-bold text-sm block"
           >
-            密码
+            {t('password')}
           </label>
           <input
             id="password"
             type="password"
-            placeholder="至少 8 位字符"
+            placeholder={t('passwordMinLength')}
             autoComplete="new-password"
             disabled={isSubmitting}
             aria-invalid={!!errors.password}
@@ -151,12 +152,12 @@ export default function RegisterPage() {
             htmlFor="confirmPassword"
             className="font-heading font-bold text-sm block"
           >
-            确认密码
+            {t('confirmPassword')}
           </label>
           <input
             id="confirmPassword"
             type="password"
-            placeholder="再次输入密码"
+            placeholder={t('enterPasswordAgain')}
             autoComplete="new-password"
             disabled={isSubmitting}
             aria-invalid={!!errors.confirmPassword}
@@ -177,19 +178,19 @@ export default function RegisterPage() {
           className="w-full"
           disabled={isSubmitting}
         >
-          {isSubmitting ? "注册中..." : "创建账号"}
+          {isSubmitting ? t('registering') : t('createAccount')}
         </Button>
       </form>
 
       {/* Login link */}
       <div className="text-center mt-6 pt-4 border-t-2 border-black">
         <p className="font-sans text-sm text-muted-foreground">
-          已有账号？{" "}
+          {t('hasAccount')}{" "}
           <Link
             href="/auth/login"
             className="font-heading font-bold text-black hover:text-brutal-primary transition-colors"
           >
-            登录
+            {t('login')}
           </Link>
         </p>
       </div>

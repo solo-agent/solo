@@ -17,6 +17,7 @@ import { useState, useCallback } from 'react';
 import { ChevronDown, AlertCircle, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Computer } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
 interface ComputersLeftColumnProps {
   computers: Computer[];
@@ -70,7 +71,7 @@ export function ComputersLeftColumn({
           type="button"
           onClick={() => toggle('all')}
           className={SECTION_HEADER}
-          aria-label="展开或折叠 电脑列表"
+          aria-label={t('navCollapseComputers')}
           aria-expanded={isAllExpanded}
         >
           <ChevronDown
@@ -87,7 +88,7 @@ export function ComputersLeftColumn({
           <div>
             {isLoading && computers.length === 0 ? (
               <p className="px-6 py-2 font-mono text-[10px] italic text-muted-foreground">
-                加载中...
+                {t('loading')}
               </p>
             ) : error ? (
               <div className="flex flex-col items-center gap-2 px-3 py-3">
@@ -101,12 +102,12 @@ export function ComputersLeftColumn({
                   className="btn-brutal btn-brutal-sm"
                 >
                   <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                  重试
+                  {t('retry')}
                 </button>
               </div>
             ) : computers.length === 0 ? (
               <p className="px-6 py-2 font-mono text-[10px] italic text-muted-foreground">
-                暂无电脑
+                {t('computersNoComputers')}
               </p>
             ) : (
               computers.map((computer) => {

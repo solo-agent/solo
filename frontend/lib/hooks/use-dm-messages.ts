@@ -10,6 +10,7 @@
 
 'use client';
 
+import { t } from '@/lib/i18n';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
@@ -43,18 +44,18 @@ function createMockMessage(
 
 const MOCK_MESSAGES: Record<string, Message[]> = {
   'dm-1': [
-    createMockMessage('dm1-m1', 'dm-1', '你好，张三', '我', 'user', 120),
-    createMockMessage('dm1-m2', 'dm-1', '你好！明天的项目管理会议你参加吗？', '张三', 'user', 115),
-    createMockMessage('dm1-m3', 'dm-1', '参加的，我会准备好项目进度报告', '我', 'user', 110),
-    createMockMessage('dm1-m4', 'dm-1', '好的，那下午2点会议室见', '张三', 'user', 60),
-    createMockMessage('dm1-m5', 'dm-1', '明天下午的会议别忘了', '张三', 'user', 5),
+    createMockMessage('dm1-m1', 'dm-1', 'Hey Alice', 'Me', 'user', 120),
+    createMockMessage('dm1-m2', 'dm-1', 'Hi! Are you joining the project sync tomorrow?', 'Alice', 'user', 115),
+    createMockMessage('dm1-m3', 'dm-1', 'Yes, I\'ll have the progress report ready', 'Me', 'user', 110),
+    createMockMessage('dm1-m4', 'dm-1', 'Great, let\'s meet in the conference room at 2pm', 'Alice', 'user', 60),
+    createMockMessage('dm1-m5', 'dm-1', 'Don\'t forget the meeting tomorrow afternoon', 'Alice', 'user', 5),
   ],
   'dm-2': [
-    createMockMessage('dm2-m1', 'dm-2', '这是你与 AI 助手的私信', '系统', 'system', 120),
-    createMockMessage('dm2-m2', 'dm-2', '你好，能帮我分析一下这些数据吗？', '我', 'user', 60),
-    createMockMessage('dm2-m3', 'dm-2', '好的，请把数据发给我，我来分析', 'AI 助手', 'agent', 58),
-    createMockMessage('dm2-m4', 'dm-2', '这是一份销售数据报表', '我', 'user', 40),
-    createMockMessage('dm2-m5', 'dm-2', '好的，我已经分析了数据，以下是详细的报告...', 'AI 助手', 'agent', 30),
+    createMockMessage('dm2-m1', 'dm-2', 'This is your DM with AI Assistant', 'System', 'system', 120),
+    createMockMessage('dm2-m2', 'dm-2', 'Hey, can you help me analyze some data?', 'Me', 'user', 60),
+    createMockMessage('dm2-m3', 'dm-2', 'Sure! Send me the data and I\'ll take a look', 'AI Assistant', 'agent', 58),
+    createMockMessage('dm2-m4', 'dm-2', 'Here\'s a sales report', 'Me', 'user', 40),
+    createMockMessage('dm2-m5', 'dm-2', 'I\'ve analyzed the data. Here\'s the detailed report...', 'AI Assistant', 'agent', 30),
   ],
 };
 
@@ -97,7 +98,7 @@ export function useDMMessages(dmId: string | null) {
       setHasMore(false);
       dmIdRef.current = id;
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : '加载消息失败';
+      const message = err instanceof ApiError ? err.message : `${t('dmMessageLoadError')}`;
       setError(message);
     } finally {
       setIsLoading(false);
@@ -140,7 +141,7 @@ export function useDMMessages(dmId: string | null) {
       await new Promise((r) => setTimeout(r, 400));
       setHasMore(false);
     } catch {
-      setLoadMoreError('加载更早消息失败');
+      setLoadMoreError(`${t('dmEarlierMessageError')}`);
     } finally {
       setIsLoadingMore(false);
       loadingMoreRef.current = false;
@@ -254,7 +255,7 @@ export function useDMMessages(dmId: string | null) {
         id: tempId,
         channel_id: id,
         user_id: 'user-1',
-        display_name: '我',
+        display_name: t('selfRef'),
         content: content.trim(),
         created_at: new Date().toISOString(),
         status: 'sending',
@@ -275,7 +276,7 @@ export function useDMMessages(dmId: string | null) {
                   id: confirmedId,
                   channel_id: id,
                   user_id: 'user-1',
-                  display_name: '我',
+                  display_name: t('selfRef'),
                   content: content.trim(),
                   created_at: new Date().toISOString(),
                   status: 'sent' as const,

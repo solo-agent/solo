@@ -1,6 +1,6 @@
 // ============================================================================
 // SOLO-120-F: InteractionMode — Agent interaction mode selector
-// - Three modes: 主动参与 (active) / 仅 @提及 (mention) / 免打搅 (dnd)
+// - Three modes: Active / Mention Only / Do Not Disturb
 // - Brutalist radio button group matching agent-form.tsx style
 // - Saves on change with btn-brutal confirmation
 // ============================================================================
@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import { MessageCircle, AtSign, BellOff, Save } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 import type { Agent, AgentInteractionMode } from '@/lib/types';
 
 interface InteractionModeProps {
@@ -28,20 +29,20 @@ interface ModeOption {
 const MODE_OPTIONS: ModeOption[] = [
   {
     key: 'active',
-    label: '主动参与',
-    description: 'Agent 自动响应频道消息',
+    label: t('interactionModeActive'),
+    description: t('interactionModeActiveDesc'),
     icon: MessageCircle,
   },
   {
     key: 'mention',
-    label: '仅 @提及',
-    description: '只有被 @ 时才响应',
+    label: t('interactionModeMention'),
+    description: t('interactionModeMentionDesc'),
     icon: AtSign,
   },
   {
     key: 'dnd',
-    label: '免打搅',
-    description: '不响应任何消息',
+    label: t('interactionModeDoNotDisturb'),
+    description: t('interactionModeDoNotDisturbDesc'),
     icon: BellOff,
   },
 ];
@@ -75,10 +76,10 @@ export function InteractionMode({
   return (
     <div className="space-y-3">
       <h3 className="font-heading font-bold text-sm text-muted-foreground uppercase tracking-wider">
-        交互模式
+        {t('interactionMode')}
       </h3>
       <p className="font-mono text-[11px] text-muted-foreground">
-        控制 Agent 何时响应消息。
+        {t('interactionModeHelp')}
       </p>
 
       {/* Brutalist radio group — matches agent-form.tsx pattern */}
@@ -135,12 +136,12 @@ export function InteractionMode({
           {isSaving ? (
             <>
               <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              保存中...
+              {t('interactionModeSaving')}
             </>
           ) : (
             <>
               <Save className="mr-1.5 h-4 w-4" />
-              保存模式
+              {t('interactionModeSave')}
             </>
           )}
         </button>

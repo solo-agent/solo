@@ -12,6 +12,7 @@
 import { useState } from 'react';
 import { Bot, Pencil, X, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 import type { AgentModelProvider } from '@/lib/types';
 import type { Agent } from '@/lib/types';
 
@@ -57,7 +58,7 @@ export function RuntimeTab({ agent, onSave, isSaving = false }: RuntimeTabProps)
       {/* Model info — managed by CLI config */}
       <div className="space-y-3">
         <h3 className="font-heading font-bold text-sm text-muted-foreground uppercase tracking-wider">
-          模型
+          {t('agentFormLabelModel')}
         </h3>
         <p className="font-mono text-sm text-muted-foreground">
           Model is configured in the CLI's local settings.
@@ -96,7 +97,7 @@ export function RuntimeTab({ agent, onSave, isSaving = false }: RuntimeTabProps)
           </div>
         )}
         <p className="font-mono text-[11px] text-muted-foreground">
-          控制输出随机性。较低值更确定，较高值更多样。
+          {t('agentRuntimeTemperature')}
         </p>
       </div>
 
@@ -123,7 +124,7 @@ export function RuntimeTab({ agent, onSave, isSaving = false }: RuntimeTabProps)
           </p>
         )}
         <p className="font-mono text-[11px] text-muted-foreground">
-          单次响应的最大 token 数。
+          {t('agentRuntimeMaxTokens')}
         </p>
       </div>
 
@@ -140,12 +141,12 @@ export function RuntimeTab({ agent, onSave, isSaving = false }: RuntimeTabProps)
               {isSaving ? (
                 <>
                   <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                  保存中...
+                  {t('agentRuntimeSaving')}
                 </>
               ) : (
                 <>
                   <Check className="mr-1.5 h-4 w-4" />
-                  保存
+                  {t('agentRuntimeSave')}
                 </>
               )}
             </button>
@@ -156,7 +157,7 @@ export function RuntimeTab({ agent, onSave, isSaving = false }: RuntimeTabProps)
               className="btn-flat"
             >
               <X className="mr-1.5 h-4 w-4" />
-              取消
+              {t('cancel')}
             </button>
           </>
         ) : (
@@ -166,7 +167,7 @@ export function RuntimeTab({ agent, onSave, isSaving = false }: RuntimeTabProps)
             className="btn-brutal btn-brutal-sm"
           >
             <Pencil className="mr-1.5 h-4 w-4" />
-            编辑
+            {t('agentRuntimeEdit')}
           </button>
         )}
       </div>

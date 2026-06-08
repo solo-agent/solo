@@ -8,6 +8,8 @@
 // - TypeScript 类型安全
 // ============================================================================
 
+import { t } from '@/lib/i18n';
+
 // ---- Types ----
 
 export interface ApiClientConfig {
@@ -181,7 +183,7 @@ export class ApiClient {
     } catch (err) {
       // 网络错误（断网、DNS 解析失败等）
       throw new ApiError(
-        '网络连接失败，请检查网络连接后重试',
+        t('apiNetworkError'),
         0,
         'NETWORK_ERROR',
       );
@@ -200,7 +202,7 @@ export class ApiClient {
 
       // Refresh 失败，触发登出
       this.config.onAuthFailure();
-      throw new ApiError('登录已过期，请重新登录', 401, 'UNAUTHORIZED');
+      throw new ApiError(t('apiAuthExpired'), 401, 'UNAUTHORIZED');
     }
 
     return this.processResponse<T>(response);
@@ -304,16 +306,16 @@ export class ApiClient {
 
   private defaultErrorMessage(status: number): string {
     switch (status) {
-      case 400: return '请求参数有误';
-      case 401: return '未登录或登录已过期';
-      case 403: return '没有权限执行此操作';
-      case 404: return '请求的资源不存在';
-      case 409: return '资源冲突';
-      case 429: return '请求过于频繁，请稍后再试';
-      case 500: return '服务端内部错误，请稍后再试';
-      case 502: return '网关错误';
-      case 503: return '服务暂时不可用，请稍后再试';
-      default: return `请求失败，请稍后再试 (${status})`;
+      case 400: return t('apiBadRequest');
+      case 401: return t('apiUnauthorized');
+      case 403: return t('apiForbidden');
+      case 404: return t('apiNotFound');
+      case 409: return t('apiConflict');
+      case 429: return t('apiTooManyRequests');
+      case 500: return t('apiInternalError');
+      case 502: return t('apiBadGateway');
+      case 503: return t('apiServiceUnavailable');
+      default: return t('apiDefaultError', { n: status });
     }
   }
 

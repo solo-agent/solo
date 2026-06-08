@@ -31,6 +31,7 @@ import { useMentions } from '@/lib/hooks/use-mentions';
 import { MentionDropdown, type DropdownAnchor } from './mention-dropdown';
 import { useToast } from '@/components/ui/toast';
 import { Spinner } from '@/components/ui/spinner';
+import { t } from '@/lib/i18n';
 import type { ChannelMember } from '@/lib/types';
 
 // ---- Types ----
@@ -69,7 +70,7 @@ async function uploadSingleFile(file: File): Promise<UploadItem> {
 
   // Validate size (max 50MB)
   if (file.size > 50 * 1024 * 1024) {
-    throw new Error(`${file.name} 超过 50MB 限制`);
+    throw new Error(`${file.name} exceeds the 50MB limit`);
   }
 
   const formData = new FormData();
@@ -98,7 +99,7 @@ async function uploadSingleFile(file: File): Promise<UploadItem> {
 
 export function MessageInput({
   onSend,
-  placeholder = '输入消息... (Enter 发送, Shift+Enter 换行)',
+  placeholder = 'Type a message... (Enter to send, Shift+Enter for new line)',
   members,
   showAsTaskToggle = false,
 }: MessageInputProps) {
@@ -174,7 +175,7 @@ export function MessageInput({
     const handleClick = (e: MouseEvent) => {
       const target = e.target as Node;
       const dropdownEl = document.querySelector(
-        '[role="listbox"][aria-label="提及成员选择"]',
+        '[role="listbox"][aria-label="Select member to mention"]',
       );
       if (
         dropdownEl &&
@@ -227,7 +228,7 @@ export function MessageInput({
 
       // Validate size
       if (file.size > 50 * 1024 * 1024) {
-        showToast(`${file.name} 超过 50MB 限制`, 'error');
+        showToast(`${file.name} exceeds the 50MB limit`, 'error');
         setUploads((prev) =>
           prev.map((u) =>
             u.id === placeholder.id ? { ...u, status: 'error' as const } : u,
@@ -248,7 +249,7 @@ export function MessageInput({
         );
       } catch (err) {
         const msg =
-          err instanceof Error ? err.message : `${file.name} 上传失败`;
+          err instanceof Error ? err.message : `${file.name}: Upload failed`;
         showToast(msg, 'error');
         setUploads((prev) =>
           prev.map((u) =>
@@ -481,10 +482,10 @@ export function MessageInput({
         >
           <Upload className="h-8 w-8 text-brutal-black opacity-60" aria-hidden />
           <p className="font-heading text-base font-bold text-foreground">
-            拖放文件到此处上传
+            Drop files here to upload
           </p>
           <p className="font-mono text-xs text-muted-foreground">
-            最大 50MB
+            Max 50MB
           </p>
         </div>
       )}
@@ -509,7 +510,7 @@ export function MessageInput({
 
         {/* Upload previews */}
         {uploads.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2" aria-label="上传文件预览">
+          <div className="mb-2 flex flex-wrap gap-2" aria-label={t('uploadPreview')}>
             {uploads.map((upload) => (
               <div
                 key={upload.id}
@@ -537,13 +538,13 @@ export function MessageInput({
                   /* Status icon for non-image files */
                   <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center">
                     {upload.status === 'uploading' && (
-                      <Spinner size="sm" className="text-muted-foreground" label="上传中" />
+                      <Spinner size="sm" className="text-muted-foreground" label="Uploading" />
                     )}
                     {upload.status === 'done' && (
-                      <Check className="h-3.5 w-3.5 text-brutal-success" aria-label="已上传" />
+                      <Check className="h-3.5 w-3.5 text-brutal-success" aria-label={t('uploadedDone')} />
                     )}
                     {upload.status === 'error' && (
-                      <AlertTriangle className="h-3.5 w-3.5 text-brutal-danger" aria-label="上传失败" />
+                      <AlertTriangle className="h-3.5 w-3.5 text-brutal-danger" aria-label={t('uploadFailed')} />
                     )}
                   </div>
                 )}
@@ -555,10 +556,10 @@ export function MessageInput({
                   </span>
                   <span className="font-mono text-[10px] text-muted-foreground">
                     {upload.status === 'uploading'
-                      ? '上传中...'
+                      ? 'Uploading...'
                       : upload.status === 'done'
                         ? formatSize(upload.size)
-                        : '上传失败'}
+                        : 'Upload failed'}
                   </span>
                 </div>
 
@@ -571,7 +572,7 @@ export function MessageInput({
                     'flex-shrink-0 p-0.5 text-muted-foreground hover:text-foreground transition-colors',
                     'disabled:opacity-30 disabled:pointer-events-none',
                   )}
-                  aria-label={`移除 ${upload.filename}`}
+                  aria-label={t('removeUpload', { filename: upload.filename })}
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -593,11 +594,11 @@ export function MessageInput({
                   ? 'bg-brutal-primary text-black translate-x-[2px] translate-y-[2px] shadow-none'
                   : 'bg-white text-muted-foreground hover:text-foreground hover:-translate-x-px hover:-translate-y-px hover:shadow-brutal',
               )}
-              aria-label={asTask ? '取消创建为任务' : '创建为任务'}
+              aria-label={asTask ? t('cancelAsTask') : t('createAsTask')}
               aria-pressed={asTask}
             >
               <ClipboardList className="h-3.5 w-3.5" />
-              {asTask ? '取消任务' : '创建为任务'}
+              {asTask ? 'Cancel Task' : 'Create as Task'}
             </button>
           </div>
         )}
@@ -611,11 +612,11 @@ export function MessageInput({
             onSelect={handleCursorMove}
             onClick={handleCursorMove}
             onPaste={handlePaste}
-            placeholder={asTask ? '任务描述（可选）... (Enter 创建, Shift+Enter 换行)' : placeholder}
+            placeholder={asTask ? t('taskMessagePlaceholder') : placeholder}
             rows={1}
             autoFocus
             disabled={isSending}
-            aria-label={asTask ? '任务描述输入框' : '消息输入框'}
+            aria-label={asTask ? t('taskDescriptionInput') : t('messageInput')}
             aria-autocomplete="list"
             aria-controls={mentionActive ? 'mention-listbox' : undefined}
             aria-expanded={mentionActive}
@@ -637,10 +638,10 @@ export function MessageInput({
               !canSend && 'opacity-40 pointer-events-none',
               asTask ? 'w-auto' : 'w-8 p-0',
             )}
-            aria-label={asTask ? '创建任务' : '发送消息'}
+            aria-label={asTask ? t('createTask') : t('sendMessage')}
           >
             {asTask ? (
-              <span className="font-mono text-[11px] font-bold whitespace-nowrap">创建任务</span>
+              <span className="font-mono text-[11px] font-bold whitespace-nowrap">Create Task</span>
             ) : (
               <Send className="h-4 w-4" />
             )}
@@ -649,8 +650,8 @@ export function MessageInput({
       </div>
       <p className="mt-1.5 text-center font-mono text-[10px] text-muted-foreground">
         {asTask
-          ? 'Enter 创建任务 · 标题可留空（取消息前100字符）· 切换按钮取消任务模式'
-          : 'Enter 发送 · Shift+Enter 换行 · @ 提及成员 · 拖放文件或 Ctrl+V 粘贴图片'}
+          ? 'Enter to create task · Title can be empty (first 100 chars of message) · Toggle to cancel task mode'
+          : 'Enter to send · Shift+Enter for new line · @ to mention · Drag & drop files or Ctrl+V to paste images'}
       </p>
     </div>
   );

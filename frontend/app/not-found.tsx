@@ -14,23 +14,23 @@ export default function NotFoundPage() {
         </div>
         <h1 className="font-heading text-4xl font-bold text-foreground">404</h1>
         <p className="mt-2 font-heading text-lg font-bold text-foreground">
-          页面不存在
+          Page not found
         </p>
         <p className="mt-2 font-body text-sm text-muted-foreground">
-          你访问的页面不存在或已被移除。请检查链接是否正确。
+          The page you are looking for does not exist or has been removed. Please check the link.
         </p>
         <div className="mt-8 flex gap-4">
           <Link
             href="/dashboard"
             className="btn-brutal btn-brutal-primary px-5 py-2.5 text-sm"
           >
-            返回工作台
+            Back to Dashboard
           </Link>
           <Link
             href="/auth/login"
             className="btn-brutal bg-white px-5 py-2.5 text-sm"
           >
-            返回登录
+            Back to Login
           </Link>
         </div>
       </div>

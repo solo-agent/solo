@@ -15,6 +15,7 @@ import { Plus, X, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
+import { t } from '@/lib/i18n';
 import type { DMChannel } from '@/lib/types';
 
 interface DMListProps {
@@ -32,7 +33,7 @@ interface DMListProps {
 function getDisplayName(dm: DMChannel): string {
   if (dm.other_user) return dm.other_user.display_name;
   if (dm.other_agent) return dm.other_agent.name;
-  return '未知用户';
+  return t('unknown');
 }
 
 function isAgentDM(dm: DMChannel): boolean {
@@ -72,14 +73,14 @@ function DMListSkeleton() {
 function DMListEmpty({ onCreateDM }: { onCreateDM?: () => void }) {
   return (
     <div className="space-y-2 px-2 py-3 text-center">
-      <p className="text-sm text-sidebar-muted-foreground">还没有私信</p>
+      <p className="text-sm text-sidebar-muted-foreground">{t('noDMsYet')}</p>
       {onCreateDM && (
       <button
         onClick={onCreateDM}
         className="inline-flex items-center gap-1 border-2 border-black bg-brutal-primary px-3 py-1 text-sm font-medium text-black shadow-brutal-sm hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
       >
         <Plus className="h-3.5 w-3.5" />
-        发起私信
+        {t('startDM')}
       </button>
       )}
     </div>
@@ -176,7 +177,7 @@ function DMItem({
           onClose();
         }}
         className="hidden group-hover:flex items-center justify-center rounded-none p-1 hover:bg-brutal-primary-light transition-colors flex-shrink-0"
-        aria-label="关闭私信"
+        aria-label={t('closeDM')}
       >
         <X className="h-4 w-4" />
       </button>
@@ -243,7 +244,7 @@ export function DMList({
           type="button"
           onClick={onToggleExpand}
           className="flex flex-1 items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider text-sidebar-muted-foreground font-heading"
-          aria-label="展开或折叠 直接消息"
+          aria-label={t('navCollapseDMs')}
           aria-expanded={isExpanded}
         >
           <ChevronDown
@@ -260,7 +261,7 @@ export function DMList({
         <button
           onClick={onCreateDM}
           className="mr-2 flex h-5 w-5 items-center justify-center border-2 border-transparent text-sidebar-muted-foreground group-hover:border-black group-hover:text-black hover:bg-brutal-primary/40 active:bg-brutal-primary active:text-black active:ring-2 active:ring-black transition-all cursor-pointer"
-          aria-label="发起私信"
+          aria-label={t('startDM')}
         >
           <Plus className="h-3.5 w-3.5" />
         </button>

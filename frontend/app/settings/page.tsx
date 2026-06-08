@@ -11,6 +11,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { User, Mail, ArrowLeft, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { t } from '@/lib/i18n';
 import { useUser } from '@/lib/hooks/use-user';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -58,7 +59,7 @@ export default function SettingsPage() {
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
           <Spinner size="md" />
-          <p className="font-mono text-sm text-muted-foreground">加载中...</p>
+          <p className="font-mono text-sm text-muted-foreground">{t('loading')}</p>
         </div>
       </div>
     );
@@ -75,7 +76,7 @@ export default function SettingsPage() {
           className="gap-1.5"
         >
           <ArrowLeft className="h-4 w-4" />
-          返回工作台
+          {t('backToDashboard')}
         </Button>
       </div>
 
@@ -87,10 +88,10 @@ export default function SettingsPage() {
           </div>
           <div>
             <h1 className="font-heading text-2xl font-bold text-foreground">
-              个人设置
+              {t('settingsTitle')}
             </h1>
             <p className="mt-1 font-body text-sm text-muted-foreground">
-              管理你的个人信息
+              {t('settingsDesc')}
             </p>
           </div>
         </div>
@@ -103,7 +104,7 @@ export default function SettingsPage() {
             {userError}
           </BrutalAlert>
           <Button variant="outline" size="sm" onClick={refetch}>
-            重试
+            {t('retry')}
           </Button>
         </div>
       )}
@@ -131,13 +132,13 @@ export default function SettingsPage() {
           {/* Email (read-only) */}
           <div className="border-b-2 border-black px-6 py-5">
             <Label className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-              邮箱
+              {t('email')}
             </Label>
             <div className="mt-2 flex items-center gap-2">
               <Mail className="h-4 w-4 text-muted-foreground" />
               <span className="font-body text-sm text-foreground">{user.email}</span>
             </div>
-            <p className="mt-1 font-mono text-[11px] text-muted-foreground">邮箱不可修改</p>
+            <p className="mt-1 font-mono text-[11px] text-muted-foreground">{t('settingsEmailUnmodifiable')}</p>
           </div>
 
           {/* Display name (editable) */}
@@ -146,7 +147,7 @@ export default function SettingsPage() {
               htmlFor="display-name"
               className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground"
             >
-              显示名称
+              {t('settingsDisplayName')}
             </Label>
             <div className="mt-2 flex items-end gap-3">
               <div className="flex-1">
@@ -157,7 +158,7 @@ export default function SettingsPage() {
                     setDisplayName(e.target.value);
                     clearSuccess();
                   }}
-                  placeholder="输入你的显示名称"
+                  placeholder={t('settingsDisplayNamePlaceholder')}
                   disabled={isUpdating}
                   className="max-w-sm"
                 />
@@ -172,7 +173,7 @@ export default function SettingsPage() {
                 }
                 variant="default"
               >
-                {isUpdating ? '保存中...' : '保存'}
+                {isUpdating ? t('settingsSaving') : t('settingsSave')}
               </Button>
             </div>
 

@@ -7,6 +7,7 @@
 
 import { AlertTriangle, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 import { useCliDetection } from '@/lib/hooks/use-cli-detection';
 
 interface CliDetectionProps {
@@ -23,7 +24,7 @@ export function CliDetection({ selectedRuntime, className }: CliDetectionProps) 
     return (
       <div className={cn('flex items-center gap-1.5 text-muted-foreground', className)}>
         <Loader2 className="h-3 w-3 animate-spin" />
-        <span className="font-mono text-[11px]">检测 CLI 安装状态...</span>
+        <span className="font-mono text-[11px]">{t('cliChecking')}</span>
       </div>
     );
   }
@@ -33,7 +34,7 @@ export function CliDetection({ selectedRuntime, className }: CliDetectionProps) 
     return (
       <div className={cn('flex items-center gap-1.5 text-brutal-muted', className)}>
         <AlertTriangle className="h-3 w-3" />
-        <span className="font-mono text-[11px]">无法检测 CLI 状态</span>
+        <span className="font-mono text-[11px]">{t('cliCheckFailed')}</span>
       </div>
     );
   }

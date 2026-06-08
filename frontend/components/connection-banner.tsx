@@ -8,6 +8,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import { t } from '@/lib/i18n';
 import { Loader2, Wifi, WifiOff } from 'lucide-react';
 import { useWebSocket } from '@/lib/ws-context';
 import { usePathname } from 'next/navigation';
@@ -37,7 +38,7 @@ export function ConnectionBanner() {
     if (isConnected) {
       // Just reconnected — show success momentarily
       if (wasDisconnectedRef.current) {
-        setBannerText('连接已恢复');
+        setBannerText(t('connectionRestored'));
         setBannerType('connected');
         setVisible(true);
         const timer = setTimeout(() => {
@@ -50,11 +51,11 @@ export function ConnectionBanner() {
       wasDisconnectedRef.current = false;
     } else if (isReconnecting) {
       wasDisconnectedRef.current = true;
-      setBannerText('正在重新连接...');
+      setBannerText(t('reconnecting'));
       setBannerType('reconnecting');
       setVisible(true);
     } else if (connectionState === 'disconnected' && wasDisconnectedRef.current) {
-      setBannerText('连接已断开');
+      setBannerText(t('connectionLost'));
       setBannerType('disconnected');
       setVisible(true);
     } else if (connectionState === 'disconnected') {
@@ -65,7 +66,7 @@ export function ConnectionBanner() {
       if (!wasDisconnectedRef.current) {
         setVisible(false);
       } else {
-        setBannerText('正在重新连接...');
+        setBannerText(t('reconnecting'));
         setBannerType('reconnecting');
         setVisible(true);
       }

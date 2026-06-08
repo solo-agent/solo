@@ -6,6 +6,7 @@
 
 import { Plus, X, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Channel } from '@/lib/types';
 
@@ -40,13 +41,13 @@ function ChannelListSkeleton() {
 function ChannelListEmpty({ onCreateChannel }: { onCreateChannel: () => void }) {
   return (
     <div className="space-y-3 px-2 py-4 text-center">
-      <p className="text-sm text-sidebar-muted-foreground">还没有频道</p>
+      <p className="text-sm text-sidebar-muted-foreground">No channels yet</p>
       <button
         onClick={onCreateChannel}
         className="inline-flex items-center gap-1 border-2 border-black bg-brutal-primary px-3 py-1.5 text-sm font-medium text-black shadow-brutal-sm hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
       >
         <Plus className="h-3.5 w-3.5" />
-        创建频道
+        Create Channel
       </button>
     </div>
   );
@@ -98,7 +99,7 @@ function ChannelItem({
             onDelete();
           }}
           className="hidden group-hover:flex items-center justify-center rounded-none p-1 hover:bg-brutal-primary-light transition-colors flex-shrink-0"
-          aria-label={`关闭 ${channel.name}`}
+          aria-label={t('closeChannel', { name: channel.name })}
         >
           <X className="h-4 w-4" />
         </button>
@@ -129,7 +130,7 @@ export function ChannelList({
           type="button"
           onClick={onToggleExpand}
           className="flex flex-1 items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider text-sidebar-muted-foreground font-heading"
-          aria-label="展开或折叠 频道"
+          aria-label={t('navCollapseChannels')}
           aria-expanded={isExpanded}
         >
           <ChevronDown
@@ -145,7 +146,7 @@ export function ChannelList({
         <button
           onClick={onCreateChannel}
           className="mr-2 flex h-5 w-5 items-center justify-center border-2 border-transparent text-sidebar-muted-foreground group-hover:border-black group-hover:text-black hover:bg-brutal-primary/40 active:bg-brutal-primary active:text-black active:ring-2 active:ring-black transition-all cursor-pointer"
-          aria-label="创建频道"
+          aria-label={t('createChannel')}
         >
           <Plus className="h-3.5 w-3.5" />
         </button>

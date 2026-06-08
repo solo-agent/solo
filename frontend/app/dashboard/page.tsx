@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { MessageSquare, AlertCircle, RefreshCw } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { t } from '@/lib/i18n';
 import { useChannels } from "@/lib/hooks/use-channels";
 import { useDM } from "@/lib/hooks/use-dm";
 import { useDMTasks } from "@/lib/hooks/use-tasks";
@@ -50,7 +51,7 @@ export default function DashboardPage() {
         <div className="flex h-screen items-center justify-center bg-brutal-cream">
           <div className="flex flex-col items-center gap-3">
             <Spinner size="md" />
-            <p className="font-mono text-sm text-muted-foreground">加载中...</p>
+            <p className="font-mono text-sm text-muted-foreground">{t('loading')}</p>
           </div>
         </div>
       }
@@ -127,7 +128,7 @@ function DashboardContent() {
       if (!selectedDmId) return;
       try {
         await dmClaimTask(selectedDmId, task.id);
-        showToast(`已认领任务 #${task.task_number ?? '?'}`, 'success');
+        showToast(t('taskClaimed', { n: task.task_number ?? '?' }), 'success');
       } catch {
         // 409: silent
       }
@@ -140,7 +141,7 @@ function DashboardContent() {
       if (!selectedDmId) return;
       try {
         await dmUnclaimTask(selectedDmId, task.id);
-        showToast(`已释放任务 #${task.task_number ?? '?'}`, 'info');
+        showToast(t('taskReleased', { n: task.task_number ?? '?' }), 'info');
       } catch {
         // silent
       }
@@ -188,10 +189,10 @@ function DashboardContent() {
       const title = message.content.slice(0, 200);
       try {
         const task = await dmConvertMessageToTask(selectedDmId, message.id, title);
-        showToast(`已转为任务 #${task.task_number ?? '?'}`, 'success');
+        showToast(t('taskConverted', { n: task.task_number ?? '?' }), 'success');
         dmRefetchTasks();
       } catch {
-        showToast('转换任务失败，请稍后再试', 'error');
+        showToast(t('taskConvertError'), 'error');
       }
     },
     [selectedDmId, dmConvertMessageToTask, dmRefetchTasks, showToast],
@@ -319,7 +320,7 @@ function DashboardContent() {
       <div className="flex h-screen items-center justify-center bg-muted/20">
         <div className="flex flex-col items-center gap-3">
           <Spinner size="md" />
-          <p className="text-sm text-muted-foreground">加载中...</p>
+          <p className="text-sm text-muted-foreground">{t('loading')}</p>
         </div>
       </div>
     );
@@ -407,19 +408,19 @@ function DashboardContent() {
           </div>
           <h2 className="text-xl font-semibold text-foreground">
             {channelsLoading || isLoadingDMs
-              ? "加载中..."
+              ? t('loading')
               : channelsError || dmError
-                ? "加载失败"
+                ? t('loadError')
                 : channels.length === 0 && dmChannels.length === 0
-                  ? "还没有频道和私信"
-                  : "选择一个频道或私信"}
+                  ? t('noChannelsOrDMs')
+                  : t('selectChannelPrompt')}
           </h2>
           <p className="mt-2 text-sm text-muted-foreground">
             {channelsError || dmError
               ? channelsError || dmError
               : channels.length === 0 && dmChannels.length === 0
-                ? "创建一个频道，开始与团队成员协作"
-                : "从左侧选择一个频道或私信开始交流"}
+                ? t('createChannelPrompt')
+                : t('selectChannelPrompt')}
           </p>
           {(channelsError || dmError) && (
             <Button
@@ -432,7 +433,7 @@ function DashboardContent() {
               }}
             >
               <RefreshCw className="mr-2 h-4 w-4" />
-              重试
+              {t('retry')}
             </Button>
           )}
         </div>

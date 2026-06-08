@@ -16,6 +16,7 @@ import { FilePreview } from '@/components/workspace/file-preview';
 import type { WorkspaceFileNode } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 
 interface AgentWorkspaceTabProps {
   agentId: string;
@@ -93,7 +94,7 @@ export function AgentWorkspaceTab({ agentId }: AgentWorkspaceTabProps) {
         <p className="font-body text-sm text-brutal-danger">{error}</p>
         <button type="button" onClick={() => loadTree()} className="btn-brutal btn-brutal-sm mt-4">
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-          重试
+          {t('retry')}
         </button>
       </div>
     );
@@ -106,9 +107,9 @@ export function AgentWorkspaceTab({ agentId }: AgentWorkspaceTabProps) {
         <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm">
           <FolderOpen className="h-6 w-6 text-white" />
         </div>
-        <p className="font-heading text-sm font-bold text-foreground">Workspace 为空</p>
+        <p className="font-heading text-sm font-bold text-foreground">{t('workspaceNoFiles')}</p>
         <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-          Agent 的工作空间中还没有文件
+          {t('workspaceNoFilesDesc')}
         </p>
       </div>
     );
@@ -120,7 +121,7 @@ export function AgentWorkspaceTab({ agentId }: AgentWorkspaceTabProps) {
       <div className="w-[220px] flex-shrink-0 overflow-y-auto border-r-2 border-black bg-white">
         <div className="border-b-2 border-black px-3 py-2 flex items-center">
           <span className="font-heading text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-            文件
+            {t('workspaceFiles')}
           </span>
           <Link
             href={`/workspace?agent=${agentId}`}
@@ -129,7 +130,7 @@ export function AgentWorkspaceTab({ agentId }: AgentWorkspaceTabProps) {
             rel="noopener noreferrer"
           >
             <ExternalLink className="mr-1 h-3 w-3" />
-            新页面打开
+            {t('workspaceOpenNewTab')}
           </Link>
         </div>
         <FileTree
@@ -164,7 +165,7 @@ export function AgentWorkspaceTab({ agentId }: AgentWorkspaceTabProps) {
             <div className="text-center">
               <FileText className="mx-auto h-6 w-6 text-muted-foreground" />
               <p className="mt-2 font-mono text-xs text-muted-foreground">
-                选择文件以预览内容
+                {t('workspaceSelectFile')}
               </p>
             </div>
           </div>

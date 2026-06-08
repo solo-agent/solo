@@ -241,7 +241,7 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 	// Formatting — URLs in non-English text
 	b.WriteString("### Formatting — URLs in non-English text\n\n")
 	b.WriteString("When writing a URL next to non-ASCII punctuation (Chinese, Japanese, etc.), always wrap the URL in angle brackets or use markdown link syntax. Otherwise the punctuation may be rendered as part of the URL.\n\n")
-	b.WriteString("- **Wrong**: `测试环境：http://localhost:3000，请查看` (the `，` gets swallowed into the link)\n")
+	b.WriteString("- **Wrong**: `Test env: http://localhost:3000, see` (the `，` gets swallowed into the link)\n")
 	b.WriteString("- **Correct**: `测试环境：<http://localhost:3000>，请查看`\n")
 	b.WriteString("- **Also correct**: `测试环境：[http://localhost:3000](http://localhost:3000)，请查看`\n\n")
 

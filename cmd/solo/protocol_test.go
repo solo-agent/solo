@@ -6,20 +6,18 @@ import (
 )
 
 // TestClaimRegex validates the claim protocol regex pattern used by the agent
-// service to detect inline task claim directives (/claim #N, /认领 #N).
+// service to detect inline task claim directives (/claim #N).
 func TestClaimRegex(t *testing.T) {
-	re := regexp.MustCompile(`(?i)/(?:claim|认领)\s+#(\d+)`)
+	re := regexp.MustCompile(`(?i)/(?:claim)\s+#(\d+)`)
 	tests := []struct {
 		input  string
 		match  bool
 		number string
 	}{
 		{"/claim #1", true, "1"},
-		{"/认领 #3", true, "3"},
 		{"/CLAIM #5", true, "5"},
 		{"/Claim #10", true, "10"},
 		{"/claim #42", true, "42"},
-		{"/认领 #99", true, "99"},
 		{"no claim", false, ""},
 		{"/claim", false, ""},
 		{"/claim #", false, ""},
@@ -43,27 +41,23 @@ func TestClaimRegex(t *testing.T) {
 // TestUpdateRegex validates the update protocol regex pattern used by the agent
 // service to detect inline task status update directives (/done #N, /review #N, etc.).
 func TestUpdateRegex(t *testing.T) {
-	re := regexp.MustCompile(`(?i)/(done|完成|review|审核|progress|进行中|in_progress|todo)\s+#(\d+)`)
+	re := regexp.MustCompile(`(?i)/(done|review|progress|in_progress|todo)\s+#(\d+)`)
 	tests := []struct {
 		input string
 		match bool
 		cmd   string
 	}{
 		{"/done #1", true, "done"},
-		{"/完成 #2", true, "完成"},
 		{"/review #3", true, "review"},
-		{"/进行中 #4", true, "进行中"},
 		{"/progress #5", true, "progress"},
 		{"/in_progress #6", true, "in_progress"},
 		{"/todo #7", true, "todo"},
-		{"/审核 #8", true, "审核"},
 		{"/DONE #9", true, "DONE"},
 		{"/Review #10", true, "Review"},
 		{"no command", false, ""},
 		{"/done", false, ""},
 		{"/done #", false, ""},
 		{"done #1", false, ""},
-		{"prefix /完成 #15 suffix", true, "完成"},
 	}
 	for _, tt := range tests {
 		m := re.FindStringSubmatch(tt.input)
@@ -82,8 +76,8 @@ func TestUpdateRegex(t *testing.T) {
 // TestClaimRegexMultipleMatches verifies that FindAllStringSubmatch picks up
 // multiple claim directives in the same output.
 func TestClaimRegexMultipleMatches(t *testing.T) {
-	re := regexp.MustCompile(`(?i)/(?:claim|认领)\s+#(\d+)`)
-	text := "I'll handle /claim #1 and then look at /认领 #3 after that."
+	re := regexp.MustCompile(`(?i)/(?:claim)\s+#(\d+)`)
+	text := "I'll handle /claim #1 and then look at /claim #3 after that."
 	matches := re.FindAllStringSubmatch(text, -1)
 	if len(matches) != 2 {
 		t.Fatalf("expected 2 matches, got %d", len(matches))
@@ -99,7 +93,7 @@ func TestClaimRegexMultipleMatches(t *testing.T) {
 // TestUpdateRegexMultipleMatches verifies that FindAllStringSubmatch picks up
 // multiple update directives in the same output.
 func TestUpdateRegexMultipleMatches(t *testing.T) {
-	re := regexp.MustCompile(`(?i)/(done|完成|review|审核|progress|进行中|in_progress|todo)\s+#(\d+)`)
+	re := regexp.MustCompile(`(?i)/(done|review|progress|in_progress|todo)\s+#(\d+)`)
 	text := "/done #1 and /review #2 are complete."
 	matches := re.FindAllStringSubmatch(text, -1)
 	if len(matches) != 2 {

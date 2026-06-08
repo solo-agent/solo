@@ -3,6 +3,8 @@ package agent
 import (
 	"fmt"
 	"strings"
+
+	"github.com/solo-ai/solo/internal/i18n"
 )
 
 // ============================================================================
@@ -70,24 +72,24 @@ func InferIslandStatusFromChunk(chunk OutputChunk) IslandStatus {
 func InferActivityText(chunk OutputChunk) string {
 	switch chunk.Type {
 	case string(MessageThinking):
-		return "思考中…"
+		return i18n.Active.PillThinking
 	case string(MessageText):
-		return "生成回复中…"
+		return i18n.Active.PillGenerating
 	case string(MessageToolUse):
 		if chunk.Tool != nil && chunk.Tool.Name != "" {
-			return fmt.Sprintf("调用 %s", chunk.Tool.Name)
+			return fmt.Sprintf(i18n.Active.PillCallingTool, chunk.Tool.Name)
 		}
-		return "使用工具"
+		return i18n.Active.PillUsingTool
 	case string(MessageToolResult):
 		if chunk.Tool != nil && chunk.Tool.IsError {
-			return fmt.Sprintf("%s 失败", chunk.Tool.Name)
+			return fmt.Sprintf(i18n.Active.PillToolFailed, chunk.Tool.Name)
 		}
 		if chunk.Tool != nil && chunk.Tool.Name != "" {
-			return fmt.Sprintf("%s 完成", chunk.Tool.Name)
+			return fmt.Sprintf(i18n.Active.PillToolDone, chunk.Tool.Name)
 		}
-		return "工具结果"
+		return i18n.Active.PillToolResult
 	case string(MessageError):
-		return "出错了"
+		return i18n.Active.PillError
 	}
 	return ""
 }
@@ -214,24 +216,24 @@ func InferActivityTextForBackend(provider string, chunk OutputChunk) string {
 func inferActivityTextWithToolName(chunk OutputChunk, name string) string {
 	switch chunk.Type {
 	case string(MessageThinking):
-		return "思考中…"
+		return i18n.Active.PillThinking
 	case string(MessageText):
-		return "生成回复中…"
+		return i18n.Active.PillGenerating
 	case string(MessageToolUse):
 		if name != "" {
-			return fmt.Sprintf("调用 %s", name)
+			return fmt.Sprintf(i18n.Active.PillCallingTool, name)
 		}
-		return "使用工具"
+		return i18n.Active.PillUsingTool
 	case string(MessageToolResult):
 		if chunk.Tool != nil && chunk.Tool.IsError {
-			return fmt.Sprintf("%s 失败", name)
+			return fmt.Sprintf(i18n.Active.PillToolFailed, name)
 		}
 		if name != "" {
-			return fmt.Sprintf("%s 完成", name)
+			return fmt.Sprintf(i18n.Active.PillToolDone, name)
 		}
-		return "工具结果"
+		return i18n.Active.PillToolResult
 	case string(MessageError):
-		return "出错了"
+		return i18n.Active.PillError
 	}
 	return ""
 }

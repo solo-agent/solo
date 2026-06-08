@@ -30,6 +30,7 @@ import { useThread } from '@/lib/hooks/use-thread';
 import { useMentions } from '@/lib/hooks/use-mentions';
 import { useWebSocket } from '@/lib/ws-context';
 import { MentionDropdown, type DropdownAnchor } from './mention-dropdown';
+import { t } from '@/lib/i18n';
 import type { Message, ChannelMember, Task, TaskStatus } from '@/lib/types';
 
 interface ThreadPanelProps {
@@ -53,7 +54,7 @@ interface ThreadPanelProps {
 function ParentMessageBlock({ message, task }: { message: Message; task?: Task }) {
   const isAgent = message.sender_type === 'agent';
   const displayName = task?.creator_name || message.display_name;
-  const time = new Date(message.created_at).toLocaleString('zh-CN', {
+  const time = new Date(message.created_at).toLocaleString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
   });
@@ -177,7 +178,7 @@ function ReplyItem({ message }: { message: { id: string; display_name?: string; 
   const isStreaming = message.status === 'streaming';
   const isAgent = message.sender_type === 'agent';
 
-  const time = new Date(message.created_at).toLocaleString('zh-CN', {
+  const time = new Date(message.created_at).toLocaleString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
   });
@@ -237,12 +238,12 @@ function ReplyItem({ message }: { message: { id: string; display_name?: string; 
         {isFailed && (
           <div className="mt-2 flex items-center gap-1">
             <AlertCircle className="h-3.5 w-3.5 text-brutal-danger" />
-            <span className="font-mono text-[11px] text-brutal-danger">发送失败</span>
+            <span className="font-mono text-[11px] text-brutal-danger">{t('sendFailed')}</span>
           </div>
         )}
         {isSending && (
           <div className="mt-1.5">
-            <span className="font-mono text-[11px] text-muted-foreground">发送中...</span>
+            <span className="font-mono text-[11px] text-muted-foreground">{t('sending')}</span>
           </div>
         )}
       </div>
@@ -283,7 +284,7 @@ function ThreadEmpty() {
     <div className="flex flex-1 items-center justify-center px-6">
       <div className="text-center">
         <p className="font-body text-sm text-muted-foreground">
-          还没有回复，发起讨论吧
+          No replies yet. Start the discussion.
         </p>
       </div>
     </div>
@@ -310,7 +311,7 @@ function ThreadError({
           className="btn-brutal btn-brutal-sm"
         >
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-          点击重试
+          Retry
         </button>
       </div>
     </div>
@@ -441,11 +442,11 @@ function ThreadReplyInput({
             onKeyDown={handleKeyDown}
             onSelect={handleCursorMove}
             onClick={handleCursorMove}
-            placeholder="回复到线程... (输入 @ 提及成员)"
+            placeholder={t('threadReplyPlaceholder')}
             rows={1}
             autoFocus
             disabled={isSending || disabled}
-            aria-label="线程回复输入框"
+            aria-label={t('threadReplyInput')}
             className={cn(
               'input-brutal min-h-[44px] resize-none pr-12 font-mono text-sm leading-relaxed',
               'placeholder:font-mono placeholder:text-muted-foreground/60',
@@ -455,7 +456,7 @@ function ThreadReplyInput({
           <button
             onClick={handleSend}
             disabled={!canSend}
-            aria-label="发送回复"
+            aria-label={t('sendReply')}
             className={cn(
               'btn-brutal btn-brutal-primary absolute bottom-2 right-2 flex h-8 w-8 items-center justify-center p-0',
               !canSend && 'opacity-40 pointer-events-none',
@@ -481,10 +482,10 @@ const STATUS_BADGE_COLORS: Record<string, string> = {
 
 const STATUS_LABELS: Record<string, string> = {
   todo: 'TODO',
-  in_progress: '进行中',
-  in_review: '审查中',
-  done: '已完成',
-  closed: '已关闭',
+  in_progress: 'In Progress',
+  in_review: 'In Review',
+  done: 'Done',
+  closed: 'Closed',
 };
 
 const PRIORITY_LABELS: Record<string, string> = {
@@ -523,7 +524,7 @@ function ParentMessageTaskBar({ message }: { message: Message }) {
           </span>
         ) : (
           <span className="font-heading text-xs text-muted-foreground">
-            待认领
+            Unclaimed
           </span>
         )}
       </div>
@@ -572,11 +573,11 @@ function TaskMetaBar({
       {/* Line 2: priority + claimer + claim/unclaim */}
       <div className="flex items-center gap-2 text-xs flex-wrap">
         <span className="font-mono text-muted-foreground">
-          优先级:{' '}
+          Priority:{' '}
           <span className="font-bold text-foreground">{priorityLabel}</span>
         </span>
         <span className="font-mono text-muted-foreground">|</span>
-        <span className="font-mono text-muted-foreground">认领人:</span>
+        <span className="font-mono text-muted-foreground">Claimer:</span>
         {isClaimed ? (
           <div className="">
             <span className="flex items-center gap-1">
@@ -592,25 +593,25 @@ function TaskMetaBar({
                 type="button"
                 onClick={() => onUnclaim(task)}
                 className="btn-brutal btn-brutal-sm ml-1 text-[10px]"
-                aria-label="释放任务"
+                aria-label={t('releaseTask')}
               >
-                释放
+                Release
               </button>
             )}
           </div>
         ) : (
           <div className="">
             <span className="font-heading text-xs text-muted-foreground">
-              暂未认领
+              Not yet claimed
             </span>
             {onClaim && (
               <button
                 type="button"
                 onClick={() => onClaim(task)}
                 className="btn-brutal btn-brutal-sm ml-1 text-[10px]"
-                aria-label="认领任务"
+                aria-label={t('claimTask')}
               >
-                认领
+                Claim
               </button>
             )}
           </div>
@@ -718,9 +719,9 @@ export function ThreadPanel({
       {/* Header */}
       <div className="flex h-14 flex-shrink-0 items-center justify-between border-b-2 border-black px-4">
         <h3 className="font-heading text-base font-bold text-foreground">
-          线程{replyCount > 0 && (
+          Thread{replyCount > 0 && (
             <span className="ml-1.5 font-mono text-sm text-muted-foreground">
-              &middot; {replyCount} 条回复
+              &middot; {replyCount} replies
             </span>
           )}
         </h3>
@@ -728,7 +729,7 @@ export function ThreadPanel({
           type="button"
           onClick={onClose}
           className="btn-brutal btn-brutal-sm flex h-8 w-8 items-center justify-center p-0"
-          aria-label="关闭线程面板"
+          aria-label={t('closeThreadPanel')}
         >
           <X className="h-4 w-4" />
         </button>

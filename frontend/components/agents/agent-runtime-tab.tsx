@@ -13,6 +13,7 @@ import { AlertCircle, RefreshCw, Terminal, Layers, Cpu } from 'lucide-react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import { t } from '@/lib/i18n';
 import type { Agent } from '@/lib/types';
 
 interface AgentRuntimeTabProps {
@@ -51,9 +52,9 @@ export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
       } as Agent);
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.status === 404 ? 'Agent 不存在' : err.message);
+        setError(err.status === 404 ? t('agentProfileAgentNotFound') : err.message);
       } else {
-        setError('加载 Runtime 配置失败');
+        setError(t('agentRuntimeError'));
       }
     } finally {
       setIsLoading(false);
@@ -84,7 +85,7 @@ export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
         <p className="font-body text-sm text-brutal-danger">{error}</p>
         <Button type="button" onClick={loadAgent} size="sm" className="mt-4">
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-          重试
+          {t('retry')}
         </Button>
       </div>
     );
@@ -101,12 +102,12 @@ export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
         <div className="flex items-center gap-2">
           <Cpu className="h-4 w-4 flex-shrink-0" />
           <h3 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
-            Runtime 类型
+            {t('agentRuntimeType')}
           </h3>
         </div>
         <div className="card-brutal bg-brutal-cream p-3">
           <p className="font-mono text-sm text-foreground">
-            {agent.model_provider || '未配置'}
+            {agent.model_provider || t('agentRuntimeNotConfigured')}
           </p>
         </div>
       </div>
@@ -116,14 +117,14 @@ export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
         <div className="flex items-center gap-2">
           <Layers className="h-4 w-4 flex-shrink-0" />
           <h3 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
-            模型配置
+            {t('agentRuntimeModelConfig')}
           </h3>
         </div>
         <div className="card-brutal bg-brutal-cream divide-y-2 divide-black">
           <div className="flex items-center justify-between px-3 py-2">
             <span className="font-mono text-[11px] text-muted-foreground">Model</span>
             <span className="font-mono text-sm text-foreground">
-              {agent.model_name || '默认'}
+              {agent.model_name || t('agentRuntimeDefault')}
             </span>
           </div>
           <div className="flex items-center justify-between px-3 py-2">
@@ -146,7 +147,7 @@ export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
         <div className="flex items-center gap-2">
           <Terminal className="h-4 w-4 flex-shrink-0" />
           <h3 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
-            环境变量
+            {t('agentRuntimeEnvVars')}
           </h3>
           <span className="badge-brutal text-[10px]">
             {envKeys.length}
@@ -166,7 +167,7 @@ export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
         ) : (
           <div className="card-brutal bg-brutal-cream p-3 text-center">
             <p className="font-mono text-xs italic text-muted-foreground">
-              未配置环境变量
+              {t('agentRuntimeNoEnvVars')}
             </p>
           </div>
         )}
@@ -175,19 +176,19 @@ export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
       {/* Auto-join setting */}
       <div className="space-y-2">
         <h3 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
-          自动加入频道
+          {t('agentRuntimeAutoJoin')}
         </h3>
         <div className={agent.auto_join
           ? 'border-2 border-black bg-brutal-success-light px-3 py-2'
           : 'border-2 border-black bg-brutal-cream px-3 py-2'
         }>
           <span className={`badge-brutal text-[10px] ${agent.auto_join ? 'bg-brutal-success text-black' : 'bg-brutal-muted text-black'}`}>
-            {agent.auto_join ? '已启用' : '已禁用'}
+            {agent.auto_join ? t('enabled') : t('disabled')}
           </span>
           <p className="mt-1 font-mono text-[11px] text-muted-foreground">
             {agent.auto_join
-              ? 'Agent 创建时会自动加入所有频道'
-              : 'Agent 需要手动添加到频道'}
+              ? t('agentRuntimeAutoJoinEnabled')
+              : t('agentRuntimeAutoJoinDisabled')}
           </p>
         </div>
       </div>

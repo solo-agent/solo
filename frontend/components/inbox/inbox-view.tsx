@@ -9,16 +9,17 @@ import { InboxItem } from './inbox-item';
 import { TabBar } from '@/components/ui/tab-bar';
 import type { TabBarTab } from '@/components/ui/tab-bar';
 import type { InboxItem as InboxItemType, Message } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
 const ThreadPanel = lazy(() =>
   import('@/components/dashboard/thread-panel').then((m) => ({ default: m.ThreadPanel })),
 );
 
 const INBOX_TABS: TabBarTab[] = [
-  { key: 'all', label: '全部' },
-  { key: 'mention', label: '@提及' },
-  { key: 'thread_reply', label: '话题回复' },
-  { key: 'dm', label: '私信' },
+  { key: 'all', label: t('inboxTabAll') },
+  { key: 'mention', label: t('inboxTabMentions') },
+  { key: 'thread_reply', label: t('inboxTabReplies') },
+  { key: 'dm', label: t('inboxTabDMs') },
 ];
 
 const KEY_TO_TYPE_FILTER: Record<string, string[]> = {
@@ -107,14 +108,14 @@ export function InboxView() {
                 onClick={handleMarkAllRead}
                 className="border-2 border-black bg-white px-3 py-1 text-xs font-heading font-bold shadow-brutal-sm hover:bg-brutal-cream active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
               >
-                全部已读
+                {t('markAllRead')}
               </button>
               <button
                 type="button"
                 onClick={handleClearAll}
                 className="border-2 border-black bg-brutal-primary px-3 py-1 text-xs font-heading font-bold text-black shadow-brutal-sm hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
               >
-                清空
+                {t('clearInbox')}
               </button>
             </div>
           )}
@@ -129,7 +130,7 @@ export function InboxView() {
         >
           <input
             type="text"
-            placeholder="筛选发送者..."
+            placeholder={t('filterSender')}
             value={senderFilter}
             onChange={(e) => setSenderFilter(e.target.value)}
             className="ml-auto h-7 w-36 text-xs border-2 border-black bg-white px-2 font-body shadow-brutal-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brutal-info"
@@ -147,10 +148,10 @@ export function InboxView() {
                 <InboxIcon className="h-8 w-8 text-black" />
               </div>
               <h2 className="font-heading text-lg font-bold text-foreground">
-                没有新消息
+                {t('noNewMessages')}
               </h2>
               <p className="mt-1 font-body text-sm text-muted-foreground">
-                当有人在你的话题中回复、向你发送私信或 @提及你时，消息会出现在这里
+                {t('inboxEmptyDesc')}
               </p>
             </div>
           ) : (
@@ -174,10 +175,10 @@ export function InboxView() {
                     {isLoadingMore ? (
                       <span className="flex items-center gap-1.5">
                         <Loader2 className="h-3 w-3 animate-spin" />
-                        加载中...
+                        {t('loading')}
                       </span>
                     ) : (
-                      '加载更多'
+                      t('loadMore')
                     )}
                   </button>
                 </div>

@@ -16,6 +16,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Bot, Wrench, Terminal } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -40,48 +41,48 @@ interface RoleTemplate {
 const ROLE_TEMPLATES: RoleTemplate[] = [
   {
     key: 'leader',
-    name: '统筹者',
-    desc: '监控进度、分配任务、审批交付',
+    name: 'Orchestrator',
+    desc: 'Monitor progress, assign tasks, approve deliverables',
     prompt:
-      '你是团队的统筹者。你的职责是监控整体进度、将大任务拆解为子任务、分派给合适的Agent。你不直接执行编码——你专注于任务分配和决策审批。当任务标记为 in_review 时，审查完成质量后移动到 done。发现阻塞或进度延误时，及时协调解决。',
+      'You are the team orchestrator. Your responsibility is to monitor overall progress, break down large tasks into sub-tasks, and assign them to the appropriate agents. You do not write code directly — you focus on task assignment and decision approval. When a task is marked in_review, review the quality of completion and move it to done. If you detect blockers or schedule delays, coordinate and resolve them promptly.',
   },
   {
     key: 'pm',
-    name: '项目管理',
-    desc: '需求分析、任务规划、优先级管理',
+    name: 'Project Manager',
+    desc: 'Requirements analysis, task planning, priority management',
     prompt:
-      '你是产品/项目管理者。你的职责是将需求转化为可执行的任务，编写清晰的任务描述和验收标准。设定优先级(P0-P3)确保团队专注高优事项。跟踪任务进度，识别风险并提前沟通。你不直接写代码，但需要确保每个任务都有明确的可交付标准。',
+      'You are the product/project manager. Your responsibility is to convert requirements into executable tasks, write clear task descriptions and acceptance criteria. Set priorities (P0-P3) to ensure the team focuses on high-priority items. Track task progress, identify risks, and communicate proactively. You do not write code directly, but you ensure every task has clear deliverable standards.',
   },
   {
     key: 'rd',
-    name: '后端开发',
-    desc: '后端编码、架构实现、代码审查',
+    name: 'Backend Developer',
+    desc: 'Backend coding, architecture implementation, code review',
     prompt:
-      '你是后端/架构开发者。你的职责是认领后端编码和架构实现任务，在任务线程中更新工作进度。遇到技术阻塞时及时沟通，完成实现后标记 in_review 并简要说明方案。你专注于后端技术栈（Go、PostgreSQL、分布式系统等），可帮助审查其他agent的代码。',
+      'You are a backend/architecture developer. Your responsibility is to take on backend coding and architecture implementation tasks, updating progress in the task thread. Communicate promptly when encountering technical blockers, mark tasks as in_review when implementation is complete, and briefly describe your approach. You focus on the backend tech stack (Go, PostgreSQL, distributed systems, etc.) and can help review other agents\' code.',
   },
   {
     key: 'fe',
-    name: '前端开发',
-    desc: '前端UI实现、响应式设计、交互',
+    name: 'Frontend Developer',
+    desc: 'Frontend UI, responsive design, interactions',
     prompt:
-      '你是前端开发者。你的职责是认领前端UI和交互实现任务，关注界面一致性、响应式设计、用户体验。使用 React、Next.js、Tailwind CSS 等技术栈。在任务线程中更新进度，完成实现后标记 in_review 并简要说明方案。可帮助审查前端代码。',
+      'You are a frontend developer. Your responsibility is to take on frontend UI and interaction implementation tasks, focusing on interface consistency, responsive design, and user experience. Use React, Next.js, Tailwind CSS, and related tech stacks. Update progress in the task thread, mark tasks as in_review when implementation is complete, and briefly describe your approach. You can help review frontend code.',
   },
   {
     key: 'qa',
-    name: '测试保障',
-    desc: '编写测试、发现Bug、质量验证',
+    name: 'QA Engineer',
+    desc: 'Write tests, find bugs, quality verification',
     prompt:
-      '你是测试/质量保障者。你的职责是认领测试编写和验证任务，为核心功能路径编写测试用例。发现Bug后创建新任务记录问题并@相关人员。验证 in_review 状态的任务，确认功能符合验收标准后可移动到 done。你不直接修代码，但确保交付质量。',
+      'You are a QA/test engineer. Your responsibility is to take on test writing and verification tasks, writing test cases for critical functional paths. When you discover bugs, create new tasks to document the issues and @mention relevant people. Verify tasks in in_review status, and move them to done once you confirm they meet acceptance criteria. You do not fix code directly, but you ensure delivery quality.',
   },
 ];
 
 const agentFormSchema = z.object({
   name: z
     .string()
-    .min(1, '名称不能为空')
-    .max(50, '名称不能超过 50 个字符'),
-  description: z.string().max(200, '描述不能超过 200 个字符').optional(),
-  model_provider: z.string().min(1, '请选择 Runtime'),
+    .min(1, t('agentFormNameRequired'))
+    .max(50, t('agentFormNameMaxLen')),
+  description: z.string().max(200, t('agentFormDescMaxLen')).optional(),
+  model_provider: z.string().min(1, t('agentFormRuntimeRequired')),
   model_name: z.string().optional(),
   system_prompt: z.string().optional(),
   // v1.4: custom_env and custom_args are managed via controlled components,
@@ -158,7 +159,7 @@ export function AgentForm({
 
       if (isTextareaDirty) {
         const confirmed = window.confirm(
-          '当前 System Prompt 中有未保存的自定义内容。切换模板将替换现有内容，是否继续？',
+          t('agentFormTemplateWarning'),
         );
         if (!confirmed) return;
       }
@@ -201,11 +202,11 @@ export function AgentForm({
       {/* Name */}
       <div className="space-y-2">
         <Label htmlFor="name">
-          名称 <span className="text-brutal-danger">*</span>
+          {t('agentFormName')}
         </Label>
         <Input
           id="name"
-          placeholder="例如：代码审查员"
+          placeholder={t('agentFormNamePlaceholder')}
           autoFocus
           {...register('name')}
           aria-invalid={!!errors.name}
@@ -219,10 +220,10 @@ export function AgentForm({
 
       {/* Description */}
       <div className="space-y-2">
-        <Label htmlFor="description">描述</Label>
+        <Label htmlFor="description">{t('agentFormDesc')}</Label>
         <Input
           id="description"
-          placeholder="简要描述 Agent 的职责和作用"
+          placeholder={t('agentFormDescPlaceholder')}
           {...register('description')}
           aria-invalid={!!errors.description}
         />
@@ -260,7 +261,7 @@ export function AgentForm({
                   label: `${rt.available ? '●' : '○'} ${rt.display_name}${rt.version ? ` (v${rt.version})` : ''}`,
                   disabled: !rt.available,
                 }))}
-                placeholder="选择 Runtime..."
+                placeholder={t('agentFormSelectRuntime')}
                 size="md"
                 className="w-full font-body"
               />
@@ -283,7 +284,7 @@ export function AgentForm({
                 className="flex items-center gap-1.5 text-xs text-muted-foreground"
               >
                 <span className="font-mono text-[11px]">
-                  {rt.display_name} — 未安装
+                  {t('agentFormNotInstalled', { name: rt.display_name })}
                   {rt.error ? ` (${rt.error})` : ` (${rt.binary})`}
                 </span>
               </div>
@@ -293,7 +294,7 @@ export function AgentForm({
 
       {/* Role Template Selector (SOLO-210-F) */}
       <div className="space-y-3">
-        <Label>角色模板 <span className="font-bold text-muted-foreground">(可选)</span></Label>
+        <Label>{t('agentFormRoleTemplate')}</Label>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5">
           {ROLE_TEMPLATES.map((template) => {
             const isSelected = selectedTemplateKey === template.key;
@@ -323,16 +324,16 @@ export function AgentForm({
 
       {/* System Prompt */}
       <div className="space-y-2">
-        <Label htmlFor="system_prompt">System Prompt</Label>
+        <Label htmlFor="system_prompt">{t('agentFormSystemPrompt')}</Label>
         <Textarea
           id="system_prompt"
-          placeholder="设置 Agent 的行为指令和角色定义..."
+          placeholder={t('agentFormSystemPromptPlaceholder')}
           className="min-h-[120px] resize-y"
           aria-label="System Prompt"
           {...register('system_prompt')}
         />
         <p className="font-mono text-[11px] text-muted-foreground">
-          定义 Agent 的角色和行为方式。填写后 Agent 将根据此指令回复消息。
+          {t('agentFormSystemPromptHelp')}
         </p>
       </div>
 
@@ -340,10 +341,10 @@ export function AgentForm({
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <Terminal className="h-4 w-4" />
-          <Label>Environment Variables <span className="font-bold text-muted-foreground">(可选)</span></Label>
+          <Label>{t('agentFormEnv')}</Label>
         </div>
         <p className="font-mono text-[11px] text-muted-foreground">
-          为 Agent 运行时注入环境变量，例如 API 密钥、配置参数等。
+          {t('agentFormEnvHelp')}
         </p>
         <EnvEditor
           value={envValues}
@@ -356,10 +357,10 @@ export function AgentForm({
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <Wrench className="h-4 w-4" />
-          <Label>Custom Arguments <span className="font-bold text-muted-foreground">(可选)</span></Label>
+          <Label>{t('agentFormCustomArgs')}</Label>
         </div>
         <p className="font-mono text-[11px] text-muted-foreground">
-          传递给 CLI 的额外参数。每个参数作为独立标签添加。
+          {t('agentFormCustomArgsHelp')}
         </p>
         <ArgsEditor
           value={argsValues}
@@ -378,7 +379,7 @@ export function AgentForm({
           {isSubmitting ? (
             <>
               <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              提交中...
+              {t('agentFormSubmitting')}
             </>
           ) : (
             <>

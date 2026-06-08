@@ -29,6 +29,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { t } from '@/lib/i18n';
 import { useComputers } from '@/lib/hooks/use-computers';
 import { useComputerAgents } from '@/lib/hooks/use-computer-agents';
 import { Button } from '@/components/ui/button';
@@ -54,7 +55,7 @@ import type { Computer } from '@/lib/types';
 // ---- OS icon helper ----
 
 function getOsIcon(os?: string): { icon: React.ReactNode; label: string } {
-  if (!os) return { icon: <MonitorDot className="h-4 w-4" />, label: '未知' };
+  if (!os) return { icon: <MonitorDot className="h-4 w-4" />, label: t('unknown') };
   const lower = os.toLowerCase();
   if (lower.includes('darwin') || lower.includes('mac')) {
     return { icon: <Apple className="h-4 w-4" />, label: 'macOS' };
@@ -77,10 +78,10 @@ function AgentStatusDot({ status }: { status: string }) {
     offline: 'bg-brutal-muted',
   };
   const labelMap: Record<string, string> = {
-    online: '空闲',
-    thinking: '思考中',
-    running: '运行中',
-    offline: '离线',
+    online: t('agentIdle'),
+    thinking: t('agentThinkingShort'),
+    running: t('agentExecuting'),
+    offline: t('offline'),
   };
   return (
     <span className="flex items-center gap-1.5 text-xs">
@@ -161,9 +162,9 @@ export default function ComputersPage() {
     try {
       await updateComputer(computerId, { name: editName.trim() });
       setEditingId(null);
-      showToast('名称已更新', 'success');
+      showToast(t('computersNameUpdated'), 'success');
     } catch (err) {
-      const message = err instanceof Error ? err.message : '更新名称失败';
+      const message = err instanceof Error ? err.message : t('computersNameUpdateError');
       showToast(message, 'error');
     } finally {
       setIsSaving(false);
@@ -191,9 +192,9 @@ export default function ComputersPage() {
       // seeing it as already-selected and clearing).
       setSelectedComputerId((prev) => (prev === deleteTargetId ? null : prev));
       setExpandedId(null);
-      showToast('电脑已移除', 'success');
+      showToast(t('computersRemoved'), 'success');
     } catch (err) {
-      const message = err instanceof Error ? err.message : '移除电脑失败';
+      const message = err instanceof Error ? err.message : t('computersRemoveError');
       showToast(message, 'error');
     } finally {
       setIsDeleting(false);
@@ -207,7 +208,7 @@ export default function ComputersPage() {
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
           <Spinner size="md" />
-          <p className="font-mono text-sm text-muted-foreground">加载中...</p>
+          <p className="font-mono text-sm text-muted-foreground">{t('loading')}</p>
         </div>
       </div>
     );
@@ -232,7 +233,7 @@ export default function ComputersPage() {
         <div className="flex flex-shrink-0 items-center justify-end h-14 border-b-2 border-black px-4">
           <Button onClick={() => setShowAddDialog(true)}>
             <Plus className="mr-2 h-4 w-4" />
-            添加电脑
+            {t('computersAddComputer')}
           </Button>
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-6">
@@ -244,7 +245,7 @@ export default function ComputersPage() {
                   {error}
                 </BrutalAlert>
                 <Button variant="outline" size="sm" onClick={refetch}>
-                  重试
+                  {t('retry')}
                 </Button>
               </div>
             )}
@@ -281,14 +282,14 @@ export default function ComputersPage() {
                   <Monitor className="h-8 w-8 text-white" />
                 </div>
                 <h2 className="text-xl font-heading font-bold text-foreground">
-                  还没有连接的电脑
+                  {t('computersNoComputers')}
                 </h2>
                 <p className="mt-2 font-body text-sm text-muted-foreground">
-                  启动 Daemon 并注册后，电脑将出现在这里
+                  {t('computersNoComputersDesc')}
                 </p>
                 <Button className="mt-6" onClick={() => setShowAddDialog(true)}>
                   <Plus className="mr-2 h-4 w-4" />
-                  查看接入指引
+                  {t('computersViewGuide')}
                 </Button>
               </div>
             )}
@@ -297,7 +298,7 @@ export default function ComputersPage() {
             {!isLoading && !error && computers.length > 0 && !selectedComputer && (
               <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
                 <p className="font-body text-sm text-muted-foreground">
-                  请从左侧选择一台电脑
+                  {t('computersSelectOne')}
                 </p>
               </div>
             )}
@@ -333,30 +334,30 @@ export default function ComputersPage() {
         }}
       >
         <DialogHeader>
-          <DialogTitle>添加电脑</DialogTitle>
+          <DialogTitle>{t('computersAddTitle')}</DialogTitle>
           <DialogCloseButton onClick={() => setShowAddDialog(false)} />
         </DialogHeader>
         <DialogDescription>
-          在目标机器上启动 Daemon 并注册到 Solo 服务器。
+          {t('computersAddDesc')}
         </DialogDescription>
         <div className="mt-4 space-y-3">
           <div className="border-2 border-black bg-brutal-cream p-4">
             <div className="flex items-center gap-2 mb-2">
               <Terminal className="h-4 w-4" />
-              <span className="font-heading text-sm font-bold">操作步骤</span>
+              <span className="font-heading text-sm font-bold">{t('computersSteps')}</span>
             </div>
             <ol className="list-decimal list-inside space-y-1.5 font-mono text-xs text-foreground">
-              <li>在目标机器上克隆项目代码</li>
-              <li>设置 <code className="bg-brutal-black text-brutal-success px-1">.env</code> 中的 <code className="bg-brutal-black text-brutal-success px-1">DAEMON_PORT</code> 和 <code className="bg-brutal-black text-brutal-success px-1">SERVER_URL</code></li>
-              <li>运行 <code className="bg-brutal-black text-brutal-success px-1">make daemon</code> 启动 Daemon</li>
-              <li>Daemon 启动后会自动向服务器注册</li>
-              <li>注册成功后，电脑将出现在列表中</li>
+              <li>{t('computersStepClone')}</li>
+              <li>{t('computersStepEnv')}</li>
+              <li>{t('computersStepStart')}</li>
+              <li>{t('computersStepAuto')}</li>
+              <li>{t('computersStepDone')}</li>
             </ol>
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={() => setShowAddDialog(false)}>
-            知道了
+            {t('computersGotIt')}
           </Button>
         </DialogFooter>
       </Dialog>
@@ -369,17 +370,15 @@ export default function ComputersPage() {
         }}
       >
         <DialogHeader>
-          <DialogTitle>移除电脑</DialogTitle>
+          <DialogTitle>{t('computersRemoveTitle')}</DialogTitle>
           <DialogCloseButton onClick={() => setDeleteTargetId(null)} />
         </DialogHeader>
         <DialogDescription>
-          确定要移除{' '}
-          <strong className="text-foreground">{deleteTargetName}</strong>{' '}
-          吗？此操作不可撤销。该电脑将从系统中注销。
+          {t('computersRemoveConfirm', { name: deleteTargetName || '' })}
         </DialogDescription>
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={() => setDeleteTargetId(null)}>
-            取消
+            {t('cancel')}
           </Button>
           <Button
             variant="destructive"
@@ -387,7 +386,7 @@ export default function ComputersPage() {
             onClick={handleDelete}
             disabled={isDeleting}
           >
-            {isDeleting ? '移除中...' : '确认移除'}
+            {isDeleting ? t('computersRemoving') : t('computersConfirmRemove')}
           </Button>
         </DialogFooter>
       </Dialog>
@@ -444,7 +443,7 @@ function ComputerCard({
         className="w-full p-6 text-left"
         onClick={() => onToggleExpand(computer.id)}
         aria-expanded={isExpanded}
-        aria-label={`${computer.name} — ${isOnline ? '在线' : '离线'}`}
+        aria-label={`${computer.name} — ${isOnline ? t('online') : t('offline')}`}
       >
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-info shadow-brutal-sm">
@@ -459,8 +458,8 @@ function ComputerCard({
             </div>
             <p className="mt-1 font-body text-xs text-muted-foreground">
               {isOnline
-                ? `最后心跳: ${relativeTime(computer.last_heartbeat)}`
-                : `离线 ${relativeTime(computer.last_heartbeat, false)}`}
+                ? `${t('computersLastHeartbeat')}: ${relativeTime(computer.last_heartbeat)}`
+                : `${t('offline')} ${relativeTime(computer.last_heartbeat, false)}`}
             </p>
           </div>
         </div>
@@ -488,7 +487,7 @@ function ComputerCard({
               Agents: {computer.agent_names.length}
             </span>
           ) : (
-            <span>无绑定 Agent</span>
+            <span>{t('computersNoAgentBound')}</span>
           )}
         </div>
 
@@ -511,10 +510,10 @@ function ComputerCard({
       >
         <div className="border-t-2 border-black px-6 pb-6 pt-4">
           {/* Section: System Info */}
-          <SectionHeader label="系统信息" />
+          <SectionHeader label={t('computersSystemInfo')} />
           <div className="mt-3 space-y-2 font-body text-sm">
             {computer.os && (
-              <InfoRow label="系统">
+              <InfoRow label={t('computersOS')}>
                 <span className="flex items-center gap-1.5">
                   {osInfo.icon}
                   {osInfo.label}
@@ -522,21 +521,21 @@ function ComputerCard({
               </InfoRow>
             )}
             {computer.hostname && (
-              <InfoRow label="主机名">
+              <InfoRow label={t('computersHostname')}>
                 <span className="font-mono text-xs">{computer.hostname}</span>
               </InfoRow>
             )}
             {computer.ip && (
-              <InfoRow label="IP 地址">
+              <InfoRow label={t('computersIP')}>
                 <span className="font-mono text-xs">{computer.ip}</span>
               </InfoRow>
             )}
           </div>
 
           {/* Section: Basic Info */}
-          <SectionHeader label="基本信息" className="mt-6" />
+          <SectionHeader label={t('computersBasicInfo')} className="mt-6" />
           <div className="mt-3 space-y-2 font-body text-sm">
-            <InfoRow label="名称">
+            <InfoRow label={t('computersName')}>
               {editingId === computer.id ? (
                 <div className="flex items-center gap-2">
                   <input
@@ -553,7 +552,7 @@ function ComputerCard({
                     size="icon"
                     onClick={() => onSaveName(computer.id)}
                     disabled={isSaving || !editName.trim()}
-                    aria-label="保存名称"
+                    aria-label={t('computersSaveName')}
                     className="h-8 w-8"
                   >
                     <Check className="h-3.5 w-3.5" />
@@ -563,7 +562,7 @@ function ComputerCard({
                     size="icon"
                     onClick={onCancelEdit}
                     disabled={isSaving}
-                    aria-label="取消编辑"
+                    aria-label={t('computersCancelEdit')}
                     className="h-8 w-8"
                   >
                     <X className="h-3.5 w-3.5" />
@@ -576,7 +575,7 @@ function ComputerCard({
                     variant="outline"
                     size="sm"
                     onClick={() => onStartEdit(computer)}
-                    aria-label="编辑名称"
+                    aria-label={t('computersEditName')}
                     className="h-7 px-2 text-xs"
                   >
                     <Edit3 className="h-3 w-3" />
@@ -600,28 +599,28 @@ function ComputerCard({
           </div>
 
           {/* Section: Status */}
-          <SectionHeader label="状态" className="mt-6" />
+          <SectionHeader label={t('computersStatus')} className="mt-6" />
           <div className="mt-3 space-y-2 font-body text-sm">
-            <InfoRow label="当前">
+            <InfoRow label={t('computersCurrent')}>
               <div className="flex items-center gap-2">
                 <StatusDot isOnline={isOnline} />
-                <span>{isOnline ? '在线' : '离线'}</span>
+                <span>{isOnline ? t('online') : t('offline')}</span>
               </div>
             </InfoRow>
-            <InfoRow label="最后心跳">
+            <InfoRow label={t('computersLastHeartbeat')}>
               <span>
                 {computer.last_heartbeat
                   ? formatDateTime(computer.last_heartbeat)
-                  : '从未'}
+                  : t('never')}
               </span>
             </InfoRow>
-            <InfoRow label="注册时间">
+            <InfoRow label={t('computersRegistered')}>
               <span>{formatDateTime(computer.created_at)}</span>
             </InfoRow>
           </div>
 
           {/* Section: Connected Agents (v1.5) */}
-          <SectionHeader label="连接的 Agent" className="mt-6" />
+          <SectionHeader label={t('computersConnectedAgents')} className="mt-6" />
           <div className="mt-3">
             <ConnectedAgents computerId={isExpanded ? computer.id : null} />
           </div>
@@ -633,7 +632,7 @@ function ComputerCard({
               size="sm"
               onClick={() => onDeleteClick(computer.id)}
             >
-              移除电脑
+              {t('computersRemoveTitle')}
             </Button>
           </div>
         </div>
@@ -648,14 +647,14 @@ function ConnectedAgents({ computerId }: { computerId: string | null }) {
   const { agents, isLoading, error } = useComputerAgents(computerId);
 
   if (!computerId) {
-    return <p className="font-body text-sm text-muted-foreground">展开卡片查看</p>;
+    return <p className="font-body text-sm text-muted-foreground">{t('computersExpandCard')}</p>;
   }
 
   if (isLoading) {
     return (
       <div className="flex items-center gap-2 py-2">
         <Spinner size="sm" />
-        <span className="text-sm text-muted-foreground">加载中...</span>
+        <span className="text-sm text-muted-foreground">{t('loading')}</span>
       </div>
     );
   }
@@ -665,13 +664,13 @@ function ConnectedAgents({ computerId }: { computerId: string | null }) {
   }
 
   if (agents.length === 0) {
-    return <p className="font-body text-sm text-muted-foreground">暂无连接的 Agent</p>;
+    return <p className="font-body text-sm text-muted-foreground">{t('computersNoConnectedAgents')}</p>;
   }
 
   return (
     <div className="space-y-2">
       <p className="font-body text-sm text-muted-foreground">
-        共 {agents.length} 个 Agent 连接在此电脑
+        {t('computersAgentCount', { n: agents.length })}
       </p>
       <ul className="space-y-2">
         {agents.map((agent) => (
@@ -688,7 +687,7 @@ function ConnectedAgents({ computerId }: { computerId: string | null }) {
             </div>
             <div className="flex-shrink-0 text-right">
               <span className="text-[11px] text-muted-foreground">
-                活跃任务
+                {t('computersActiveTasks')}
               </span>
               <span className="block font-mono text-sm font-bold text-foreground">
                 {agent.active_tasks}
@@ -711,7 +710,7 @@ function StatusDot({ isOnline }: { isOnline: boolean }) {
         isOnline ? 'bg-brutal-success' : 'bg-brutal-muted animate-pulse',
       )}
       role="status"
-      aria-label={isOnline ? '在线' : '离线'}
+      aria-label={isOnline ? t('online') : t('offline')}
     />
   );
 }

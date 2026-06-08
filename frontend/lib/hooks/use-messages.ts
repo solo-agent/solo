@@ -11,6 +11,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
+import { t } from '@/lib/i18n';
 import type { WSMessage } from '@/lib/ws-types';
 import type { Attachment, Message } from '@/lib/types';
 
@@ -405,7 +406,7 @@ export function useMessages(channelId: string | null) {
         setReplyCounts(newCounts);
       }
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : '加载消息失败';
+      const message = err instanceof ApiError ? err.message : t('messageLoadError');
       setError(message);
     } finally {
       setIsLoading(false);
@@ -461,7 +462,7 @@ export function useMessages(channelId: string | null) {
         }
       }
     } catch {
-      setLoadMoreError('加载更早消息失败');
+      setLoadMoreError(t('earlierMessageLoadError'));
     } finally {
       setIsLoadingMore(false);
       loadingMoreRef.current = false;

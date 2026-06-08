@@ -5,21 +5,22 @@ import { Hash, AtSign, MessageCircle } from 'lucide-react';
 import { relativeTime } from '@/lib/utils/time';
 import type { InboxItem as InboxItemType } from '@/lib/types';
 import { Tag } from '@/components/ui/tag';
+import { t } from '@/lib/i18n';
 
 const typeConfig: Record<InboxItemType['type'], { icon: React.ReactNode; label: string; variant: 'agent' | 'type' | 'status' }> = {
   thread_reply: {
     icon: <Hash className="h-3 w-3" />,
-    label: '话题回复',
+    label: t('inboxThreadReply'),
     variant: 'agent',
   },
   dm: {
     icon: <MessageCircle className="h-3 w-3" />,
-    label: '私信',
+    label: t('inboxDM'),
     variant: 'type',
   },
   mention: {
     icon: <AtSign className="h-3 w-3" />,
-    label: '@提及',
+    label: t('inboxMention'),
     variant: 'status',
   },
 };
@@ -73,10 +74,10 @@ export function InboxItem({ item, onClick }: InboxItemProps) {
 
         <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground truncate font-body">
           {item.type === 'dm'
-            ? `与 ${item.sender_name} 的私信`
+            ? t('inboxDMWith', { name: item.sender_name })
             : item.type === 'thread_reply'
-              ? `在 #${item.channel_name || 'unknown'} 中回复`
-              : `在 #${item.channel_name || 'unknown'} 中提及你`
+              ? t('inboxReplyIn', { channel: item.channel_name || t('unknown') })
+              : t('inboxMentionIn', { channel: item.channel_name || t('unknown') })
           }
         </p>
 

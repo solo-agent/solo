@@ -10,6 +10,7 @@
 import { useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
+import { t } from '@/lib/i18n';
 import { apiClient } from '@/lib/api-client';
 
 interface TaskRedirectInfo {
@@ -56,7 +57,7 @@ export default function TaskDetailPage() {
     <div className="flex h-screen items-center justify-center bg-brutal-cream">
       <div className="flex flex-col items-center gap-3">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        <p className="font-mono text-sm text-muted-foreground">正在跳转到讨论...</p>
+        <p className="font-mono text-sm text-muted-foreground">{t('taskRedirecting')}</p>
       </div>
     </div>
   );

@@ -12,6 +12,7 @@
 import { Edit, Trash2, Circle } from 'lucide-react';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 import {
   Card,
   CardContent,
@@ -33,7 +34,7 @@ export function AgentCard({ agent, onEdit, onDelete, onClick }: AgentCardProps) 
   const statusColor = agent.is_active
     ? 'fill-brutal-success text-brutal-success'
     : 'fill-brutal-muted text-brutal-muted';
-  const statusLabel = agent.is_active ? '在线' : '离线';
+  const statusLabel = agent.is_active ? t('online') : t('offline');
 
   const handleCardClick = () => {
     onClick?.(agent.id);
@@ -68,7 +69,7 @@ export function AgentCard({ agent, onEdit, onDelete, onClick }: AgentCardProps) 
             }
           : undefined
       }
-      aria-label={onClick ? `查看 ${agent.name} 详情` : undefined}
+      aria-label={onClick ? `${t('agentDetailTitle')}: ${agent.name}` : undefined}
     >
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
@@ -109,7 +110,7 @@ export function AgentCard({ agent, onEdit, onDelete, onClick }: AgentCardProps) 
         >
           {agent.system_prompt
             ? agent.system_prompt.slice(0, 80) + (agent.system_prompt.length > 80 ? '...' : '')
-            : '未设置 system prompt'}
+            : `${t('agentProfileNotSet')} system prompt`}
         </p>
       </CardContent>
 
@@ -119,8 +120,8 @@ export function AgentCard({ agent, onEdit, onDelete, onClick }: AgentCardProps) 
           type="button"
           onClick={handleEditClick}
           className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
-          aria-label={`编辑 ${agent.name}`}
-          title="编辑"
+          aria-label={`${t('edit')} ${agent.name}`}
+          title={t('edit')}
         >
           <Edit className="h-3.5 w-3.5" />
         </button>
@@ -128,8 +129,8 @@ export function AgentCard({ agent, onEdit, onDelete, onClick }: AgentCardProps) 
           type="button"
           onClick={handleDeleteClick}
           className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0 bg-brutal-danger-light"
-          aria-label={`删除 ${agent.name}`}
-          title="删除"
+          aria-label={`${t('delete')} ${agent.name}`}
+          title={t('delete')}
         >
           <Trash2 className="h-3.5 w-3.5 text-brutal-danger" />
         </button>

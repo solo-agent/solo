@@ -9,6 +9,7 @@
 
 import { Mail } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 
 interface InboxBadgeProps {
   unreadCount: number;
@@ -27,14 +28,14 @@ export function InboxBadge({ unreadCount, isSelected, onClick }: InboxBadgeProps
           ? 'bg-brutal-primary text-black border-black shadow-brutal-sm'
           : 'text-muted-foreground border-transparent hover:border-black',
       )}
-      aria-label={`收件箱${unreadCount > 0 ? `，${unreadCount} 条未读` : ''}`}
+      aria-label={t('inboxAriaLabel', { n: unreadCount })}
     >
       <Mail className="h-3.5 w-3.5" />
       <span>Inbox</span>
       {unreadCount > 0 && (
         <span
           className="ml-auto flex h-5 min-w-[20px] items-center justify-center border-2 border-black bg-brutal-danger px-1.5 font-mono text-[11px] font-bold text-white"
-          aria-label={`${unreadCount} 条未读`}
+          aria-label={t('inboxUnread', { n: unreadCount })}
         >
           {unreadCount > 99 ? '99+' : unreadCount}
         </span>

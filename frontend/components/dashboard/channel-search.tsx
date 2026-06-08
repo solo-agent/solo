@@ -8,6 +8,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, Loader2, X, Hash } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
+import { t } from '@/lib/i18n';
 import type { SearchResult, SearchResponse } from '@/lib/types';
 import { sanitizeHtml } from '@/lib/sanitize';
 
@@ -57,7 +58,7 @@ export function ChannelSearch({ channelId, channelName, onResultClick }: Channel
         );
         setResults(Array.isArray(res.results) ? res.results : []);
       } catch {
-        setError('搜索失败');
+        setError(t('searchError'));
         setResults([]);
       } finally {
         setSearching(false);
@@ -146,8 +147,8 @@ export function ChannelSearch({ channelId, channelName, onResultClick }: Channel
           type="button"
           onClick={handleOpen}
           className="flex h-8 w-8 items-center justify-center border-2 border-black bg-white shadow-brutal-sm hover:bg-brutal-cream transition-colors"
-          aria-label={`在 #${channelName} 中搜索`}
-          title={`在 #${channelName} 中搜索`}
+          aria-label={t('channelSearch', { channel: channelName })}
+          title={t('channelSearch', { channel: channelName })}
         >
           <Search className="h-4 w-4 text-muted-foreground" />
         </button>
@@ -163,16 +164,16 @@ export function ChannelSearch({ channelId, channelName, onResultClick }: Channel
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={`在 #${channelName} 中搜索...`}
+              placeholder={t('channelSearchPlaceholder', { channel: channelName })}
               className="flex-1 border-none bg-transparent font-body text-sm text-foreground outline-none placeholder:text-muted-foreground"
-              aria-label="搜索消息"
+              aria-label={t('search')}
             />
             {searching && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
             <button
               type="button"
               onClick={handleClose}
               className="flex-shrink-0 p-0.5 hover:bg-brutal-primary-light transition-colors"
-              aria-label="关闭搜索"
+              aria-label={t('channelSearchClose')}
             >
               <X className="h-4 w-4 text-muted-foreground" />
             </button>
@@ -185,7 +186,7 @@ export function ChannelSearch({ channelId, channelName, onResultClick }: Channel
               <div className="flex items-center justify-center py-6">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 <span className="ml-2 font-body text-sm text-muted-foreground">
-                  搜索中...
+                  {t('searchLoading')}
                 </span>
               </div>
             )}
@@ -201,7 +202,7 @@ export function ChannelSearch({ channelId, channelName, onResultClick }: Channel
             {!searching && !error && query.trim() && results.length === 0 && (
               <div className="px-4 py-6 text-center">
                 <p className="font-body text-sm text-muted-foreground">
-                  未找到结果
+                  {t('noResults')}
                 </p>
               </div>
             )}
@@ -210,14 +211,14 @@ export function ChannelSearch({ channelId, channelName, onResultClick }: Channel
             {!searching && !error && !query.trim() && (
               <div className="px-4 py-6 text-center">
                 <p className="font-body text-sm text-muted-foreground">
-                  输入关键词搜索消息
+                  {t('searchEmpty')}
                 </p>
               </div>
             )}
 
             {/* Results list */}
             {results.length > 0 && (
-              <ul className="py-1" role="listbox" aria-label="搜索结果">
+              <ul className="py-1" role="listbox" aria-label={t('searchResults')}>
                 {results.map((result) => (
                   <li key={result.id}>
                     <button
@@ -225,7 +226,7 @@ export function ChannelSearch({ channelId, channelName, onResultClick }: Channel
                       onClick={() => handleResultClick(result.id)}
                       className="w-full border-b-2 border-black px-4 py-3 text-left transition-colors hover:bg-brutal-primary last:border-b-0"
                       role="option"
-                      aria-label={`跳转到 ${result.sender_name} 的消息`}
+                      aria-label={t('jumpToMessage', { name: result.sender_name })}
                     >
                       <div className="flex items-center gap-1.5">
                         <span className="font-heading text-sm font-bold text-foreground truncate">
@@ -255,7 +256,7 @@ export function ChannelSearch({ channelId, channelName, onResultClick }: Channel
           {results.length > 0 && (
             <div className="border-t-2 border-black px-3 py-1.5">
               <p className="font-mono text-[11px] text-muted-foreground">
-                {results.length} 条结果
+                {t('searchResultsCount', { n: results.length })}
               </p>
             </div>
           )}

@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Button } from '@/components/ui/button';
 import type { Channel, DMChannel } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
 interface TasksLeftColumnProps {
   channels: Channel[];
@@ -45,7 +46,7 @@ const SECTION_COUNT = 'ml-auto text-xs tabular-nums opacity-50';
 function getDmDisplayName(dm: DMChannel): string {
   if (dm.other_user) return dm.other_user.display_name;
   if (dm.other_agent) return dm.other_agent.name;
-  return '未知对话';
+  return t('unknown');
 }
 
 function getDmAvatarId(dm: DMChannel): string {
@@ -97,7 +98,7 @@ export function TasksLeftColumn({
           type="button"
           onClick={() => toggle('channels')}
           className={SECTION_HEADER}
-          aria-label="展开或折叠 频道"
+          aria-label={t('navCollapseChannels')}
           aria-expanded={isChannelsExpanded}
         >
           <ChevronDown
@@ -114,7 +115,7 @@ export function TasksLeftColumn({
           <div>
             {channelsLoading && channels.length === 0 ? (
               <p className="px-6 py-2 font-mono text-[10px] italic text-muted-foreground">
-                加载中...
+                {t('loading')}
               </p>
             ) : channelsError ? (
               <div className="flex flex-col items-center gap-2 px-3 py-3">
@@ -124,12 +125,12 @@ export function TasksLeftColumn({
                 </div>
                 <Button size="sm" variant="outline" onClick={onRetryChannels}>
                   <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                  重试
+                  {t('retry')}
                 </Button>
               </div>
             ) : channels.length === 0 ? (
               <p className="px-6 py-2 font-mono text-[10px] italic text-muted-foreground">
-                暂无频道
+                {t('noChannelsOrDMs')}
               </p>
             ) : (
               channels.map((channel) => (
@@ -160,7 +161,7 @@ export function TasksLeftColumn({
           type="button"
           onClick={() => toggle('dms')}
           className={SECTION_HEADER}
-          aria-label="展开或折叠 直接消息"
+          aria-label={t('navCollapseDMs')}
           aria-expanded={isDmsExpanded}
         >
           <ChevronDown
@@ -177,7 +178,7 @@ export function TasksLeftColumn({
           <div>
             {dmsLoading && dms.length === 0 ? (
               <p className="px-6 py-2 font-mono text-[10px] italic text-muted-foreground">
-                加载中...
+                {t('loading')}
               </p>
             ) : dmsError ? (
               <div className="flex flex-col items-center gap-2 px-3 py-3">
@@ -187,12 +188,12 @@ export function TasksLeftColumn({
                 </div>
                 <Button size="sm" variant="outline" onClick={onRetryDMs}>
                   <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                  重试
+                  {t('retry')}
                 </Button>
               </div>
             ) : dms.length === 0 ? (
               <p className="px-6 py-2 font-mono text-[10px] italic text-muted-foreground">
-                暂无对话
+                {t('noDMsYet')}
               </p>
             ) : (
               dms.map((dm) => {

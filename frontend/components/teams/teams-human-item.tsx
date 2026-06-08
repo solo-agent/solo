@@ -6,6 +6,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 
 interface TeamsHumanItemProps {
   user: { id: string; display_name: string; avatar_url?: string | null };
@@ -31,7 +32,7 @@ export function TeamsHumanItem({ user, isSelected, onSelect }: TeamsHumanItemPro
           onSelect(user.id);
         }
       }}
-      aria-label={`查看 ${user.display_name} 详情`}
+      aria-label={t('viewUserDetail', { name: user.display_name })}
       aria-current={isSelected ? 'true' : undefined}
     >
       <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center border-2 border-black shadow-brutal-sm bg-primary text-xs font-bold text-primary-foreground font-heading">

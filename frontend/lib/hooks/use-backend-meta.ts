@@ -6,6 +6,7 @@
 
 'use client';
 
+import { t } from '@/lib/i18n';
 import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '@/lib/api-client';
 import type { AgentBackendMeta } from '@/lib/types';
@@ -56,7 +57,7 @@ export function useBackendMeta(): BackendMetaState {
       .catch((err) => {
         if (!mountedRef.current) return;
         setError(
-          err instanceof Error ? err.message : '加载 Backend 元数据失败',
+          err instanceof Error ? err.message : `${t('backendMetaLoadError')}`,
         );
       })
       .finally(() => {

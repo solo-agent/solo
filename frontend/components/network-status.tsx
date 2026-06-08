@@ -52,12 +52,12 @@ export function NetworkStatus() {
       {isOnline ? (
         <>
           <Wifi className="h-4 w-4" />
-          <span>网络已恢复</span>
+          <span>Network restored</span>
         </>
       ) : (
         <>
           <WifiOff className="h-4 w-4" />
-          <span>网络连接已断开，部分功能不可用</span>
+          <span>Connection lost. Some features may be unavailable.</span>
         </>
       )}
     </div>

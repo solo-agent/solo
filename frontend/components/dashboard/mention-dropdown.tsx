@@ -12,6 +12,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Bot, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 import type { ChannelMember } from '@/lib/types';
 
 // ---- Types ----
@@ -59,11 +60,11 @@ export function MentionDropdown({
         bottom: window.innerHeight - anchor.top,
       }}
       role="listbox"
-      aria-label="提及成员选择"
+      aria-label={t('mentionSelect')}
     >
       {suggestions.length === 0 && searchQuery !== '' ? (
         <div className="py-3 text-center text-xs text-muted-foreground">
-          没有匹配的成员
+          No matching members
         </div>
       ) : (
         <div ref={listRef} className="max-h-48 overflow-y-auto py-1">

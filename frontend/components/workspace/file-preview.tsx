@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { sanitizeHtml } from '@/lib/sanitize';
+import { t } from '@/lib/i18n';
 
 // Module-level singleton to avoid re-creating the highlighter
 let highlighterPromise: ReturnType<typeof createHighlighter> | null = null;
@@ -237,7 +238,7 @@ export function FilePreview({
   if (content === null) {
     return (
       <div className="flex items-center justify-center h-full">
-        <p className="font-mono text-xs text-muted-foreground">加载文件内容失败</p>
+        <p className="font-mono text-xs text-muted-foreground">{t('workspaceLoadError')}</p>
       </div>
     );
   }

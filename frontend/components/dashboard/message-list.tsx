@@ -45,6 +45,7 @@ import { StreamingMessage } from './streaming-message';
 import { MessageAttachments } from './message-attachments';
 import type { Channel, Message, Task, TaskStatus } from '@/lib/types';
 import { sanitizeHtml } from '@/lib/sanitize';
+import { t } from '@/lib/i18n';
 // SOLO-island PR2: TypingIndicator removed — AgentIsland (mounted at the
 // dashboard root) now surfaces agent status. The unused import is removed
 // along with the agentActivities prop and the inline <TypingIndicator />.
@@ -72,28 +73,28 @@ interface MessageListProps {
 
 const TASK_HEADER_CONFIG: Record<string, { label: string; borderClass: string; bgClass: string; badgeClass: string; lightClass: string }> = {
   todo: {
-    label: 'TODO',
+    label: t('statusTodo'),
     borderClass: 'border-2 border-black',
     bgClass: '',
     badgeClass: 'bg-brutal-warning text-black border-2 border-black',
     lightClass: 'bg-brutal-warning-light',
   },
   in_progress: {
-    label: '处理中',
+    label: t('statusInProgress'),
     borderClass: 'border-2 border-black',
     bgClass: '',
     badgeClass: 'bg-brutal-info text-black border-2 border-black',
     lightClass: 'bg-brutal-info-light',
   },
   in_review: {
-    label: '待审核',
+    label: t('statusPendingReview'),
     borderClass: 'border-2 border-black',
     bgClass: '',
     badgeClass: 'bg-brutal-violet text-black border-2 border-black',
     lightClass: 'bg-brutal-violet-light',
   },
   done: {
-    label: '已完成',
+    label: t('statusDone'),
     borderClass: 'border-2 border-black',
     bgClass: '',
     badgeClass: 'bg-brutal-success text-black border-2 border-black',
@@ -246,7 +247,7 @@ const MessageItem = memo(function MessageItem({
       onClick={isTaskMessage && onReply ? () => onReply(message) : undefined}
       onKeyDown={isTaskMessage && onReply ? (e) => { if (e.key === 'Enter') onReply(message); } : undefined}
       tabIndex={isTaskMessage ? 0 : undefined}
-      aria-label={isTaskMessage ? `任务 #${message.task_number} — ${headerConfig?.label || ''}` : undefined}
+      aria-label={isTaskMessage ? `Task #${message.task_number} — ${headerConfig?.label || ''}` : undefined}
     >
       {/* P25-08-F: Unread thread red dot */}
       {hasUnreadThread && onReply && (
@@ -254,8 +255,8 @@ const MessageItem = memo(function MessageItem({
           type="button"
           onClick={(e) => { e.stopPropagation(); onReply(message); }}
           className="flex-shrink-0 self-center -mr-1.5 -ml-2"
-          aria-label="有未读线程回复，点击查看"
-          title="有未读回复"
+          aria-label={t('unreadThreadReply')}
+          title={t('unreadReply')}
         >
           <span className="block h-2.5 w-2.5 bg-brutal-danger border border-black animate-fade-in" />
         </button>
@@ -308,7 +309,7 @@ const MessageItem = memo(function MessageItem({
           </span>
           {isEditing && (
             <span className="font-mono text-[11px] text-brutal-primary animate-pulse ml-auto">
-              编辑中...
+              {t('editingMessage')}
             </span>
           )}
         </div>
@@ -319,7 +320,7 @@ const MessageItem = memo(function MessageItem({
             {isSaving && (
               <div className="flex items-center gap-1.5">
                 <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-                <span className="font-mono text-[11px] text-muted-foreground">保存中...</span>
+                <span className="font-mono text-[11px] text-muted-foreground">{t('savingMessage')}</span>
               </div>
             )}
             <textarea
@@ -328,7 +329,7 @@ const MessageItem = memo(function MessageItem({
               onChange={(e) => setEditContent(e.target.value)}
               onKeyDown={handleEditKeyDown}
               className="input-brutal min-h-[60px] resize-y py-2 text-sm"
-              aria-label="编辑消息内容"
+              aria-label={t('editMessage')}
               disabled={isSaving}
             />
             <div className="flex items-center gap-2">
@@ -338,7 +339,7 @@ const MessageItem = memo(function MessageItem({
                 disabled={isSaving || !editContent.trim()}
                 className="btn-brutal btn-brutal-sm btn-brutal-primary"
               >
-                {isSaving ? '保存中...' : '保存'}
+                {isSaving ? t('savingMessage') : t('saveMessage')}
               </button>
               <button
                 type="button"
@@ -346,7 +347,7 @@ const MessageItem = memo(function MessageItem({
                 disabled={isSaving}
                 className="btn-brutal btn-brutal-sm"
               >
-                取消
+                {t('cancel')}
               </button>
             </div>
           </div>
@@ -378,7 +379,7 @@ const MessageItem = memo(function MessageItem({
           <div className="mt-2 flex items-center gap-2">
             <AlertCircle className="h-3.5 w-3.5 text-brutal-danger" />
             <span className="font-mono text-[11px] text-brutal-danger">
-              发送失败
+              {t('sendFailed')}
             </span>
             <button
               type="button"
@@ -386,14 +387,14 @@ const MessageItem = memo(function MessageItem({
               className="btn-brutal btn-brutal-sm"
             >
               <RefreshCw className="mr-1 h-3 w-3" />
-              重试
+              {t('retry')}
             </button>
             <button
               type="button"
               onClick={() => onCancel?.(message.id)}
               className="btn-brutal btn-brutal-sm"
             >
-              取消
+              {t('cancel')}
             </button>
           </div>
         )}
@@ -402,7 +403,7 @@ const MessageItem = memo(function MessageItem({
         {isSending && (
           <div className="mt-1.5">
             <span className="font-mono text-[11px] text-muted-foreground">
-              发送中...
+              {t('sending')}
             </span>
           </div>
         )}
@@ -415,7 +416,7 @@ const MessageItem = memo(function MessageItem({
               {message.task_claimer_name ? (
                 <>@{message.task_claimer_name}</>
               ) : (
-                '待认领'
+                t('unclaimed')
               )}
             </span>
           )}
@@ -455,8 +456,8 @@ const MessageItem = memo(function MessageItem({
                 setIsEditing(true);
               }}
               className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
-              aria-label={`编辑 ${message.display_name} 的消息`}
-              title="编辑"
+              aria-label={t('editMessage')}
+              title={t('edit')}
             >
               <Pencil className="h-3.5 w-3.5" />
             </button>
@@ -466,8 +467,8 @@ const MessageItem = memo(function MessageItem({
               type="button"
               onClick={(e) => { e.stopPropagation(); onDelete(message.id); }}
               className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
-              aria-label={`删除 ${message.display_name} 的消息`}
-              title="删除"
+              aria-label={t('deleteMessage')}
+              title={t('delete')}
             >
               <Trash2 className="h-3.5 w-3.5" />
             </button>
@@ -477,8 +478,8 @@ const MessageItem = memo(function MessageItem({
               type="button"
               onClick={(e) => { e.stopPropagation(); onReply(message); }}
               className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
-              aria-label={`回复 ${message.display_name} 的消息`}
-              title="回复"
+              aria-label={t('replyToMessage', { name: message.display_name })}
+              title={t('replyToMessage', { name: message.display_name })}
             >
               <MessageSquare className="h-3.5 w-3.5" />
             </button>
@@ -488,8 +489,8 @@ const MessageItem = memo(function MessageItem({
               type="button"
               onClick={(e) => { e.stopPropagation(); onAsTask(message); }}
               className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
-              aria-label="转为任务"
-              title="转为任务"
+              aria-label={t('convertToTask')}
+              title={t('convertToTask')}
             >
               <ClipboardList className="h-3.5 w-3.5" />
             </button>
@@ -518,11 +519,11 @@ function DeleteConfirmDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogHeader>
-        <DialogTitle>删除消息?</DialogTitle>
+        <DialogTitle>{t('deleteMessageTitle')}</DialogTitle>
         <DialogCloseButton onClick={() => onOpenChange(false)} />
       </DialogHeader>
       <DialogDescription>
-        确定删除 {messageAuthor} 的这条消息吗？此操作不可撤销。
+        {t('deleteMessageConfirm', { name: messageAuthor })}
       </DialogDescription>
       <DialogFooter>
         <button
@@ -530,14 +531,14 @@ function DeleteConfirmDialog({
           onClick={() => onOpenChange(false)}
           className="btn-brutal btn-brutal-sm"
         >
-          取消
+          {t('cancel')}
         </button>
         <button
           type="button"
           onClick={onConfirm}
           className="btn-brutal btn-brutal-sm bg-brutal-danger text-white"
         >
-          删除
+          {t('delete')}
         </button>
       </DialogFooter>
     </Dialog>
@@ -568,7 +569,7 @@ function MessageListEmpty() {
     <div className="flex flex-1 items-center justify-center">
       <div className="text-center">
         <p className="font-body text-sm text-muted-foreground">
-          还没有消息，发送第一条消息开始讨论吧
+          {t('noMessages')}
         </p>
       </div>
     </div>
@@ -584,10 +585,10 @@ function ScrollToBottom({ onClick }: { onClick: () => void }) {
         type="button"
         onClick={onClick}
         className="btn-brutal btn-brutal-sm h-8 gap-1 text-xs"
-        aria-label="回到最新消息"
+        aria-label={t('scrollToLatest')}
       >
         <ChevronDown className="h-3.5 w-3.5" />
-        回到最新消息
+        {t('scrollToLatest')}
       </button>
     </div>
   );
@@ -599,7 +600,7 @@ function LoadMoreSpinner() {
   return (
     <div className="flex items-center justify-center gap-2 py-3 font-mono text-xs text-muted-foreground">
       <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      <span>加载更早消息...</span>
+      <span>{t('loadEarlierMessages')}</span>
     </div>
   );
 }
@@ -610,7 +611,7 @@ function ChannelBeginning() {
       <div className="flex items-center gap-3">
         <div className="flex-1 border-t-2 border-black" />
         <span className="font-mono text-[11px] flex-shrink-0 text-muted-foreground">
-          这是频道开端
+          {t('beginningOfChannel')}
         </span>
         <div className="flex-1 border-t-2 border-black" />
       </div>
@@ -622,14 +623,14 @@ function LoadMoreFailed({ onRetry }: { onRetry: () => void }) {
   return (
     <div className="flex items-center justify-center gap-2 py-3">
       <AlertCircle className="h-3.5 w-3.5 text-brutal-danger" />
-      <span className="font-mono text-xs text-brutal-danger">加载失败</span>
+      <span className="font-mono text-xs text-brutal-danger">{t('loadError')}</span>
       <button
         type="button"
         onClick={onRetry}
         className="btn-brutal btn-brutal-sm"
       >
         <RefreshCw className="mr-1 h-3 w-3" />
-        重试
+        {t('retry')}
       </button>
     </div>
   );
@@ -643,13 +644,13 @@ function KeyboardShortcutsHelp({ onDismiss }: { onDismiss: () => void }) {
   return (
     <div className="mx-6 mb-2 flex items-center justify-between border-2 border-black bg-brutal-primary-light px-3 py-1.5">
       <span className="font-mono text-[11px] text-muted-foreground">
-        悬停消息后按 <kbd className="rounded-none border border-black bg-white px-1 py-px font-bold text-foreground">E</kbd> 编辑 · <kbd className="rounded-none border border-black bg-white px-1 py-px font-bold text-foreground">Delete</kbd> 删除
+        {t('keyboardShortcutHint')}
       </span>
       <button
         type="button"
         onClick={onDismiss}
         className="ml-2 font-mono text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-        aria-label="关闭快捷键提示"
+        aria-label={t('closeShortcutHint')}
       >
         x
       </button>
@@ -842,7 +843,7 @@ export function MessageList({
         className="h-full overflow-y-auto"
         onScroll={handleScroll}
         role="list"
-        aria-label="消息列表"
+        aria-label={t('messageList')}
         data-streaming-container="true"
       >
         {hasMore && !loadMoreError && (
@@ -880,7 +881,7 @@ export function MessageList({
                         const msg = messages.find((m) => m.id === id);
                         setDeleteTarget({
                           id,
-                          displayName: msg?.display_name ?? '该用户',
+                          displayName: msg?.display_name ?? t('user'),
                         });
                       }
                     : undefined

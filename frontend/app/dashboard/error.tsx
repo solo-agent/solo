@@ -18,10 +18,10 @@ export default function DashboardError({
     <div className="flex flex-1 items-center justify-center p-8 bg-brutal-cream">
       <div className="border-4 border-black shadow-brutal-xl bg-white rounded-none p-8 max-w-lg w-full text-center">
         <h1 className="font-heading font-bold text-3xl text-black mb-4">
-          仪表盘加载失败
+          Dashboard failed to load
         </h1>
         <p className="font-body text-lg text-black/70 mb-2">
-          仪表盘页面遇到了一个错误，请尝试重试或返回仪表盘首页。
+          The dashboard encountered an error. Please retry or return to the dashboard home.
         </p>
         {error.digest && (
           <p className="font-mono text-xs text-black/40 mb-6">
@@ -30,13 +30,13 @@ export default function DashboardError({
         )}
         <div className="flex flex-col gap-3">
           <button onClick={reset} className="btn-brutal w-full">
-            重试
+            Retry
           </button>
           <Link
             href="/dashboard"
             className="btn-brutal w-full inline-flex items-center justify-center"
           >
-            返回仪表盘
+            Back to Dashboard
           </Link>
         </div>
       </div>

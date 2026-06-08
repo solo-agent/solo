@@ -18,15 +18,16 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { t } from '@/lib/i18n';
 import type { CreateChannelInput } from '@/lib/types';
 
 const createChannelSchema = z.object({
   name: z
     .string()
-    .min(1, '请输入频道名称')
-    .max(80, '频道名称不能超过 80 个字符')
-    .regex(/^[a-z0-9_-]+$/, '频道名称只能包含小写字母、数字、下划线和连字符'),
-  description: z.string().max(200, '频道描述不能超过 200 个字符').optional(),
+    .min(1, t('channelNameRequired'))
+    .max(80, t('channelNameMaxLen'))
+    .regex(/^[a-z0-9_-]+$/, t('channelNamePattern')),
+  description: z.string().max(200, t('channelDescMaxLen')).optional(),
 });
 
 type FormValues = z.infer<typeof createChannelSchema>;
@@ -76,19 +77,19 @@ export function CreateChannelModal({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <div className="flex items-center justify-between">
-        <DialogTitle>创建频道</DialogTitle>
+        <DialogTitle>Create Channel</DialogTitle>
         <DialogCloseButton onClick={() => handleOpenChange(false)} />
       </div>
       <DialogDescription>
-        频道是团队成员围绕特定主题进行协作的空间。请使用合适的名称，例如 general、random、project-alpha。
+        Channels are collaboration spaces around specific topics. Use a suitable name like general, random, or project-alpha.
       </DialogDescription>
 
       <form onSubmit={handleSubmit(onFormSubmit)} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="channel-name">名称</Label>
+          <Label htmlFor="channel-name">Name</Label>
           <Input
             id="channel-name"
-            placeholder="例如：project-alpha"
+            placeholder={t('channelNamePlaceholder')}
             disabled={isSubmitting}
             autoFocus
             aria-invalid={!!errors.name}
@@ -102,10 +103,10 @@ export function CreateChannelModal({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="channel-desc">描述（选填）</Label>
+          <Label htmlFor="channel-desc">Description (optional)</Label>
           <Input
             id="channel-desc"
-            placeholder="这个频道是做什么的？"
+            placeholder={t('channelDescPlaceholder')}
             disabled={isSubmitting}
             aria-invalid={!!errors.description}
             {...register('description')}
@@ -124,10 +125,10 @@ export function CreateChannelModal({
             onClick={() => handleOpenChange(false)}
             disabled={isSubmitting}
           >
-            取消
+            Cancel
           </Button>
           <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? '创建中...' : '创建'}
+            {isSubmitting ? 'Creating...' : 'Create'}
           </Button>
         </DialogFooter>
       </form>

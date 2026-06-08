@@ -2,7 +2,7 @@
 // HistoryTab — Agent execution history list
 // - card-brutal style list items
 // - Timestamp + channel + status badge + duration
-// - Empty state: Bot icon + "暂无执行记录"
+// - Empty state: Bot icon + "No execution records yet"
 // - Loading state: skeleton rows
 // - All neubrutalism, zero rounding
 // ============================================================================
@@ -11,6 +11,7 @@
 
 import { Bot, Clock, Hash } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 
 // ---- Types ----
 
@@ -57,15 +58,15 @@ const STATUS_BADGE: Record<
   { label: string; className: string }
 > = {
   success: {
-    label: '成功',
+    label: t('agentHistoryStatusSuccess'),
     className: 'bg-brutal-success text-black',
   },
   failed: {
-    label: '失败',
+    label: t('agentHistoryStatusFailed'),
     className: 'bg-brutal-danger text-white',
   },
   running: {
-    label: '运行中',
+    label: t('agentHistoryStatusRunning'),
     className: 'bg-brutal-primary text-black',
   },
 };
@@ -97,7 +98,7 @@ export function HistoryTab({
       <div className="card-brutal divide-y-2 divide-black overflow-hidden">
         <div className="flex items-center gap-2 border-b-2 border-black bg-black/5 px-5 py-3">
           <Clock className="h-4 w-4" />
-          <span className="font-heading text-sm font-bold">执行记录</span>
+          <span className="font-heading text-sm font-bold">{t('agentHistoryTitle')}</span>
         </div>
         {[1, 2, 3, 4, 5].map((i) => (
           <SkeletonRow key={i} />
@@ -118,7 +119,7 @@ export function HistoryTab({
               onClick={onRetry}
               className="btn-brutal btn-brutal-sm ml-auto"
             >
-              重试
+              {t('retry')}
             </button>
           )}
         </div>
@@ -135,10 +136,10 @@ export function HistoryTab({
             <Bot className="h-7 w-7 text-white" />
           </div>
           <h3 className="font-heading font-bold text-base text-foreground">
-            暂无执行记录
+            {t('agentHistoryNoRecords')}
           </h3>
           <p className="mt-1.5 font-body text-sm text-muted-foreground">
-            在频道中 @提及该 Agent 或将 Agent 加入频道即可触发执行
+            {t('agentHistoryNoRecordsDesc')}
           </p>
         </div>
       </div>
@@ -152,7 +153,7 @@ export function HistoryTab({
       <div className="flex items-center gap-2 border-b-2 border-black bg-black/5 px-5 py-3">
         <Clock className="h-4 w-4" />
         <span className="font-heading text-sm font-bold">
-          执行记录 ({records.length})
+          {t('agentHistoryTitleCount', { n: records.length })}
         </span>
       </div>
 

@@ -12,6 +12,7 @@ import { Suspense, useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Hash } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
+import { t } from '@/lib/i18n';
 import { useTasks } from '@/lib/hooks/use-tasks';
 import { useChannels } from '@/lib/hooks/use-channels';
 import { useAgents } from '@/lib/hooks/use-agents';
@@ -58,13 +59,13 @@ function CreateTaskForm() {
       setSubmitError(null);
       try {
         if (!effectiveChannelId) {
-          setSubmitError('请选择一个频道');
+          setSubmitError(t('taskChannelRequired'));
           return;
         }
         await createTask({ ...input, channel_id: effectiveChannelId });
         router.push('/tasks');
       } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : '创建任务失败，请稍后再试');
+        setSubmitError(err instanceof Error ? err.message : t('unexpectedError'));
       } finally {
         setIsSubmitting(false);
       }
@@ -77,7 +78,7 @@ function CreateTaskForm() {
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
           <Spinner size="md" />
-          <p className="font-mono text-sm text-muted-foreground">加载中...</p>
+          <p className="font-mono text-sm text-muted-foreground">{t('loading')}</p>
         </div>
       </div>
     );
@@ -92,15 +93,15 @@ function CreateTaskForm() {
         onClick={() => router.push('/tasks')}
       >
         <ArrowLeft className="mr-2 h-4 w-4" />
-        返回任务列表
+        {t('backToTaskList')}
       </Button>
 
       <div className="mb-8">
         <h1 className="text-2xl font-heading font-bold text-foreground">
-          创建任务
+          {t('createTaskTitle')}
         </h1>
         <p className="mt-1 font-body text-sm text-muted-foreground">
-          创建一个新任务，指派给团队成员或 Agent
+          {t('createTaskDesc')}
         </p>
       </div>
 
@@ -110,13 +111,13 @@ function CreateTaskForm() {
           <div className="mb-5">
             <label className="mb-1.5 block text-sm font-heading font-bold">
               <Hash className="mr-1 inline h-3.5 w-3.5" />
-              所属频道 <span className="text-brutal-danger">*</span>
+              {t('taskChannel')} <span className="text-brutal-danger">*</span>
             </label>
             <Select
               value={selectedChannelId}
               onChange={(v) => setSelectedChannelId(v)}
               options={[
-                { value: '', label: '选择频道...' },
+                { value: '', label: t('taskChannelPlaceholder') },
                 ...channels.map((ch) => ({ value: ch.id, label: `#${ch.name}` })),
               ]}
               size="md"
@@ -131,7 +132,7 @@ function CreateTaskForm() {
           assigneeOptions={assigneeOptions}
           onSubmit={handleSubmit}
           isSubmitting={isSubmitting}
-          submitLabel="创建任务"
+          submitLabel={t('createTask')}
           error={submitError}
         />
       </div>
@@ -146,7 +147,7 @@ export default function CreateTaskPage() {
         <div className="flex h-screen items-center justify-center bg-brutal-cream">
           <div className="flex flex-col items-center gap-3">
             <Spinner size="md" />
-            <p className="font-mono text-sm text-muted-foreground">加载中...</p>
+            <p className="font-mono text-sm text-muted-foreground">{t('loading')}</p>
           </div>
         </div>
       }

@@ -18,6 +18,7 @@ import {
   DialogCloseButton,
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import { t } from '@/lib/i18n';
 import type { Agent } from '@/lib/types';
 
 interface AddAgentModalProps {
@@ -75,7 +76,7 @@ export function AddAgentModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogHeader>
-        <DialogTitle>添加 Agent 到频道</DialogTitle>
+        <DialogTitle>{t('addAgentToChannel')}</DialogTitle>
         <DialogCloseButton onClick={() => onOpenChange(false)} />
       </DialogHeader>
 
@@ -83,7 +84,7 @@ export function AddAgentModal({
       <div className="mb-4">
         <input
           type="text"
-          placeholder="搜索 Agent..."
+          placeholder={t('searchAgent')}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="input-brutal"
@@ -104,7 +105,7 @@ export function AddAgentModal({
             className="btn-brutal btn-brutal-sm flex-shrink-0"
           >
             <RefreshCw className="mr-1 h-3 w-3" />
-            重试
+            {t('retry')}
           </button>
         </div>
       )}
@@ -129,11 +130,11 @@ export function AddAgentModal({
               <Bot className="h-5 w-5 text-muted-foreground" />
             </div>
             <p className="font-body text-sm text-muted-foreground">
-              {searchQuery ? '没有匹配的 Agent' : '没有可添加的 Agent'}
+              {searchQuery ? t('noMatchingAgents') : t('noAgentsAvailable')}
             </p>
             {!searchQuery && (
               <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-                所有 Agent 已在该频道中
+                {t('allAgentsInChannel')}
               </p>
             )}
           </div>
@@ -167,7 +168,7 @@ export function AddAgentModal({
                   )}
                 </div>
                 <span className="btn-brutal btn-brutal-sm flex-shrink-0">
-                  {addingId === agent.id ? '添加中...' : '添加'}
+                  {addingId === agent.id ? t('adding') : t('add')}
                 </span>
               </button>
             ))}

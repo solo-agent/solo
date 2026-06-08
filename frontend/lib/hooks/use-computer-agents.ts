@@ -6,6 +6,7 @@
 
 'use client';
 
+import { t } from '@/lib/i18n';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import type { ComputerAgent } from '@/lib/types';
@@ -37,7 +38,7 @@ export function useComputerAgents(computerId: string | null) {
         setAgents(Array.isArray(res.agents) ? res.agents : []);
       }
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : '加载 Agent 列表失败';
+      const message = err instanceof ApiError ? err.message : `${t('agentLoadError')}`;
       if (mountedRef.current) setError(message);
     } finally {
       if (mountedRef.current) setIsLoading(false);

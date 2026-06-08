@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { t } from '@/lib/i18n';
 import { NavBar } from '@/components/ui/navbar';
 import { Sidebar } from '@/components/dashboard/sidebar';
 import { useChannels } from '@/lib/hooks/use-channels';
@@ -27,7 +28,7 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
 
   const handleCreateChannel = async () => {
     try {
-      const channel = await createChannel({ name: '新频道', description: '' });
+      const channel = await createChannel({ name: t('newChannel'), description: '' });
       router.push(`/dashboard?channel=${channel.id}`);
     } catch {
       // Error handled by useChannels hook

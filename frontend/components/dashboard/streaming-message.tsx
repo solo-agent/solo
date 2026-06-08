@@ -12,6 +12,7 @@ import { useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 import type { Message } from '@/lib/types';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 
@@ -112,7 +113,7 @@ export function StreamingMessage({ message }: StreamingMessageProps) {
       data-message-id={message.id}
       className="group relative flex gap-3 px-6 py-2.5 agent-message border-l-brutal-primary"
       role="listitem"
-      aria-label="流式输出中"
+      aria-label={t('streaming')}
       data-streaming="true"
     >
       <PixelAvatar agentId={message.user_id} size="md" className="mt-0.5 flex-shrink-0" />
@@ -131,7 +132,7 @@ export function StreamingMessage({ message }: StreamingMessageProps) {
             {time}
           </span>
           <span className="badge-brutal bg-brutal-primary/20 text-brutal-primary">
-            流式输出中
+            {t('streaming')}
           </span>
         </div>
         <div className="font-body text-sm leading-relaxed space-y-1">

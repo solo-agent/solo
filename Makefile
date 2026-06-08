@@ -1,24 +1,24 @@
 .PHONY: init start restart rebuild stop pg-ready migrate build
 
-# ── 0. 公共：等 PostgreSQL 就绪（30s 超时即失败） ────────────────────────────
+# ── 0. Common: wait for PostgreSQL to be ready (30s timeout) ──────────────
 pg-ready:
 	@docker compose up -d --remove-orphans postgres >/dev/null
 	@for i in $$(seq 1 30); do \
 		docker exec solo-postgres pg_isready -U solo -d solo >/dev/null 2>&1 && exit 0; \
 		sleep 1; \
 	done; \
-	echo "ERROR: PostgreSQL 30s 内未就绪"; exit 1
+	echo "ERROR: PostgreSQL not ready after 30s"; exit 1
 
-# ── 0. 公共：执行迁移（幂等，仅跑未应用过的；任何失败立刻退出） ──────────────
+# ── 0. Common: run migrations (idempotent, any failure exits immediately) ──
 migrate: pg-ready
-	@echo "=== 执行数据库迁移 ==="
+	@echo "=== Running database migrations ==="
 	@docker exec -i solo-postgres psql -U solo -d solo -v ON_ERROR_STOP=1 -q -c \
 		"CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now());" >/dev/null
 	@set -e; for f in migrations/*.up.sql; do \
 		v=$$(basename $$f .up.sql); \
 		applied=$$(docker exec -i solo-postgres psql -U solo -d solo -tAc "SELECT 1 FROM schema_migrations WHERE version='$$v'"); \
 		if [ "$$applied" = "1" ]; then \
-			echo "  ✓ $$v (已应用，跳过)"; \
+			echo "  ✓ $$v (already applied, skipped)"; \
 		else \
 			echo "  → $$v"; \
 			docker exec -i solo-postgres psql -U solo -d solo -v ON_ERROR_STOP=1 -q < "$$f"; \
@@ -27,25 +27,25 @@ migrate: pg-ready
 		fi; \
 	done
 
-# ── 0. 公共：构建二进制 ──────────────────────────────────────────────────────
+# ── 0. Common: build binaries ──────────────────────────────────────────────
 build:
 	@mkdir -p .pids
 	@go build -o .pids/server ./cmd/server/
 	@go build -o .pids/daemon ./cmd/daemon/
 	@go build -o .pids/solo ./cmd/solo/
 
-# ── 1. 初次初始化 ────────────────────────────────────────────────────────────
+# ── 1. First-time setup ────────────────────────────────────────────────────
 init:
-	@echo "=== 初始化 .env ==="
+	@echo "=== Initializing .env ==="
 	@cp -n .env.example .env 2>/dev/null || true
-	@echo "=== 安装前端依赖 ==="
+	@echo "=== Installing frontend dependencies ==="
 	@cd frontend && npm install
 	@$(MAKE) migrate
-	@echo "=== 构建二进制 ==="
+	@echo "=== Building binaries ==="
 	@$(MAKE) build
-	@echo "=== 初始化完成 ==="
+	@echo "=== Initialization complete ==="
 
-# ── 2. 启动所有服务 ─────────────────────────────────────────────────────────
+# ── 2. Start all services ──────────────────────────────────────────────────
 start: pg-ready
 	@mkdir -p .pids
 	@echo "PostgreSQL ✓"
@@ -65,7 +65,7 @@ start: pg-ready
 			sleep 0.5; \
 		done; \
 		if [ $$ok -ne 1 ]; then \
-			echo "ERROR: Server :8080 未就绪，最近日志："; \
+			echo "ERROR: Server on :8080 did not become ready, recent logs:"; \
 			tail -20 server.log; \
 			exit 1; \
 		fi; \
@@ -84,7 +84,7 @@ start: pg-ready
 		echo $$! > .pids/daemon.pid; \
 		sleep 2; \
 		if ! kill -0 $$(cat .pids/daemon.pid) 2>/dev/null; then \
-			echo "ERROR: Daemon 启动失败，最近日志："; \
+			echo "ERROR: Daemon failed to start, recent logs:"; \
 			tail -20 daemon.log; \
 			exit 1; \
 		fi; \
@@ -98,21 +98,21 @@ start: pg-ready
 		echo $$! > ../.pids/frontend.pid; \
 		echo "Frontend :3000 ✓"; \
 	fi
-	@echo "=== 全部启动完成 ==="
+	@echo "=== All services started ==="
 	@echo "  http://localhost:3000"
 
-# ── 3. 重启 ──────────────────────────────────────────────────────────────────
+# ── 3. Restart ─────────────────────────────────────────────────────────────
 restart: stop start
 
-# ── 4. 重建重启 ──────────────────────────────────────────────────────────────
+# ── 4. Rebuild and restart ─────────────────────────────────────────────────
 rebuild: stop build start
 
-# ── 5. 关闭所有 ──────────────────────────────────────────────────────────────
+# ── 5. Shut down all ───────────────────────────────────────────────────────
 stop:
-	@echo "=== 关闭所有服务 ==="
+	@echo "=== Stopping all services ==="
 	@-lsof -ti :8080 | xargs kill 2>/dev/null && echo "Server stopped" || echo "Server not running"
 	@-lsof -ti :8081 | xargs kill 2>/dev/null && echo "Daemon stopped" || echo "Daemon not running"
 	@-lsof -ti :3000 | xargs kill 2>/dev/null && echo "Frontend stopped" || echo "Frontend not running"
 	@rm -f .pids/*.pid
 	@sleep 1
-	@echo "=== 全部关闭 ==="
+	@echo "=== All services stopped ==="

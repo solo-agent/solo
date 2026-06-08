@@ -4,6 +4,7 @@
 
 'use client';
 
+import { t } from '@/lib/i18n';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { getNextPixelAvatarIndex } from '@/components/ui/pixel-avatar';
@@ -74,7 +75,7 @@ export function useAgents() {
         setAgents(res.map(mapAgent));
       }
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : '加载 Agent 列表失败';
+      const message = err instanceof ApiError ? err.message : `${t('agentLoadError')}`;
       setError(message);
     } finally {
       setIsLoading(false);

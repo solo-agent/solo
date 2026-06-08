@@ -9,6 +9,7 @@
 
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 import type { Agent } from '@/lib/types';
 
 interface TeamsAgentItemProps {
@@ -35,7 +36,7 @@ export function TeamsAgentItem({ agent, isSelected, onSelect }: TeamsAgentItemPr
           onSelect(agent.id);
         }
       }}
-      aria-label={`查看 ${agent.name} 详情`}
+      aria-label={t('viewAgentDetail', { name: agent.name })}
       aria-current={isSelected ? 'true' : undefined}
     >
       <PixelAvatar agentId={agent.id} avatarUrl={agent.avatar_url} size="sm" />

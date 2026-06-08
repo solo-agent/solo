@@ -22,6 +22,7 @@ import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { Avatar } from '@/components/ui/avatar';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
+import { t } from '@/lib/i18n';
 import type { CreateDMInput, DMChannel } from '@/lib/types';
 
 // ---- Types ----
@@ -69,7 +70,7 @@ export function CreateDMModal({
         setParticipants(list);
       })
       .catch(() => {
-        setParticipantsError('加载失败');
+        setParticipantsError(t('loadError'));
       })
       .finally(() => {
         setParticipantsLoading(false);
@@ -137,14 +138,14 @@ export function CreateDMModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogHeader>
-        <DialogTitle>发起私信</DialogTitle>
+        <DialogTitle>{t('startDM')}</DialogTitle>
         <DialogCloseButton onClick={() => onOpenChange(false)} />
       </DialogHeader>
 
       {/* Search input */}
       <div className="mb-4">
         <Input
-          placeholder="搜索用户或 Agent..."
+          placeholder={t('dmSearch')}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           autoFocus
@@ -152,14 +153,14 @@ export function CreateDMModal({
       </div>
 
       {/* Participant list */}
-      <div className="max-h-64 overflow-y-auto" role="listbox" aria-label="用户和 Agent 列表">
+      <div className="max-h-64 overflow-y-auto" role="listbox" aria-label={t('userAgentList')}>
         {filteredParticipants.length === 0 ? (
           <div className="py-8 text-center">
             <Search className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
             <p className="text-sm text-muted-foreground">
               {searchQuery
-                ? '没有匹配的用户或 Agent'
-                : '暂无可联系的用户或 Agent'}
+                ? t('noMatchingUsers')
+                : t('noUsersAvailable')}
             </p>
           </div>
         ) : (
@@ -204,7 +205,7 @@ export function CreateDMModal({
                             : 'bg-brutal-info-light text-black'
                         }`}
                       >
-                        {isAgent ? 'Agent' : '用户'}
+                        {isAgent ? t('agent') : t('user')}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -217,11 +218,11 @@ export function CreateDMModal({
                               : 'fill-brutal-muted text-brutal-muted'
                           }`}
                         />
-                        {participant.online ? '在线' : '离线'}
+                        {participant.online ? t('online') : t('offline')}
                       </span>
                       {existing && (
                         <span className="text-muted-foreground/60">
-                          · 已有私信
+                          {t('alreadyHaveDM')}
                         </span>
                       )}
                     </div>
@@ -241,12 +242,12 @@ export function CreateDMModal({
                     {isCreating ? (
                       <>
                         <Spinner size="sm" className="mr-1" />
-                        处理中...
+                        {t('submitting')}
                       </>
                     ) : existing ? (
-                      '进入'
+                      t('enterExisting')
                     ) : (
-                      '私信'
+                      t('startDM')
                     )}
                   </Button>
                 </button>

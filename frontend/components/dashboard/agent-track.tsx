@@ -6,6 +6,7 @@ import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { AgentChunkItem } from './agent-chunk';
 import type { AgentChunk } from '@/lib/hooks/use-agent-chunks';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 
 interface AgentTrackProps {
   agentId: string;
@@ -52,7 +53,7 @@ export function AgentTrack({ agentId, agentName, chunks, isActive, onClear }: Ag
 
       <div ref={scrollRef} className="max-h-64 overflow-y-auto px-1 py-1 space-y-0.5 font-mono text-[11px]">
         {chunks.length === 0 && (
-          <p className="text-muted-foreground italic text-[10px] px-2 py-2">等待中…</p>
+          <p className="text-muted-foreground italic text-[10px] px-2 py-2">{t('agentWaiting')}</p>
         )}
         {chunks.map((chunk, i) => (
           <AgentChunkItem key={`${chunk.agentId}-${i}-${chunk.chunkType}`} chunk={chunk} />

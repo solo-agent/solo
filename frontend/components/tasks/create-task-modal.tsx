@@ -13,6 +13,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { CreateTaskInput } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
 // ---- Props ----
 
@@ -80,13 +81,13 @@ export function CreateTaskModal({
 
     const trimmed = title.trim();
     if (!trimmed) {
-      setValidationError('请输入任务标题');
+      setValidationError(t('taskTitleRequired'));
       inputRef.current?.focus();
       return;
     }
 
     if (trimmed.length > 500) {
-      setValidationError('任务标题不能超过 500 个字符');
+      setValidationError(t('taskTitleMaxLen'));
       return;
     }
 
@@ -98,7 +99,7 @@ export function CreateTaskModal({
       });
       onOpenChange(false);
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : '创建任务失败，请稍后再试');
+      setSubmitError(err instanceof Error ? err.message : t('somethingWentWrong'));
     } finally {
       isSubmittingRef.current = false;
     }
@@ -130,19 +131,19 @@ export function CreateTaskModal({
         className="mx-4 w-full max-w-md rounded-none border-brutal-thick bg-card shadow-brutal-xl"
         role="dialog"
         aria-modal="true"
-        aria-label="创建任务"
+        aria-label={t('createTask')}
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b-2 border-black px-5 py-3">
           <h2 className="font-heading text-base font-bold text-foreground">
-            创建任务
+            {t('createTask')}
           </h2>
           <button
             type="button"
             onClick={() => !isDisabled && onOpenChange(false)}
             disabled={isDisabled}
             className="flex h-7 w-7 items-center justify-center border-2 border-black bg-white hover:bg-brutal-primary-light transition-colors disabled:opacity-50"
-            aria-label="关闭"
+            aria-label={t('close')}
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -154,7 +155,7 @@ export function CreateTaskModal({
             htmlFor="task-create-title"
             className="mb-2 block font-heading text-sm font-bold text-foreground"
           >
-            任务标题
+            {t('taskTitle')}
           </label>
           <input
             ref={inputRef}
@@ -166,7 +167,7 @@ export function CreateTaskModal({
               if (validationError) setValidationError(null);
             }}
             onKeyDown={handleKeyDown}
-            placeholder="输入任务标题..."
+            placeholder={t('taskTitlePlaceholder')}
             disabled={isDisabled}
             aria-required="true"
             aria-invalid={!!validationError}
@@ -201,7 +202,7 @@ export function CreateTaskModal({
             disabled={isDisabled}
             className="btn-brutal btn-brutal-sm bg-white"
           >
-            取消
+            {t('cancel')}
           </button>
           <button
             type="button"
@@ -209,7 +210,7 @@ export function CreateTaskModal({
             disabled={isDisabled}
             className="btn-brutal btn-brutal-sm btn-brutal-primary"
           >
-            {isDisabled ? '创建中...' : '创建任务'}
+            {isDisabled ? t('submitting') : t('createTask')}
           </button>
         </div>
       </div>

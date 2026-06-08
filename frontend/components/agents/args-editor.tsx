@@ -9,6 +9,7 @@
 import { useState, useCallback, useEffect, useRef, type KeyboardEvent } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 
 interface ArgsEditorProps {
   value?: string[];
@@ -107,7 +108,7 @@ export function ArgsEditor({ value, onChange, disabled }: ArgsEditorProps) {
                 removeTag(idx);
               }}
               disabled={disabled}
-              aria-label={`移除参数 ${tag}`}
+              aria-label={t('agentArgsRemove', { tag })}
               className="ml-0.5 inline-flex items-center justify-center hover:opacity-70"
             >
               <X className="h-3 w-3" />
@@ -120,9 +121,9 @@ export function ArgsEditor({ value, onChange, disabled }: ArgsEditorProps) {
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={tags.length === 0 ? '输入参数后按 Enter 添加...' : '继续添加...'}
+          placeholder={tags.length === 0 ? t('agentArgsPlaceholder') : t('agentArgsMorePlaceholder')}
           disabled={disabled}
-          aria-label="自定义参数输入"
+          aria-label={t('agentArgsAriaLabel')}
           className={cn(
             'flex-1 min-w-[140px] bg-transparent border-none outline-none',
             'font-mono text-xs text-foreground',
@@ -132,7 +133,8 @@ export function ArgsEditor({ value, onChange, disabled }: ArgsEditorProps) {
         />
       </div>
       <p className="font-mono text-[11px] text-muted-foreground">
-        输入每个参数后按 Enter 添加。例如: <code className="text-foreground">--thinking-budget</code>{' '}
+        {t('agentArgsHelp')}{' '}
+        <code className="text-foreground">--thinking-budget</code>{' '}
         <code className="text-foreground">16000</code>
       </p>
     </div>

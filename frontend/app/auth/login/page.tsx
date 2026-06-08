@@ -8,6 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
 import { useAuth } from "@/lib/auth-context";
+import { t } from '@/lib/i18n';
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { BrutalAlert } from "@/components/ui/brutal-alert";
@@ -15,12 +16,12 @@ import { BrutalAlert } from "@/components/ui/brutal-alert";
 const loginFormSchema = z.object({
   email: z
     .string()
-    .min(1, "请输入邮箱地址")
-    .email("请输入有效的邮箱地址"),
+    .min(1, t('emailRequired'))
+    .email(t('emailInvalid')),
   password: z
     .string()
-    .min(1, "请输入密码")
-    .min(8, "密码至少需要 8 位字符"),
+    .min(1, t('passwordRequired'))
+    .min(8, t('passwordMinLength')),
 });
 
 type LoginFormValues = z.infer<typeof loginFormSchema>;
@@ -63,7 +64,7 @@ export default function LoginPage() {
       <div className="card-brutal p-12 w-full">
         <div className="flex flex-col items-center gap-3">
           <Spinner size="md" />
-          <p className="text-sm text-muted-foreground">检查登录状态...</p>
+          <p className="text-sm text-muted-foreground">{t('checkingAuth')}</p>
         </div>
       </div>
     );
@@ -76,8 +77,8 @@ export default function LoginPage() {
         <div className="inline-flex h-10 w-10 items-center justify-center bg-brutal-primary border-2 border-black shadow-brutal-sm mb-3">
           <span className="font-heading font-bold text-lg text-black">S</span>
         </div>
-        <h1 className="font-heading font-bold text-xl text-black">欢迎回来</h1>
-        <p className="font-sans text-sm text-muted-foreground mt-1">登录您的 Solo 账号</p>
+        <h1 className="font-heading font-bold text-xl text-black">{t('welcomeBack')}</h1>
+        <p className="font-sans text-sm text-muted-foreground mt-1">{t('loginToSolo')}</p>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -90,7 +91,7 @@ export default function LoginPage() {
             htmlFor="email"
             className="font-heading font-bold text-sm block"
           >
-            邮箱
+            {t('email')}
           </label>
           <input
             id="email"
@@ -115,12 +116,12 @@ export default function LoginPage() {
             htmlFor="password"
             className="font-heading font-bold text-sm block"
           >
-            密码
+            {t('password')}
           </label>
           <input
             id="password"
             type="password"
-            placeholder="输入密码"
+            placeholder={t('enterPassword')}
             autoComplete="current-password"
             disabled={isSubmitting}
             aria-invalid={!!errors.password}
@@ -141,19 +142,19 @@ export default function LoginPage() {
           className="w-full"
           disabled={isSubmitting}
         >
-          {isSubmitting ? "登录中..." : "登录"}
+          {isSubmitting ? t('loggingIn') : t('login')}
         </Button>
       </form>
 
       {/* Register link */}
       <div className="text-center mt-6 pt-4 border-t-2 border-black">
         <p className="font-sans text-sm text-muted-foreground">
-          还没有账号？{" "}
+          {t('noAccount')}{" "}
           <Link
             href="/auth/register"
             className="font-heading font-bold text-black hover:text-brutal-primary transition-colors"
           >
-            注册
+            {t('register')}
           </Link>
         </p>
       </div>

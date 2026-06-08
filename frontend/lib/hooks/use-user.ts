@@ -7,6 +7,7 @@
 
 'use client';
 
+import { t } from '@/lib/i18n';
 import { useState, useCallback } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useAuth, type User } from '@/lib/auth-context';
@@ -48,7 +49,7 @@ export function useUser(): UseUserResult {
       const data = await apiClient.get<User>('/api/v1/users/me');
       setLocalUser(data);
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : '加载用户信息失败';
+      const msg = err instanceof ApiError ? err.message : `${t('userLoadError')}`;
       setError(msg);
     } finally {
       setIsLoading(false);
@@ -65,12 +66,12 @@ export function useUser(): UseUserResult {
           display_name: displayName,
         });
         setLocalUser(updated);
-        setSuccessMessage('显示名称已更新');
+        setSuccessMessage(`${t('authNameUpdated')}`);
         // Auto-clear success after 3s
         setTimeout(() => setSuccessMessage(null), 3000);
         return true;
       } catch (err) {
-        const msg = err instanceof ApiError ? err.message : '更新失败，请稍后再试';
+        const msg = err instanceof ApiError ? err.message : `${t('authUpdateError')}`;
         setError(msg);
         return false;
       } finally {

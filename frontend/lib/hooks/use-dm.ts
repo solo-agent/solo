@@ -9,6 +9,7 @@
 
 'use client';
 
+import { t } from '@/lib/i18n';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
@@ -243,7 +244,7 @@ export function useDM(dmId: string | null = null) {
       const res = await apiClient.get<DMChannelResponse[]>('/api/v1/dm');
       setDMChannels(res.map(mapDMChannel));
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : '加载私信列表失败';
+      const message = err instanceof ApiError ? err.message : `${t('dmLoadError')}`;
       setDMError(message);
     } finally {
       setIsLoadingDMs(false);
@@ -530,7 +531,7 @@ export function useDM(dmId: string | null = null) {
       setMessages(res.messages.map(mapDMMessageResponse));
       setHasMore(res.has_more);
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : '加载消息失败';
+      const message = err instanceof ApiError ? err.message : `${t('dmMessageLoadError')}`;
       setMessagesError(message);
     } finally {
       setIsLoadingMessages(false);
@@ -573,7 +574,7 @@ export function useDM(dmId: string | null = null) {
       setMessages((prev) => [...res.messages.map(mapDMMessageResponse), ...prev]);
       setHasMore(res.has_more);
     } catch {
-      setLoadMoreError('加载更早消息失败');
+      setLoadMoreError(`${t('dmEarlierMessageError')}`);
     } finally {
       setIsLoadingMore(false);
       loadingMoreRef.current = false;

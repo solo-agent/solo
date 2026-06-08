@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { t } from '@/lib/i18n';
 import { usePathname } from 'next/navigation';
 import {
   Hash,
@@ -15,10 +16,10 @@ import { useAuth } from '@/lib/auth-context';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 
 const NAV_ITEMS = [
-  { href: '/dashboard', icon: Hash, label: '频道' },
-  { href: '/tasks', icon: ClipboardList, label: '任务看板' },
-  { href: '/teams', icon: Users, label: '团队' },
-  { href: '/computers', icon: Monitor, label: '电脑管理' },
+  { href: '/dashboard', icon: Hash, label: t('navChannels') },
+  { href: '/tasks', icon: ClipboardList, label: t('navTasks') },
+  { href: '/teams', icon: Users, label: t('navTeams') },
+  { href: '/computers', icon: Monitor, label: t('navComputers') },
   { href: '/workspace', icon: FolderOpen, label: 'Workspace' },
 ] as const;
 
@@ -32,7 +33,7 @@ export function NavBar() {
       <Link
         href="/dashboard"
         className="mb-2 flex h-9 w-9 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm"
-        aria-label="Solo 工作区"
+        aria-label={t('navSoloWorkspace')}
       >
         <span className="font-heading text-sm font-black text-black">S</span>
       </Link>
@@ -68,8 +69,8 @@ export function NavBar() {
             'navbar-icon',
             pathname.startsWith('/settings') && 'navbar-icon-active',
           )}
-          aria-label="个人设置"
-          title="个人设置"
+          aria-label={t('navSettings')}
+          title={t('navSettings')}
         >
           <Settings className="h-4 w-4" />
         </Link>
@@ -79,8 +80,8 @@ export function NavBar() {
           <Link
             href="/settings"
             className="navbar-icon mt-1"
-            aria-label={user.display_name || user.email || '用户'}
-            title={user.display_name || user.email || '用户'}
+            aria-label={user.display_name || user.email || t('user')}
+            title={user.display_name || user.email || t('user')}
           >
             <PixelAvatar
               agentId={user.id || 'user'}

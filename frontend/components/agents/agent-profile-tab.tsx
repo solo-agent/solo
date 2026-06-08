@@ -14,6 +14,7 @@ import { useToast } from '@/components/ui/toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
+import { t } from '@/lib/i18n';
 import type { Agent } from '@/lib/types';
 
 interface AgentProfileTabProps {
@@ -88,7 +89,7 @@ function InlineTextField({
             disabled={saving || draft === value}
             className="btn-brutal btn-brutal-sm h-7 px-2 text-xs"
           >
-            {saving ? '...' : <><Check className="mr-1 h-3 w-3" />保存</>}
+            {saving ? '...' : <><Check className="mr-1 h-3 w-3" />{t('save')}</>}
           </button>
           <button
             type="button"
@@ -97,7 +98,7 @@ function InlineTextField({
             className="btn-flat h-7 text-xs"
           >
             <X className="mr-1 h-3 w-3" />
-            取消
+            {t('cancel')}
           </button>
         </div>
       </div>
@@ -111,7 +112,7 @@ function InlineTextField({
       </span>
       <div className="flex items-center gap-2 group">
         <span className="font-body text-sm text-foreground min-w-0 flex-1">
-          {value || <span className="italic text-muted-foreground">{placeholder || '未设置'}</span>}
+          {value || <span className="italic text-muted-foreground">{placeholder || t('agentProfileNotSet')}</span>}
         </span>
         <button
           type="button"
@@ -120,7 +121,7 @@ function InlineTextField({
             setEditing(true);
           }}
           className="flex h-6 w-6 items-center justify-center opacity-0 group-hover:opacity-100 border-2 border-black bg-white shadow-brutal-sm transition-opacity"
-          aria-label={`编辑 ${label}`}
+          aria-label={t('agentProfileEdit', { label })}
         >
           <Pencil className="h-3 w-3" />
         </button>
@@ -160,7 +161,7 @@ function StatusToggle({
       <div className="flex items-center gap-2">
         <Circle className={`h-3 w-3 ${active ? 'fill-brutal-success text-brutal-success' : 'fill-brutal-muted text-brutal-muted'}`} />
         <span className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
-          {active ? '已启用' : '已禁用'}
+          {active ? t('agentProfileEnabled') : t('agentProfileDisabled')}
         </span>
       </div>
       <button
@@ -170,7 +171,7 @@ function StatusToggle({
         className={`relative flex h-7 w-11 flex-shrink-0 items-center border-2 border-black transition-colors ${statusColor}`}
         role="switch"
         aria-checked={active}
-        aria-label={active ? '禁用 Agent' : '启用 Agent'}
+        aria-label={active ? t('agentProfileDisable') : t('agentProfileEnable')}
       >
         <span
           className={`absolute h-7 w-[18px] border-r-2 border-l-2 border-black bg-white transition-all ${active ? 'left-[calc(100%-18px)]' : 'left-0'}`}
@@ -227,9 +228,9 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
       } as Agent);
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.status === 404 ? 'Agent 不存在' : err.message);
+        setError(err.status === 404 ? t('agentProfileAgentNotFound') : err.message);
       } else {
-        setError('加载 Agent 信息失败');
+        setError(t('agentProfileError'));
       }
     } finally {
       setIsLoading(false);
@@ -245,7 +246,7 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
       const body: Record<string, unknown> = { [field]: value };
       await apiClient.patch(`/api/v1/agents/${agentId}`, body);
       setAgent((prev) => prev ? { ...prev, [field]: value } : null);
-      showToast('更新成功', 'success');
+      showToast(t('agentProfileUpdateSuccess'), 'success');
     },
     [agentId, showToast],
   );
@@ -271,7 +272,7 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
         <p className="font-body text-sm text-brutal-danger">{error}</p>
         <Button type="button" onClick={loadAgent} size="sm" className="mt-4">
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-          重试
+          {t('retry')}
         </Button>
       </div>
     );
@@ -286,7 +287,7 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
         <PixelAvatar agentId={agent.id} avatarUrl={agent.avatar_url} size="md" />
         <div>
           <h3 className="font-heading font-bold text-base text-foreground">{agent.name}</h3>
-          <p className="font-mono text-[11px] text-muted-foreground">{agent.model_provider || '未配置 Runtime'}</p>
+          <p className="font-mono text-[11px] text-muted-foreground">{agent.model_provider || t('agentProfileNoRuntime')}</p>
         </div>
       </div>
 
@@ -302,33 +303,33 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
 
       {/* Editable fields */}
       <InlineTextField
-        label="名称"
+        label={t('agentFormName')}
         value={agent.name}
         onSave={(val) => handleUpdate('name', val)}
-        placeholder="Agent 名称"
+        placeholder={t('agentFormNamePlaceholder')}
       />
 
       <InlineTextField
-        label="描述"
+        label={t('agentFormDesc')}
         value={agent.description}
         onSave={(val) => handleUpdate('description', val)}
-        placeholder="Agent 描述"
+        placeholder={t('agentFormDescPlaceholder')}
         multiline
       />
 
       <InlineTextField
-        label="System Prompt"
+        label={t('agentFormSystemPrompt')}
         value={agent.system_prompt}
         onSave={(val) => handleUpdate('system_prompt', val)}
-        placeholder="设置 Agent 的行为指令..."
+        placeholder={t('agentFormSystemPromptPlaceholder')}
         multiline
       />
 
       <InlineTextField
-        label="模型名称"
+        label={t('agentFormLabelModel')}
         value={agent.model_name}
         onSave={(val) => handleUpdate('model_name', val)}
-        placeholder="例如：gpt-4o"
+        placeholder={t('agentFormModelPlaceholder')}
       />
 
       <hr className="divider-brutal" />
@@ -336,7 +337,7 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
       {/* Read-only metadata */}
       <div className="space-y-2">
         <h4 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
-          元信息
+          {t('agentProfileMeta')}
         </h4>
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
@@ -346,11 +347,11 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="font-mono text-[11px] text-muted-foreground">创建时间</span>
+            <span className="font-mono text-[11px] text-muted-foreground">{t('agentProfileCreatedAt')}</span>
             <span className="font-mono text-[11px] text-foreground">{formatDate(agent.created_at)}</span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="font-mono text-[11px] text-muted-foreground">创建者</span>
+            <span className="font-mono text-[11px] text-muted-foreground">{t('agentProfileCreatedBy')}</span>
             <span className="font-mono text-[11px] text-foreground">{agent.owner_id?.slice(0, 8) ?? '—'}</span>
           </div>
         </div>

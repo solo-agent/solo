@@ -11,6 +11,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { File, Download, ImageOff, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 import type { Attachment } from '@/lib/types';
 
 // ---- Helpers ----
@@ -74,7 +75,7 @@ export function ImageLightbox({ attachment, onClose }: ImageLightboxProps) {
       className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black"
       onClick={handleBackdropClick}
       role="dialog"
-      aria-label={`预览图片: ${attachment.filename}`}
+      aria-label={t('attachmentPreview', { filename: attachment.filename })}
       aria-modal="true"
     >
       {/* Close button */}
@@ -82,7 +83,7 @@ export function ImageLightbox({ attachment, onClose }: ImageLightboxProps) {
         type="button"
         onClick={onClose}
         className="absolute top-4 right-4 flex h-10 w-10 items-center justify-center border-2 border-white bg-black text-white hover:bg-brutal-danger transition-colors"
-        aria-label="关闭预览"
+        aria-label={t('attachmentClosePreview')}
       >
         <X className="h-5 w-5" />
       </button>
@@ -100,7 +101,7 @@ export function ImageLightbox({ attachment, onClose }: ImageLightboxProps) {
         {loadState === 'error' && (
           <div className="flex flex-col items-center gap-3 p-12 text-white">
             <ImageOff className="h-10 w-10 text-brutal-danger" />
-            <p className="font-mono text-sm">图片加载失败</p>
+            <p className="font-mono text-sm">{t('attachmentImageError')}</p>
           </div>
         )}
 
@@ -148,7 +149,7 @@ function InlineImage({ attachment, onClick }: InlineImageProps) {
       }}
       role="button"
       tabIndex={0}
-      aria-label={`查看大图: ${attachment.filename}`}
+      aria-label={t('attachmentViewFull', { filename: attachment.filename })}
     >
       {/* Loading skeleton */}
       {loadState === 'loading' && (
@@ -162,7 +163,7 @@ function InlineImage({ attachment, onClick }: InlineImageProps) {
         <div className="flex flex-col items-center gap-1 p-4">
           <ImageOff className="h-6 w-6 text-brutal-muted" />
           <span className="font-mono text-[10px] text-muted-foreground">
-            图片加载失败
+            {t('attachmentImageError')}
           </span>
         </div>
       )}
@@ -211,7 +212,7 @@ function FileCard({ attachment }: FileCardProps) {
         'transition-all cursor-pointer',
         'no-underline text-foreground min-w-0',
       )}
-      aria-label={`下载 ${filename}`}
+      aria-label={t('attachmentDownload', { filename })}
     >
       <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-cream">
         <File className="h-4 w-4 text-muted-foreground" />
@@ -245,7 +246,7 @@ export function MessageAttachments({ attachments }: MessageAttachmentsProps) {
       <div
         className="mt-2 flex flex-wrap gap-2"
         role="group"
-        aria-label={`${attachments.length} 个附件`}
+        aria-label={t('attachmentCount', { n: attachments.length })}
       >
         {attachments.map((att) =>
           isImageAttachment(att) ? (

@@ -15,6 +15,7 @@
 import { useState, useCallback } from 'react';
 import { ChevronDown, Network, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 import { TeamsAgentItem } from './teams-agent-item';
 import { TeamsHumanItem } from './teams-human-item';
 import type { Agent } from '@/lib/types';
@@ -89,7 +90,7 @@ export function TeamsLeftColumn({
               ? 'bg-brutal-primary text-black border-black shadow-brutal-sm'
               : 'text-muted-foreground',
           )}
-          aria-label="进入 Graph 视图"
+          aria-label={t('enterGraphView')}
         >
           <Network className="h-3.5 w-3.5" aria-hidden="true" />
           <span>Graph</span>
@@ -102,7 +103,7 @@ export function TeamsLeftColumn({
             type="button"
             onClick={() => toggle('agents')}
             className={cn(SECTION_HEADER, 'flex-1 text-muted-foreground')}
-            aria-label="展开或折叠 Agents"
+            aria-label={t('expandOrCollapseAgents')}
             aria-expanded={isAgentsExpanded}
           >
             <ChevronDown
@@ -119,7 +120,7 @@ export function TeamsLeftColumn({
             <button
               onClick={onCreateAgent}
               className="mr-2 flex h-5 w-5 items-center justify-center border-2 border-transparent text-sidebar-muted-foreground group-hover:border-black group-hover:text-black hover:bg-brutal-primary/40 active:bg-brutal-primary active:text-black active:ring-2 active:ring-black transition-all cursor-pointer"
-              aria-label="创建 Agent"
+              aria-label={t('teamsCreateAgent')}
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
@@ -129,7 +130,7 @@ export function TeamsLeftColumn({
           <div>
             {agents.length === 0 ? (
               <p className="px-6 py-2 font-mono text-[10px] italic text-muted-foreground">
-                暂无 agent
+                No agents yet
               </p>
             ) : (
               agents.map((agent) => (
@@ -151,7 +152,7 @@ export function TeamsLeftColumn({
           type="button"
           onClick={() => toggle('humans')}
           className={cn(SECTION_HEADER, 'text-muted-foreground')}
-          aria-label="展开或折叠 Humans"
+          aria-label={t('expandOrCollapseHumans')}
           aria-expanded={isHumansExpanded}
         >
           <ChevronDown
@@ -168,7 +169,7 @@ export function TeamsLeftColumn({
           <div>
             {humans.length === 0 ? (
               <p className="px-6 py-2 font-mono text-[10px] italic text-muted-foreground">
-                暂无 human
+                No humans yet
               </p>
             ) : (
               humans.map((human) => (

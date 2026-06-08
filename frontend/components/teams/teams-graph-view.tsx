@@ -16,6 +16,7 @@ import {
   type TeamGroup,
 } from './infer-agent-group';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 import type { Agent } from '@/lib/types';
 
 interface TeamsGraphViewProps {
@@ -51,7 +52,7 @@ export function TeamsGraphView({ agents, onSelectAgent }: TeamsGraphViewProps) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-center">
         <p className="font-body text-sm text-muted-foreground">
-          还没有 Agent,创建后在 Graph 视图查看组织关系
+          No agents yet. Create agents to view the organization graph.
         </p>
       </div>
     );
@@ -77,7 +78,7 @@ export function TeamsGraphView({ agents, onSelectAgent }: TeamsGraphViewProps) {
                     onClick={() => toggle(group)}
                     className="w-full text-left"
                     aria-expanded={isExpanded}
-                    aria-label={`${isExpanded ? '收起' : '展开'} ${group} 分组`}
+                    aria-label={t('expandGroup', { action: isExpanded ? t('collapse') : t('expand'), group })}
                   >
                     <div className="flex items-center justify-between">
                       <h3 className="font-heading text-sm font-bold">{group}</h3>
@@ -99,7 +100,7 @@ export function TeamsGraphView({ agents, onSelectAgent }: TeamsGraphViewProps) {
                       ))}
                       {!isExpanded && items.length > 3 && (
                         <p className="pl-7 font-mono text-[10px] text-muted-foreground">
-                          +{items.length - 3} 更多...
+                          +{items.length - 3} more...
                         </p>
                       )}
                     </div>
@@ -130,7 +131,7 @@ export function TeamsGraphView({ agents, onSelectAgent }: TeamsGraphViewProps) {
         </div>
       </div>
       <p className="mt-3 text-center font-mono text-[10px] text-muted-foreground">
-        ← 横向滚动查看更多 · 点击 group 卡片可展开 agent 列表 →
+        Scroll horizontally for more · Click group card to expand agent list
       </p>
     </div>
   );

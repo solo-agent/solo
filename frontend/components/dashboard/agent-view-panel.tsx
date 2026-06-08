@@ -5,6 +5,7 @@ import { Eye, EyeOff, X } from 'lucide-react';
 import { useAgentChunks } from '@/lib/hooks/use-agent-chunks';
 import { AgentTrack } from './agent-track';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 
 interface AgentViewPanelProps {
   channelId: string | null;
@@ -109,7 +110,7 @@ export function AgentViewPanel({
               onClick={clearAllChunks}
               className="font-mono text-[10px] text-muted-foreground hover:text-foreground"
             >
-              清除全部
+              {t('agentClearAll')}
             </button>
           )}
           {onClose && (
@@ -117,8 +118,8 @@ export function AgentViewPanel({
               type="button"
               onClick={onClose}
               className="flex h-6 w-6 items-center justify-center border-2 border-black bg-brutal-primary text-white hover:bg-brutal-primary/80"
-              aria-label="关闭 Agent 详情面板"
-              title="关闭"
+              aria-label={t('agentDetailPanelClose')}
+              title={t('close')}
             >
               <X className="h-3 w-3" />
             </button>
@@ -131,9 +132,9 @@ export function AgentViewPanel({
         {!hasContent && (
           <div className="flex flex-col items-center justify-center h-full text-center px-4 py-8">
             <EyeOff className="h-8 w-8 text-muted-foreground/30 mb-2" />
-            <p className="font-mono text-xs text-muted-foreground">暂无 agent 执行中</p>
+            <p className="font-mono text-xs text-muted-foreground">{t('agentNoActive')}</p>
             <p className="font-mono text-[10px] text-muted-foreground/50 mt-1">
-              Agent 执行时思考过程会出现在这里
+              {t('agentPanelEmptyDesc')}
             </p>
           </div>
         )}

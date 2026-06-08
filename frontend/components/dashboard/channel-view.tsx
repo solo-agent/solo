@@ -25,6 +25,7 @@ import {
   DialogCloseButton,
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast';
+import { t } from '@/lib/i18n';
 import type { Channel, Message, Task, TaskStatus } from '@/lib/types';
 
 // SOLO-63-F: Lazy-load ThreadPanel (only rendered when a thread is open)
@@ -343,7 +344,7 @@ export function ChannelView({
     try {
       const updated = await claimTask(task.channel_id, task.id);
       setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
-      showToast(`已认领任务 #${task.task_number ?? '?'}`, 'success');
+      showToast(t('taskClaimed', { n: task.task_number ?? '?' }), 'success');
     } catch {
       // 409: silent — per spec, no error toast
     }
@@ -353,7 +354,7 @@ export function ChannelView({
     try {
       const updated = await unclaimTask(task.channel_id, task.id);
       setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
-      showToast(`已释放任务 #${task.task_number ?? '?'}`, 'info');
+      showToast(t('taskReleased', { n: task.task_number ?? '?' }), 'info');
     } catch {
       // Errors handled silently for claim/unclaim
     }
@@ -369,9 +370,9 @@ export function ChannelView({
           message.id,
           title,
         );
-        showToast(`已转为任务 #${task.task_number ?? '?'}`, 'success');
+        showToast(t('taskConverted', { n: task.task_number ?? '?' }), 'success');
       } catch {
-        showToast('转换任务失败，请稍后再试', 'error');
+        showToast(t('taskConvertError'), 'error');
       }
     },
     [convertMessageToTask, showToast],
@@ -414,7 +415,7 @@ export function ChannelView({
                 )}
               >
                 <MessageSquare className="h-3.5 w-3.5" />
-                消息
+                {t('messages')}
               </button>
               <button
                 type="button"
@@ -428,7 +429,7 @@ export function ChannelView({
                 )}
               >
                 <ClipboardList className="h-3.5 w-3.5" />
-                任务
+                {t('tasks')}
               </button>
             </div>
           </div>
@@ -462,8 +463,8 @@ export function ChannelView({
               type="button"
               onClick={() => setIsMemberPopoverOpen(true)}
               className="flex h-8 w-8 items-center justify-center border-2 border-black bg-white shadow-brutal-sm hover:bg-brutal-cream transition-colors"
-              aria-label="频道成员"
-              title="频道成员"
+              aria-label={t('channelMembers')}
+              title={t('channelMembers')}
             >
               <Users className="h-4 w-4" />
             </button>
@@ -495,12 +496,12 @@ export function ChannelView({
                 if (asTask) {
                   const result = await sendMessage(content, _mentionedAgentIds, true, attachmentIds);
                   if (result && result.task_number !== undefined) {
-                    showToast(`已创建任务 #${result.task_number}`, 'success');
+                    showToast(t('taskCreatedToast', { n: result.task_number }), 'success');
                   }
                 } else {
                   const result = await sendMessage(content, _mentionedAgentIds, undefined, attachmentIds);
                   if (result && result.task_number !== undefined) {
-                    showToast(`已创建任务 #${result.task_number}`, 'success');
+                    showToast(t('taskCreatedToast', { n: result.task_number }), 'success');
                   }
                 }
               }}
@@ -515,7 +516,7 @@ export function ChannelView({
           <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream">
             <div className="flex-1 overflow-y-auto px-4 py-4">
               <h3 className="mb-4 font-heading text-sm font-bold text-foreground">
-                  #{channel.name} 的任务
+                  {t('channelTasks', { channel: channel.name })}
                 </h3>
               <TaskBoard
                 tasks={channelTasks}
@@ -605,7 +606,7 @@ export function ChannelView({
           <DialogTitle>
             <div className="flex items-center gap-2">
               <Users className="h-4 w-4" />
-              频道成员
+              {t('channelMembers')}
               <span className="font-mono text-sm font-normal text-muted-foreground">
                 ({users.length + agents.length})
               </span>
@@ -618,7 +619,7 @@ export function ChannelView({
                 setIsAddAgentModalOpen(true);
               }}
               className="flex h-7 w-7 items-center justify-center border-2 border-black bg-white shadow-brutal-sm hover:bg-brutal-primary-light active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
-              aria-label="添加 Agent 到频道"
+              aria-label={t('addAgentToChannel')}
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
@@ -646,7 +647,7 @@ export function ChannelView({
           type="button"
           onClick={() => setIsMemberPopoverOpen(true)}
           className="btn-brutal fixed bottom-4 right-4 z-40 flex h-10 w-10 items-center justify-center shadow-brutal"
-          aria-label="成员"
+          aria-label={t('members')}
         >
           <Users className="h-4 w-4" />
         </button>
