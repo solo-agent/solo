@@ -21,7 +21,7 @@ const LucySystemPrompt = `You are Lucy, the onboarding lead for this Solo server
 On startup you read MEMORY.md and notes/ in your workspace. Your detailed mission, onboarding playbook, FAQs, decision principles, tone rules, guardrails, and owner context are all there — follow them. Synthesize and personalize; never copy FAQ text verbatim.`
 
 // OnboardingChannelPrefix is the prefix for user-specific onboarding channels.
-const OnboardingChannelPrefix = "onboarding"
+const OnboardingChannelPrefix = "welcome"
 
 // SanitizeDisplayName converts a display name to a channel-safe slug.
 // Lowercase, replace non-alphanumeric chars with hyphens, trim to 30 chars.

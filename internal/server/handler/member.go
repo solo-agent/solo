@@ -95,7 +95,10 @@ func (h *MemberHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	// v1.3: When an agent joins a channel, trigger a greeting so it
 	// introduces itself — new-agent-in-channel behavior.
 	if req.MemberType == "agent" && h.agentSvc != nil {
-		go h.agentSvc.TriggerAgentGreeting(context.Background(), channelID, req.MemberID)
+		go h.agentSvc.TriggerAgentGreeting(context.Background(), channelID, req.MemberID, "")
+		}
+		if h.agentSvc != nil {
+			h.agentSvc.BroadcastMemberEvent(channelID, "member.added", req.MemberType, req.MemberID, "")
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{

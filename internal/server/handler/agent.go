@@ -190,6 +190,25 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("agent created", "agent_id", agentID, "name", name, "owner_id", userID)
 
+	// Auto-join the user's #all-{name} channel so @mentions work immediately.
+	var allID string
+	_ = h.pool.QueryRow(r.Context(),
+		`SELECT c.id FROM channels c
+		 JOIN channel_members cm ON cm.channel_id = c.id
+		 WHERE cm.member_type = 'user' AND cm.member_id = $1
+		 AND c.name LIKE 'all-%%' AND c.is_archived = false
+		 LIMIT 1`,
+		userID,
+	).Scan(&allID)
+	if allID != "" {
+		_, _ = h.pool.Exec(r.Context(),
+			`INSERT INTO channel_members (channel_id, member_type, member_id, role)
+			 VALUES ($1, 'agent', $2, 'member')
+			 ON CONFLICT DO NOTHING`,
+			allID, agentID,
+		)
+	}
+
 	writeJSON(w, http.StatusCreated, AgentResponse{
 		ID:            agentID,
 		Name:          name,

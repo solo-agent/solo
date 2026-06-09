@@ -285,7 +285,7 @@ func (m *MemoryManager) Delete(agentID string) error {
 
 // memoryFilePath returns the absolute path to the agent's MEMORY.md file.
 func (m *MemoryManager) memoryFilePath(agentID string) string {
-	return filepath.Join(m.basePath, agentID, "MEMORY.md")
+	return filepath.Join(m.basePath, agentID, "workspace", "MEMORY.md")
 }
 
 // updateLastUpdated replaces or appends the "Last updated:" line in the

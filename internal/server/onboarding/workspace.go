@@ -8,7 +8,8 @@ import (
 )
 
 // SeedAgentKnowledge writes Lucy's MEMORY.md and notes/ files into the
-// agent's directory (~/.solo/agents/{agentID}/).
+// agent's workspace directory (~/.solo/agents/{agentID}/workspace/).
+// This is the agent's cwd — where BuildSystemPrompt tells it to read MEMORY.md.
 // This is best-effort: failures are logged but not returned.
 func SeedAgentKnowledge(agentID, displayName, email string) {
 	home, err := os.UserHomeDir()
@@ -17,8 +18,8 @@ func SeedAgentKnowledge(agentID, displayName, email string) {
 		return
 	}
 
-	agentDir := filepath.Join(home, ".solo", "agents", agentID)
-	notesDir := filepath.Join(agentDir, "notes")
+	workspaceDir := filepath.Join(home, ".solo", "agents", agentID, "workspace")
+	notesDir := filepath.Join(workspaceDir, "notes")
 
 	if err := os.MkdirAll(notesDir, 0o755); err != nil {
 		slog.Warn("onboarding: cannot create notes dir", "agent_id", agentID, "path", notesDir, "error", err)
@@ -27,9 +28,9 @@ func SeedAgentKnowledge(agentID, displayName, email string) {
 
 	files := KnowledgeFiles(displayName, email)
 	for relPath, content := range files {
-		fullPath := filepath.Join(agentDir, relPath)
+		fullPath := filepath.Join(workspaceDir, relPath)
 		// Ensure parent dir exists (handles nested paths like notes/foo.md)
-		if dir := filepath.Dir(fullPath); dir != agentDir {
+		if dir := filepath.Dir(fullPath); dir != workspaceDir {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				slog.Warn("onboarding: cannot create parent dir", "agent_id", agentID, "path", dir, "error", err)
 				continue

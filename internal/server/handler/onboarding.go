@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -127,33 +126,31 @@ func (h *OnboardingHandler) CreateLucy(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Warn("onboarding: failed to add Lucy to channel",
 			"channel_id", channelID, "agent_id", agentID, "error", err)
+	} else if h.agentSvc != nil {
+		h.agentSvc.BroadcastMemberEvent(channelID, "member.added", "agent", agentID, onboarding.LucyName)
+	}
+
+	// Also add Lucy to the shared #all channel.
+	h.ensureAgentInAllChannel(r.Context(), agentID)
+	if h.agentSvc != nil {
+		allID := allChannelID(r.Context(), h.pool, agentID)
+		if allID != "" {
+			h.agentSvc.BroadcastMemberEvent(allID, "member.added", "agent", agentID, onboarding.LucyName)
+		}
 	}
 
 	// Seed knowledge files asynchronously.
 	channelName := channelName(r.Context(), h.pool, channelID)
 	go onboarding.SeedAgentKnowledge(agentID, displayName, email)
 
-	// Trigger Lucy's first message.
+	// Trigger Lucy's first message — the greeting is injected as private
+	// agent context (not a visible channel message).
 	if h.agentSvc != nil {
-		msgID := uuid.New().String()
 		greeting := onboarding.GreetingPrompt(displayName, email, channelName)
-		now := time.Now()
-		_, err := h.pool.Exec(r.Context(),
-			`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, created_at, updated_at)
-			 VALUES ($1, $2, 'system', '00000000-0000-0000-0000-000000000000', $3, 'system', $4, $4)`,
-			msgID, channelID, greeting, now,
+		go h.agentSvc.TriggerAgentGreeting(
+			context.Background(),
+			channelID, agentID, greeting,
 		)
-		if err != nil {
-			slog.Warn("onboarding: failed to insert greeting message",
-				"channel_id", channelID, "error", err)
-		} else {
-			go h.agentSvc.TriggerAgentResponse(
-				context.Background(),
-				channelID, msgID,
-				"system", "00000000-0000-0000-0000-000000000000",
-				nil, false, nil,
-			)
-		}
 	}
 
 	slog.Info("onboarding: Lucy created via wizard",
@@ -202,6 +199,35 @@ func channelName(ctx context.Context, pool *pgxpool.Pool, channelID string) stri
 		name = channelID
 	}
 	return name
+}
+
+// ensureAgentInAllChannel adds the agent to the shared #all channel.
+func (h *OnboardingHandler) ensureAgentInAllChannel(ctx context.Context, agentID string) {
+	allID := allChannelID(ctx, h.pool, agentID)
+	if allID == "" {
+		return
+	}
+	_, _ = h.pool.Exec(ctx,
+		`INSERT INTO channel_members (channel_id, member_type, member_id, role)
+		 VALUES ($1, 'agent', $2, 'member')
+		 ON CONFLICT DO NOTHING`,
+		allID, agentID,
+	)
+}
+
+// allChannelID resolves the per-user #all-{name} channel ID for the given agent's owner.
+func allChannelID(ctx context.Context, pool *pgxpool.Pool, agentID string) string {
+	var id string
+	_ = pool.QueryRow(ctx,
+		`SELECT c.id FROM channels c
+		 JOIN channel_members cm ON cm.channel_id = c.id
+		 JOIN agents a ON a.owner_id = cm.member_id
+		 WHERE a.id = $1 AND cm.member_type = 'user'
+		 AND c.name LIKE 'all-%%' AND c.is_archived = false
+		 LIMIT 1`,
+		agentID,
+	).Scan(&id)
+	return id
 }
 
 // nullIfEmpty returns a *string that is nil when s is empty.

@@ -225,7 +225,7 @@ function DashboardContent() {
     (c) => c.id === selectedChannelId,
   );
 
-  const isOnboardingChannel = selectedChannel?.name?.startsWith('onboarding-') ?? false;
+  const isOnboardingChannel = selectedChannel?.name?.startsWith('welcome-') ?? false;
   const showOnboardingWizard = isOnboardingChannel && channelAgents.length === 0;
 
   const selectedDM: DMChannel | undefined = dmChannels.find(

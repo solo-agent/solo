@@ -9,6 +9,7 @@
 import { t } from '@/lib/i18n';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
+import { useWebSocket } from '@/lib/ws-context';
 import type { ChannelMember } from '@/lib/types';
 
 // ---- Backend response shape (from service.Member) ----
@@ -47,6 +48,17 @@ export function useChannelMembers(channelId: string | null) {
   const mountedRef = useRef(true);
   const channelIdRef = useRef(channelId);
   channelIdRef.current = channelId;
+  const loadMembersRef = useRef<() => Promise<void>>();
+  const { onEvent } = useWebSocket();
+
+  // Listen for member.added events and refetch in real time.
+  useEffect(() => {
+    return onEvent((event) => {
+      if (event.type === 'member.added' && event.channel_id === channelIdRef.current) {
+        loadMembersRef.current?.();
+      }
+    });
+  }, [onEvent]);
 
   const loadMembers = useCallback(async () => {
     if (!channelId) {
@@ -71,6 +83,8 @@ export function useChannelMembers(channelId: string | null) {
       setIsLoading(false);
     }
   }, [channelId]);
+
+  loadMembersRef.current = loadMembers;
 
   useEffect(() => {
     mountedRef.current = true;

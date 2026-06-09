@@ -367,6 +367,9 @@ func (h *AuthHandler) bootstrapOnboarding(ctx context.Context, userID, displayNa
 		return ""
 	}
 
+	// Step 1b: Create the per-user #all channel where all agents auto-join.
+	h.ensureAllChannel(ctx, userID, displayName)
+
 	// Step 2: Insert a wizard welcome message.
 	msgID := uuid.New().String()
 	welcomeMsg := onboarding.WizardWelcomePrompt(displayName)
@@ -386,4 +389,16 @@ func (h *AuthHandler) bootstrapOnboarding(ctx context.Context, userID, displayNa
 		"user_id", userID, "channel_id", channelID, "channel_name", channelName)
 
 	return channelID
+}
+
+// ensureAllChannel creates a per-user #all-{name} channel where the user's
+// agents automatically join so @mentions work across the workspace.
+func (h *AuthHandler) ensureAllChannel(ctx context.Context, userID, displayName string) {
+	channelName := "all-" + onboarding.SanitizeDisplayName(displayName)
+	_, err := h.svc.CreateChannel(ctx, channelName, "All your agents and members", "channel", userID)
+	if err != nil {
+		slog.Debug("onboarding: #all channel exists", "user_id", userID, "channel", channelName, "error", err)
+	} else {
+		slog.Info("onboarding: #all channel created", "user_id", userID, "channel", channelName)
+	}
 }

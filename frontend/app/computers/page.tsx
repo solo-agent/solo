@@ -108,6 +108,8 @@ export default function ComputersPage() {
   // Create agent dialog
   const [showCreateAgent, setShowCreateAgent] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  // Increment after agent creation to force ConnectedAgents remount
+  const [agentVersion, setAgentVersion] = useState(0);
 
   const handleCreateAgent = useCallback(async (values: AgentFormValues) => {
     setIsCreating(true);
@@ -116,6 +118,7 @@ export default function ComputersPage() {
       setShowCreateAgent(false);
       showToast(t('teamsAgentCreated'), 'success');
       refetch();
+      setAgentVersion((v) => v + 1);
     } catch {
       showToast(t('teamsAgentCreateError'), 'error');
     } finally {
@@ -345,6 +348,7 @@ export default function ComputersPage() {
                 onEditNameChange={setEditName}
                 onDeleteClick={setDeleteTargetId}
                 onCreateAgent={() => setShowCreateAgent(true)}
+                agentVersion={agentVersion}
               />
             )}
           </div>
@@ -388,10 +392,12 @@ interface ComputerCardProps {
   onEditNameChange: (name: string) => void;
   onDeleteClick: (id: string) => void;
   onCreateAgent?: () => void;
+  agentVersion?: number;
 }
 
 function ComputerCard({
   onCreateAgent,
+  agentVersion,
   computer,
   isExpanded,
   editingId,
@@ -592,7 +598,7 @@ function ComputerCard({
           {/* Section: Connected Agents (v1.5) */}
           <SectionHeader label={t('computersConnectedAgents')} className="mt-6" />
           <div className="mt-3">
-            <ConnectedAgents computerId={isExpanded ? computer.id : null} onCreateAgent={onCreateAgent} />
+            <ConnectedAgents key={agentVersion} computerId={isExpanded ? computer.id : null} onCreateAgent={onCreateAgent} />
           </div>
 
         </div>

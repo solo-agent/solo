@@ -277,6 +277,16 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 		"channel_id", taskReq.ChannelID,
 	)
 
+	// Inject InitialGreeting as a system message if set (e.g. Lucy's onboarding greeting).
+	// This is private context for the agent — not stored as a channel message.
+	if taskReq.InitialGreeting != "" {
+		taskReq.Messages = append([]agent.Message{{
+			Role:     agent.RoleSystem,
+			Content:  taskReq.InitialGreeting,
+			SenderID: "system",
+		}}, taskReq.Messages...)
+	}
+
 	// Broadcast thinking event immediately
 	s.broadcastAgentThinking(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "Processing request...")
 
@@ -1489,10 +1499,9 @@ type daemonTaskRequest struct {
 	OriginTaskID string            `json:"origin_task_id,omitempty"` // SOLO-123-B: task ID for status update
 	TaskContext  string            `json:"task_context,omitempty"`   // SOLO-221-B: summary of pending tasks in channel
 	AgentChain   []string          `json:"agent_chain,omitempty"`    // SOLO-228-B: agent trigger chain for loop prevention
-	MentionedNames []string        `json:"mentioned_names,omitempty"` // v1.3: names of @mentioned agents for context awareness
+	MentionedNames  []string        `json:"mentioned_names,omitempty"` // v1.3: names of @mentioned agents for context awareness
+	InitialGreeting string          `json:"initial_greeting,omitempty"` // greeting message to prepend as system context
 }
-
-
 // containsStr returns true if the slice s contains value v.
 func containsStr(s []string, v string) bool {
 	for _, x := range s {

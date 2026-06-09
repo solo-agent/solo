@@ -72,6 +72,8 @@ export type WSServerEvent =
   // summary. Powers the AgentIsland floating UI. Derived by the daemon
   // from agent.OutputChunk events.
   | { type: 'agent.activity'; channel_id: string; agent_id: string; agent_name?: string; status: 'idle' | 'thinking' | 'running' | 'streaming' | 'waiting_approval' | 'error'; activity_text: string; tool_name?: string; tool_input_summary?: string; source?: string; timestamp: string }
+  // ---- 频道成员事件 ----
+  | { type: 'member.added'; channel_id: string; member_type: string; member_id: string; member_name?: string }
   // ---- 流式消息事件 (SOLO-51-F, SOLO-52-F) ----
   | { type: 'message.agent_typing'; id: string; channel_id: string; thread_id?: string; sender_id: string; sender_name?: string; content: string; created_at: string }
   // ---- 任务事件 (SOLO-122-B) ----
