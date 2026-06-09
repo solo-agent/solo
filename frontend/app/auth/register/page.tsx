@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
@@ -15,6 +15,10 @@ import { BrutalAlert } from "@/components/ui/brutal-alert";
 
 const registerFormSchema = z
   .object({
+    displayName: z
+      .string()
+      .min(1, "请输入显示名称")
+      .max(50, "显示名称不能超过 50 个字符"),
     email: z
       .string()
       .min(1, t('emailRequired'))
@@ -35,6 +39,7 @@ type RegisterFormValues = z.infer<typeof registerFormSchema>;
 export default function RegisterPage() {
   const router = useRouter();
   const { register: authRegister, isAuthenticated, isLoading, error, clearError } = useAuth();
+  const submittingRef = useRef(false);
 
   const {
     register,
@@ -43,6 +48,7 @@ export default function RegisterPage() {
   } = useForm<RegisterFormValues>({
     resolver: zodResolver(registerFormSchema),
     defaultValues: {
+      displayName: "",
       email: "",
       password: "",
       confirmPassword: "",
@@ -51,21 +57,27 @@ export default function RegisterPage() {
 
   // If already authenticated, redirect to dashboard
   useEffect(() => {
-    if (!isLoading && isAuthenticated) {
+    if (!isLoading && isAuthenticated && !submittingRef.current) {
       router.push("/dashboard");
     }
   }, [isAuthenticated, isLoading, router]);
 
   async function onSubmit(data: RegisterFormValues) {
     clearError();
+    submittingRef.current = true;
     try {
-      await authRegister({
+      const onboardingChannelId = await authRegister({
         email: data.email,
         password: data.password,
-        display_name: data.email.split("@")[0],
+        display_name: data.displayName || data.email.split("@")[0],
       });
-      router.push("/dashboard");
+      if (onboardingChannelId) {
+        router.push(`/dashboard?channel=${onboardingChannelId}`);
+      } else {
+        router.push("/dashboard");
+      }
     } catch {
+      submittingRef.current = false;
       // Error is set in auth context, displayed below
     }
   }
@@ -95,6 +107,31 @@ export default function RegisterPage() {
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         {/* API Error */}
         {error && <BrutalAlert variant="error">{error}</BrutalAlert>}
+
+        {/* Display Name field */}
+        <div className="space-y-2">
+          <label
+            htmlFor="displayName"
+            className="font-heading font-bold text-sm block"
+          >
+            显示名称
+          </label>
+          <input
+            id="displayName"
+            type="text"
+            placeholder="你的名字"
+            autoComplete="name"
+            disabled={isSubmitting}
+            aria-invalid={!!errors.displayName}
+            className={`input-brutal ${errors.displayName ? "input-error" : ""}`}
+            {...register("displayName")}
+          />
+          {errors.displayName && (
+            <p className="text-destructive text-sm" role="alert">
+              {errors.displayName.message}
+            </p>
+          )}
+        </div>
 
         {/* Email field */}
         <div className="space-y-2">

@@ -16,6 +16,7 @@ func CORS() func(http.Handler) http.Handler {
 	if os.Getenv("APP_ENV") == "development" || os.Getenv("APP_ENV") == "" {
 		allowedOrigins = []string{
 			"http://localhost:3000",
+			"http://localhost:3001",
 			"http://localhost:8080",
 			"http://localhost:8081",
 		}

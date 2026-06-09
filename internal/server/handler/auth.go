@@ -8,22 +8,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/solo-ai/solo/internal/auth"
-	"github.com/solo-ai/solo/internal/i18n"
+	"github.com/solo-ai/solo/internal/server/onboarding"
 	"github.com/solo-ai/solo/internal/server/service"
 	"golang.org/x/crypto/bcrypt"
 )
 
 // AuthHandler handles authentication-related HTTP requests.
 type AuthHandler struct {
-	pool *pgxpool.Pool
-	svc  *service.ChannelService
+	pool     *pgxpool.Pool
+	svc      *service.ChannelService
+	agentSvc *service.AgentService // optional: nil in tests
 }
 
 // NewAuthHandler creates a new AuthHandler.
-func NewAuthHandler(pool *pgxpool.Pool) *AuthHandler {
-	return &AuthHandler{pool: pool, svc: service.NewChannelService(pool)}
+func NewAuthHandler(pool *pgxpool.Pool, agentSvc *service.AgentService) *AuthHandler {
+	return &AuthHandler{pool: pool, svc: service.NewChannelService(pool), agentSvc: agentSvc}
 }
 
 // --- Request/Response types ---
@@ -44,10 +46,11 @@ type RefreshRequest struct {
 }
 
 type AuthResponse struct {
-	AccessToken  string       `json:"access_token"`
-	RefreshToken string       `json:"refresh_token"`
-	ExpiresIn    int64        `json:"expires_in"`
-	User         UserResponse `json:"user"`
+	AccessToken          string       `json:"access_token"`
+	RefreshToken         string       `json:"refresh_token"`
+	ExpiresIn            int64        `json:"expires_in"`
+	User                 UserResponse `json:"user"`
+	OnboardingChannelID  string       `json:"onboarding_channel_id,omitempty"`
 }
 
 type UserResponse struct {
@@ -144,13 +147,16 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("user registered", "user_id", userID, "email", email)
 
-	// Auto-create welcome channel for new user (best-effort)
-	h.createWelcomeChannel(r.Context(), userID, displayName)
+	// Bootstrap onboarding: creates onboarding channel, Lucy agent,
+	// seeds knowledge files, and triggers the first welcome message.
+	// Best-effort — failures are logged but never block registration.
+	onboardingChannelID := h.bootstrapOnboarding(r.Context(), userID, displayName, email)
 
 	writeJSON(w, http.StatusCreated, AuthResponse{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		ExpiresIn:    int64(auth.AccessTokenDuration.Seconds()),
+		AccessToken:         accessToken,
+		RefreshToken:        refreshToken,
+		ExpiresIn:           int64(auth.AccessTokenDuration.Seconds()),
+		OnboardingChannelID: onboardingChannelID,
 		User: UserResponse{
 			ID:          userID,
 			Email:       email,
@@ -343,25 +349,88 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// createWelcomeChannel creates a "welcome" channel for a newly registered user.
-// This is best-effort — failures are logged but not returned to the client.
-func (h *AuthHandler) createWelcomeChannel(ctx context.Context, userID, displayName string) {
-	// Use user-specific suffix to avoid unique constraint collision across users.
-	shortID := userID
-	if len(shortID) > 8 {
-		shortID = shortID[:8]
-	}
-	channelName := "welcome-" + shortID
-	channelDesc := i18n.Active.DefaultChannelDesc
-	if displayName == "" {
-		displayName = i18n.Active.DefaultDisplayName
+// bootstrapOnboarding creates the onboarding channel, Lucy agent, and triggers
+// the first welcome message for a newly registered user. Returns the onboarding
+// channel ID so the frontend can auto-select it.
+// All failures are logged but not returned — registration succeeds regardless.
+func (h *AuthHandler) bootstrapOnboarding(ctx context.Context, userID, displayName, email string) string {
+	channelName := onboarding.OnboardingChannelName(displayName)
+	channelDesc := "Your personal onboarding space. Lucy will help you get started."
+
+	// Step 1: Create the onboarding channel.
+	channelID, err := h.svc.CreateChannel(ctx, channelName, channelDesc, "channel", userID)
+	if err != nil {
+		slog.Warn("onboarding: failed to create channel",
+			"user_id", userID, "channel_name", channelName, "error", err)
+		return ""
 	}
 
-	_, err := h.svc.CreateChannel(ctx, channelName, channelDesc, "channel", userID)
+	// Step 2: Create the Lucy agent via direct SQL.
+	agentID := uuid.New().String()
+	systemPrompt := onboarding.LucySystemPrompt
+	agentDesc := "Onboarding lead — helps you set up your Solo workspace."
+	_, err = h.pool.Exec(ctx,
+		`INSERT INTO agents (id, name, description, owner_id, model_provider, model_name,
+			system_prompt, temperature, max_tokens, custom_env, custom_args)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		agentID, onboarding.LucyName, agentDesc, userID,
+		"", "", // model_provider, model_name — auto-detect from daemon
+		systemPrompt, 0.7, 4096,
+		`{}`, `[]`,
+	)
 	if err != nil {
-		slog.Warn("failed to create welcome channel for new user",
-			"user_id", userID,
-			"error", err,
+		slog.Warn("onboarding: failed to create Lucy agent",
+			"user_id", userID, "error", err)
+		// Channel was created; return its ID so user still has something.
+		return channelID
+	}
+
+	// Step 3: Add Lucy to the onboarding channel.
+	_, err = h.pool.Exec(ctx,
+		`INSERT INTO channel_members (channel_id, member_type, member_id, role)
+		 VALUES ($1, 'agent', $2, 'member')`,
+		channelID, agentID,
+	)
+	if err != nil {
+		slog.Warn("onboarding: failed to add Lucy to channel",
+			"channel_id", channelID, "agent_id", agentID, "error", err)
+	}
+
+	// Step 4: Seed knowledge files asynchronously (I/O, best-effort).
+	go onboarding.SeedAgentKnowledge(agentID, displayName, email)
+
+	// Step 5: Trigger Lucy's first message if the agent service is available.
+	if h.agentSvc != nil {
+		// Insert a system message that tells Lucy to introduce herself.
+		msgID := uuid.New().String()
+		greeting := onboarding.GreetingPrompt(displayName, email, channelName)
+		now := time.Now()
+		_, err := h.pool.Exec(ctx,
+			`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, created_at, updated_at)
+			 VALUES ($1, $2, 'system', '00000000-0000-0000-0000-000000000000', $3, 'system', $4, $4)`,
+			msgID, channelID, greeting, now,
+		)
+		if err != nil {
+			slog.Warn("onboarding: failed to insert greeting message",
+				"channel_id", channelID, "error", err)
+			return channelID
+		}
+
+		// Trigger Lucy to process the greeting and send her welcome message.
+		go h.agentSvc.TriggerAgentResponse(
+			context.Background(),
+			channelID, msgID,
+			"system", "00000000-0000-0000-0000-000000000000",
+			nil, false, nil,
 		)
 	}
+
+	slog.Info("onboarding: bootstrap complete",
+		"user_id", userID,
+		"channel_id", channelID,
+		"agent_id", agentID,
+		"channel_name", channelName,
+	)
+
+	return channelID
 }
