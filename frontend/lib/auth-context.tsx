@@ -46,6 +46,7 @@ export interface AuthResponse {
   access_token: string;
   refresh_token: string;
   user: User;
+  onboarding_channel_id?: string;
 }
 
 // ---- 状态管理 ----
@@ -97,7 +98,7 @@ export interface AuthContextValue {
   isLoading: boolean;
   error: string | null;
   login: (req: LoginRequest) => Promise<void>;
-  register: (req: RegisterRequest) => Promise<void>;
+  register: (req: RegisterRequest) => Promise<string | undefined>;
   logout: () => Promise<void>;
   clearError: () => void;
 }
@@ -166,12 +167,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // ---- Register ----
 
-  const register = useCallback(async (req: RegisterRequest) => {
+  const register = useCallback(async (req: RegisterRequest): Promise<string | undefined> => {
     dispatch({ type: 'AUTH_START' });
     try {
       const data = await apiClient.post<AuthResponse>('/api/v1/auth/register', req);
       setAuthTokens(data.access_token, data.refresh_token);
       dispatch({ type: 'AUTH_SUCCESS', user: data.user });
+      return data.onboarding_channel_id;
     } catch (err: unknown) {
       const message =
         err instanceof ApiError ? err.message : '注册失败，请稍后再试';

@@ -50,7 +50,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	inboxSvc := service.NewInboxService(pool)
 
 	// Initialize handlers
-	authHandler := handler.NewAuthHandler(pool)
+	authHandler := handler.NewAuthHandler(pool, agentSvc)
 	channelHandler := handler.NewChannelHandler(pool)
 	memberHandler := handler.NewMemberHandler(pool, agentSvc)
 	messageHandler := handler.NewMessageHandler(pool, hub, agentSvc, taskSvc)

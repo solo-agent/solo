@@ -2,7 +2,10 @@
 
 # ── 0. 公共：等 PostgreSQL 就绪（30s 超时即失败） ────────────────────────────
 pg-ready:
-	@docker compose up -d --remove-orphans postgres >/dev/null
+	@if docker exec solo-postgres pg_isready -U solo -d solo >/dev/null 2>&1; then \
+		exit 0; \
+	fi
+	@docker compose up -d --remove-orphans postgres >/dev/null 2>&1 || true
 	@for i in $$(seq 1 30); do \
 		docker exec solo-postgres pg_isready -U solo -d solo >/dev/null 2>&1 && exit 0; \
 		sleep 1; \
