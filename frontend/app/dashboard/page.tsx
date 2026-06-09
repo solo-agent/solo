@@ -7,6 +7,7 @@ import { MessageSquare, AlertCircle, RefreshCw } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { t } from '@/lib/i18n';
 import { useChannels } from "@/lib/hooks/use-channels";
+import { useChannelMembers } from "@/lib/hooks/use-channel-members";
 import { useDM } from "@/lib/hooks/use-dm";
 import { useDMTasks } from "@/lib/hooks/use-tasks";
 import { Sidebar } from "@/components/dashboard/sidebar";
@@ -217,9 +218,15 @@ function DashboardContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dmFromUrl]);
 
+  // ---- Onboarding wizard detection ----
+  const { agents: channelAgents } = useChannelMembers(selectedChannelId);
+
   const selectedChannel: Channel | undefined = channels.find(
     (c) => c.id === selectedChannelId,
   );
+
+  const isOnboardingChannel = selectedChannel?.name?.startsWith('onboarding-') ?? false;
+  const showOnboardingWizard = isOnboardingChannel && channelAgents.length === 0;
 
   const selectedDM: DMChannel | undefined = dmChannels.find(
     (dm) => dm.id === selectedDmId,
@@ -341,6 +348,7 @@ function DashboardContent() {
         <ChannelView
           key={`chan-${selectedChannel.id}`}
           channel={selectedChannel}
+          showOnboardingWizard={showOnboardingWizard}
           initialThreadMessageId={threadFromUrl ?? undefined}
           initialScrollToMessageId={messageFromUrl ?? undefined}
           onThreadChange={handleChannelThreadChange}

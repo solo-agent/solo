@@ -8,7 +8,6 @@ import {
   ClipboardList,
   Users,
   Monitor,
-  Settings,
   FolderOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -62,26 +61,16 @@ export function NavBar() {
 
       {/* Spacer */}
       <div className="mt-auto flex flex-col items-center gap-1">
-        {/* Settings */}
-        <Link
-          href="/settings"
-          className={cn(
-            'navbar-icon',
-            pathname.startsWith('/settings') && 'navbar-icon-active',
-          )}
-          aria-label={t('navSettings')}
-          title={t('navSettings')}
-        >
-          <Settings className="h-4 w-4" />
-        </Link>
-
-        {/* User avatar (pixel style for consistency) */}
+        {/* User avatar (settings / profile) */}
         {user && (
           <Link
             href="/settings"
-            className="navbar-icon mt-1"
-            aria-label={user.display_name || user.email || t('user')}
-            title={user.display_name || user.email || t('user')}
+            className={cn(
+              'navbar-icon mt-1',
+              pathname.startsWith('/settings') && 'navbar-icon-active',
+            )}
+            aria-label={t('navSettings')}
+            title={t('navSettings')}
           >
             <PixelAvatar
               agentId={user.id || 'user'}

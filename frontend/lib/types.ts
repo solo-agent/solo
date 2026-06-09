@@ -375,3 +375,19 @@ export interface ComputerAgent {
   status: 'online' | 'thinking' | 'running' | 'offline';
   active_tasks: number;
 }
+
+// ---- Onboarding types (v1.6) ----
+
+export interface CreateLucyRequest {
+  runtime_type: string;
+  computer_id?: string;
+  channel_id: string;
+}
+
+export interface CreateLucyResponse {
+  agent_id: string;
+  agent_name: string;
+  channel_id: string;
+}
+
+export type WizardStep = 'computer' | 'runtime' | 'create' | 'done';

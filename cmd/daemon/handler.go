@@ -83,6 +83,26 @@ func (h *daemonHandler) getSessionManager(providerType string) *agent.AgentSessi
 	return h.sessionManagers[providerType]
 }
 
+// activeSessionAgentIDs returns all agent IDs that have active persistent
+// sessions across all registered session managers. This is the source of
+// truth for which agents are "online" on this daemon.
+func (h *daemonHandler) activeSessionAgentIDs() []string {
+	if h.sessionManagers == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var ids []string
+	for _, sm := range h.sessionManagers {
+		for _, id := range sm.ActiveAgentIDs() {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
+}
+
 // ── Token store (SOLO-254-B: persistent session token auto-refresh) ────────────
 
 // getOrGenerateToken returns a cached valid token for the agent, or generates a

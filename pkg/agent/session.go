@@ -167,6 +167,23 @@ func (m *AgentSessionManager) IsActive(agentID string) bool {
 	return exists && !entry.asleep && m.isSessionAlive(entry)
 }
 
+// ActiveAgentIDs returns the IDs of all agents with an active (non-asleep,
+// process-alive) persistent session. This is used by the daemon heartbeat to
+// report which agents are "online" on this computer — distinct from the
+// task-level ActiveAgentIDs which only reports currently-executing tasks.
+func (m *AgentSessionManager) ActiveAgentIDs() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var ids []string
+	for agentID, entry := range m.sessions {
+		if !entry.asleep && m.isSessionAlive(entry) {
+			ids = append(ids, agentID)
+		}
+	}
+	return ids
+}
+
 // CloseSession terminates a session (active or asleep).
 func (m *AgentSessionManager) CloseSession(agentID string) error {
 	m.mu.Lock()

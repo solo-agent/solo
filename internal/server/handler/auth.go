@@ -349,13 +349,15 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// bootstrapOnboarding creates the onboarding channel, Lucy agent, and triggers
-// the first welcome message for a newly registered user. Returns the onboarding
-// channel ID so the frontend can auto-select it.
+// bootstrapOnboarding creates the onboarding channel for a newly registered user
+// and inserts a wizard welcome message. Lucy agent creation is deferred to the
+// onboarding wizard (POST /api/v1/onboarding/create-lucy) so the user can select
+// a runtime first.
+// Returns the channel ID so the frontend can auto-select it.
 // All failures are logged but not returned — registration succeeds regardless.
 func (h *AuthHandler) bootstrapOnboarding(ctx context.Context, userID, displayName, email string) string {
 	channelName := onboarding.OnboardingChannelName(displayName)
-	channelDesc := "Your personal onboarding space. Lucy will help you get started."
+	channelDesc := "Your personal onboarding space. Set up your first agent here."
 
 	// Step 1: Create the onboarding channel.
 	channelID, err := h.svc.CreateChannel(ctx, channelName, channelDesc, "channel", userID)
@@ -365,72 +367,23 @@ func (h *AuthHandler) bootstrapOnboarding(ctx context.Context, userID, displayNa
 		return ""
 	}
 
-	// Step 2: Create the Lucy agent via direct SQL.
-	agentID := uuid.New().String()
-	systemPrompt := onboarding.LucySystemPrompt
-	agentDesc := "Onboarding lead — helps you set up your Solo workspace."
+	// Step 2: Insert a wizard welcome message.
+	msgID := uuid.New().String()
+	welcomeMsg := onboarding.WizardWelcomePrompt(displayName)
+	now := time.Now()
 	_, err = h.pool.Exec(ctx,
-		`INSERT INTO agents (id, name, description, owner_id, model_provider, model_name,
-			system_prompt, temperature, max_tokens, custom_env, custom_args)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		agentID, onboarding.LucyName, agentDesc, userID,
-		"", "", // model_provider, model_name — auto-detect from daemon
-		systemPrompt, 0.7, 4096,
-		`{}`, `[]`,
+		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, created_at, updated_at)
+		 VALUES ($1, $2, 'system', '00000000-0000-0000-0000-000000000000', $3, 'system', $4, $4)`,
+		msgID, channelID, welcomeMsg, now,
 	)
 	if err != nil {
-		slog.Warn("onboarding: failed to create Lucy agent",
-			"user_id", userID, "error", err)
-		// Channel was created; return its ID so user still has something.
+		slog.Warn("onboarding: failed to insert welcome message",
+			"channel_id", channelID, "error", err)
 		return channelID
 	}
 
-	// Step 3: Add Lucy to the onboarding channel.
-	_, err = h.pool.Exec(ctx,
-		`INSERT INTO channel_members (channel_id, member_type, member_id, role)
-		 VALUES ($1, 'agent', $2, 'member')`,
-		channelID, agentID,
-	)
-	if err != nil {
-		slog.Warn("onboarding: failed to add Lucy to channel",
-			"channel_id", channelID, "agent_id", agentID, "error", err)
-	}
-
-	// Step 4: Seed knowledge files asynchronously (I/O, best-effort).
-	go onboarding.SeedAgentKnowledge(agentID, displayName, email)
-
-	// Step 5: Trigger Lucy's first message if the agent service is available.
-	if h.agentSvc != nil {
-		// Insert a system message that tells Lucy to introduce herself.
-		msgID := uuid.New().String()
-		greeting := onboarding.GreetingPrompt(displayName, email, channelName)
-		now := time.Now()
-		_, err := h.pool.Exec(ctx,
-			`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, created_at, updated_at)
-			 VALUES ($1, $2, 'system', '00000000-0000-0000-0000-000000000000', $3, 'system', $4, $4)`,
-			msgID, channelID, greeting, now,
-		)
-		if err != nil {
-			slog.Warn("onboarding: failed to insert greeting message",
-				"channel_id", channelID, "error", err)
-			return channelID
-		}
-
-		// Trigger Lucy to process the greeting and send her welcome message.
-		go h.agentSvc.TriggerAgentResponse(
-			context.Background(),
-			channelID, msgID,
-			"system", "00000000-0000-0000-0000-000000000000",
-			nil, false, nil,
-		)
-	}
-
-	slog.Info("onboarding: bootstrap complete",
-		"user_id", userID,
-		"channel_id", channelID,
-		"agent_id", agentID,
-		"channel_name", channelName,
-	)
+	slog.Info("onboarding: channel created, awaiting wizard",
+		"user_id", userID, "channel_id", channelID, "channel_name", channelName)
 
 	return channelID
 }

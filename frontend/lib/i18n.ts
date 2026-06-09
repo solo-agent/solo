@@ -399,6 +399,8 @@ const en = {
   settingsSave: 'Save',
   settingsSaving: 'Saving...',
   settingsLoadError: 'Could not load user info',
+  settingsLogout: 'Log Out',
+  settingsLoggingOut: 'Logging out...',
 
   // ── Teams ──
   teamsLoading: 'Loading...',

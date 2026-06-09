@@ -68,8 +68,8 @@ func (s *ComputerService) GetComputer(ctx context.Context, id, userID string) (*
 	err := s.pool.QueryRow(ctx,
 		`SELECT id, name, owner_id, daemon_id, daemon_url, status, last_heartbeat, agent_ids, os, hostname, ip, created_at, updated_at
 		 FROM computers
-		 WHERE id = $1 AND owner_id = $2`,
-		id, userID,
+		 WHERE id = $1`,
+		id,
 	).Scan(&c.ID, &c.Name, &c.OwnerID, &daemonID, &daemonURL, &c.Status,
 		&lastHeartbeat, &c.AgentIDs, &c.OS, &c.Hostname, &c.IP, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
@@ -96,9 +96,8 @@ func (s *ComputerService) ListComputers(ctx context.Context, userID string) ([]C
 		`SELECT id, name, owner_id, COALESCE(daemon_id, ''), COALESCE(daemon_url, ''),
 		        status, last_heartbeat, agent_ids, COALESCE(os, ''), COALESCE(hostname, ''), COALESCE(ip, ''), created_at, updated_at
 		 FROM computers
-		 WHERE owner_id = $1
+		 WHERE 1=1
 		 ORDER BY created_at DESC`,
-		userID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list computers: %w", err)
@@ -137,9 +136,9 @@ func (s *ComputerService) UpdateComputer(ctx context.Context, id, userID, name s
 
 	err := s.pool.QueryRow(ctx,
 		`UPDATE computers SET name = $1, updated_at = now()
-		 WHERE id = $2 AND owner_id = $3
+		 WHERE id = $2
 		 RETURNING id, name, owner_id, daemon_id, daemon_url, status, last_heartbeat, agent_ids, os, hostname, ip, created_at, updated_at`,
-		name, id, userID,
+		name, id,
 	).Scan(&c.ID, &c.Name, &c.OwnerID, &daemonID, &daemonURL, &c.Status,
 		&lastHeartbeat, &c.AgentIDs, &c.OS, &c.Hostname, &c.IP, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
@@ -164,7 +163,6 @@ func (s *ComputerService) UpdateComputer(ctx context.Context, id, userID, name s
 func (s *ComputerService) DeleteComputer(ctx context.Context, id, userID string) error {
 	result, err := s.pool.Exec(ctx,
 		`DELETE FROM computers WHERE id = $1 AND owner_id = $2`,
-		id, userID,
 	)
 	if err != nil {
 		return fmt.Errorf("delete computer: %w", err)

@@ -25,6 +25,7 @@ import {
   DialogCloseButton,
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast';
+import { WizardCard } from '@/components/onboarding/wizard-card';
 import { t } from '@/lib/i18n';
 import type { Channel, Message, Task, TaskStatus } from '@/lib/types';
 
@@ -37,6 +38,8 @@ import { AgentViewPanel } from './agent-view-panel';
 
 interface ChannelViewProps {
   channel: Channel;
+  /** Show the onboarding wizard card above the message list */
+  showOnboardingWizard?: boolean;
   /** Optional message ID to open ThreadPanel for on mount */
   initialThreadMessageId?: string;
   /** Optional message ID to scroll to on mount */
@@ -61,6 +64,7 @@ interface ChannelViewProps {
 
 export function ChannelView({
   channel,
+  showOnboardingWizard,
   initialThreadMessageId,
   initialScrollToMessageId,
   onThreadChange,
@@ -474,6 +478,11 @@ export function ChannelView({
         {/* Messages tab (SOLO-128-F) */}
         {channelViewTab === 'messages' && (
           <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream">
+            {showOnboardingWizard && (
+              <div className="px-4 pt-4">
+                <WizardCard channelId={channel.id} />
+              </div>
+            )}
             <MessageList
               messages={messages}
               isLoading={isLoading}

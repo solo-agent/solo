@@ -12,11 +12,11 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Monitor,
   Plus,
   AlertCircle,
-  Terminal,
   Edit3,
   Check,
   X,
@@ -27,6 +27,7 @@ import {
   Cpu,
   ChevronDown,
   ChevronUp,
+  ExternalLink,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { t } from '@/lib/i18n';
@@ -38,6 +39,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { BrutalAlert } from '@/components/ui/brutal-alert';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { useToast } from '@/components/ui/toast';
+import { useAgents } from '@/lib/hooks/use-agents';
+import { AgentForm, type AgentFormValues } from '@/components/agents/agent-form';
 import { NavBar } from '@/components/ui/navbar';
 import { ComputersLeftColumn } from '@/components/computers/computers-left-column';
 import { relativeTime, formatDateTime } from '@/lib/utils/time';
@@ -99,7 +102,26 @@ function AgentStatusDot({ status }: { status: string }) {
 export default function ComputersPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { computers, isLoading, error, updateComputer, deleteComputer, refetch } = useComputers();
+  const { createAgent } = useAgents();
   const { showToast } = useToast();
+
+  // Create agent dialog
+  const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+
+  const handleCreateAgent = useCallback(async (values: AgentFormValues) => {
+    setIsCreating(true);
+    try {
+      await createAgent(values);
+      setShowCreateAgent(false);
+      showToast(t('teamsAgentCreated'), 'success');
+      refetch();
+    } catch {
+      showToast(t('teamsAgentCreateError'), 'error');
+    } finally {
+      setIsCreating(false);
+    }
+  }, [isCreating, createAgent, showToast, refetch]);
 
   // Expanded card state
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -125,6 +147,17 @@ export default function ComputersPage() {
     () => (selectedComputerId ? computers.find((c) => c.id === selectedComputerId) : undefined),
     [computers, selectedComputerId],
   );
+
+  // Auto-select and expand the first computer on initial load
+  const [autoSelected, setAutoSelected] = useState(false);
+  useEffect(() => {
+    if (!autoSelected && !isLoading && computers.length > 0 && !selectedComputerId) {
+      const firstId = computers[0].id;
+      setSelectedComputerId(firstId);
+      setExpandedId(firstId);
+      setAutoSelected(true);
+    }
+  }, [autoSelected, isLoading, computers, selectedComputerId]);
 
   // Left-column click: re-click clears selection; switching resets edit/expand
   const handleComputerClick = useCallback((id: string) => {
@@ -229,13 +262,8 @@ export default function ComputersPage() {
       </div>
 
       <main className="flex flex-1 flex-col overflow-hidden">
-        {/* Top bar — add button only (page label lives in the left column) */}
-        <div className="flex flex-shrink-0 items-center justify-end h-14 border-b-2 border-black px-4">
-          <Button onClick={() => setShowAddDialog(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            {t('computersAddComputer')}
-          </Button>
-        </div>
+        {/* Top bar (page label lives in the left column) */}
+        <div className="flex flex-shrink-0 items-center h-14 border-b-2 border-black px-4" />
         <div className="flex-1 overflow-y-auto px-6 py-6">
           <div className="mx-auto w-full max-w-3xl">
             {/* Error state */}
@@ -287,10 +315,6 @@ export default function ComputersPage() {
                 <p className="mt-2 font-body text-sm text-muted-foreground">
                   {t('computersNoComputersDesc')}
                 </p>
-                <Button className="mt-6" onClick={() => setShowAddDialog(true)}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  {t('computersViewGuide')}
-                </Button>
               </div>
             )}
 
@@ -320,76 +344,29 @@ export default function ComputersPage() {
                 onEditKeyDown={handleEditKeyDown}
                 onEditNameChange={setEditName}
                 onDeleteClick={setDeleteTargetId}
+                onCreateAgent={() => setShowCreateAgent(true)}
               />
             )}
           </div>
         </div>
       </main>
 
-      {/* Add computer instruction dialog */}
+      {/* Create Agent dialog */}
       <Dialog
-        open={showAddDialog}
-        onOpenChange={(open) => {
-          if (!open) setShowAddDialog(false);
-        }}
+        open={showCreateAgent}
+        onOpenChange={(open) => { if (!open) setShowCreateAgent(false); }}
       >
         <DialogHeader>
-          <DialogTitle>{t('computersAddTitle')}</DialogTitle>
-          <DialogCloseButton onClick={() => setShowAddDialog(false)} />
+          <DialogTitle>{t('teamsCreateAgent')}</DialogTitle>
+          <DialogCloseButton onClick={() => setShowCreateAgent(false)} />
         </DialogHeader>
-        <DialogDescription>
-          {t('computersAddDesc')}
-        </DialogDescription>
-        <div className="mt-4 space-y-3">
-          <div className="border-2 border-black bg-brutal-cream p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Terminal className="h-4 w-4" />
-              <span className="font-heading text-sm font-bold">{t('computersSteps')}</span>
-            </div>
-            <ol className="list-decimal list-inside space-y-1.5 font-mono text-xs text-foreground">
-              <li>{t('computersStepClone')}</li>
-              <li>{t('computersStepEnv')}</li>
-              <li>{t('computersStepStart')}</li>
-              <li>{t('computersStepAuto')}</li>
-              <li>{t('computersStepDone')}</li>
-            </ol>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => setShowAddDialog(false)}>
-            {t('computersGotIt')}
-          </Button>
-        </DialogFooter>
+        <AgentForm
+          onSubmit={handleCreateAgent}
+          isSubmitting={isCreating}
+          submitLabel={t('teamsCreateAgent')}
+        />
       </Dialog>
 
-      {/* Delete confirmation dialog */}
-      <Dialog
-        open={!!deleteTargetId}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTargetId(null);
-        }}
-      >
-        <DialogHeader>
-          <DialogTitle>{t('computersRemoveTitle')}</DialogTitle>
-          <DialogCloseButton onClick={() => setDeleteTargetId(null)} />
-        </DialogHeader>
-        <DialogDescription>
-          {t('computersRemoveConfirm', { name: deleteTargetName || '' })}
-        </DialogDescription>
-        <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => setDeleteTargetId(null)}>
-            {t('cancel')}
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={handleDelete}
-            disabled={isDeleting}
-          >
-            {isDeleting ? t('computersRemoving') : t('computersConfirmRemove')}
-          </Button>
-        </DialogFooter>
-      </Dialog>
     </div>
   );
 }
@@ -410,9 +387,11 @@ interface ComputerCardProps {
   onEditKeyDown: (e: React.KeyboardEvent<HTMLInputElement>, id: string) => void;
   onEditNameChange: (name: string) => void;
   onDeleteClick: (id: string) => void;
+  onCreateAgent?: () => void;
 }
 
 function ComputerCard({
+  onCreateAgent,
   computer,
   isExpanded,
   editingId,
@@ -479,15 +458,6 @@ function ComputerCard({
               <Globe className="h-3 w-3" />
               {computer.ip}
             </span>
-          )}
-          {/* Agent count */}
-          {computer.agent_names && computer.agent_names.length > 0 ? (
-            <span>
-              <Cpu className="inline h-3 w-3 mr-0.5 -mt-0.5" />
-              Agents: {computer.agent_names.length}
-            </span>
-          ) : (
-            <span>{t('computersNoAgentBound')}</span>
           )}
         </div>
 
@@ -622,19 +592,9 @@ function ComputerCard({
           {/* Section: Connected Agents (v1.5) */}
           <SectionHeader label={t('computersConnectedAgents')} className="mt-6" />
           <div className="mt-3">
-            <ConnectedAgents computerId={isExpanded ? computer.id : null} />
+            <ConnectedAgents computerId={isExpanded ? computer.id : null} onCreateAgent={onCreateAgent} />
           </div>
 
-          {/* Remove button */}
-          <div className="mt-6">
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => onDeleteClick(computer.id)}
-            >
-              {t('computersRemoveTitle')}
-            </Button>
-          </div>
         </div>
       </div>
     </div>
@@ -643,8 +603,9 @@ function ComputerCard({
 
 // ---- Connected Agents sub-component (lazy-loaded on expand) ----
 
-function ConnectedAgents({ computerId }: { computerId: string | null }) {
+function ConnectedAgents({ computerId, onCreateAgent }: { computerId: string | null; onCreateAgent?: () => void }) {
   const { agents, isLoading, error } = useComputerAgents(computerId);
+  const router = useRouter();
 
   if (!computerId) {
     return <p className="font-body text-sm text-muted-foreground">{t('computersExpandCard')}</p>;
@@ -663,39 +624,52 @@ function ConnectedAgents({ computerId }: { computerId: string | null }) {
     return <p className="font-body text-sm text-muted-foreground">{error}</p>;
   }
 
-  if (agents.length === 0) {
-    return <p className="font-body text-sm text-muted-foreground">{t('computersNoConnectedAgents')}</p>;
-  }
-
   return (
     <div className="space-y-2">
-      <p className="font-body text-sm text-muted-foreground">
-        {t('computersAgentCount', { n: agents.length })}
-      </p>
-      <ul className="space-y-2">
-        {agents.map((agent) => (
-          <li
-            key={agent.id}
-            className="flex items-center gap-3 border-2 border-black bg-brutal-cream p-2.5"
-          >
-            <PixelAvatar agentId={agent.id} size="sm" />
-            <div className="flex-1 min-w-0">
-              <span className="block truncate font-body text-sm font-medium text-foreground">
-                {agent.name}
-              </span>
-              <AgentStatusDot status={agent.status} />
-            </div>
-            <div className="flex-shrink-0 text-right">
-              <span className="text-[11px] text-muted-foreground">
-                {t('computersActiveTasks')}
-              </span>
-              <span className="block font-mono text-sm font-bold text-foreground">
-                {agent.active_tasks}
-              </span>
-            </div>
-          </li>
-        ))}
-      </ul>
+      <div className="flex items-center justify-between">
+        <p className="font-body text-sm text-muted-foreground">
+          {t('computersAgentCount', { n: agents.length })}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 px-2"
+          onClick={() => onCreateAgent?.()}
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      {agents.length === 0 ? (
+        <p className="font-body text-sm text-muted-foreground">{t('computersNoConnectedAgents')}</p>
+      ) : (
+        <ul className="space-y-2">
+          {agents.map((agent) => (
+            <li key={agent.id}>
+              <button
+                type="button"
+                className="flex w-full items-center gap-3 border-2 border-black bg-brutal-cream p-2.5 text-left transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal"
+                onClick={() => router.push('/teams')}
+              >
+                <PixelAvatar agentId={agent.id} size="sm" />
+                <div className="flex-1 min-w-0">
+                  <span className="block truncate font-body text-sm font-medium text-foreground">
+                    {agent.name}
+                  </span>
+                  <AgentStatusDot status={agent.status} />
+                </div>
+                <div className="flex-shrink-0 text-right">
+                  <span className="text-[11px] text-muted-foreground">
+                    {t('computersActiveTasks')}
+                  </span>
+                  <span className="block font-mono text-sm font-bold text-foreground">
+                    {agent.active_tasks}
+                  </span>
+                </div>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

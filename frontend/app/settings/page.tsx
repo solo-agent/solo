@@ -9,7 +9,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Mail, ArrowLeft, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { User, Mail, ArrowLeft, AlertCircle, CheckCircle2, LogOut } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { t } from '@/lib/i18n';
 import { useUser } from '@/lib/hooks/use-user';
@@ -22,7 +22,7 @@ import { BrutalAlert } from '@/components/ui/brutal-alert';
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, logout } = useAuth();
   const {
     user,
     isLoading: userLoading,
@@ -35,6 +35,17 @@ export default function SettingsPage() {
   } = useUser();
 
   const [displayName, setDisplayName] = useState('');
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const handleLogout = useCallback(async () => {
+    setLoggingOut(true);
+    try {
+      await logout();
+      router.push('/auth/login');
+    } catch {
+      setLoggingOut(false);
+    }
+  }, [logout, router]);
 
   useEffect(() => {
     if (user?.display_name) {
@@ -128,66 +139,81 @@ export default function SettingsPage() {
 
       {/* Profile form */}
       {!userLoading && user && (
-        <div className="card-brutal">
-          {/* Email (read-only) */}
-          <div className="border-b-2 border-black px-6 py-5">
-            <Label className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-              {t('email')}
-            </Label>
-            <div className="mt-2 flex items-center gap-2">
-              <Mail className="h-4 w-4 text-muted-foreground" />
-              <span className="font-body text-sm text-foreground">{user.email}</span>
-            </div>
-            <p className="mt-1 font-mono text-[11px] text-muted-foreground">{t('settingsEmailUnmodifiable')}</p>
-          </div>
-
-          {/* Display name (editable) */}
-          <div className="px-6 py-5">
-            <Label
-              htmlFor="display-name"
-              className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground"
-            >
-              {t('settingsDisplayName')}
-            </Label>
-            <div className="mt-2 flex items-end gap-3">
-              <div className="flex-1">
-                <Input
-                  id="display-name"
-                  value={displayName}
-                  onChange={(e) => {
-                    setDisplayName(e.target.value);
-                    clearSuccess();
-                  }}
-                  placeholder={t('settingsDisplayNamePlaceholder')}
-                  disabled={isUpdating}
-                  className="max-w-sm"
-                />
+        <>
+          <div className="card-brutal">
+            {/* Email (read-only) */}
+            <div className="border-b-2 border-black px-6 py-5">
+              <Label className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                {t('email')}
+              </Label>
+              <div className="mt-2 flex items-center gap-2">
+                <Mail className="h-4 w-4 text-muted-foreground" />
+                <span className="font-body text-sm text-foreground">{user.email}</span>
               </div>
-              <Button
-                type="button"
-                onClick={handleSave}
-                disabled={
-                  isUpdating ||
-                  !displayName.trim() ||
-                  displayName.trim() === user.display_name
-                }
-                variant="default"
-              >
-                {isUpdating ? t('settingsSaving') : t('settingsSave')}
-              </Button>
+              <p className="mt-1 font-mono text-[11px] text-muted-foreground">{t('settingsEmailUnmodifiable')}</p>
             </div>
 
-            {/* Feedback messages */}
-            <div className="mt-3 space-y-1">
-              {successMessage && (
-                <div className="flex items-center gap-1.5 font-mono text-xs text-brutal-success">
-                  <CheckCircle2 className="h-4 w-4" />
-                  <span>{successMessage}</span>
+            {/* Display name (editable) */}
+            <div className="px-6 py-5">
+              <Label
+                htmlFor="display-name"
+                className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground"
+              >
+                {t('settingsDisplayName')}
+              </Label>
+              <div className="mt-2 flex items-end gap-3">
+                <div className="flex-1">
+                  <Input
+                    id="display-name"
+                    value={displayName}
+                    onChange={(e) => {
+                      setDisplayName(e.target.value);
+                      clearSuccess();
+                    }}
+                    placeholder={t('settingsDisplayNamePlaceholder')}
+                    disabled={isUpdating}
+                    className="max-w-sm"
+                  />
                 </div>
-              )}
+                <Button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={
+                    isUpdating ||
+                    !displayName.trim() ||
+                    displayName.trim() === user.display_name
+                  }
+                  variant="default"
+                >
+                  {isUpdating ? t('settingsSaving') : t('settingsSave')}
+                </Button>
+              </div>
+
+              {/* Feedback messages */}
+              <div className="mt-3 space-y-1">
+                {successMessage && (
+                  <div className="flex items-center gap-1.5 font-mono text-xs text-brutal-success">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>{successMessage}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
+
+          {/* Logout */}
+          <div className="mt-6">
+            <Button
+              variant="outline"
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="gap-2 border-red-500 text-red-600 hover:bg-red-50"
+            >
+              <LogOut className="h-4 w-4" />
+              {loggingOut ? t('settingsLoggingOut') : t('settingsLogout')}
+            </Button>
+          </div>
+        </>
       )}
     </div>
   );

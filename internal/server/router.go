@@ -63,6 +63,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	searchHandler := handler.NewSearchHandler(pool)
 	computerHandler := handler.NewComputerHandler(computerSvc, dm, pool)
 	inboxHandler := handler.NewInboxHandler(inboxSvc)
+		onboardingHandler := handler.NewOnboardingHandler(pool, agentSvc)
 
 	// Attachment handler
 	uploadDir := os.Getenv("ATTACHMENTS_DIR")
@@ -202,6 +203,9 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		// Agent backends metadata (registered backend adapters)
 		r.Get("/api/v1/agent-backends", agentHandler.AgentBackends)
 		r.Get("/api/v1/agent-backends/detect", agentHandler.AgentBackendsDetect)
+
+			// Onboarding wizard
+			r.Post("/api/v1/onboarding/create-lucy", onboardingHandler.CreateLucy)
 
 		// Global tasks routes (all channels)
 		r.Route("/api/v1/tasks", func(r chi.Router) {

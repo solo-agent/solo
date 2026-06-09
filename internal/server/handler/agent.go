@@ -158,13 +158,24 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-bind to the first online computer if available.
+	var computerID *string
+	var cid string
+	compErr := h.pool.QueryRow(r.Context(),
+		`SELECT id FROM computers WHERE status = 'online' ORDER BY created_at ASC LIMIT 1`,
+	).Scan(&cid)
+	if compErr == nil && cid != "" {
+		computerID = &cid
+	}
+
 	var agentID string
 	var createdAt, updatedAt time.Time
 	err = h.pool.QueryRow(r.Context(),
-		`INSERT INTO agents (name, description, owner_id, model_provider, model_name, system_prompt, temperature, max_tokens, auto_join, custom_env, custom_args)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		`INSERT INTO agents (name, description, owner_id, model_provider, model_name, system_prompt, temperature, max_tokens, auto_join, runtime_id, custom_env, custom_args)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		 RETURNING id, created_at, updated_at`,
 		name, req.Description, userID, modelProvider, modelName, systemPrompt, temperature, maxTokens, autoJoin,
+		computerID,
 		customEnvBytes, customArgsBytes,
 	).Scan(&agentID, &createdAt, &updatedAt)
 	if err != nil {

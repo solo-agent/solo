@@ -40,6 +40,10 @@ type ComputerResponse struct {
 	Status        string   `json:"status"`
 	LastHeartbeat string   `json:"last_heartbeat,omitempty"`
 	AgentIDs      []string `json:"agent_ids,omitempty"`
+	AgentNames    []string `json:"agent_names,omitempty"`
+	OS            string   `json:"os,omitempty"`
+	Hostname      string   `json:"hostname,omitempty"`
+	IP            string   `json:"ip,omitempty"`
 	CreatedAt     string   `json:"created_at"`
 	UpdatedAt     string   `json:"updated_at"`
 }
@@ -59,6 +63,9 @@ func toResponse(c *service.Computer) ComputerResponse {
 		DaemonURL: c.DaemonURL,
 		Status:    c.Status,
 		AgentIDs:  c.AgentIDs,
+		OS:        c.OS,
+		Hostname:  c.Hostname,
+		IP:        c.IP,
 		CreatedAt: c.CreatedAt.Format(time.RFC3339),
 		UpdatedAt: c.UpdatedAt.Format(time.RFC3339),
 	}
@@ -67,6 +74,9 @@ func toResponse(c *service.Computer) ComputerResponse {
 	}
 	if resp.AgentIDs == nil {
 		resp.AgentIDs = []string{}
+	}
+	if resp.AgentNames == nil {
+		resp.AgentNames = []string{}
 	}
 	return resp
 }
@@ -251,13 +261,13 @@ type ComputerAgentsResponse struct {
 
 // ListAgents handles GET /api/v1/computers/{computerID}/agents
 //
-// The agent<->daemon mapping is determined through two sources:
-//  1. computers.agent_ids — populated from daemon heartbeat AgentIDs field
-//  2. DaemonManager pending tasks — for actively dispatched agent tasks
+// Returns agents persistently bound to this computer (via agents.runtime_id).
+// Only shows agents owned by the current user.
 //
-// Both sources are combined and deduplicated. Agent details (name) come from
-// the agents table, and active_tasks is the count of in_progress tasks claimed
-// by the agent.
+// Agent status is determined by heartbeat agent_ids (persistent session state):
+//   - "online"  — active persistent session on the daemon
+//   - "offline" — bound but no active session (or computer offline)
+//   - "running" — active session + currently executing a task
 func (h *ComputerHandler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
@@ -282,67 +292,68 @@ func (h *ComputerHandler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Collect agent IDs from computer record (populated by daemon heartbeat)
-	// and from pending tasks on the daemon.
-	agentIDSet := make(map[string]struct{})
+	// Build lookup set from heartbeat agent_ids (persistent session state).
+	sessionSet := make(map[string]struct{}, len(c.AgentIDs))
 	for _, id := range c.AgentIDs {
 		if id != "" {
-			agentIDSet[id] = struct{}{}
+			sessionSet[id] = struct{}{}
 		}
 	}
 
-	// Supplement with agent IDs from pending daemon tasks.
-	if h.dm != nil && c.DaemonID != "" {
-		for _, pt := range h.dm.GetDaemonPendingTasks(c.DaemonID) {
-			if pt.AgentID != "" {
-				agentIDSet[pt.AgentID] = struct{}{}
-			}
-		}
+	// Query agents persistently bound to this computer, filtered by owner.
+	rows, err := h.pool.Query(r.Context(),
+		`SELECT a.id, a.name
+		 FROM agents a
+		 WHERE a.runtime_id = $1 AND a.owner_id = $2 AND a.is_active = true
+		 ORDER BY a.created_at ASC`,
+		computerID, userID,
+	)
+	if err != nil {
+		slog.Error("failed to query bound agents", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
 	}
+	defer rows.Close()
 
-	// Build response
-	agents := make([]ComputerAgentResponse, 0, len(agentIDSet))
-	for agentID := range agentIDSet {
-		var name string
-		err := h.pool.QueryRow(r.Context(),
-			`SELECT COALESCE(name, '') FROM agents WHERE id = $1`,
-			agentID,
-		).Scan(&name)
-		if err != nil {
-			// Agent may have been deleted; skip.
-			slog.Debug("agent not found for computer agents list", "agent_id", agentID, "error", err)
+	agents := make([]ComputerAgentResponse, 0)
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
 			continue
 		}
 
-		// Count active (in_progress) tasks claimed by this agent.
 		var activeTasks int
-		err = h.pool.QueryRow(r.Context(),
+		_ = h.pool.QueryRow(r.Context(),
 			`SELECT COUNT(*) FROM tasks WHERE claimer_id = $1 AND status = $2`,
-			agentID, service.TaskStatusInProgress,
+			id, service.TaskStatusInProgress,
 		).Scan(&activeTasks)
-		if err != nil {
-			slog.Warn("failed to count active tasks for agent", "agent_id", agentID, "error", err)
-			activeTasks = 0
-		}
 
-		// Determine agent status: "running" if there are pending tasks on this
-		// daemon, otherwise "online" (the agent exists and the daemon is online).
-		status := "online"
-		if h.dm != nil && c.DaemonID != "" {
-			for _, pt := range h.dm.GetDaemonPendingTasks(c.DaemonID) {
-				if pt.AgentID == agentID {
-					status = "running"
-					break
+		status := "offline"
+		computerOnline := c.Status == "online"
+		_, hasSession := sessionSet[id]
+
+		if computerOnline && hasSession {
+			status = "online"
+			if h.dm != nil && c.DaemonID != "" {
+				for _, pt := range h.dm.GetDaemonPendingTasks(c.DaemonID) {
+					if pt.AgentID == id {
+						status = "running"
+						break
+					}
 				}
 			}
 		}
 
 		agents = append(agents, ComputerAgentResponse{
-			ID:          agentID,
+			ID:          id,
 			Name:        name,
 			Status:      status,
 			ActiveTasks: activeTasks,
 		})
+	}
+
+	if agents == nil {
+		agents = []ComputerAgentResponse{}
 	}
 
 	writeJSON(w, http.StatusOK, ComputerAgentsResponse{

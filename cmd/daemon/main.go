@@ -42,6 +42,7 @@ var (
 	dbPool           *pgxpool.Pool
 	machineLock      *agent.MachineLock
 	taskMgr          *taskManager
+		daemonH          *daemonHandler
 )
 
 func main() {
@@ -101,6 +102,7 @@ func main() {
 
 	// Create handler
 	h := newDaemonHandler(dbPool, taskMgr, llmProvider, serverURL, internalToken)
+	daemonH = h
 
 	// v1.4: Initialize persistent agent session managers for all registered types.
 	for _, meta := range agent.GlobalRegistry().ListMeta() {
@@ -326,7 +328,7 @@ func sendHeartbeat() {
 		MaxLoad:     10,
 		UptimeSec:   int64(time.Since(startTime).Seconds()),
 		ActiveTasks: taskMgr.ListActiveTasks(),
-		AgentIDs:    taskMgr.ActiveAgentIDs(),
+		AgentIDs:    daemonH.activeSessionAgentIDs(),
 		SystemInfo:  collectSystemInfo(),
 	}
 
