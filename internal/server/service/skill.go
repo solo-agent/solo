@@ -63,7 +63,7 @@ func (s *SkillService) SyncGlobalSkills(ctx context.Context, skills []skillloade
 			ON CONFLICT (name) DO UPDATE
 				SET description = $2, source_path = $3, source_kind = $4,
 				    body = $5, body_hash = $6, updated_at = now()
-			WHERE skills.body_hash <> $6
+			WHERE skills.body_hash <> $6 OR skills.source_kind <> $4
 			RETURNING id
 		`, ds.Name, ds.Description, ds.SourcePath, ds.SourceKind, ds.Body, ds.BodyHash).Scan(&id)
 		if err != nil {
@@ -100,7 +100,7 @@ func (s *SkillService) SyncFromDaemon(ctx context.Context, reported map[string][
 				ON CONFLICT (name) DO UPDATE
 					SET description = $2, source_path = $3, source_kind = $4,
 					    body = $5, body_hash = $6, updated_at = now()
-				WHERE skills.body_hash <> $6
+				WHERE skills.body_hash <> $6 OR skills.source_kind <> $4
 				RETURNING id
 			`, ds.Name, ds.Description, ds.SourcePath, ds.SourceKind, ds.Body, ds.BodyHash).Scan(&skillID)
 			if err != nil {
