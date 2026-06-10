@@ -137,16 +137,6 @@ export interface AgentSkillSummary {
   description: string;
 }
 
-/** Returned by POST /api/v1/skills/rescan. */
-export interface RescanResult {
-  ok: boolean;
-  added: number;
-  updated: number;
-  removed: number;
-  total: number;
-  error?: string;
-}
-
 // ---- Channel Member types ----
 
 export interface ChannelMember {

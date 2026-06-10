@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -59,7 +58,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	agentHandler := handler.NewAgentHandler(pool, dm)
 	threadHandler := handler.NewThreadHandler(pool, hub, agentSvc)
 	dmHandler := handler.NewDMHandler(pool, hub, agentSvc, taskSvc)
-	daemonHandler := handler.NewDaemonHandler(dm, agentSvc, computerSvc)
+	daemonHandler := handler.NewDaemonHandler(dm, agentSvc, computerSvc, skillSvc)
 	mentionSvc := service.NewMentionService(pool)
 	taskHandler := handler.NewTaskHandler(pool, hub, agentSvc, taskSvc, mentionSvc)
 	searchHandler := handler.NewSearchHandler(pool)
@@ -78,18 +77,6 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		}
 	}
 	attachmentHandler := handler.NewAttachmentHandler(pool, uploadDir)
-
-	// Kick off first skill rescan asynchronously so the HTTP listener accepts
-	// traffic immediately. Hard 10s budget inside StartBackgroundRescan; never
-	// panics the server.
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Error("background skill rescan panicked", "recover", r)
-			}
-		}()
-		skillSvc.StartBackgroundRescan(context.Background())
-	}()
 
 	// ---- Internal daemon routes (no JWT auth, no rate limit) ----
 	r.Route("/internal/daemon", func(r chi.Router) {
@@ -225,7 +212,6 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Route("/api/v1/skills", func(r chi.Router) {
 			r.Get("/", skillHandler.ListSkills)
 			r.Get("/{id}", skillHandler.GetSkill)
-			r.Post("/rescan", skillHandler.RescanSkills)
 		})
 
 		// Agent backends metadata (registered backend adapters)

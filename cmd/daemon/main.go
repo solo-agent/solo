@@ -25,6 +25,7 @@ import (
 	"github.com/solo-ai/solo/pkg/agent"
 	"github.com/solo-ai/solo/pkg/config"
 	"github.com/solo-ai/solo/pkg/llm"
+	"github.com/solo-ai/solo/pkg/skillloader"
 )
 
 type healthResponse struct {
@@ -330,6 +331,7 @@ func sendHeartbeat() {
 		ActiveTasks: taskMgr.ListActiveTasks(),
 		AgentIDs:    daemonH.activeSessionAgentIDs(),
 		SystemInfo:  collectSystemInfo(),
+		Skills:      collectSkills(),
 	}
 
 	payload, err := json.Marshal(req)
@@ -408,13 +410,45 @@ type daemonRegisterResponse struct {
 }
 
 type daemonHeartbeatPayload struct {
-	DaemonID    string     `json:"daemon_id"`
-	Load        int32      `json:"load"`
-	MaxLoad     int        `json:"max_load"`
-	UptimeSec   int64      `json:"uptime_seconds"`
-	ActiveTasks []string   `json:"active_tasks"`
-	AgentIDs    []string   `json:"agent_ids"`
-	SystemInfo  SystemInfo `json:"system_info"`
+	DaemonID    string                        `json:"daemon_id"`
+	Load        int32                         `json:"load"`
+	MaxLoad     int                           `json:"max_load"`
+	UptimeSec   int64                         `json:"uptime_seconds"`
+	ActiveTasks []string                      `json:"active_tasks"`
+	AgentIDs    []string                      `json:"agent_ids"`
+	SystemInfo  SystemInfo                    `json:"system_info"`
+	Skills      []skillloader.DiscoveredSkill `json:"skills,omitempty"`
+}
+
+// collectSkills scans the agent-native skill directories and returns the
+// discovered skills. See pkg/skillloader for the scanning and parsing logic.
+func collectSkills() []skillloader.DiscoveredSkill {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		slog.Warn("skill scan: no home dir", "error", err)
+		return nil
+	}
+
+	roots := []skillloader.SkillRoot{
+		{Path: home + "/.claude/skills", Kind: "claude", Priority: 60},
+		{Path: home + "/.codex/skills", Kind: "codex", Priority: 35},
+	}
+
+	discovered, err := skillloader.ScanRoots("", roots)
+	if err != nil {
+		slog.Warn("skill scan failed", "error", err)
+		return nil
+	}
+
+	var out []skillloader.DiscoveredSkill
+	for _, ds := range discovered {
+		out = append(out, ds)
+	}
+
+	if len(out) > 0 {
+		slog.Debug("skill scan complete", "count", len(out))
+	}
+	return out
 }
 
 // writeJSON writes a JSON response.

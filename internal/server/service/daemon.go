@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/solo-ai/solo/internal/realtime"
 	"github.com/solo-ai/solo/internal/server/workspace"
+	"github.com/solo-ai/solo/pkg/skillloader"
 )
 
 // DaemonStatus represents the operational status of a daemon instance.
@@ -610,13 +611,14 @@ type DaemonRegisterResponse struct {
 }
 
 type DaemonHeartbeatRequest struct {
-	DaemonID    string           `json:"daemon_id"`
-	Load        int32            `json:"load"`
-	MaxLoad     int              `json:"max_load"`
-	UptimeSec   int64            `json:"uptime_seconds"`
-	ActiveTasks []string         `json:"active_tasks"`
-	AgentIDs    []string         `json:"agent_ids,omitempty"`
-	SystemInfo  DaemonSystemInfo `json:"system_info"`
+	DaemonID    string                        `json:"daemon_id"`
+	Load        int32                         `json:"load"`
+	MaxLoad     int                           `json:"max_load"`
+	UptimeSec   int64                         `json:"uptime_seconds"`
+	ActiveTasks []string                      `json:"active_tasks"`
+	AgentIDs    []string                      `json:"agent_ids,omitempty"`
+	SystemInfo  DaemonSystemInfo              `json:"system_info"`
+	Skills      []skillloader.DiscoveredSkill `json:"skills,omitempty"`
 }
 
 type DaemonHeartbeatResponse struct {

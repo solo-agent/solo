@@ -15,11 +15,12 @@ type DaemonHandler struct {
 	dm          *service.DaemonManager
 	agent       *service.AgentService
 	computerSvc *service.ComputerService
+	skillSvc    *service.SkillService
 }
 
 // NewDaemonHandler creates a new DaemonHandler.
-func NewDaemonHandler(dm *service.DaemonManager, agent *service.AgentService, computerSvc *service.ComputerService) *DaemonHandler {
-	return &DaemonHandler{dm: dm, agent: agent, computerSvc: computerSvc}
+func NewDaemonHandler(dm *service.DaemonManager, agent *service.AgentService, computerSvc *service.ComputerService, skillSvc *service.SkillService) *DaemonHandler {
+	return &DaemonHandler{dm: dm, agent: agent, computerSvc: computerSvc, skillSvc: skillSvc}
 }
 
 // Register handles POST /internal/daemon/register
@@ -141,6 +142,21 @@ func (h *DaemonHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 					"error", err,
 				)
 			}
+		}
+	}
+
+	// Sync skills reported by the daemon.
+	if h.skillSvc != nil && len(req.Skills) > 0 {
+		added, updated, removed, syncErr := h.skillSvc.SyncFromDaemon(r.Context(), req.Skills)
+		if syncErr != nil {
+			slog.Warn("skill sync from daemon heartbeat failed",
+				"request_id", reqID, "daemon_id", req.DaemonID, "error", syncErr,
+			)
+		} else {
+			slog.Debug("skill synced from daemon",
+				"daemon_id", req.DaemonID,
+				"added", added, "updated", updated, "removed", removed,
+			)
 		}
 	}
 

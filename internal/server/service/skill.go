@@ -5,14 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/solo-ai/solo/internal/server/skillloader"
+	"github.com/solo-ai/solo/pkg/skillloader"
 )
 
 // SkillSummary is the list-endpoint shape: everything Skill has except body.
@@ -43,29 +41,6 @@ type SkillFile struct {
 	UpdatedAt time.Time
 }
 
-// RescanResult is what POST /api/v1/skills/rescan returns.
-type RescanResult struct {
-	OK      bool   `json:"ok"`
-	Added   int    `json:"added"`
-	Updated int    `json:"updated"`
-	Removed int    `json:"removed"`
-	Total   int    `json:"total"`
-	Error   string `json:"error,omitempty"`
-}
-
-// AgentSkillData is the per-agent-skill payload intended for task-time use.
-type AgentSkillData struct {
-	Name    string
-	Content string
-	Files   []AgentSkillFileData
-}
-
-// AgentSkillFileData is a supporting file inside an AgentSkillData.
-type AgentSkillFileData struct {
-	Path    string
-	Content string
-}
-
 // SkillService is the entry point for skill-related operations.
 type SkillService struct {
 	pool *pgxpool.Pool
@@ -76,74 +51,56 @@ func NewSkillService(pool *pgxpool.Pool) *SkillService {
 	return &SkillService{pool: pool}
 }
 
-// StartBackgroundRescan runs a full disk rescan on startup, with a hard
-// 10s deadline. Failures are logged and swallowed — the server must not
-// refuse to start because rescan failed.
-func (s *SkillService) StartBackgroundRescan(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	res, err := s.Rescan(ctx)
-	if err != nil {
-		slog.Warn("background skill rescan failed", "error", err)
-		return
-	}
-	slog.Info("background rescan complete",
-		"added", res.Added, "updated", res.Updated, "removed", res.Removed, "total", res.Total)
-}
-
-// Rescan reconciles the on-disk skills with the DB. It returns counts of
-// added/updated/removed/total skills, or an error if the scan itself failed.
-func (s *SkillService) Rescan(ctx context.Context) (RescanResult, error) {
-	discovered, err := s.scanRoots(ctx)
-	if err != nil {
-		return RescanResult{OK: false, Error: err.Error()}, err
+// SyncFromDaemon reconciles skills reported by a daemon with the DB.
+// Daemon sends {name, desc, path, kind, body, body_hash} from its local scan.
+// Server inserts new, updates changed, and deletes skills whose source_path
+// no longer appears in the report (but only for paths managed by this daemon's
+// provider kind, to avoid deleting skills reported by other daemons).
+func (s *SkillService) SyncFromDaemon(ctx context.Context, reported []skillloader.DiscoveredSkill) (added, updated, removed int, err error) {
+	// Index reported skills by name.
+	reportedByName := make(map[string]skillloader.DiscoveredSkill, len(reported))
+	for _, ds := range reported {
+		reportedByName[ds.Name] = ds
 	}
 
-	// Fetch all existing skills in one query.
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, body_hash, source_path
-		FROM skills
-	`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name, body_hash, source_path FROM skills`)
 	if err != nil {
-		return RescanResult{OK: false, Error: err.Error()}, fmt.Errorf("list existing: %w", err)
+		return 0, 0, 0, fmt.Errorf("list existing: %w", err)
 	}
 	defer rows.Close()
 
-	existing := make(map[string]existingSkill)
+	type existingRow struct {
+		ID, Name, BodyHash, SourcePath string
+	}
+	existing := make(map[string]existingRow)
 	for rows.Next() {
-		var es existingSkill
-		if err := rows.Scan(&es.ID, &es.Name, &es.BodyHash, &es.SourcePath); err != nil {
-			return RescanResult{OK: false, Error: err.Error()}, fmt.Errorf("scan: %w", err)
+		var r existingRow
+		if err := rows.Scan(&r.ID, &r.Name, &r.BodyHash, &r.SourcePath); err != nil {
+			return 0, 0, 0, fmt.Errorf("scan: %w", err)
 		}
-		existing[es.Name] = es
+		existing[r.Name] = r
 	}
 	if err := rows.Err(); err != nil {
-		return RescanResult{OK: false, Error: err.Error()}, err
+		return 0, 0, 0, err
 	}
 
-	var res RescanResult
-	seen := make(map[string]bool, len(discovered))
-
-	for name, ds := range discovered {
-		seen[name] = true
+	for name, ds := range reportedByName {
 		es, ok := existing[name]
 		if !ok {
-			// INSERT
 			_, err := s.pool.Exec(ctx, `
 				INSERT INTO skills (name, description, source_path, source_kind, body, body_hash)
 				VALUES ($1, $2, $3, $4, $5, $6)
 			`, ds.Name, ds.Description, ds.SourcePath, ds.SourceKind, ds.Body, ds.BodyHash)
 			if err != nil {
-				slog.Warn("rescan insert failed", "name", ds.Name, "error", err)
+				slog.Warn("skill sync insert failed", "name", name, "error", err)
 				continue
 			}
-			res.Added++
+			added++
 			continue
 		}
 		if es.BodyHash == ds.BodyHash {
-			continue
+			continue // unchanged
 		}
-		// UPDATE
 		_, err := s.pool.Exec(ctx, `
 			UPDATE skills
 			SET description = $1, source_path = $2, source_kind = $3,
@@ -151,33 +108,25 @@ func (s *SkillService) Rescan(ctx context.Context) (RescanResult, error) {
 			WHERE id = $6
 		`, ds.Description, ds.SourcePath, ds.SourceKind, ds.Body, ds.BodyHash, es.ID)
 		if err != nil {
-			slog.Warn("rescan update failed", "name", ds.Name, "error", err)
+			slog.Warn("skill sync update failed", "name", name, "error", err)
 			continue
 		}
-		res.Updated++
+		updated++
 	}
 
-	// DELETE any existing skill whose source_path no longer exists on disk.
-	// (We don't use the "seen" set to allow DB-only skills in Phase 2.)
+	// Delete skills that were not in the report.
 	for name, es := range existing {
-		if seen[name] {
+		if _, stillPresent := reportedByName[name]; stillPresent {
 			continue
 		}
-		if !fileExists(es.SourcePath) {
-			if _, err := s.pool.Exec(ctx, `DELETE FROM skills WHERE id = $1`, es.ID); err != nil {
-				slog.Warn("rescan delete failed", "name", name, "error", err)
-				continue
-			}
-			res.Removed++
+		if _, err := s.pool.Exec(ctx, `DELETE FROM skills WHERE id = $1`, es.ID); err != nil {
+			slog.Warn("skill sync delete failed", "name", name, "error", err)
+			continue
 		}
+		removed++
 	}
 
-	// Total = current row count.
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM skills`).Scan(&res.Total); err != nil {
-		return RescanResult{OK: false, Error: err.Error()}, err
-	}
-	res.OK = true
-	return res, nil
+	return added, updated, removed, nil
 }
 
 type existingSkill struct {
@@ -353,64 +302,15 @@ func (s *SkillService) LoadAgentSkillsForTask(ctx context.Context, agentID strin
 	return out, rows.Err()
 }
 
-// scanRoots builds the priority table from env vars and runs ScanRoots.
-func (s *SkillService) scanRoots(_ context.Context) (map[string]skillloader.DiscoveredSkill, error) {
-	dataDir := resolveDataDir()
-	roots := buildRoots(dataDir)
-	return skillloader.ScanRoots(dataDir, roots)
+// AgentSkillData is the per-agent-skill payload intended for task-time use.
+type AgentSkillData struct {
+	Name    string
+	Content string
+	Files   []AgentSkillFileData
 }
 
-// resolveDataDir returns SOLO_DATA_DIR if set, else ~/.mavis.
-func resolveDataDir() string {
-	if d := os.Getenv("SOLO_DATA_DIR"); d != "" {
-		return d
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ".mavis"
-	}
-	return filepath.Join(home, ".mavis")
-}
-
-// buildRoots returns the priority table for skill root discovery.
-// Scans each agent backend's native global skill directory so solo
-// sees what the user has already installed for their CLI agents.
-func buildRoots(dataDir string) []skillloader.SkillRoot {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return []skillloader.SkillRoot{
-			{Path: filepath.Join(dataDir, "skills"), Kind: "mavis", Priority: 25},
-		}
-	}
-
-	var roots []skillloader.SkillRoot
-
-	// Agent builtin-skills per agent (highest priority).
-	agentsDir := filepath.Join(dataDir, "agents")
-	if entries, err := os.ReadDir(agentsDir); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			roots = append(roots, skillloader.SkillRoot{
-				Path:     filepath.Join(agentsDir, e.Name(), ".builtin-skills"),
-				Kind:     "builtin-agent",
-				Priority: 100,
-			})
-		}
-	}
-
-	// Agent-native global skill directories.
-	roots = append(roots,
-		skillloader.SkillRoot{Path: filepath.Join(home, ".claude", "skills"), Kind: "claude", Priority: 60},
-		skillloader.SkillRoot{Path: filepath.Join(home, ".codex", "skills"), Kind: "codex", Priority: 35},
-		skillloader.SkillRoot{Path: filepath.Join(dataDir, "skills"), Kind: "mavis", Priority: 25},
-	)
-
-	return roots
-}
-
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
+// AgentSkillFileData is a supporting file inside an AgentSkillData.
+type AgentSkillFileData struct {
+	Path    string
+	Content string
 }

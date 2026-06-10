@@ -1,10 +1,12 @@
 // ============================================================================
-// useSkills — 5 hooks for the skill system (Phase1)
-// - useSkills: full catalog from disk (via rescan-then-list)
+// useSkills — 4 hooks for the skill system (Phase1)
+// - useSkills: full catalog (daemon syncs skills via heartbeat)
 // - useSkill(id): single skill with body + files
 // - useAgentSkills(agentId): agent's current bindings
-// - useRescanSkills(): trigger disk rescan (mutation)
 // - useSetAgentSkills(agentId): replace agent bindings (mutation)
+//
+// Skills are discovered by the daemon and synced to the DB on each heartbeat
+// (every 30s). No manual rescan is needed — just refetch to see the latest.
 //
 // Uses raw useState/useEffect (project does not have @tanstack/react-query).
 // ============================================================================
@@ -13,7 +15,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
-import type { Skill, SkillSummary, RescanResult } from '@/lib/types';
+import type { Skill, SkillSummary } from '@/lib/types';
 
 export function useSkills() {
   const [skills, setSkills] = useState<SkillSummary[]>([]);
@@ -118,27 +120,6 @@ export function useAgentSkills(agentId: string | null) {
   }, [load]);
 
   return { skills, isLoading, error, refetch: load } as const;
-}
-
-export function useRescanSkills() {
-  const [isPending, setIsPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const mutate = useCallback(async (): Promise<RescanResult | null> => {
-    setIsPending(true);
-    setError(null);
-    try {
-      const res = await apiClient.post<RescanResult>('/api/v1/skills/rescan', {});
-      return res;
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Rescan 失败');
-      return null;
-    } finally {
-      setIsPending(false);
-    }
-  }, []);
-
-  return { mutate, isPending, error } as const;
 }
 
 export function useSetAgentSkills(agentId: string | null) {

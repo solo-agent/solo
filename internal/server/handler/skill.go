@@ -109,24 +109,6 @@ func (h *SkillHandler) GetSkill(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, dto)
 }
 
-// RescanSkills handles POST /api/v1/skills/rescan
-func (h *SkillHandler) RescanSkills(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireUserID(r); !ok {
-		writeError(w, http.StatusUnauthorized, "not authenticated")
-		return
-	}
-	res, err := h.svc.Rescan(r.Context())
-	if err != nil {
-		// Per spec: return 200 + ok:false on rescan failure (server can keep
-		// serving even if disk is unwalkable).
-		writeJSON(w, http.StatusOK, service.RescanResult{
-			OK: false, Error: err.Error(),
-		})
-		return
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
 // ListAgentSkills handles GET /api/v1/agents/{agentID}/skills
 func (h *SkillHandler) ListAgentSkills(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireUserID(r); !ok {

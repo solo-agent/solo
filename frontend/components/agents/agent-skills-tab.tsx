@@ -1,26 +1,21 @@
 // ============================================================================
-// AgentSkillsTab — toggle agent's skill bindings against the on-disk catalog
-// - Data source: useAgentSkills(agentId) (server-truth bindings)
-//                + useSkills() (full catalog so unbound skills are also toggle-able)
+// AgentSkillsTab — toggle agent's skill bindings against the DB catalog
+// - Skills are synced by the daemon on each heartbeat (every 30s)
+// - Data source: useAgentSkills(agentId) + useSkills() (DB-backed)
 // - Toggle: useSetAgentSkills(agentId) with optimistic update + resync on settle
-// - Rescan button: refreshes both bindings + catalog
-// - Click a row: opens SkillDetailDrawer (T3-built) with SKILL.md rendered
-// Brutal design preserved (chunky 2px toggle, mono font, badge-brutal, divide-y-2
-// divide-black, shadow-brutal-sm).
+// - Click a row: opens SkillDetailDrawer
 // ============================================================================
 
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
-import { AlertCircle, RefreshCw, Puzzle, Loader2 } from 'lucide-react';
-import { apiClient, ApiError } from '@/lib/api-client';
+import { useState, useCallback, useMemo } from 'react';
+import { AlertCircle, Puzzle } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   useAgentSkills,
   useSkills,
-  useRescanSkills,
   useSetAgentSkills,
 } from '@/lib/hooks/use-skills';
 import { SkillDetailDrawer } from './skill-detail-drawer';
@@ -33,11 +28,9 @@ interface AgentSkillsTabProps {
 export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
   const { skills: catalog, isLoading: catalogLoading, error: catalogError, refetch: refetchCatalog } = useSkills();
   const { skills: bindings, isLoading: bindingsLoading, error: bindingsError, refetch: refetchBindings } = useAgentSkills(agentId);
-  const { mutate: rescanMutate, isPending: rescanning } = useRescanSkills();
   const { mutate: setMutate, isPending: setting } = useSetAgentSkills(agentId);
 
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
-  const [rescanBanner, setRescanBanner] = useState<{ added: number; updated: number; removed: number; total: number } | null>(null);
   const [drawerSkillId, setDrawerSkillId] = useState<string | null>(null);
 
   const boundIds = useMemo(() => new Set(bindings.map((s) => s.id)), [bindings]);
@@ -55,9 +48,6 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
       setSavingIds((prev) => new Set(prev).add(skillId));
       try {
         await setMutate(next);
-        // Always re-sync from server (whether PUT succeeded or failed) so the
-        // UI matches the actual bindings. On failure the server is unchanged
-        // and refetch just re-renders the prior state.
         await refetchBindings();
       } finally {
         setSavingIds((prev) => {
@@ -69,22 +59,6 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
     },
     [boundIds, bindings, setMutate, refetchBindings],
   );
-
-  const handleRescan = useCallback(async () => {
-    setRescanBanner(null);
-    const result = await rescanMutate();
-    if (result && result.ok) {
-      setRescanBanner({
-        added: result.added,
-        updated: result.updated,
-        removed: result.removed,
-        total: result.total,
-      });
-      await Promise.all([refetchCatalog(), refetchBindings()]);
-      // auto-dismiss after 4s
-      setTimeout(() => setRescanBanner(null), 4000);
-    }
-  }, [rescanMutate, refetchCatalog, refetchBindings]);
 
   if (isLoading) {
     return (
@@ -120,57 +94,28 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
   return (
     <div className="space-y-4">
       {/* Section header */}
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <div className="flex items-center gap-2">
-            <Puzzle className="h-4 w-4" />
-            <h3 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
-              Agent Skills
-            </h3>
-            <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
-              {bindings.length}/{catalog.length}
-            </span>
-          </div>
-          <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-            切换开关来启用/禁用 Agent 拥有的 Skill。修改即时生效。
-          </p>
+      <div>
+        <div className="flex items-center gap-2">
+          <Puzzle className="h-4 w-4" />
+          <h3 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
+            Agent Skills
+          </h3>
+          <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
+            {bindings.length}/{catalog.length}
+          </span>
         </div>
-        <Button
-          type="button"
-          onClick={handleRescan}
-          disabled={rescanning}
-          size="sm"
-          variant="outline"
-        >
-          {rescanning ? (
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-          )}
-          {rescanning ? '扫描中…' : 'Rescan'}
-        </Button>
+        <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+          切换开关来启用/禁用 Agent 拥有的 Skill。技能由 Daemon 自动扫描并同步。
+        </p>
       </div>
-
-      {/* Rescan banner */}
-      {rescanBanner && (
-        <div className="border-2 border-black bg-brutal-success-light px-3 py-2 shadow-brutal-sm">
-          <p className="font-mono text-[11px] text-foreground">
-            Rescan 完成：新增 {rescanBanner.added} · 更新 {rescanBanner.updated} · 移除 {rescanBanner.removed} · 总计 {rescanBanner.total}
-          </p>
-        </div>
-      )}
 
       {/* Empty state */}
       {catalog.length === 0 && (
         <div className="card-brutal bg-brutal-cream p-6 text-center">
-          <p className="font-mono text-sm text-foreground">磁盘上还没有发现任何 Skill</p>
+          <p className="font-mono text-sm text-foreground">还没有发现任何 Skill</p>
           <p className="mt-2 font-mono text-[11px] text-muted-foreground">
-            在 <code className="bg-white px-1.5 py-0.5 border border-black">~/.claude/skills/</code> 或 <code className="bg-white px-1.5 py-0.5 border border-black">~/.codex/skills/</code> 下放一个含 <code className="bg-white px-1.5 py-0.5 border border-black">SKILL.md</code> 的目录
+            在 <code className="bg-white px-1.5 py-0.5 border border-black">~/.claude/skills/</code> 或 <code className="bg-white px-1.5 py-0.5 border border-black">~/.codex/skills/</code> 下放置含 <code className="bg-white px-1.5 py-0.5 border border-black">SKILL.md</code> 的目录，Daemon 下次心跳时自动同步（最多 30 秒）
           </p>
-          <Button type="button" onClick={handleRescan} disabled={rescanning} size="sm" className="mt-4">
-            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-            重新扫描
-          </Button>
         </div>
       )}
 
