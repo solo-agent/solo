@@ -152,9 +152,17 @@ func (h *DaemonHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("global skill sync failed",
 				"request_id", reqID, "daemon_id", req.DaemonID, "error", syncErr,
 			)
-		} else if n > 0 {
-			slog.Debug("global skills synced", "daemon_id", req.DaemonID, "upserted", n)
+		} else {
+			slog.Info("heartbeat: global skills synced",
+				"daemon_id", req.DaemonID, "received", len(req.GlobalSkills), "upserted", n,
+			)
 		}
+	} else {
+		slog.Debug("heartbeat: no global skills in payload",
+			"daemon_id", req.DaemonID,
+			"has_skill_svc", h.skillSvc != nil,
+			"global_count", len(req.GlobalSkills),
+		)
 	}
 
 	// Sync per-agent skills (stored with agent binding).

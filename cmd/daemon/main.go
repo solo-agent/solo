@@ -562,8 +562,13 @@ func collectGlobalSkills(providers []string) []skillloader.DiscoveredSkill {
 	for _, ds := range discovered {
 		out = append(out, ds)
 	}
-	if len(out) > 0 {
-		slog.Debug("skill global scan", "providers", len(providers), "roots", len(allRoots), "count", len(out))
+	slog.Info("skill global scan",
+		"providers", providers,
+		"roots", len(allRoots),
+		"count", len(out),
+	)
+	if len(out) == 0 {
+		slog.Warn("skill global scan returned 0 skills — check that scan paths exist and contain SKILL.md files")
 	}
 	return out
 }
