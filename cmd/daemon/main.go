@@ -434,85 +434,99 @@ type daemonHeartbeatPayload struct {
 //   Workspace: <ws>/.agents/skills/
 
 // agentGlobalRoots returns all global skill directories for a provider.
-// Provider-specific paths come first (higher priority), then the fallback.
+// Only returns provider-specific paths — no universal fallback.
 func agentGlobalRoots(provider, home string) []skillloader.SkillRoot {
-	var roots []skillloader.SkillRoot
 	switch provider {
 	case "claude", "local":
-		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(home, ".claude", "skills"), Kind: "claude", Priority: 60})
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(home, ".claude", "skills"), Kind: "claude", Priority: 60},
+		}
 	case "codex":
 		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
 		if codexHome == "" {
 			codexHome = filepath.Join(home, ".codex")
 		}
-		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(codexHome, "skills"), Kind: "codex", Priority: 35})
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(codexHome, "skills"), Kind: "codex", Priority: 35},
+		}
 	case "opencode":
-		roots = append(roots,
-			skillloader.SkillRoot{Path: filepath.Join(home, ".config", "opencode", "skills"), Kind: "opencode", Priority: 35},
-			skillloader.SkillRoot{Path: filepath.Join(home, ".claude", "skills"), Kind: "claude-compat", Priority: 30},
-		)
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(home, ".config", "opencode", "skills"), Kind: "opencode", Priority: 35},
+			{Path: filepath.Join(home, ".claude", "skills"), Kind: "claude", Priority: 30},
+		}
 	case "copilot":
-		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(home, ".copilot", "skills"), Kind: "copilot", Priority: 35})
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(home, ".copilot", "skills"), Kind: "copilot", Priority: 35},
+		}
 	case "cursor":
-		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(home, ".cursor", "skills"), Kind: "cursor", Priority: 35})
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(home, ".cursor", "skills"), Kind: "cursor", Priority: 35},
+		}
 	case "kiro":
-		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(home, ".kiro", "skills"), Kind: "kiro", Priority: 35})
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(home, ".kiro", "skills"), Kind: "kiro", Priority: 35},
+		}
 	case "openclaw":
-		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(home, ".openclaw", "skills"), Kind: "openclaw", Priority: 35})
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(home, ".openclaw", "skills"), Kind: "openclaw", Priority: 35},
+		}
 	case "hermes":
-		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(home, ".hermes", "skills"), Kind: "hermes", Priority: 35})
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(home, ".hermes", "skills"), Kind: "hermes", Priority: 35},
+		}
 	case "pi":
-		roots = append(roots,
-			skillloader.SkillRoot{Path: filepath.Join(home, ".pi", "agent", "skills"), Kind: "pi", Priority: 35},
-		)
-	case "gemini", "kimi":
-		// No provider-specific path; fallback only.
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(home, ".pi", "agent", "skills"), Kind: "pi", Priority: 35},
+		}
 	default:
 		return nil
 	}
-	// Universal fallback for all providers.
-	roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(home, ".agents", "skills"), Kind: "agents", Priority: 20})
-	return roots
 }
 
 // agentWorkspaceRoots returns all workspace-relative skill directories for a
-// provider. Provider-specific paths come first, then agent-ecosystem fallback.
+// provider. Kind is prefixed with "ws-" so the frontend can separate sections.
 func agentWorkspaceRoots(provider, wsDir string) []skillloader.SkillRoot {
-	var roots []skillloader.SkillRoot
 	switch provider {
 	case "claude", "local":
-		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(wsDir, ".claude", "skills"), Kind: "claude", Priority: 100})
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(wsDir, ".claude", "skills"), Kind: "ws-claude", Priority: 100},
+		}
 	case "codex":
-		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(wsDir, ".codex", "skills"), Kind: "codex", Priority: 100})
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(wsDir, ".codex", "skills"), Kind: "ws-codex", Priority: 100},
+		}
 	case "opencode":
-		roots = append(roots,
-			skillloader.SkillRoot{Path: filepath.Join(wsDir, ".opencode", "skills"), Kind: "opencode", Priority: 100},
-			skillloader.SkillRoot{Path: filepath.Join(wsDir, ".claude", "skills"), Kind: "claude-compat", Priority: 90},
-		)
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(wsDir, ".opencode", "skills"), Kind: "ws-opencode", Priority: 100},
+			{Path: filepath.Join(wsDir, ".claude", "skills"), Kind: "ws-claude", Priority: 90},
+		}
 	case "copilot":
-		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(wsDir, ".github", "copilot", "skills"), Kind: "copilot", Priority: 100})
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(wsDir, ".github", "copilot", "skills"), Kind: "ws-copilot", Priority: 100},
+		}
 	case "cursor":
-		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(wsDir, ".cursor", "skills"), Kind: "cursor", Priority: 100})
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(wsDir, ".cursor", "skills"), Kind: "ws-cursor", Priority: 100},
+		}
 	case "kiro":
-		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(wsDir, ".kiro", "skills"), Kind: "kiro", Priority: 100})
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(wsDir, ".kiro", "skills"), Kind: "ws-kiro", Priority: 100},
+		}
 	case "openclaw":
-		roots = append(roots,
-			skillloader.SkillRoot{Path: filepath.Join(wsDir, "skills"), Kind: "openclaw-legacy", Priority: 100},
-		)
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(wsDir, "skills"), Kind: "ws-openclaw", Priority: 100},
+		}
 	case "hermes":
-		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(wsDir, ".hermes", "skills"), Kind: "hermes", Priority: 100})
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(wsDir, ".hermes", "skills"), Kind: "ws-hermes", Priority: 100},
+		}
 	case "pi":
-		roots = append(roots,
-			skillloader.SkillRoot{Path: filepath.Join(wsDir, ".pi", "skills"), Kind: "pi", Priority: 100},
-		)
-	case "gemini", "kimi":
-		// No provider-specific workspace path; fallback only.
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(wsDir, ".pi", "skills"), Kind: "ws-pi", Priority: 100},
+		}
 	default:
 		return nil
 	}
-	// Universal workspace fallback.
-	roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(wsDir, ".agents", "skills"), Kind: "agents", Priority: 80})
-	return roots
 }
 
 // collectGlobalSkills scans global skill directories for all registered

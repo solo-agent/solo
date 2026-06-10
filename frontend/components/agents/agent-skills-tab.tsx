@@ -1,45 +1,134 @@
 // ============================================================================
-// AgentSkillsTab — read-only skill catalog
-// - Data source: useSkills() (daemon-synced, DB-backed)
-// - All agents see the same catalog; skills are tagged with provider kind
+// AgentSkillsTab — read-only skill catalog, filtered by agent provider
+// - Skills are grouped into Global and Workspace sections
+// - Filtered to only show skills compatible with the agent's provider type
 // - Click a row: opens SkillDetailDrawer
 // ============================================================================
 
 'use client';
 
-import { useState } from 'react';
-import { AlertCircle, Puzzle } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { AlertCircle, Puzzle, Globe, Folder } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { useSkills } from '@/lib/hooks/use-skills';
+import { apiClient } from '@/lib/api-client';
 import { SkillDetailDrawer } from './skill-detail-drawer';
 import type { SkillSummary } from '@/lib/types';
 
 interface AgentSkillsTabProps {
   agentId: string;
+  agentProvider?: string;
+}
+
+// Which skill kinds are visible to each agent provider type.
+// opencode sees both its own path and the claude-compat path.
+const PROVIDER_KINDS: Record<string, string[]> = {
+  claude: ['claude', 'ws-claude'],
+  local: ['claude', 'ws-claude'],
+  codex: ['codex', 'ws-codex'],
+  opencode: ['opencode', 'claude', 'ws-opencode', 'ws-claude'],
+  copilot: ['copilot', 'ws-copilot'],
+  cursor: ['cursor', 'ws-cursor'],
+  kiro: ['kiro', 'ws-kiro'],
+  openclaw: ['openclaw', 'ws-openclaw'],
+  hermes: ['hermes', 'ws-hermes'],
+  pi: ['pi', 'ws-pi'],
+};
+
+function visibleKinds(provider?: string): string[] {
+  if (!provider) return [];
+  return PROVIDER_KINDS[provider] ?? [];
+}
+
+function isWorkspace(kind: string) {
+  return kind.startsWith('ws-');
 }
 
 const KIND_LABELS: Record<string, string> = {
-  claude: 'Claude',
-  codex: 'Codex',
-  opencode: 'OpenCode',
-  copilot: 'Copilot',
-  cursor: 'Cursor',
-  kiro: 'Kiro',
-  openclaw: 'OpenClaw',
-  hermes: 'Hermes',
-  pi: 'Pi',
-  agents: 'Agent',
-  'claude-compat': 'Claude',
+  claude: 'Claude', codex: 'Codex', opencode: 'OpenCode',
+  copilot: 'Copilot', cursor: 'Cursor', kiro: 'Kiro',
+  openclaw: 'OpenClaw', hermes: 'Hermes', pi: 'Pi',
 };
 
 function kindLabel(kind: string): string {
-  return KIND_LABELS[kind] || kind.toUpperCase();
+  const base = kind.replace(/^ws-/, '');
+  return KIND_LABELS[base] || base.toUpperCase();
 }
 
-export function AgentSkillsTab({ agentId: _agentId }: AgentSkillsTabProps) {
+function SkillList({ skills, emptyText }: { skills: SkillSummary[]; emptyText: string }) {
+  const [drawerId, setDrawerId] = useState<string | null>(null);
+
+  if (skills.length === 0) {
+    return <p className="font-mono text-xs italic text-muted-foreground px-4 py-3">{emptyText}</p>;
+  }
+
+  return (
+    <>
+      <div className="divide-y-2 divide-black">
+        {skills.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => setDrawerId(s.id)}
+            className="flex w-full items-center gap-3 bg-white px-4 py-3 text-left hover:bg-gray-50"
+          >
+            <Puzzle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-heading text-sm font-bold text-foreground">{s.name}</span>
+                <span className="badge-brutal text-[10px] bg-brutal-cream text-foreground px-1.5">
+                  {kindLabel(s.source_kind)}
+                </span>
+              </div>
+              {s.description && (
+                <p className="mt-0.5 font-mono text-[11px] text-muted-foreground leading-relaxed line-clamp-2">
+                  {s.description}
+                </p>
+              )}
+            </div>
+          </button>
+        ))}
+      </div>
+      <SkillDetailDrawer skillId={drawerId} onClose={() => setDrawerId(null)} />
+    </>
+  );
+}
+
+export function AgentSkillsTab({ agentId, agentProvider }: AgentSkillsTabProps) {
   const { skills: catalog, isLoading, error, refetch } = useSkills();
-  const [drawerSkillId, setDrawerSkillId] = useState<string | null>(null);
+  const [resolvedProvider, setResolvedProvider] = useState(agentProvider);
+
+  useEffect(() => {
+    if (agentProvider) return;
+    let cancelled = false;
+    apiClient.get<{ model_provider?: string }>(`/api/v1/agents/${agentId}`).then((res) => {
+      if (!cancelled && res.model_provider) {
+        setResolvedProvider(res.model_provider);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [agentId, agentProvider]);
+
+  const kinds = useMemo(() => visibleKinds(resolvedProvider), [resolvedProvider]);
+
+  const { globalSkills, workspaceSkills } = useMemo(() => {
+    if (kinds.length === 0) {
+      return { globalSkills: catalog, workspaceSkills: [] as SkillSummary[] };
+    }
+    const kindSet = new Set(kinds);
+    const global: SkillSummary[] = [];
+    const workspace: SkillSummary[] = [];
+    for (const s of catalog) {
+      if (!kindSet.has(s.source_kind)) continue;
+      if (isWorkspace(s.source_kind)) {
+        workspace.push(s);
+      } else {
+        global.push(s);
+      }
+    }
+    return { globalSkills: global, workspaceSkills: workspace };
+  }, [catalog, kinds]);
 
   if (isLoading) {
     return (
@@ -64,9 +153,7 @@ export function AgentSkillsTab({ agentId: _agentId }: AgentSkillsTabProps) {
           <AlertCircle className="h-6 w-6 text-brutal-danger" />
         </div>
         <p className="font-body text-sm text-brutal-danger">{error}</p>
-        <Button type="button" onClick={refetch} size="sm" className="mt-4">
-          重试
-        </Button>
+        <Button type="button" onClick={refetch} size="sm" className="mt-4">重试</Button>
       </div>
     );
   }
@@ -80,11 +167,11 @@ export function AgentSkillsTab({ agentId: _agentId }: AgentSkillsTabProps) {
             Skill 目录
           </h3>
           <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
-            {catalog.length}
+            {globalSkills.length + workspaceSkills.length}
           </span>
         </div>
         <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-          由 Daemon 自动扫描并同步。显示机器上所有已安装的 Skill。
+          由 Daemon 自动扫描，仅显示当前 Agent 类型可用的 Skill。
         </p>
       </div>
 
@@ -92,43 +179,38 @@ export function AgentSkillsTab({ agentId: _agentId }: AgentSkillsTabProps) {
         <div className="card-brutal bg-brutal-cream p-6 text-center">
           <p className="font-mono text-sm text-foreground">还没有发现任何 Skill</p>
           <p className="mt-2 font-mono text-[11px] text-muted-foreground">
-            在 <code className="bg-white px-1.5 py-0.5 border border-black">~/.claude/skills/</code> 或 <code className="bg-white px-1.5 py-0.5 border border-black">~/.codex/skills/</code> 下放置 SKILL.md，Daemon 下次心跳自动同步
+            在对应路径下放置 SKILL.md，Daemon 下次心跳自动同步
           </p>
         </div>
       ) : (
-        <div className="divide-y-2 divide-black border-2 border-black shadow-brutal-sm">
-          {catalog.map((skill) => (
-            <button
-              key={skill.id}
-              type="button"
-              onClick={() => setDrawerSkillId(skill.id)}
-              className="flex w-full items-center gap-3 bg-white px-4 py-3 text-left hover:bg-gray-50"
-            >
-              <Puzzle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-heading text-sm font-bold text-foreground">
-                    {skill.name}
-                  </span>
-                  <span className="badge-brutal text-[10px] bg-brutal-cream text-foreground px-1.5">
-                    {kindLabel(skill.source_kind)}
-                  </span>
-                </div>
-                {skill.description && (
-                  <p className="mt-0.5 font-mono text-[11px] text-muted-foreground leading-relaxed line-clamp-2">
-                    {skill.description}
-                  </p>
-                )}
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
+        <>
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Globe className="h-3.5 w-3.5 text-muted-foreground" />
+              <h4 className="font-heading text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                Global
+              </h4>
+              <span className="font-mono text-[10px] text-muted-foreground/70">{globalSkills.length}</span>
+            </div>
+            <div className="border-2 border-black shadow-brutal-sm">
+              <SkillList skills={globalSkills} emptyText="无全局 Skill" />
+            </div>
+          </div>
 
-      <SkillDetailDrawer
-        skillId={drawerSkillId}
-        onClose={() => setDrawerSkillId(null)}
-      />
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Folder className="h-3.5 w-3.5 text-muted-foreground" />
+              <h4 className="font-heading text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                Workspace
+              </h4>
+              <span className="font-mono text-[10px] text-muted-foreground/70">{workspaceSkills.length}</span>
+            </div>
+            <div className="border-2 border-black shadow-brutal-sm">
+              <SkillList skills={workspaceSkills} emptyText="无 Workspace Skill" />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
