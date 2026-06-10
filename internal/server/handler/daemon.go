@@ -15,12 +15,11 @@ type DaemonHandler struct {
 	dm          *service.DaemonManager
 	agent       *service.AgentService
 	computerSvc *service.ComputerService
-	skillSvc    *service.SkillService
 }
 
 // NewDaemonHandler creates a new DaemonHandler.
-func NewDaemonHandler(dm *service.DaemonManager, agent *service.AgentService, computerSvc *service.ComputerService, skillSvc *service.SkillService) *DaemonHandler {
-	return &DaemonHandler{dm: dm, agent: agent, computerSvc: computerSvc, skillSvc: skillSvc}
+func NewDaemonHandler(dm *service.DaemonManager, agent *service.AgentService, computerSvc *service.ComputerService) *DaemonHandler {
+	return &DaemonHandler{dm: dm, agent: agent, computerSvc: computerSvc}
 }
 
 // Register handles POST /internal/daemon/register
@@ -142,41 +141,6 @@ func (h *DaemonHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 					"error", err,
 				)
 			}
-		}
-	}
-
-	// Sync global skills first (stored without agent binding).
-	if h.skillSvc != nil && len(req.GlobalSkills) > 0 {
-		n, syncErr := h.skillSvc.SyncGlobalSkills(r.Context(), req.GlobalSkills)
-		if syncErr != nil {
-			slog.Warn("global skill sync failed",
-				"request_id", reqID, "daemon_id", req.DaemonID, "error", syncErr,
-			)
-		} else {
-			slog.Info("heartbeat: global skills synced",
-				"daemon_id", req.DaemonID, "received", len(req.GlobalSkills), "upserted", n,
-			)
-		}
-	} else {
-		slog.Debug("heartbeat: no global skills in payload",
-			"daemon_id", req.DaemonID,
-			"has_skill_svc", h.skillSvc != nil,
-			"global_count", len(req.GlobalSkills),
-		)
-	}
-
-	// Sync per-agent skills (stored with agent binding).
-	if h.skillSvc != nil && len(req.AgentSkills) > 0 {
-		added, updated, removed, syncErr := h.skillSvc.SyncFromDaemon(r.Context(), req.AgentSkills)
-		if syncErr != nil {
-			slog.Warn("skill sync from daemon heartbeat failed",
-				"request_id", reqID, "daemon_id", req.DaemonID, "error", syncErr,
-			)
-		} else {
-			slog.Debug("skill synced from daemon",
-				"daemon_id", req.DaemonID,
-				"added", added, "updated", updated, "removed", removed,
-			)
 		}
 	}
 

@@ -23,6 +23,7 @@ import (
 	"github.com/solo-ai/solo/pkg/agent"
 	"github.com/solo-ai/solo/internal/auth"
 	"github.com/solo-ai/solo/pkg/llm"
+	"github.com/solo-ai/solo/pkg/skillloader"
 )
 
 // agentTokenState holds a cached JWT for an agent plus its expiry.
@@ -101,34 +102,6 @@ func (h *daemonHandler) activeSessionAgentIDs() []string {
 		}
 	}
 	return ids
-}
-
-// agentProviders returns provider → agentIDs for all active sessions.
-func (h *daemonHandler) agentProviders() map[string]string {
-	if h.sessionManagers == nil {
-		return nil
-	}
-	out := make(map[string]string)
-	for providerType, sm := range h.sessionManagers {
-		for _, id := range sm.ActiveAgentIDs() {
-			out[id] = providerType
-		}
-	}
-	return out
-}
-
-// registeredProviders returns all provider types that have session managers
-// registered, even if no agents are currently active. Used to scan global
-// skill directories on startup before any agent has been triggered.
-func (h *daemonHandler) registeredProviders() []string {
-	if h.sessionManagers == nil {
-		return nil
-	}
-	var out []string
-	for providerType := range h.sessionManagers {
-		out = append(out, providerType)
-	}
-	return out
 }
 
 // ── Token store (SOLO-254-B: persistent session token auto-refresh) ────────────
@@ -1410,6 +1383,105 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	defer d.Close()
 	_, err = io.Copy(d, s)
 	return err
+}
+
+// ── Skill listing endpoints ──────────────────────────────────────────────────
+
+// skillListItem is the JSON shape returned by the skill list endpoint.
+type skillListItem struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	SourceKind  string `json:"source_kind"`
+	SourcePath  string `json:"source_path"`
+}
+
+// HandleSkillsList returns discovered skills for an agent (global + workspace).
+func (h *daemonHandler) HandleSkillsList(w http.ResponseWriter, r *http.Request) {
+	agentID := r.URL.Query().Get("agent_id")
+	if agentID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_id is required"})
+		return
+	}
+
+	var provider string
+	_ = h.pool.QueryRow(r.Context(),
+		`SELECT COALESCE(model_provider, '') FROM agents WHERE id = $1 AND is_active = true`,
+		agentID,
+	).Scan(&provider)
+	if provider == "" {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"skills": []skillListItem{}})
+		return
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		slog.Warn("skills list: no home dir", "error", err)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"skills": []skillListItem{}})
+		return
+	}
+
+	globalRoots := agentGlobalRoots(provider, home)
+	var wsRoots []skillloader.SkillRoot
+	if h.workspaceManager != nil {
+		wsRoots = agentWorkspaceRoots(provider, h.workspaceManager.WorkspaceDir(agentID))
+	}
+
+	allRoots := append([]skillloader.SkillRoot{}, globalRoots...)
+	allRoots = append(allRoots, wsRoots...)
+
+	discovered, err := skillloader.ScanRoots(home, allRoots)
+	if err != nil {
+		slog.Warn("skills list: scan failed", "agent_id", agentID, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to scan skills"})
+		return
+	}
+
+	var skills []skillListItem
+	for _, ds := range discovered {
+		skills = append(skills, skillListItem{
+			Name:        ds.Name,
+			Description: ds.Description,
+			SourceKind:  ds.SourceKind,
+			SourcePath:  ds.SourcePath,
+		})
+	}
+
+	// Collect unique scan paths, replace home dir with ~.
+	wsDir := ""
+	if h.workspaceManager != nil {
+		wsDir = h.workspaceManager.WorkspaceDir(agentID)
+	}
+	globalPaths := uniquePaths(globalRoots, home, "")
+	wsPaths := uniquePaths(wsRoots, home, wsDir)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"skills":          skills,
+		"global_paths":    globalPaths,
+		"workspace_paths": wsPaths,
+	})
+}
+
+// uniquePaths returns unique Path strings from a slice of SkillRoot, preserving
+// insertion order. home prefix → ~, strip prefix → relative (used for workspace).
+func uniquePaths(roots []skillloader.SkillRoot, home, strip string) []string {
+	seen := make(map[string]bool, len(roots))
+	var out []string
+	for _, r := range roots {
+		if !seen[r.Path] {
+			seen[r.Path] = true
+			p := r.Path
+			if strip != "" && strings.HasPrefix(p, strip) {
+				p = p[len(strip)+1:] // +1 for trailing /
+			} else if home != "" && strings.HasPrefix(p, home) {
+				p = "~" + p[len(home):]
+			}
+			out = append(out, p)
+		}
+	}
+	if out == nil {
+		return []string{}
+	}
+	return out
 }
 
 // ── Workspace file browsing endpoints ──────────────────────────────────────────

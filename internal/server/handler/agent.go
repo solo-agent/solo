@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -89,15 +88,6 @@ type AgentResponse struct {
 	CustomArgs    []string          `json:"custom_args,omitempty"`
 	CreatedAt     string            `json:"created_at"`
 	UpdatedAt     string            `json:"updated_at"`
-	Skills        []AgentSkillSummary `json:"skills"`
-}
-
-// AgentSkillSummary is the lightweight shape embedded in AgentResponse payloads.
-type AgentSkillSummary struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	SourceKind  string `json:"source_kind"`
 }
 
 // Create handles POST /api/v1/agents
@@ -284,27 +274,6 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		agents = append(agents, a)
 	}
 
-	// Batch-load skills to avoid N+1.
-	if len(agents) > 0 {
-		ids := make([]string, len(agents))
-		for i, a := range agents {
-			ids[i] = a.ID
-			a.Skills = []AgentSkillSummary{} // initialise empty (non-nil) so JSON renders [] not null
-			agents[i] = a
-		}
-		skillMap, err := h.loadAgentSkills(r.Context(), ids)
-		if err != nil {
-			slog.Warn("failed to load agent skills (non-fatal)", "error", err)
-		} else {
-			for i, a := range agents {
-				if s, ok := skillMap[a.ID]; ok {
-					a.Skills = s
-					agents[i] = a
-				}
-			}
-		}
-	}
-
 	writeJSON(w, http.StatusOK, agents)
 }
 
@@ -352,16 +321,6 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	a.CustomArgs = unmarshalStringSlice(customArgsBytes)
 	a.CreatedAt = createdAt.Format(time.RFC3339)
 	a.UpdatedAt = updatedAt.Format(time.RFC3339)
-
-	// Load skills for this agent.
-	skillMap, err := h.loadAgentSkills(r.Context(), []string{a.ID})
-	if err != nil {
-		slog.Warn("failed to load agent skills (non-fatal)", "error", err)
-	}
-	a.Skills = []AgentSkillSummary{}
-	if s, ok := skillMap[a.ID]; ok {
-		a.Skills = s
-	}
 
 	writeJSON(w, http.StatusOK, a)
 }
@@ -466,127 +425,9 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	a.CreatedAt = createdAt.Format(time.RFC3339)
 	a.UpdatedAt = updatedAt.Format(time.RFC3339)
 
-	// Load skills for this agent.
-	skillMap, err := h.loadAgentSkills(r.Context(), []string{a.ID})
-	if err != nil {
-		slog.Warn("failed to load agent skills (non-fatal)", "error", err)
-	}
-	a.Skills = []AgentSkillSummary{}
-	if s, ok := skillMap[a.ID]; ok {
-		a.Skills = s
-	}
-
 	writeJSON(w, http.StatusOK, a)
 }
 
-// providerSkillKinds maps agent model_provider values to the skill kinds
-// that agent can use. An agent sees only skills tagged with these kinds.
-var providerSkillKinds = map[string][]string{
-	"claude":    {"claude", "agents", "ws-claude", "ws-agents"},
-	"local":     {"claude", "agents", "ws-claude", "ws-agents"},
-	"codex":     {"codex", "agents", "ws-codex", "ws-agents"},
-	"opencode":  {"opencode", "claude", "agents", "ws-opencode", "ws-claude", "ws-agents"},
-	"copilot":   {"copilot", "agents", "ws-copilot", "ws-agents"},
-	"cursor":    {"cursor", "agents", "ws-cursor", "ws-agents"},
-	"kiro":      {"kiro", "agents", "ws-kiro", "ws-agents"},
-	"openclaw":  {"openclaw", "agents", "ws-openclaw", "ws-agents"},
-	"hermes":    {"hermes", "agents", "ws-hermes", "ws-agents"},
-	"pi":        {"pi", "agents", "ws-pi", "ws-agents"},
-}
-
-// loadAgentSkills returns per-agent skill summaries filtered by each agent's
-// provider. Uses source_kind matching — no agent_skills join needed.
-func (h *AgentHandler) loadAgentSkills(ctx context.Context, agentIDs []string) (map[string][]AgentSkillSummary, error) {
-	if len(agentIDs) == 0 {
-		return map[string][]AgentSkillSummary{}, nil
-	}
-
-	// Fetch agent providers in bulk.
-	rows, err := h.pool.Query(ctx, `
-		SELECT id, COALESCE(model_provider, '') FROM agents WHERE id = ANY($1)
-	`, agentIDs)
-	if err != nil {
-		return nil, err
-	}
-	agentProviders := make(map[string][]string) // agentID -> kinds
-	for rows.Next() {
-		var id, provider string
-		if err := rows.Scan(&id, &provider); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		kinds, ok := providerSkillKinds[provider]
-		if !ok {
-			kinds = []string{}
-		}
-		agentProviders[id] = kinds
-	}
-	rows.Close()
-
-	// Collect all unique kinds across all agents.
-	allKinds := make(map[string]bool)
-	for _, kinds := range agentProviders {
-		for _, k := range kinds {
-			allKinds[k] = true
-		}
-	}
-	if len(allKinds) == 0 {
-		out := make(map[string][]AgentSkillSummary, len(agentIDs))
-		for _, id := range agentIDs {
-			out[id] = []AgentSkillSummary{}
-		}
-		return out, nil
-	}
-	kindList := make([]string, 0, len(allKinds))
-	for k := range allKinds {
-		kindList = append(kindList, k)
-	}
-
-	// Query all matching skills in one go.
-	skillRows, err := h.pool.Query(ctx, `
-		SELECT id, name, COALESCE(description, ''), source_kind FROM skills
-		WHERE source_kind = ANY($1) ORDER BY name
-	`, kindList)
-	if err != nil {
-		return nil, err
-	}
-	defer skillRows.Close()
-	var allSkills []AgentSkillSummary
-	var allSkillKinds []string
-	for skillRows.Next() {
-		var id, name, desc, kind string
-		if err := skillRows.Scan(&id, &name, &desc, &kind); err != nil {
-			return nil, err
-		}
-		allSkills = append(allSkills, AgentSkillSummary{ID: id, Name: name, Description: desc, SourceKind: kind})
-		allSkillKinds = append(allSkillKinds, kind)
-	}
-	if err := skillRows.Err(); err != nil {
-		return nil, err
-	}
-
-	// Distribute to agents based on kind match.
-	out := make(map[string][]AgentSkillSummary, len(agentIDs))
-	for _, agentID := range agentIDs {
-		kinds := agentProviders[agentID]
-		if len(kinds) == 0 {
-			out[agentID] = []AgentSkillSummary{}
-			continue
-		}
-		kindSet := make(map[string]bool, len(kinds))
-		for _, k := range kinds {
-			kindSet[k] = true
-		}
-		var matched []AgentSkillSummary
-		for i, s := range allSkills {
-			if kindSet[allSkillKinds[i]] {
-				matched = append(matched, s)
-			}
-		}
-		out[agentID] = matched
-	}
-	return out, nil
-}
 
 // Delete handles DELETE /api/v1/agents/{id} (soft delete: sets is_active=false)
 func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -650,6 +491,52 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("agent deactivated", "agent_id", agentID, "user_id", userID)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "agent deleted"})
+}
+
+// AgentSkills handles GET /api/v1/agents/{agentID}/skills — proxies to daemon.
+func (h *AgentHandler) AgentSkills(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	agentID := chi.URLParam(r, "agentID")
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "agent ID is required")
+		return
+	}
+
+	// Verify agent ownership.
+	var ownerID string
+	err := h.pool.QueryRow(r.Context(),
+		`SELECT owner_id FROM agents WHERE id = $1 AND is_active = true`, agentID,
+	).Scan(&ownerID)
+	if err != nil || ownerID != userID {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+
+	if h.proxy == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"skills": []interface{}{}})
+		return
+	}
+
+	d, ok := h.proxy.FindDaemonForAgent(r.Context(), agentID)
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"skills": []interface{}{}})
+		return
+	}
+
+	data, err := h.proxy.ProxySkillList(r.Context(), d, agentID)
+	if err != nil {
+		slog.Warn("agent skills: daemon proxy failed", "agent_id", agentID, "error", err)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"skills": []interface{}{}})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
 }
 
 // AgentBackends handles GET /api/v1/agent-backends

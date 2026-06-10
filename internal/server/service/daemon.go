@@ -18,7 +18,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/solo-ai/solo/internal/realtime"
 	"github.com/solo-ai/solo/internal/server/workspace"
-	"github.com/solo-ai/solo/pkg/skillloader"
 )
 
 // DaemonStatus represents the operational status of a daemon instance.
@@ -491,6 +490,31 @@ func (dm *DaemonManager) ProxyWorkspaceRead(ctx context.Context, daemon *workspa
 	return io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024)) // 1MB cap
 }
 
+// ProxySkillList sends a skill list request to a daemon.
+func (dm *DaemonManager) ProxySkillList(ctx context.Context, daemon *workspace.Daemon, agentID string) ([]byte, error) {
+	params := url.Values{}
+	params.Set("agent_id", agentID)
+	urlStr := fmt.Sprintf("http://%s:%d/internal/daemon/skills?%s",
+		daemon.Host, daemon.Port, params.Encode())
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
+	if err != nil {
+		return nil, fmt.Errorf("proxy skill list: %w", err)
+	}
+
+	resp, err := dm.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("proxy skill list: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("proxy skill list: daemon returned %d", resp.StatusCode)
+	}
+
+	return io.ReadAll(io.LimitReader(resp.Body, 512*1024)) // 512KB cap
+}
+
 // --- Health check loop ---
 
 // healthCheckLoop runs periodically to mark daemons as offline after missed heartbeats.
@@ -618,8 +642,6 @@ type DaemonHeartbeatRequest struct {
 	ActiveTasks []string                      `json:"active_tasks"`
 	AgentIDs    []string                      `json:"agent_ids,omitempty"`
 	SystemInfo  DaemonSystemInfo              `json:"system_info"`
-	AgentSkills  map[string][]skillloader.DiscoveredSkill `json:"agent_skills,omitempty"`
-	GlobalSkills []skillloader.DiscoveredSkill            `json:"global_skills,omitempty"`
 }
 
 type DaemonHeartbeatResponse struct {

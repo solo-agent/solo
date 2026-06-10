@@ -75,7 +75,6 @@ export interface Agent {
   avatar_url: string | null;
   custom_env: Record<string, string>;
   custom_args: string[];
-  skills: AgentSkillSummary[];
   created_at: string;
   updated_at: string;
 }
@@ -100,42 +99,20 @@ export interface UpdateAgentInput extends Partial<CreateAgentInput> {
   name?: string;
 }
 
-// ---- Skill types (Phase1) ----
+// ---- Skill types — discovered from daemon filesystem scan ----
 
-/** Lightweight shape returned by GET /api/v1/skills and embedded in Agent. */
-export interface SkillSummary {
-  id: string;
+/** Returned by GET /api/v1/agents/{id}/skills (proxied to daemon). */
+export interface SkillListItem {
   name: string;
   description: string;
+  source_kind: string;
   source_path: string;
-  source_kind: string;
-  body_hash: string;
-  discovered_at: string;
-  updated_at: string;
 }
 
-/** Skill supporting file. */
-export interface SkillFile {
-  id: string;
-  skill_id: string;
-  path: string;
-  content: string;
-  created_at: string;
-  updated_at: string;
-}
-
-/** Detail shape returned by GET /api/v1/skills/{id}. */
-export interface Skill extends SkillSummary {
-  body: string;
-  files: SkillFile[];
-}
-
-/** Embedded in Agent payloads — 3 fields only. */
-export interface AgentSkillSummary {
-  id: string;
-  name: string;
-  description: string;
-  source_kind: string;
+export interface SkillListResponse {
+  skills: SkillListItem[];
+  global_paths: string[];
+  workspace_paths: string[];
 }
 
 // ---- Channel Member types ----

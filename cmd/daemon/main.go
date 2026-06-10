@@ -152,6 +152,7 @@ func main() {
 			r.Get("/list", h.HandleWorkspaceList)
 			r.Get("/read", h.HandleWorkspaceRead)
 		})
+		r.Get("/skills", h.HandleSkillsList)
 	})
 
 	// SSE requires long-lived connections — no write timeout.
@@ -333,8 +334,7 @@ func sendHeartbeat() {
 		ActiveTasks: taskMgr.ListActiveTasks(),
 		AgentIDs:    daemonH.activeSessionAgentIDs(),
 		SystemInfo:  collectSystemInfo(),
-		GlobalSkills: collectGlobalSkills(daemonH.registeredProviders()),
-		AgentSkills:  collectAgentSkills(daemonH.agentProviders()),
+		// Skills served on-demand via /internal/daemon/skills
 	}
 
 	payload, err := json.Marshal(req)
@@ -420,8 +420,7 @@ type daemonHeartbeatPayload struct {
 	ActiveTasks []string                                `json:"active_tasks"`
 	AgentIDs    []string                                `json:"agent_ids"`
 	SystemInfo  SystemInfo                              `json:"system_info"`
-	AgentSkills  map[string][]skillloader.DiscoveredSkill `json:"agent_skills,omitempty"`
-	GlobalSkills []skillloader.DiscoveredSkill            `json:"global_skills,omitempty"`
+	// Skills are served on-demand via /internal/daemon/skills, not in heartbeat.
 }
 
 // ---- Skill path resolution ------------------------------------------------
@@ -440,7 +439,6 @@ func agentGlobalRoots(provider, home string) []skillloader.SkillRoot {
 	case "claude", "local":
 		return []skillloader.SkillRoot{
 			{Path: filepath.Join(home, ".claude", "skills"), Kind: "claude", Priority: 60},
-			{Path: filepath.Join(home, ".agents", "skills"), Kind: "agents", Priority: 25},
 		}
 	case "codex":
 		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
@@ -480,7 +478,6 @@ func agentGlobalRoots(provider, home string) []skillloader.SkillRoot {
 	case "hermes":
 		return []skillloader.SkillRoot{
 			{Path: filepath.Join(home, ".hermes", "skills"), Kind: "hermes", Priority: 35},
-			{Path: filepath.Join(home, ".agents", "skills"), Kind: "agents", Priority: 25},
 		}
 	case "pi":
 		return []skillloader.SkillRoot{
@@ -540,124 +537,6 @@ func agentWorkspaceRoots(provider, wsDir string) []skillloader.SkillRoot {
 	}
 }
 
-// collectGlobalSkills scans all unique global skill directories. Each path
-// is scanned once with its own kind — no provider dedup, no priority merging.
-// If a skill name exists in multiple paths, only the first-scanned copy is kept.
-func collectGlobalSkills(providers []string) []skillloader.DiscoveredSkill {
-	if len(providers) == 0 {
-		return nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		slog.Warn("skill global scan: no home dir", "error", err)
-		return nil
-	}
-
-	// Collect all roots from all providers, deduplicate by path only.
-	type root struct {
-		sk  skillloader.SkillRoot
-	}
-	allRoots := make([]skillloader.SkillRoot, 0)
-	seen := make(map[string]bool)
-	for _, provider := range providers {
-		for _, r := range agentGlobalRoots(provider, home) {
-			if seen[r.Path] {
-				continue
-			}
-			seen[r.Path] = true
-			allRoots = append(allRoots, r)
-		}
-	}
-
-	discovered, err := skillloader.ScanRoots(home, allRoots)
-	if err != nil {
-		slog.Warn("skill global scan failed", "error", err)
-		return nil
-	}
-	out := make([]skillloader.DiscoveredSkill, 0, len(discovered))
-	for _, ds := range discovered {
-		out = append(out, ds)
-	}
-	slog.Info("skill global scan", "roots", len(allRoots), "count", len(out))
-	return out
-}
-
-// collectAgentSkills scans each agent's global and workspace skill directories.
-// Returns per-agent discovered skills. Global roots from the same provider are
-// shared across agents; workspace roots are agent-specific. First-found wins on
-// name collision (higher priority paths are scanned first).
-func collectAgentSkills(agentProviders map[string]string) map[string][]skillloader.DiscoveredSkill {
-	if len(agentProviders) == 0 {
-		return nil
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		slog.Warn("skill scan: no home dir", "error", err)
-		return nil
-	}
-
-	// Group agent IDs by provider.
-	providerAgents := make(map[string][]string)
-	for agentID, provider := range agentProviders {
-		providerAgents[provider] = append(providerAgents[provider], agentID)
-	}
-
-	out := make(map[string][]skillloader.DiscoveredSkill)
-
-	// Phase 1: global roots per provider (shared across same-provider agents).
-	for provider, agents := range providerAgents {
-		roots := agentGlobalRoots(provider, home)
-		if len(roots) == 0 {
-			continue
-		}
-		discovered, err := skillloader.ScanRoots(home, roots)
-		if err != nil {
-			slog.Warn("skill global scan failed", "provider", provider, "error", err)
-			continue
-		}
-		flat := make([]skillloader.DiscoveredSkill, 0, len(discovered))
-		for _, ds := range discovered {
-			flat = append(flat, ds)
-		}
-		for _, agentID := range agents {
-			out[agentID] = append(out[agentID], flat...)
-		}
-		slog.Debug("skill global scan",
-			"provider", provider, "roots", len(roots), "count", len(flat), "agents", len(agents),
-		)
-	}
-
-	// Phase 2: workspace roots per agent.
-	if workspaceMgr != nil {
-		for agentID, provider := range agentProviders {
-			wsDir := workspaceMgr.WorkspaceDir(agentID)
-			roots := agentWorkspaceRoots(provider, wsDir)
-			if len(roots) == 0 {
-				continue
-			}
-			discovered, err := skillloader.ScanRoots(wsDir, roots)
-			if err != nil {
-				slog.Debug("skill workspace scan failed",
-					"agent_id", agentID, "error", err,
-				)
-				continue
-			}
-			flat := make([]skillloader.DiscoveredSkill, 0, len(discovered))
-			for _, ds := range discovered {
-				flat = append(flat, ds)
-			}
-			if len(flat) > 0 {
-				out[agentID] = append(out[agentID], flat...)
-				slog.Debug("skill workspace scan",
-					"agent_id", agentID, "roots", len(roots), "count", len(flat),
-				)
-			}
-		}
-	}
-
-	return out
-}
 
 // writeJSON writes a JSON response.
 func writeJSON(w http.ResponseWriter, status int, v any) {

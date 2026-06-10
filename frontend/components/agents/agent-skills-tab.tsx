@@ -1,6 +1,5 @@
 // ============================================================================
-// AgentSkillsTab — skill catalog filtered by agent's provider type.
-// Reads skills from the agent detail endpoint (server-side filtering).
+// AgentSkillsTab — read-only skill catalog discovered from daemon filesystem scan.
 // ============================================================================
 
 'use client';
@@ -10,18 +9,11 @@ import { AlertCircle, Puzzle, Globe, Folder } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { apiClient, ApiError } from '@/lib/api-client';
-import { SkillDetailDrawer } from './skill-detail-drawer';
-import type { SkillSummary } from '@/lib/types';
+import { t } from '@/lib/i18n';
+import type { SkillListItem, SkillListResponse } from '@/lib/types';
 
 interface AgentSkillsTabProps {
   agentId: string;
-}
-
-interface AgentSkillEmbed {
-  id: string;
-  name: string;
-  description: string;
-  source_kind: string;
 }
 
 function isWorkspace(kind: string) {
@@ -40,42 +32,41 @@ function kindLabel(kind: string): string {
   return KIND_LABELS[base] || base.toUpperCase();
 }
 
-function SkillList({ skills, emptyText }: { skills: AgentSkillEmbed[]; emptyText: string }) {
-  const [drawerId, setDrawerId] = useState<string | null>(null);
+function SkillList({ skills, emptyText }: { skills: SkillListItem[]; emptyText: string }) {
   if (skills.length === 0) {
     return <p className="font-mono text-xs italic text-muted-foreground px-4 py-3">{emptyText}</p>;
   }
   return (
-    <>
-      <div className="divide-y-2 divide-black">
-        {skills.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            onClick={() => setDrawerId(s.id)}
-            className="flex w-full items-center gap-3 bg-white px-4 py-3 text-left hover:bg-gray-50"
-          >
-            <Puzzle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-heading text-sm font-bold text-foreground">{s.name}</span>
-              </div>
-              {s.description && (
-                <p className="mt-0.5 font-mono text-[11px] text-muted-foreground leading-relaxed line-clamp-2">
-                  {s.description}
-                </p>
-              )}
+    <div className="divide-y-2 divide-black">
+      {skills.map((s) => (
+        <div
+          key={s.source_path}
+          className="flex items-center gap-3 bg-white px-4 py-3"
+        >
+          <Puzzle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-heading text-sm font-bold text-foreground">{s.name}</span>
+              <span className="badge-brutal text-[10px] bg-brutal-cream text-foreground px-1.5">
+                {kindLabel(s.source_kind)}
+              </span>
             </div>
-          </button>
-        ))}
-      </div>
-      <SkillDetailDrawer skillId={drawerId} onClose={() => setDrawerId(null)} />
-    </>
+            {s.description && (
+              <p className="mt-0.5 font-mono text-[11px] text-muted-foreground leading-relaxed line-clamp-2">
+                {s.description}
+              </p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
 export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
-  const [skills, setSkills] = useState<SkillSummary[]>([]);
+  const [skills, setSkills] = useState<SkillListItem[]>([]);
+  const [globalPaths, setGlobalPaths] = useState<string[]>([]);
+  const [workspacePaths, setWorkspacePaths] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,11 +74,12 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
     setIsLoading(true);
     setError(null);
     try {
-      // API returns Skills field embedded, plus source_kind for grouping
-      const res = await apiClient.get<{ skills: SkillSummary[] }>(`/api/v1/agents/${agentId}`);
+      const res = await apiClient.get<SkillListResponse>(`/api/v1/agents/${agentId}/skills`);
       setSkills(res.skills ?? []);
+      setGlobalPaths(res.global_paths ?? []);
+      setWorkspacePaths(res.workspace_paths ?? []);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : '加载 Skills 失败');
+      setError(err instanceof ApiError ? err.message : t('agentSkillLoadError'));
     } finally {
       setIsLoading(false);
     }
@@ -96,8 +88,8 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
   useEffect(() => { load(); }, [agentId]);
 
   const { globalSkills, workspaceSkills } = (() => {
-    const g: SkillSummary[] = [];
-    const w: SkillSummary[] = [];
+    const g: SkillListItem[] = [];
+    const w: SkillListItem[] = [];
     for (const s of skills) {
       if (isWorkspace(s.source_kind)) w.push(s); else g.push(s);
     }
@@ -127,55 +119,60 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
           <AlertCircle className="h-6 w-6 text-brutal-danger" />
         </div>
         <p className="font-body text-sm text-brutal-danger">{error}</p>
-        <Button type="button" onClick={load} size="sm" className="mt-4">重试</Button>
+        <Button type="button" onClick={load} size="sm" className="mt-4">{t('retry')}</Button>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      <div>
-        <div className="flex items-center gap-2">
-          <Puzzle className="h-4 w-4" />
-          <h3 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
-            Skill 目录
-          </h3>
-          <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
-            {skills.length}
-          </span>
-        </div>
-        <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-          仅显示当前 Agent 可用的 Skill（按 Provider 过滤）。
-        </p>
+      <div className="flex items-center gap-2">
+        <Puzzle className="h-4 w-4" />
+        <h3 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
+          {t('agentSkillCatalog')}
+        </h3>
+        <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
+          {skills.length}
+        </span>
       </div>
 
       {skills.length === 0 ? (
         <div className="card-brutal bg-brutal-cream p-6 text-center">
-          <p className="font-mono text-sm text-foreground">还没有发现任何 Skill</p>
+          <p className="font-mono text-sm text-foreground">{t('agentSkillEmpty')}</p>
           <p className="mt-2 font-mono text-[11px] text-muted-foreground">
-            Daemon 启动后会在心跳时自动扫描并同步。
+            {t('agentSkillEmptyHint')}
           </p>
         </div>
       ) : (
         <>
           <div>
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-1">
               <Globe className="h-3.5 w-3.5 text-muted-foreground" />
-              <h4 className="font-heading text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Global</h4>
+              <h4 className="font-heading text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                {t('agentSkillGlobal')}
+              </h4>
               <span className="font-mono text-[10px] text-muted-foreground/70">{globalSkills.length}</span>
             </div>
+            <p className="mb-2 font-mono text-[10px] text-muted-foreground/60 truncate" title={globalPaths.join(', ')}>
+              {globalPaths.join(', ')}
+            </p>
             <div className="border-2 border-black shadow-brutal-sm">
-              <SkillList skills={globalSkills} emptyText="无全局 Skill" />
+              <SkillList skills={globalSkills} emptyText={t('agentSkillNoGlobal')} />
             </div>
           </div>
           <div>
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-1">
               <Folder className="h-3.5 w-3.5 text-muted-foreground" />
-              <h4 className="font-heading text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Workspace</h4>
+              <h4 className="font-heading text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                {t('agentSkillWorkspace')}
+              </h4>
               <span className="font-mono text-[10px] text-muted-foreground/70">{workspaceSkills.length}</span>
             </div>
+            <p className="mb-2 font-mono text-[10px] text-muted-foreground/60 truncate" title={workspacePaths.join(', ')}>
+              {workspacePaths.join(', ')}
+            </p>
             <div className="border-2 border-black shadow-brutal-sm">
-              <SkillList skills={workspaceSkills} emptyText="无 Workspace Skill" />
+              <SkillList skills={workspaceSkills} emptyText={t('agentSkillNoWorkspace')} />
             </div>
           </div>
         </>

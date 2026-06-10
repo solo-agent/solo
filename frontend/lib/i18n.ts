@@ -479,14 +479,14 @@ const en = {
   agentProfileMeta: 'Meta',
 
   // ── Agent Skills Tab ──
-  agentSkillsError: 'Could not load skills config',
-  agentSkillsToggle: 'Toggle switches to enable/disable tools. Changes take effect immediately.',
-  agentSkillsDisable: 'Disable {tool}',
-  agentSkillsEnable: 'Enable {tool}',
-  agentSkillsEnabled: 'Enabled',
-  agentSkillsNotEnabled: 'Not enabled',
-  agentSkillsSaving: 'Saving...',
-  agentSkillsComingSoon: 'Workspace skills coming in a future release',
+  agentSkillCatalog: 'Skill Catalog',
+  agentSkillGlobal: 'Global',
+  agentSkillWorkspace: 'Workspace',
+  agentSkillNoGlobal: 'No global skills',
+  agentSkillNoWorkspace: 'No workspace skills',
+  agentSkillEmpty: 'No skills discovered yet',
+  agentSkillEmptyHint: 'Ensure your skill directories contain valid SKILL.md files.',
+  agentSkillLoadError: 'Could not load skills',
 
   // ── Agent Runtime Tab ──
   agentRuntimeError: 'Could not load runtime config',
