@@ -546,34 +546,32 @@ func collectGlobalSkills(providers []string) []skillloader.DiscoveredSkill {
 		return nil
 	}
 
-	var allRoots []skillloader.SkillRoot
-	seen := make(map[string]bool)
+	// Scan each provider's roots independently so that skills from shared
+	// paths (~/.agents/skills/) are tagged with the correct provider kind.
+	// Path dedup is handled by server-side ON CONFLICT upsert.
+	allDiscovered := make(map[string]skillloader.DiscoveredSkill)
 	for _, provider := range providers {
-		for _, r := range agentGlobalRoots(provider, home) {
-			if !seen[r.Path] {
-				seen[r.Path] = true
-				allRoots = append(allRoots, r)
+		roots := agentGlobalRoots(provider, home)
+		if len(roots) == 0 {
+			continue
+		}
+		discovered, err := skillloader.ScanRoots(home, roots)
+		if err != nil {
+			slog.Warn("skill global scan failed for provider", "provider", provider, "error", err)
+			continue
+		}
+		for name, ds := range discovered {
+			if _, exists := allDiscovered[name]; exists {
+				continue // first-wins (higher priority root scanned first)
 			}
+			allDiscovered[name] = ds
 		}
 	}
-
-	discovered, err := skillloader.ScanRoots(home, allRoots)
-	if err != nil {
-		slog.Warn("skill global scan failed", "error", err)
-		return nil
-	}
-	out := make([]skillloader.DiscoveredSkill, 0, len(discovered))
-	for _, ds := range discovered {
+	out := make([]skillloader.DiscoveredSkill, 0, len(allDiscovered))
+	for _, ds := range allDiscovered {
 		out = append(out, ds)
 	}
-	slog.Info("skill global scan",
-		"providers", providers,
-		"roots", len(allRoots),
-		"count", len(out),
-	)
-	if len(out) == 0 {
-		slog.Warn("skill global scan returned 0 skills — check that scan paths exist and contain SKILL.md files")
-	}
+	slog.Info("skill global scan", "providers", providers, "count", len(out))
 	return out
 }
 
