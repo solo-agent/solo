@@ -92,12 +92,12 @@ type AgentResponse struct {
 	Skills        []AgentSkillSummary `json:"skills"`
 }
 
-// AgentSkillSummary is the lightweight 3-field shape embedded in AgentResponse
-// payloads. Full skill info is available via GET /api/v1/agents/{id}/skills.
+// AgentSkillSummary is the lightweight shape embedded in AgentResponse payloads.
 type AgentSkillSummary struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	SourceKind  string `json:"source_kind"`
 }
 
 // Create handles POST /api/v1/agents
@@ -479,36 +479,113 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a)
 }
 
-// loadAgentSkills returns a map agentID -> []AgentSkillSummary for the given
-// agent IDs. Used to inline skills into AgentResponse without N+1 queries.
-// Returns an empty map on error (callers should treat as non-fatal and
-// continue with the agent list as-is).
+// providerSkillKinds maps agent model_provider values to the skill kinds
+// that agent can use. An agent sees only skills tagged with these kinds.
+var providerSkillKinds = map[string][]string{
+	"claude":    {"claude", "agents", "ws-claude", "ws-agents"},
+	"local":     {"claude", "agents", "ws-claude", "ws-agents"},
+	"codex":     {"codex", "agents", "ws-codex", "ws-agents"},
+	"opencode":  {"opencode", "claude", "agents", "ws-opencode", "ws-claude", "ws-agents"},
+	"copilot":   {"copilot", "agents", "ws-copilot", "ws-agents"},
+	"cursor":    {"cursor", "agents", "ws-cursor", "ws-agents"},
+	"kiro":      {"kiro", "agents", "ws-kiro", "ws-agents"},
+	"openclaw":  {"openclaw", "agents", "ws-openclaw", "ws-agents"},
+	"hermes":    {"hermes", "agents", "ws-hermes", "ws-agents"},
+	"pi":        {"pi", "agents", "ws-pi", "ws-agents"},
+}
+
+// loadAgentSkills returns per-agent skill summaries filtered by each agent's
+// provider. Uses source_kind matching — no agent_skills join needed.
 func (h *AgentHandler) loadAgentSkills(ctx context.Context, agentIDs []string) (map[string][]AgentSkillSummary, error) {
 	if len(agentIDs) == 0 {
 		return map[string][]AgentSkillSummary{}, nil
 	}
+
+	// Fetch agent providers in bulk.
 	rows, err := h.pool.Query(ctx, `
-		SELECT ask.agent_id, s.id, s.name, COALESCE(s.description, '')
-		FROM agent_skills ask
-		JOIN skills s ON s.id = ask.skill_id
-		WHERE ask.agent_id = ANY($1)
-		ORDER BY s.name
+		SELECT id, COALESCE(model_provider, '') FROM agents WHERE id = ANY($1)
 	`, agentIDs)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := make(map[string][]AgentSkillSummary, len(agentIDs))
+	agentProviders := make(map[string][]string) // agentID -> kinds
 	for rows.Next() {
-		var agentID, skillID, name, desc string
-		if err := rows.Scan(&agentID, &skillID, &name, &desc); err != nil {
+		var id, provider string
+		if err := rows.Scan(&id, &provider); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		out[agentID] = append(out[agentID], AgentSkillSummary{
-			ID: skillID, Name: name, Description: desc,
-		})
+		kinds, ok := providerSkillKinds[provider]
+		if !ok {
+			kinds = []string{}
+		}
+		agentProviders[id] = kinds
 	}
-	return out, rows.Err()
+	rows.Close()
+
+	// Collect all unique kinds across all agents.
+	allKinds := make(map[string]bool)
+	for _, kinds := range agentProviders {
+		for _, k := range kinds {
+			allKinds[k] = true
+		}
+	}
+	if len(allKinds) == 0 {
+		out := make(map[string][]AgentSkillSummary, len(agentIDs))
+		for _, id := range agentIDs {
+			out[id] = []AgentSkillSummary{}
+		}
+		return out, nil
+	}
+	kindList := make([]string, 0, len(allKinds))
+	for k := range allKinds {
+		kindList = append(kindList, k)
+	}
+
+	// Query all matching skills in one go.
+	skillRows, err := h.pool.Query(ctx, `
+		SELECT id, name, COALESCE(description, ''), source_kind FROM skills
+		WHERE source_kind = ANY($1) ORDER BY name
+	`, kindList)
+	if err != nil {
+		return nil, err
+	}
+	defer skillRows.Close()
+	var allSkills []AgentSkillSummary
+	var allSkillKinds []string
+	for skillRows.Next() {
+		var id, name, desc, kind string
+		if err := skillRows.Scan(&id, &name, &desc, &kind); err != nil {
+			return nil, err
+		}
+		allSkills = append(allSkills, AgentSkillSummary{ID: id, Name: name, Description: desc, SourceKind: kind})
+		allSkillKinds = append(allSkillKinds, kind)
+	}
+	if err := skillRows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Distribute to agents based on kind match.
+	out := make(map[string][]AgentSkillSummary, len(agentIDs))
+	for _, agentID := range agentIDs {
+		kinds := agentProviders[agentID]
+		if len(kinds) == 0 {
+			out[agentID] = []AgentSkillSummary{}
+			continue
+		}
+		kindSet := make(map[string]bool, len(kinds))
+		for _, k := range kinds {
+			kindSet[k] = true
+		}
+		var matched []AgentSkillSummary
+		for i, s := range allSkills {
+			if kindSet[allSkillKinds[i]] {
+				matched = append(matched, s)
+			}
+		}
+		out[agentID] = matched
+	}
+	return out, nil
 }
 
 // Delete handles DELETE /api/v1/agents/{id} (soft delete: sets is_active=false)

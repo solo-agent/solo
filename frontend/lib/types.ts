@@ -135,6 +135,7 @@ export interface AgentSkillSummary {
   id: string;
   name: string;
   description: string;
+  source_kind: string;
 }
 
 // ---- Channel Member types ----
