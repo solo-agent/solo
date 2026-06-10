@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -54,8 +55,10 @@ func NewSkillService(pool *pgxpool.Pool) *SkillService {
 // stored without agent bindings — the catalog is shared, and per-agent
 // filtering is done by provider type at query time.
 func (s *SkillService) SyncGlobalSkills(ctx context.Context, skills []skillloader.DiscoveredSkill) (int, error) {
+	reportedNames := make(map[string]bool, len(skills))
 	var upserted int
 	for _, ds := range skills {
+		reportedNames[ds.Name] = true
 		var id string
 		err := s.pool.QueryRow(ctx, `
 			INSERT INTO skills (name, description, source_path, source_kind, body, body_hash)
@@ -75,16 +78,24 @@ func (s *SkillService) SyncGlobalSkills(ctx context.Context, skills []skillloade
 		upserted++
 	}
 
-	// Clean up skills left over from old scanning code. These have source_kind
-	// values that the daemon no longer reports (e.g. "agents", "builtin-global",
-	// "user-mavis"). Only delete if the skill was NOT just upserted.
-	_, _ = s.pool.Exec(ctx, `
-		DELETE FROM skills
-		WHERE source_kind IN (
-			'agents', 'builtin-agent', 'builtin-global',
-			'user-claude', 'user-codex', 'user-mavis'
+	// Remove global skills no longer reported by the daemon (e.g. deleted from
+	// disk). Workspace skills (ws-*) are managed by SyncFromDaemon and not
+	// affected by global cleanup.
+	if len(reportedNames) > 0 {
+		names := make([]string, 0, len(reportedNames))
+		for n := range reportedNames {
+			names = append(names, n)
+		}
+		result, err := s.pool.Exec(ctx,
+			`DELETE FROM skills WHERE name != ALL($1) AND source_kind NOT LIKE 'ws-%'`,
+			names,
 		)
-	`)
+		if err != nil {
+			slog.Warn("skill cleanup failed", "error", err)
+		} else {
+			slog.Info("skill cleanup", "deleted", result.RowsAffected())
+		}
+	}
 
 	return upserted, nil
 }
