@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -421,13 +422,30 @@ type daemonHeartbeatPayload struct {
 }
 
 // skillRootForProvider maps a backend provider type to the global skill
-// directory that CLI agent natively discovers.
+// directory that CLI agent natively discovers. Paths follow upstream
+// conventions documented by each provider. Keep in sync with:
+//
+//	OpenCode: https://opencode.ai/docs/skills
+//	Copilot:  https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills
+//	Cursor:   https://forum.cursor.com/t/cursor-doesnt-know-new-skills-arens-saved/158507
 func skillRootForProvider(provider, home string) *skillloader.SkillRoot {
 	switch provider {
 	case "claude", "local":
-		return &skillloader.SkillRoot{Path: home + "/.claude/skills", Kind: "claude", Priority: 60}
+		return &skillloader.SkillRoot{Path: filepath.Join(home, ".claude", "skills"), Kind: "claude", Priority: 60}
 	case "codex":
-		return &skillloader.SkillRoot{Path: home + "/.codex/skills", Kind: "codex", Priority: 35}
+		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
+		if codexHome == "" {
+			codexHome = filepath.Join(home, ".codex")
+		}
+		return &skillloader.SkillRoot{Path: filepath.Join(codexHome, "skills"), Kind: "codex", Priority: 35}
+	case "opencode":
+		return &skillloader.SkillRoot{Path: filepath.Join(home, ".config", "opencode", "skills"), Kind: "opencode", Priority: 35}
+	case "copilot":
+		return &skillloader.SkillRoot{Path: filepath.Join(home, ".copilot", "skills"), Kind: "copilot", Priority: 35}
+	case "cursor":
+		return &skillloader.SkillRoot{Path: filepath.Join(home, ".cursor", "skills"), Kind: "cursor", Priority: 35}
+	case "kiro":
+		return &skillloader.SkillRoot{Path: filepath.Join(home, ".kiro", "skills"), Kind: "kiro", Priority: 35}
 	default:
 		return nil
 	}
