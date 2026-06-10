@@ -146,6 +146,29 @@ func TestScanRoots_HigherPriorityWins(t *testing.T) {
 	}
 }
 
+func TestScanDir_SymlinkedSubdirectory(t *testing.T) {
+	// Create a real directory with a SKILL.md, then symlink it under the scan root.
+	realDir := t.TempDir()
+	if err := writeSkill(t, realDir, "symlinked", "via symlink"); err != nil {
+		t.Fatal(err)
+	}
+	scanRoot := t.TempDir()
+	linkPath := filepath.Join(scanRoot, "linked-skill")
+	if err := os.Symlink(filepath.Join(realDir, "symlinked-dir"), linkPath); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ScanDir(scanRoot, "test", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 skill via symlink, got %d", len(got))
+	}
+	if got[0].Name != "symlinked" {
+		t.Fatalf("expected name 'symlinked', got %q", got[0].Name)
+	}
+}
+
 // writeSkill is a tiny helper to make a temp dir containing a valid SKILL.md.
 func writeSkill(t *testing.T, dir, name, desc string) error {
 	t.Helper()

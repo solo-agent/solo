@@ -108,10 +108,22 @@ func ScanDir(root, sourceKind string, priority int) ([]DiscoveredSkill, error) {
 
 	var out []DiscoveredSkill
 	for _, e := range entries {
-		if !e.IsDir() {
+		name := e.Name()
+		if isIgnoredDir(name) {
 			continue
 		}
-		skillPath := filepath.Join(root, e.Name(), "SKILL.md")
+		// Resolve symlinks: `e.IsDir()` is false for symlinked directories,
+		// so we follow the link via os.Stat to determine the real type.
+		entryPath := filepath.Join(root, name)
+		if e.Type()&os.ModeSymlink != 0 {
+			info, statErr := os.Stat(entryPath)
+			if statErr != nil || !info.IsDir() {
+				continue
+			}
+		} else if !e.IsDir() {
+			continue
+		}
+		skillPath := filepath.Join(entryPath, "SKILL.md")
 		f, err := os.Open(skillPath)
 		if err != nil {
 			continue
@@ -183,4 +195,8 @@ type SkillRoot struct {
 	Path     string
 	Kind     string
 	Priority int
+}
+
+func isIgnoredDir(name string) bool {
+	return strings.HasPrefix(name, ".")
 }
