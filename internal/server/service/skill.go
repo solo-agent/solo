@@ -74,6 +74,18 @@ func (s *SkillService) SyncGlobalSkills(ctx context.Context, skills []skillloade
 		}
 		upserted++
 	}
+
+	// Clean up skills left over from old scanning code. These have source_kind
+	// values that the daemon no longer reports (e.g. "agents", "builtin-global",
+	// "user-mavis"). Only delete if the skill was NOT just upserted.
+	_, _ = s.pool.Exec(ctx, `
+		DELETE FROM skills
+		WHERE source_kind IN (
+			'agents', 'builtin-agent', 'builtin-global',
+			'user-claude', 'user-codex', 'user-mavis'
+		)
+	`)
+
 	return upserted, nil
 }
 

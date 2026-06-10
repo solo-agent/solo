@@ -26,7 +26,7 @@ type DiscoveredSkill struct {
 	Name        string // from frontmatter, falls back to dir name
 	Description string // from frontmatter
 	SourcePath  string // absolute path to the SKILL.md file
-	SourceKind  string // builtin-agent / builtin-global / user-claude / user-codex / user-mavis
+	SourceKind  string // e.g. claude, codex, opencode, hermes, pi, ws-claude, ws-codex
 	Body        string // full SKILL.md content
 	BodyHash    string // sha256 hex of Body (64 chars)
 	Priority    int    // higher wins on name collision
