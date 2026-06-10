@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -48,6 +49,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	taskSvc := service.NewTaskService(pool)
 	computerSvc := service.NewComputerService(pool)
 	inboxSvc := service.NewInboxService(pool)
+	skillSvc := service.NewSkillService(pool)
 
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(pool, agentSvc)
@@ -64,6 +66,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	computerHandler := handler.NewComputerHandler(computerSvc, dm, pool)
 	inboxHandler := handler.NewInboxHandler(inboxSvc)
 		onboardingHandler := handler.NewOnboardingHandler(pool, agentSvc)
+	skillHandler := handler.NewSkillHandler(skillSvc)
 
 	// Attachment handler
 	uploadDir := os.Getenv("ATTACHMENTS_DIR")
@@ -75,6 +78,18 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		}
 	}
 	attachmentHandler := handler.NewAttachmentHandler(pool, uploadDir)
+
+	// Kick off first skill rescan asynchronously so the HTTP listener accepts
+	// traffic immediately. Hard 10s budget inside StartBackgroundRescan; never
+	// panics the server.
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("background skill rescan panicked", "recover", r)
+			}
+		}()
+		skillSvc.StartBackgroundRescan(context.Background())
+	}()
 
 	// ---- Internal daemon routes (no JWT auth, no rate limit) ----
 	r.Route("/internal/daemon", func(r chi.Router) {
@@ -197,7 +212,20 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 
 				// Agent workspace files (v1.5)
 				r.Get("/workspace", agentHandler.Workspace)
+
+				// Agent-skill bindings (Phase1)
+				r.Route("/skills", func(r chi.Router) {
+					r.Get("/", skillHandler.ListAgentSkills)
+					r.Put("/", skillHandler.SetAgentSkills)
+				})
 			})
+		})
+
+		// Skill routes (Phase1)
+		r.Route("/api/v1/skills", func(r chi.Router) {
+			r.Get("/", skillHandler.ListSkills)
+			r.Get("/{id}", skillHandler.GetSkill)
+			r.Post("/rescan", skillHandler.RescanSkills)
 		})
 
 		// Agent backends metadata (registered backend adapters)

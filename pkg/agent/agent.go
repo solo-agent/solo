@@ -30,27 +30,6 @@ type Message struct {
 	SenderID string `json:"sender_id,omitempty"`
 }
 
-// ToolParameter represents a parameter definition for an agent tool.
-type ToolParameter struct {
-	Type        string `json:"type"`
-	Description string `json:"description"`
-	Required    bool   `json:"required"`
-}
-
-// ToolFunction represents a function that an agent can call.
-type ToolFunction struct {
-	Name        string                    `json:"name"`
-	Description string                    `json:"description"`
-	Parameters  map[string]ToolParameter  `json:"parameters"`
-}
-
-// ToolConfig represents the configuration of a tool available to an agent.
-type ToolConfig struct {
-	Name        string        `json:"name"`
-	Description string        `json:"description"`
-	Function    ToolFunction  `json:"function,omitempty"`
-}
-
 // ModelConfig represents the LLM model configuration for an agent run.
 type ModelConfig struct {
 	Provider    string  `json:"provider"`
@@ -61,13 +40,12 @@ type ModelConfig struct {
 
 // RunRequest contains all parameters needed to invoke an agent.
 type RunRequest struct {
-	AgentID      string        `json:"agent_id"`
-	ChannelID    string        `json:"channel_id"`
-	ThreadID     string        `json:"thread_id,omitempty"`
-	Messages     []Message     `json:"messages"`
-	Tools        []ToolConfig  `json:"tools,omitempty"`
-	SystemPrompt string        `json:"system_prompt"`
-	ModelConfig  ModelConfig   `json:"model_config"`
+	AgentID      string       `json:"agent_id"`
+	ChannelID    string       `json:"channel_id"`
+	ThreadID     string       `json:"thread_id,omitempty"`
+	Messages     []Message    `json:"messages"`
+	SystemPrompt string       `json:"system_prompt"`
+	ModelConfig  ModelConfig  `json:"model_config"`
 }
 
 // RunResponse contains the result of a non-streaming agent run.

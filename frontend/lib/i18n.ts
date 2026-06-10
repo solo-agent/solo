@@ -505,26 +505,6 @@ const en = {
   agentRuntimeSaving: 'Saving...',
   agentRuntimeEdit: 'Edit',
 
-  // ── Agent Tools Tab / Tools ──
-  agentToolsAvailable: 'Available Tools',
-  agentToolsHelp: 'When enabled, the agent can use these tools to access files and system resources during responses.',
-  agentToolsSave: 'Save tool config',
-  agentToolsSaving: 'Saving...',
-  agentToolsEnabled: 'Enabled',
-  agentToolsNotEnabled: 'Not enabled',
-
-  // ── Agent Interaction Mode ──
-  interactionMode: 'Interaction Mode',
-  interactionModeHelp: 'Controls when the agent responds to messages.',
-  interactionModeActive: 'Active',
-  interactionModeActiveDesc: 'Agent participates in all channel conversations.',
-  interactionModeMention: 'Mention Only',
-  interactionModeMentionDesc: 'Agent only responds when @mentioned.',
-  interactionModeDoNotDisturb: 'Do Not Disturb',
-  interactionModeDoNotDisturbDesc: 'Agent does not respond to any messages.',
-  interactionModeSave: 'Save mode',
-  interactionModeSaving: 'Saving...',
-
   // ── Agent History Tab ──
   agentHistoryTitle: 'Execution History',
   agentHistoryTitleCount: 'Execution History ({n})',

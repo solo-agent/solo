@@ -24,9 +24,8 @@ type Backend interface {
 
 // ExecuteRequest contains the context and input for a single agent execution.
 type ExecuteRequest struct {
-	AgentID  string       `json:"agent_id"`
-	Messages []Message    `json:"messages"`
-	Tools    []ToolConfig `json:"tools,omitempty"`
+	AgentID  string    `json:"agent_id"`
+	Messages []Message `json:"messages"`
 }
 
 // ExecuteOptions configures a single execution.

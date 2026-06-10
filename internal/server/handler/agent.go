@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -88,6 +89,15 @@ type AgentResponse struct {
 	CustomArgs    []string          `json:"custom_args,omitempty"`
 	CreatedAt     string            `json:"created_at"`
 	UpdatedAt     string            `json:"updated_at"`
+	Skills        []AgentSkillSummary `json:"skills"`
+}
+
+// AgentSkillSummary is the lightweight 3-field shape embedded in AgentResponse
+// payloads. Full skill info is available via GET /api/v1/agents/{id}/skills.
+type AgentSkillSummary struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 // Create handles POST /api/v1/agents
@@ -274,6 +284,27 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		agents = append(agents, a)
 	}
 
+	// Batch-load skills to avoid N+1.
+	if len(agents) > 0 {
+		ids := make([]string, len(agents))
+		for i, a := range agents {
+			ids[i] = a.ID
+			a.Skills = []AgentSkillSummary{} // initialise empty (non-nil) so JSON renders [] not null
+			agents[i] = a
+		}
+		skillMap, err := h.loadAgentSkills(r.Context(), ids)
+		if err != nil {
+			slog.Warn("failed to load agent skills (non-fatal)", "error", err)
+		} else {
+			for i, a := range agents {
+				if s, ok := skillMap[a.ID]; ok {
+					a.Skills = s
+					agents[i] = a
+				}
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, agents)
 }
 
@@ -321,6 +352,16 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	a.CustomArgs = unmarshalStringSlice(customArgsBytes)
 	a.CreatedAt = createdAt.Format(time.RFC3339)
 	a.UpdatedAt = updatedAt.Format(time.RFC3339)
+
+	// Load skills for this agent.
+	skillMap, err := h.loadAgentSkills(r.Context(), []string{a.ID})
+	if err != nil {
+		slog.Warn("failed to load agent skills (non-fatal)", "error", err)
+	}
+	a.Skills = []AgentSkillSummary{}
+	if s, ok := skillMap[a.ID]; ok {
+		a.Skills = s
+	}
 
 	writeJSON(w, http.StatusOK, a)
 }
@@ -425,7 +466,49 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	a.CreatedAt = createdAt.Format(time.RFC3339)
 	a.UpdatedAt = updatedAt.Format(time.RFC3339)
 
+	// Load skills for this agent.
+	skillMap, err := h.loadAgentSkills(r.Context(), []string{a.ID})
+	if err != nil {
+		slog.Warn("failed to load agent skills (non-fatal)", "error", err)
+	}
+	a.Skills = []AgentSkillSummary{}
+	if s, ok := skillMap[a.ID]; ok {
+		a.Skills = s
+	}
+
 	writeJSON(w, http.StatusOK, a)
+}
+
+// loadAgentSkills returns a map agentID -> []AgentSkillSummary for the given
+// agent IDs. Used to inline skills into AgentResponse without N+1 queries.
+// Returns an empty map on error (callers should treat as non-fatal and
+// continue with the agent list as-is).
+func (h *AgentHandler) loadAgentSkills(ctx context.Context, agentIDs []string) (map[string][]AgentSkillSummary, error) {
+	if len(agentIDs) == 0 {
+		return map[string][]AgentSkillSummary{}, nil
+	}
+	rows, err := h.pool.Query(ctx, `
+		SELECT ask.agent_id, s.id, s.name, COALESCE(s.description, '')
+		FROM agent_skills ask
+		JOIN skills s ON s.id = ask.skill_id
+		WHERE ask.agent_id = ANY($1)
+		ORDER BY s.name
+	`, agentIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string][]AgentSkillSummary, len(agentIDs))
+	for rows.Next() {
+		var agentID, skillID, name, desc string
+		if err := rows.Scan(&agentID, &skillID, &name, &desc); err != nil {
+			return nil, err
+		}
+		out[agentID] = append(out[agentID], AgentSkillSummary{
+			ID: skillID, Name: name, Description: desc,
+		})
+	}
+	return out, rows.Err()
 }
 
 // Delete handles DELETE /api/v1/agents/{id} (soft delete: sets is_active=false)

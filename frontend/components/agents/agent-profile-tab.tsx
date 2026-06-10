@@ -219,8 +219,6 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
         is_active: (res.is_active as boolean) ?? false,
         auto_join: (res.auto_join as boolean) ?? false,
         avatar_url: (res.avatar_url as string) || null,
-        enabled_tools: (res.enabled_tools as string[]) ?? [],
-        interaction_mode: (res.interaction_mode as string) ?? 'mention',
         custom_env: (res.custom_env as Record<string, string>) ?? {},
         custom_args: (res.custom_args as string[]) ?? [],
         created_at: res.created_at as string,

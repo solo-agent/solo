@@ -73,10 +73,9 @@ export interface Agent {
   is_active: boolean;
   auto_join: boolean;
   avatar_url: string | null;
-  enabled_tools: string[];
-  interaction_mode: 'active' | 'mention' | 'dnd';
   custom_env: Record<string, string>;
   custom_args: string[];
+  skills: AgentSkillSummary[];
   created_at: string;
   updated_at: string;
 }
@@ -99,24 +98,54 @@ export interface CreateAgentInput {
 
 export interface UpdateAgentInput extends Partial<CreateAgentInput> {
   name?: string;
-  enabled_tools?: string[];
-  interaction_mode?: 'active' | 'mention' | 'dnd';
 }
 
-export type AgentInteractionMode = 'active' | 'mention' | 'dnd';
+// ---- Skill types (Phase1) ----
 
-export interface AgentToolDef {
+/** Lightweight shape returned by GET /api/v1/skills and embedded in Agent. */
+export interface SkillSummary {
+  id: string;
+  name: string;
+  description: string;
+  source_path: string;
+  source_kind: string;
+  body_hash: string;
+  discovered_at: string;
+  updated_at: string;
+}
+
+/** Skill supporting file. */
+export interface SkillFile {
+  id: string;
+  skill_id: string;
+  path: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Detail shape returned by GET /api/v1/skills/{id}. */
+export interface Skill extends SkillSummary {
+  body: string;
+  files: SkillFile[];
+}
+
+/** Embedded in Agent payloads — 3 fields only. */
+export interface AgentSkillSummary {
   id: string;
   name: string;
   description: string;
 }
 
-export const AVAILABLE_TOOLS: AgentToolDef[] = [
-  { id: 'read_file', name: 'Read File', description: '读取服务器文件内容' },
-  { id: 'write_file', name: 'Write File', description: '写入或编辑文件' },
-  { id: 'list_files', name: 'List Files', description: '列出目录中的文件' },
-  { id: 'search_files', name: 'Search Files', description: '搜索文件内容' },
-];
+/** Returned by POST /api/v1/skills/rescan. */
+export interface RescanResult {
+  ok: boolean;
+  added: number;
+  updated: number;
+  removed: number;
+  total: number;
+  error?: string;
+}
 
 // ---- Channel Member types ----
 

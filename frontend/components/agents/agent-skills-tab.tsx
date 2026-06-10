@@ -1,104 +1,90 @@
 // ============================================================================
-// AgentSkillsTab — list global/workspace skills with toggle switches (v1.5)
-// - Shows name, description, enabled/disabled toggle
-// - No create/edit/delete — toggles only
+// AgentSkillsTab — toggle agent's skill bindings against the on-disk catalog
+// - Data source: useAgentSkills(agentId) (server-truth bindings)
+//                + useSkills() (full catalog so unbound skills are also toggle-able)
+// - Toggle: useSetAgentSkills(agentId) with optimistic update + resync on settle
+// - Rescan button: refreshes both bindings + catalog
+// - Click a row: opens SkillDetailDrawer (T3-built) with SKILL.md rendered
+// Brutal design preserved (chunky 2px toggle, mono font, badge-brutal, divide-y-2
+// divide-black, shadow-brutal-sm).
 // ============================================================================
 
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { AlertCircle, RefreshCw, Puzzle } from 'lucide-react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import { AlertCircle, RefreshCw, Puzzle, Loader2 } from 'lucide-react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { t } from '@/lib/i18n';
-import { AVAILABLE_TOOLS } from '@/lib/types';
-import type { Agent } from '@/lib/types';
+import {
+  useAgentSkills,
+  useSkills,
+  useRescanSkills,
+  useSetAgentSkills,
+} from '@/lib/hooks/use-skills';
+import { SkillDetailDrawer } from './skill-detail-drawer';
+import type { SkillSummary } from '@/lib/types';
 
 interface AgentSkillsTabProps {
   agentId: string;
 }
 
 export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
-  const [agent, setAgent] = useState<Agent | null>(null);
-  const [enabledTools, setEnabledTools] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { skills: catalog, isLoading: catalogLoading, error: catalogError, refetch: refetchCatalog } = useSkills();
+  const { skills: bindings, isLoading: bindingsLoading, error: bindingsError, refetch: refetchBindings } = useAgentSkills(agentId);
+  const { mutate: rescanMutate, isPending: rescanning } = useRescanSkills();
+  const { mutate: setMutate, isPending: setting } = useSetAgentSkills(agentId);
+
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
+  const [rescanBanner, setRescanBanner] = useState<{ added: number; updated: number; removed: number; total: number } | null>(null);
+  const [drawerSkillId, setDrawerSkillId] = useState<string | null>(null);
 
-  const loadAgent = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await apiClient.get<Record<string, unknown>>(`/api/v1/agents/${agentId}`);
-      const tools = (res.enabled_tools as string[]) ?? [];
-      setAgent({
-        id: res.id as string,
-        name: res.name as string,
-        description: (res.description as string) || '',
-        owner_id: res.owner_id as string,
-        model_provider: (res.model_provider as string) || '',
-        model_name: (res.model_name as string) || '',
-        system_prompt: (res.system_prompt as string) || '',
-        temperature: (res.temperature as number) ?? 0.7,
-        max_tokens: (res.max_tokens as number) ?? 4096,
-        is_active: (res.is_active as boolean) ?? false,
-        auto_join: (res.auto_join as boolean) ?? false,
-        avatar_url: (res.avatar_url as string) || null,
-        enabled_tools: tools,
-        interaction_mode: (res.interaction_mode as string) ?? 'mention',
-        custom_env: (res.custom_env as Record<string, string>) ?? {},
-        custom_args: (res.custom_args as string[]) ?? [],
-        created_at: res.created_at as string,
-        updated_at: res.updated_at as string,
-      } as Agent);
-      setEnabledTools(tools);
-    } catch (err) {
-      if (err instanceof ApiError) {
-        setError(err.status === 404 ? t('agentProfileAgentNotFound') : err.message);
-      } else {
-        setError(t('agentSkillsError'));
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [agentId]);
+  const boundIds = useMemo(() => new Set(bindings.map((s) => s.id)), [bindings]);
 
-  useEffect(() => {
-    loadAgent();
-  }, [loadAgent]);
+  const isLoading = catalogLoading || bindingsLoading;
+  const error = catalogError || bindingsError;
 
-  const toggleSkill = useCallback(
+  const handleToggle = useCallback(
     async (skillId: string) => {
-      const isCurrentlyEnabled = enabledTools.includes(skillId);
-      const next = isCurrentlyEnabled
-        ? enabledTools.filter((id) => id !== skillId)
-        : [...enabledTools, skillId];
+      const isCurrentlyBound = boundIds.has(skillId);
+      const next = isCurrentlyBound
+        ? bindings.filter((s) => s.id !== skillId).map((s) => s.id)
+        : [...bindings.map((s) => s.id), skillId];
 
-      // Optimistic update
-      setEnabledTools(next);
       setSavingIds((prev) => new Set(prev).add(skillId));
-
       try {
-        await apiClient.patch(`/api/v1/agents/${agentId}`, { enabled_tools: next });
-      } catch {
-        // Revert on failure
-        setEnabledTools((prev) =>
-          isCurrentlyEnabled
-            ? [...prev, skillId]
-            : prev.filter((id) => id !== skillId),
-        );
+        await setMutate(next);
+        // Always re-sync from server (whether PUT succeeded or failed) so the
+        // UI matches the actual bindings. On failure the server is unchanged
+        // and refetch just re-renders the prior state.
+        await refetchBindings();
       } finally {
         setSavingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(skillId);
-          return next;
+          const nextSet = new Set(prev);
+          nextSet.delete(skillId);
+          return nextSet;
         });
       }
     },
-    [agentId, enabledTools],
+    [boundIds, bindings, setMutate, refetchBindings],
   );
+
+  const handleRescan = useCallback(async () => {
+    setRescanBanner(null);
+    const result = await rescanMutate();
+    if (result && result.ok) {
+      setRescanBanner({
+        added: result.added,
+        updated: result.updated,
+        removed: result.removed,
+        total: result.total,
+      });
+      await Promise.all([refetchCatalog(), refetchBindings()]);
+      // auto-dismiss after 4s
+      setTimeout(() => setRescanBanner(null), 4000);
+    }
+  }, [rescanMutate, refetchCatalog, refetchBindings]);
 
   if (isLoading) {
     return (
@@ -123,9 +109,9 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
           <AlertCircle className="h-6 w-6 text-brutal-danger" />
         </div>
         <p className="font-body text-sm text-brutal-danger">{error}</p>
-        <Button type="button" onClick={loadAgent} size="sm" className="mt-4">
+        <Button type="button" onClick={() => { refetchCatalog(); refetchBindings(); }} size="sm" className="mt-4">
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-          {t('retry')}
+          重试
         </Button>
       </div>
     );
@@ -134,93 +120,154 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
   return (
     <div className="space-y-4">
       {/* Section header */}
-      <div>
-        <div className="flex items-center gap-2">
-          <Puzzle className="h-4 w-4" />
-          <h3 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
-            Global Skills
-          </h3>
-        </div>
-        <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-          {t('agentSkillsToggle')}
-        </p>
-      </div>
-
-      {/* Skill list */}
-      <div className="divide-y-2 divide-black border-2 border-black shadow-brutal-sm">
-        {AVAILABLE_TOOLS.map((tool) => {
-          const isEnabled = enabledTools.includes(tool.id);
-          const isSaving = savingIds.has(tool.id);
-
-          return (
-            <div
-              key={tool.id}
-              className="flex items-center gap-3 bg-white px-4 py-3"
-            >
-              {/* Toggle switch */}
-              <button
-                type="button"
-                onClick={() => toggleSkill(tool.id)}
-                disabled={isSaving}
-                className={cn(
-                  'relative flex h-7 w-11 flex-shrink-0 items-center border-2 border-black transition-colors',
-                  isSaving ? 'opacity-50 cursor-wait' : '',
-                  isEnabled ? 'bg-brutal-success' : 'bg-brutal-muted',
-                )}
-                role="switch"
-                aria-checked={isEnabled}
-                aria-label={t(isEnabled ? 'agentSkillsDisable' : 'agentSkillsEnable', { tool: tool.name })}
-              >
-                <span
-                  className={cn(
-                    'absolute h-7 w-[18px] border-r-2 border-l-2 border-black bg-white transition-all',
-                    isEnabled ? 'left-[calc(100%-18px)]' : 'left-0',
-                  )}
-                />
-              </button>
-
-              {/* Skill info */}
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-heading text-sm font-bold text-foreground">
-                    {tool.name}
-                  </span>
-                  <span
-                    className={cn(
-                      'badge-brutal text-[10px] px-1.5',
-                      isSaving
-                        ? 'bg-brutal-muted text-white'
-                        : isEnabled
-                          ? 'bg-brutal-success text-black'
-                          : 'bg-brutal-muted text-white',
-                    )}
-                  >
-                    {isSaving ? t('agentSkillsSaving') : isEnabled ? t('agentSkillsEnabled') : t('agentSkillsNotEnabled')}
-                  </span>
-                </div>
-                <p className="mt-0.5 font-mono text-[11px] text-muted-foreground leading-relaxed">
-                  {tool.description}
-                </p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Workspace Skills section (placeholder for future) */}
-      <div className="mt-6">
-        <div className="flex items-center gap-2">
-          <Puzzle className="h-4 w-4" />
-          <h3 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
-            Workspace Skills
-          </h3>
-        </div>
-        <div className="mt-2 card-brutal bg-brutal-cream p-4 text-center">
-          <p className="font-mono text-xs italic text-muted-foreground">
-            {t('agentSkillsComingSoon')}
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="flex items-center gap-2">
+            <Puzzle className="h-4 w-4" />
+            <h3 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
+              Agent Skills
+            </h3>
+            <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
+              {bindings.length}/{catalog.length}
+            </span>
+          </div>
+          <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+            切换开关来启用/禁用 Agent 拥有的 Skill。修改即时生效。
           </p>
         </div>
+        <Button
+          type="button"
+          onClick={handleRescan}
+          disabled={rescanning}
+          size="sm"
+          variant="outline"
+        >
+          {rescanning ? (
+            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+          )}
+          {rescanning ? '扫描中…' : 'Rescan'}
+        </Button>
       </div>
+
+      {/* Rescan banner */}
+      {rescanBanner && (
+        <div className="border-2 border-black bg-brutal-success-light px-3 py-2 shadow-brutal-sm">
+          <p className="font-mono text-[11px] text-foreground">
+            Rescan 完成：新增 {rescanBanner.added} · 更新 {rescanBanner.updated} · 移除 {rescanBanner.removed} · 总计 {rescanBanner.total}
+          </p>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {catalog.length === 0 && (
+        <div className="card-brutal bg-brutal-cream p-6 text-center">
+          <p className="font-mono text-sm text-foreground">磁盘上还没有发现任何 Skill</p>
+          <p className="mt-2 font-mono text-[11px] text-muted-foreground">
+            在 <code className="bg-white px-1.5 py-0.5 border border-black">~/.mavis/skills/</code> 下放一个含 <code className="bg-white px-1.5 py-0.5 border border-black">SKILL.md</code> 的目录
+          </p>
+          <Button type="button" onClick={handleRescan} disabled={rescanning} size="sm" className="mt-4">
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+            重新扫描
+          </Button>
+        </div>
+      )}
+
+      {/* Skill list */}
+      {catalog.length > 0 && (
+        <div className="divide-y-2 divide-black border-2 border-black shadow-brutal-sm">
+          {catalog.map((skill) => (
+            <SkillRow
+              key={skill.id}
+              skill={skill}
+              isBound={boundIds.has(skill.id)}
+              isSaving={savingIds.has(skill.id) || setting}
+              onToggle={() => handleToggle(skill.id)}
+              onOpen={() => setDrawerSkillId(skill.id)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Drawer */}
+      <SkillDetailDrawer
+        skillId={drawerSkillId}
+        onClose={() => setDrawerSkillId(null)}
+      />
+    </div>
+  );
+}
+
+function SkillRow({
+  skill,
+  isBound,
+  isSaving,
+  onToggle,
+  onOpen,
+}: {
+  skill: SkillSummary;
+  isBound: boolean;
+  isSaving: boolean;
+  onToggle: () => void;
+  onOpen: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 bg-white px-4 py-3">
+      {/* Toggle switch */}
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={isSaving}
+        className={cn(
+          'relative flex h-7 w-11 flex-shrink-0 items-center border-2 border-black transition-colors',
+          isSaving ? 'opacity-50 cursor-wait' : '',
+          isBound ? 'bg-brutal-success' : 'bg-brutal-muted',
+        )}
+        role="switch"
+        aria-checked={isBound}
+        aria-label={`${isBound ? '禁用' : '启用'} ${skill.name}`}
+      >
+        <span
+          className={cn(
+            'absolute h-7 w-[18px] border-r-2 border-l-2 border-black bg-white transition-all',
+            isBound ? 'left-[calc(100%-18px)]' : 'left-0',
+          )}
+        />
+      </button>
+
+      {/* Skill info (clickable) */}
+      <button
+        type="button"
+        onClick={onOpen}
+        className="min-w-0 flex-1 text-left"
+      >
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-heading text-sm font-bold text-foreground">
+            {skill.name}
+          </span>
+          <span className="badge-brutal text-[10px] bg-brutal-cream text-foreground px-1.5">
+            {skill.source_kind}
+          </span>
+          <span
+            className={cn(
+              'badge-brutal text-[10px] px-1.5',
+              isSaving
+                ? 'bg-brutal-muted text-white'
+                : isBound
+                  ? 'bg-brutal-success text-black'
+                  : 'bg-brutal-muted text-white',
+            )}
+          >
+            {isSaving ? '保存中…' : isBound ? '已启用' : '未启用'}
+          </span>
+        </div>
+        {skill.description && (
+          <p className="mt-0.5 font-mono text-[11px] text-muted-foreground leading-relaxed line-clamp-2">
+            {skill.description}
+          </p>
+        )}
+      </button>
     </div>
   );
 }

@@ -8,7 +8,7 @@ import { t } from '@/lib/i18n';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { getNextPixelAvatarIndex } from '@/components/ui/pixel-avatar';
-import type { Agent, CreateAgentInput, UpdateAgentInput, AgentInteractionMode } from '@/lib/types';
+import type { Agent, AgentSkillSummary, CreateAgentInput, UpdateAgentInput } from '@/lib/types';
 
 // ---- Backend response shape ----
 
@@ -25,10 +25,9 @@ interface AgentResponse {
   is_active: boolean;
   auto_join: boolean;
   avatar_url: string;
-  enabled_tools: string[];
-  interaction_mode: string;
   custom_env: Record<string, string> | null;
   custom_args: string[] | null;
+  skills: AgentSkillSummary[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -49,10 +48,9 @@ function mapAgent(resp: AgentResponse): Agent {
     is_active: resp.is_active,
     auto_join: resp.auto_join,
     avatar_url: resp.avatar_url || null,
-    enabled_tools: resp.enabled_tools ?? [],
-    interaction_mode: (resp.interaction_mode as AgentInteractionMode) ?? 'mention',
     custom_env: resp.custom_env ?? {},
     custom_args: resp.custom_args ?? [],
+    skills: resp.skills ?? [],
     created_at: resp.created_at,
     updated_at: resp.updated_at,
   };
