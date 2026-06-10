@@ -50,10 +50,12 @@ func NewSkillService(pool *pgxpool.Pool) *SkillService {
 	return &SkillService{pool: pool}
 }
 
-// SyncGlobalSkills upserts global skills into the skills table without binding
-// them to any agent. Called on every heartbeat so the catalog is always fresh.
+// SyncGlobalSkills upserts global skills into the skills table and binds them
+// to every existing agent. This ensures new agents and newly discovered skills
+// are connected without waiting for per-agent daemon heartbeat.
 func (s *SkillService) SyncGlobalSkills(ctx context.Context, skills []skillloader.DiscoveredSkill) (int, error) {
 	var upserted int
+	var skillIDs []string
 	for _, ds := range skills {
 		var id string
 		err := s.pool.QueryRow(ctx, `
@@ -72,7 +74,36 @@ func (s *SkillService) SyncGlobalSkills(ctx context.Context, skills []skillloade
 			return upserted, fmt.Errorf("upsert skill %q: %w", ds.Name, err)
 		}
 		upserted++
+		skillIDs = append(skillIDs, id)
 	}
+
+	// Bind all global skills to every existing agent (missing bindings only).
+	if len(skillIDs) > 0 {
+		rows, err := s.pool.Query(ctx, `SELECT id FROM agents`)
+		if err != nil {
+			return upserted, fmt.Errorf("list agents: %w", err)
+		}
+		var agentIDs []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return upserted, err
+			}
+			agentIDs = append(agentIDs, id)
+		}
+		rows.Close()
+
+		for _, agentID := range agentIDs {
+			for _, skillID := range skillIDs {
+				_, _ = s.pool.Exec(ctx,
+					`INSERT INTO agent_skills (agent_id, skill_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+					agentID, skillID,
+				)
+			}
+		}
+	}
+
 	return upserted, nil
 }
 
