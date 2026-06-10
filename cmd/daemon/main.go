@@ -422,73 +422,101 @@ type daemonHeartbeatPayload struct {
 	AgentSkills map[string][]skillloader.DiscoveredSkill `json:"agent_skills,omitempty"`
 }
 
-// workspaceSkillDir returns the relative path inside the agent workspace CWD
-// where each provider discovers project-level skills.
-func workspaceSkillDir(provider string) string {
-	switch provider {
-	case "claude", "local":
-		return ".claude/skills"
-	case "codex":
-		return ".codex/skills"
-	case "opencode":
-		return ".opencode/skills"
-	case "copilot":
-		return ".github/copilot/skills"
-	case "cursor":
-		return ".cursor/skills"
-	case "kiro":
-		return ".kiro/skills"
-	case "openclaw":
-		return ".openclaw/skills"
-	case "hermes":
-		return ".hermes/skills"
-	case "pi":
-		return ".pi/agent/skills"
-	default:
-		return ""
-	}
-}
-
-// skillRootForProvider maps a backend provider type to the global skill
-// directory that CLI agent natively discovers. Paths follow upstream
-// conventions documented by each provider. Keep in sync with:
+// ---- Skill path resolution ------------------------------------------------
+// Each provider may discover skills from multiple directories (native paths,
+// shared agent-ecosystem paths, and a universal fallback). See skill-system
+// design docs for the full priority table.
 //
-//	OpenCode: https://opencode.ai/docs/skills
-//	Copilot:  https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills
-//	Cursor:   https://forum.cursor.com/t/cursor-doesnt-know-new-skills-arens-saved/158507
-func skillRootForProvider(provider, home string) *skillloader.SkillRoot {
+// Universal fallback paths (all providers):
+//   Global:    ~/.agents/skills/
+//   Workspace: <ws>/.agents/skills/
+
+// agentGlobalRoots returns all global skill directories for a provider.
+// Provider-specific paths come first (higher priority), then the fallback.
+func agentGlobalRoots(provider, home string) []skillloader.SkillRoot {
+	var roots []skillloader.SkillRoot
 	switch provider {
 	case "claude", "local":
-		return &skillloader.SkillRoot{Path: filepath.Join(home, ".claude", "skills"), Kind: "claude", Priority: 60}
+		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(home, ".claude", "skills"), Kind: "claude", Priority: 60})
 	case "codex":
 		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
 		if codexHome == "" {
 			codexHome = filepath.Join(home, ".codex")
 		}
-		return &skillloader.SkillRoot{Path: filepath.Join(codexHome, "skills"), Kind: "codex", Priority: 35}
+		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(codexHome, "skills"), Kind: "codex", Priority: 35})
 	case "opencode":
-		return &skillloader.SkillRoot{Path: filepath.Join(home, ".config", "opencode", "skills"), Kind: "opencode", Priority: 35}
+		roots = append(roots,
+			skillloader.SkillRoot{Path: filepath.Join(home, ".config", "opencode", "skills"), Kind: "opencode", Priority: 35},
+			skillloader.SkillRoot{Path: filepath.Join(home, ".claude", "skills"), Kind: "claude-compat", Priority: 30},
+		)
 	case "copilot":
-		return &skillloader.SkillRoot{Path: filepath.Join(home, ".copilot", "skills"), Kind: "copilot", Priority: 35}
+		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(home, ".copilot", "skills"), Kind: "copilot", Priority: 35})
 	case "cursor":
-		return &skillloader.SkillRoot{Path: filepath.Join(home, ".cursor", "skills"), Kind: "cursor", Priority: 35}
+		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(home, ".cursor", "skills"), Kind: "cursor", Priority: 35})
 	case "kiro":
-		return &skillloader.SkillRoot{Path: filepath.Join(home, ".kiro", "skills"), Kind: "kiro", Priority: 35}
+		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(home, ".kiro", "skills"), Kind: "kiro", Priority: 35})
 	case "openclaw":
-		return &skillloader.SkillRoot{Path: filepath.Join(home, ".openclaw", "skills"), Kind: "openclaw", Priority: 35}
+		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(home, ".openclaw", "skills"), Kind: "openclaw", Priority: 35})
 	case "hermes":
-		return &skillloader.SkillRoot{Path: filepath.Join(home, ".hermes", "skills"), Kind: "hermes", Priority: 35}
+		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(home, ".hermes", "skills"), Kind: "hermes", Priority: 35})
 	case "pi":
-		return &skillloader.SkillRoot{Path: filepath.Join(home, ".pi", "agent", "skills"), Kind: "pi", Priority: 35}
+		roots = append(roots,
+			skillloader.SkillRoot{Path: filepath.Join(home, ".pi", "agent", "skills"), Kind: "pi", Priority: 35},
+		)
+	case "gemini", "kimi":
+		// No provider-specific path; fallback only.
 	default:
 		return nil
 	}
+	// Universal fallback for all providers.
+	roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(home, ".agents", "skills"), Kind: "agents", Priority: 20})
+	return roots
+}
+
+// agentWorkspaceRoots returns all workspace-relative skill directories for a
+// provider. Provider-specific paths come first, then agent-ecosystem fallback.
+func agentWorkspaceRoots(provider, wsDir string) []skillloader.SkillRoot {
+	var roots []skillloader.SkillRoot
+	switch provider {
+	case "claude", "local":
+		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(wsDir, ".claude", "skills"), Kind: "claude", Priority: 100})
+	case "codex":
+		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(wsDir, ".codex", "skills"), Kind: "codex", Priority: 100})
+	case "opencode":
+		roots = append(roots,
+			skillloader.SkillRoot{Path: filepath.Join(wsDir, ".opencode", "skills"), Kind: "opencode", Priority: 100},
+			skillloader.SkillRoot{Path: filepath.Join(wsDir, ".claude", "skills"), Kind: "claude-compat", Priority: 90},
+		)
+	case "copilot":
+		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(wsDir, ".github", "copilot", "skills"), Kind: "copilot", Priority: 100})
+	case "cursor":
+		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(wsDir, ".cursor", "skills"), Kind: "cursor", Priority: 100})
+	case "kiro":
+		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(wsDir, ".kiro", "skills"), Kind: "kiro", Priority: 100})
+	case "openclaw":
+		roots = append(roots,
+			skillloader.SkillRoot{Path: filepath.Join(wsDir, "skills"), Kind: "openclaw-legacy", Priority: 100},
+		)
+	case "hermes":
+		roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(wsDir, ".hermes", "skills"), Kind: "hermes", Priority: 100})
+	case "pi":
+		roots = append(roots,
+			skillloader.SkillRoot{Path: filepath.Join(wsDir, ".pi", "skills"), Kind: "pi", Priority: 100},
+		)
+	case "gemini", "kimi":
+		// No provider-specific workspace path; fallback only.
+	default:
+		return nil
+	}
+	// Universal workspace fallback.
+	roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(wsDir, ".agents", "skills"), Kind: "agents", Priority: 80})
+	return roots
 }
 
 // collectAgentSkills scans each agent's global and workspace skill directories.
-// Returns per-agent discovered skills. Global skills from the same provider are
-// shared across agents of that provider; workspace skills are agent-specific.
-// Workspace skills win on name collision (added after global, first-wins).
+// Returns per-agent discovered skills. Global roots from the same provider are
+// shared across agents; workspace roots are agent-specific. First-found wins on
+// name collision (higher priority paths are scanned first).
 func collectAgentSkills(agentProviders map[string]string) map[string][]skillloader.DiscoveredSkill {
 	if len(agentProviders) == 0 {
 		return nil
@@ -500,64 +528,49 @@ func collectAgentSkills(agentProviders map[string]string) map[string][]skillload
 		return nil
 	}
 
-	// Phase 1: scan global roots per provider (avoid duplicate scans).
-	type providerScan struct {
-		root    *skillloader.SkillRoot
-		agents  []string
-	}
-	scanned := make(map[string]*providerScan)
+	// Group agent IDs by provider.
+	providerAgents := make(map[string][]string)
 	for agentID, provider := range agentProviders {
-		if scanned[provider] == nil {
-			scanned[provider] = &providerScan{
-				root:   skillRootForProvider(provider, home),
-				agents: nil,
-			}
-		}
-		scanned[provider].agents = append(scanned[provider].agents, agentID)
+		providerAgents[provider] = append(providerAgents[provider], agentID)
 	}
 
 	out := make(map[string][]skillloader.DiscoveredSkill)
 
-	// Assign global skills to agents.
-	for provider, ps := range scanned {
-		if ps.root == nil {
+	// Phase 1: global roots per provider (shared across same-provider agents).
+	for provider, agents := range providerAgents {
+		roots := agentGlobalRoots(provider, home)
+		if len(roots) == 0 {
 			continue
 		}
-		discovered, err := skillloader.ScanRoots(home, []skillloader.SkillRoot{*ps.root})
+		discovered, err := skillloader.ScanRoots(home, roots)
 		if err != nil {
-			slog.Warn("skill global scan failed", "provider", provider, "path", ps.root.Path, "error", err)
+			slog.Warn("skill global scan failed", "provider", provider, "error", err)
 			continue
 		}
 		flat := make([]skillloader.DiscoveredSkill, 0, len(discovered))
 		for _, ds := range discovered {
 			flat = append(flat, ds)
 		}
-		for _, agentID := range ps.agents {
+		for _, agentID := range agents {
 			out[agentID] = append(out[agentID], flat...)
 		}
 		slog.Debug("skill global scan",
-			"provider", provider, "path", ps.root.Path,
-			"count", len(flat), "agents", len(ps.agents),
+			"provider", provider, "roots", len(roots), "count", len(flat), "agents", len(agents),
 		)
 	}
 
-	// Phase 2: scan each agent's workspace dir for project-level skills.
+	// Phase 2: workspace roots per agent.
 	if workspaceMgr != nil {
 		for agentID, provider := range agentProviders {
-			relDir := workspaceSkillDir(provider)
-			if relDir == "" {
+			wsDir := workspaceMgr.WorkspaceDir(agentID)
+			roots := agentWorkspaceRoots(provider, wsDir)
+			if len(roots) == 0 {
 				continue
 			}
-			wsDir := workspaceMgr.WorkspaceDir(agentID)
-			wsRoot := &skillloader.SkillRoot{
-				Path:     filepath.Join(wsDir, relDir),
-				Kind:     "workspace",
-				Priority: 100, // workspace skills override globals
-			}
-			discovered, err := skillloader.ScanRoots(wsDir, []skillloader.SkillRoot{*wsRoot})
+			discovered, err := skillloader.ScanRoots(wsDir, roots)
 			if err != nil {
 				slog.Debug("skill workspace scan failed",
-					"agent_id", agentID, "path", wsRoot.Path, "error", err,
+					"agent_id", agentID, "error", err,
 				)
 				continue
 			}
@@ -568,7 +581,7 @@ func collectAgentSkills(agentProviders map[string]string) map[string][]skillload
 			if len(flat) > 0 {
 				out[agentID] = append(out[agentID], flat...)
 				slog.Debug("skill workspace scan",
-					"agent_id", agentID, "path", wsRoot.Path, "count", len(flat),
+					"agent_id", agentID, "roots", len(roots), "count", len(flat),
 				)
 			}
 		}
