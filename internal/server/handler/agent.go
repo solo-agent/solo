@@ -51,9 +51,6 @@ type CreateAgentRequest struct {
 	SystemPrompt  string            `json:"system_prompt,omitempty"`
 	ModelProvider string            `json:"model_provider,omitempty"`
 	ModelName     string            `json:"model_name,omitempty"`
-	Temperature   *float64          `json:"temperature,omitempty"`
-	MaxTokens     *int              `json:"max_tokens,omitempty"`
-	AutoJoin      *bool             `json:"auto_join,omitempty"`
 	CustomEnv     map[string]string `json:"custom_env,omitempty"`
 	CustomArgs    []string          `json:"custom_args,omitempty"`
 }
@@ -64,9 +61,6 @@ type UpdateAgentRequest struct {
 	SystemPrompt  *string            `json:"system_prompt,omitempty"`
 	ModelProvider *string            `json:"model_provider,omitempty"`
 	ModelName     *string            `json:"model_name,omitempty"`
-	Temperature   *float64           `json:"temperature,omitempty"`
-	MaxTokens     *int               `json:"max_tokens,omitempty"`
-	AutoJoin      *bool              `json:"auto_join,omitempty"`
 	CustomEnv     *map[string]string `json:"custom_env,omitempty"`
 	CustomArgs    *[]string          `json:"custom_args,omitempty"`
 }
@@ -79,10 +73,7 @@ type AgentResponse struct {
 	ModelProvider string            `json:"model_provider"`
 	ModelName     string            `json:"model_name"`
 	SystemPrompt  string            `json:"system_prompt"`
-	Temperature   float64           `json:"temperature"`
-	MaxTokens     int               `json:"max_tokens"`
 	IsActive      bool              `json:"is_active"`
-	AutoJoin      bool              `json:"auto_join"`
 	AvatarURL     string            `json:"avatar_url,omitempty"`
 	CustomEnv     map[string]string `json:"custom_env,omitempty"`
 	CustomArgs    []string          `json:"custom_args,omitempty"`
@@ -123,21 +114,6 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	modelName := req.ModelName
 
-	temperature := 0.7
-	if req.Temperature != nil {
-		temperature = *req.Temperature
-	}
-
-	maxTokens := 4096
-	if req.MaxTokens != nil {
-		maxTokens = *req.MaxTokens
-	}
-
-	autoJoin := false
-	if req.AutoJoin != nil {
-		autoJoin = *req.AutoJoin
-	}
-
 	customEnv := req.CustomEnv
 	if customEnv == nil {
 		customEnv = map[string]string{}
@@ -171,10 +147,10 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var agentID string
 	var createdAt, updatedAt time.Time
 	err = h.pool.QueryRow(r.Context(),
-		`INSERT INTO agents (name, description, owner_id, model_provider, model_name, system_prompt, temperature, max_tokens, auto_join, runtime_id, custom_env, custom_args)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		`INSERT INTO agents (name, description, owner_id, model_provider, model_name, system_prompt, runtime_id, custom_env, custom_args)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		 RETURNING id, created_at, updated_at`,
-		name, req.Description, userID, modelProvider, modelName, systemPrompt, temperature, maxTokens, autoJoin,
+		name, req.Description, userID, modelProvider, modelName, systemPrompt,
 		computerID,
 		customEnvBytes, customArgsBytes,
 	).Scan(&agentID, &createdAt, &updatedAt)
@@ -217,10 +193,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ModelProvider: modelProvider,
 		ModelName:     modelName,
 		SystemPrompt:  systemPrompt,
-		Temperature:   temperature,
-		MaxTokens:     maxTokens,
 		IsActive:      true,
-		AutoJoin:      autoJoin,
 		CustomEnv:     customEnv,
 		CustomArgs:    customArgs,
 		CreatedAt:     createdAt.Format(time.RFC3339),
@@ -238,7 +211,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.pool.Query(r.Context(),
 		`SELECT id, name, COALESCE(description, ''), owner_id, model_provider, model_name,
-		        system_prompt, temperature, max_tokens, is_active, auto_join, COALESCE(avatar_url, ''),
+		        system_prompt, is_active, COALESCE(avatar_url, ''),
 		        custom_env, custom_args,
 		        created_at, updated_at
 		 FROM agents
@@ -260,7 +233,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		var customEnvBytes, customArgsBytes []byte
 		err := rows.Scan(&a.ID, &a.Name, &a.Description, &a.OwnerID,
 			&a.ModelProvider, &a.ModelName, &a.SystemPrompt,
-			&a.Temperature, &a.MaxTokens, &a.IsActive, &a.AutoJoin, &a.AvatarURL,
+			&a.IsActive, &a.AvatarURL,
 			&customEnvBytes, &customArgsBytes,
 			&createdAt, &updatedAt)
 		if err != nil {
@@ -296,7 +269,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var customEnvBytes, customArgsBytes []byte
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT id, name, COALESCE(description, ''), owner_id, model_provider, model_name,
-		        system_prompt, temperature, max_tokens, is_active, auto_join, COALESCE(avatar_url, ''),
+		        system_prompt, is_active, COALESCE(avatar_url, ''),
 		        custom_env, custom_args,
 		        created_at, updated_at
 		 FROM agents
@@ -304,7 +277,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		agentID, userID,
 	).Scan(&a.ID, &a.Name, &a.Description, &a.OwnerID,
 		&a.ModelProvider, &a.ModelName, &a.SystemPrompt,
-		&a.Temperature, &a.MaxTokens, &a.IsActive, &a.AutoJoin, &a.AvatarURL,
+		&a.IsActive, &a.AvatarURL,
 		&customEnvBytes, &customArgsBytes,
 		&createdAt, &updatedAt)
 	if err != nil {
@@ -390,24 +363,21 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 			system_prompt = COALESCE($3, system_prompt),
 			model_provider = COALESCE($4, model_provider),
 			model_name = COALESCE($5, model_name),
-			temperature = COALESCE($6, temperature),
-			max_tokens = COALESCE($7, max_tokens),
-			auto_join = COALESCE($8, auto_join),
-			custom_env = COALESCE($9, custom_env),
-			custom_args = COALESCE($10, custom_args),
+			custom_env = COALESCE($6, custom_env),
+			custom_args = COALESCE($7, custom_args),
 			updated_at = now()
-		 WHERE id = $11 AND owner_id = $12 AND is_active = true
+		 WHERE id = $8 AND owner_id = $9 AND is_active = true
 		 RETURNING id, name, COALESCE(description, ''), owner_id, model_provider, model_name,
-		           system_prompt, temperature, max_tokens, is_active, auto_join, COALESCE(avatar_url, ''),
+		           system_prompt, is_active, COALESCE(avatar_url, ''),
 		           custom_env, custom_args,
 		           created_at, updated_at`,
 		req.Name, req.Description, req.SystemPrompt,
-		req.ModelProvider, req.ModelName, req.Temperature, req.MaxTokens, req.AutoJoin,
+		req.ModelProvider, req.ModelName,
 		customEnvBytes, customArgsBytes,
 		agentID, userID,
 	).Scan(&a.ID, &a.Name, &a.Description, &a.OwnerID,
 		&a.ModelProvider, &a.ModelName, &a.SystemPrompt,
-		&a.Temperature, &a.MaxTokens, &a.IsActive, &a.AutoJoin, &a.AvatarURL,
+		&a.IsActive, &a.AvatarURL,
 		&retCustomEnvBytes, &retCustomArgsBytes,
 		&createdAt, &updatedAt)
 	if err != nil {
@@ -507,31 +477,41 @@ func (h *AgentHandler) AgentSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify agent ownership.
 	var ownerID string
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT owner_id FROM agents WHERE id = $1 AND is_active = true`, agentID,
 	).Scan(&ownerID)
-	if err != nil || ownerID != userID {
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "agent not found")
+		} else {
+			slog.Error("agent skills: db query failed", "agent_id", agentID, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal error")
+		}
+		return
+	}
+	if ownerID != userID {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return
 	}
 
+	empty := map[string]interface{}{"skills": []interface{}{}}
+
 	if h.proxy == nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"skills": []interface{}{}})
+		writeJSON(w, http.StatusOK, empty)
 		return
 	}
 
 	d, ok := h.proxy.FindDaemonForAgent(r.Context(), agentID)
 	if !ok {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"skills": []interface{}{}})
+		writeJSON(w, http.StatusOK, empty)
 		return
 	}
 
 	data, err := h.proxy.ProxySkillList(r.Context(), d, agentID)
 	if err != nil {
 		slog.Warn("agent skills: daemon proxy failed", "agent_id", agentID, "error", err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"skills": []interface{}{}})
+		writeJSON(w, http.StatusOK, empty)
 		return
 	}
 

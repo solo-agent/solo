@@ -12,7 +12,6 @@ import (
 //
 // Supported CLI backend types (registered by builtins.go):
 //   - "claude"   — Claude Code CLI (binary resolved from env)
-//   - "local"    — alias for claude (local CLI execution)
 //   - "codex"    — Codex CLI via JSON-RPC 2.0
 //   - "cursor"   — Cursor Agent CLI via stream-json
 //   - "gemini"   — Google Gemini CLI via stream-json
@@ -71,7 +70,7 @@ func newClaudeBackendFromEnv() *ClaudeBackend {
 // It delegates to the global BackendRegistry and checks whether the created
 // Backend satisfies the PersistentBackend interface.
 //
-// Supported: claude, local, codex, opencode, hermes, kimi, kiro, openclaw.
+// Supported: claude, codex, opencode, hermes, kimi, kiro, openclaw.
 func NewPersistentBackend(providerType string) (PersistentBackend, error) {
 	backend, err := GlobalRegistry().Create(providerType, BackendConfig{ProviderType: providerType})
 	if err != nil {

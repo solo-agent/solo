@@ -214,10 +214,7 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
         model_provider: (res.model_provider as string) || '',
         model_name: (res.model_name as string) || '',
         system_prompt: (res.system_prompt as string) || '',
-        temperature: (res.temperature as number) ?? 0.7,
-        max_tokens: (res.max_tokens as number) ?? 4096,
         is_active: (res.is_active as boolean) ?? false,
-        auto_join: (res.auto_join as boolean) ?? false,
         avatar_url: (res.avatar_url as string) || null,
         custom_env: (res.custom_env as Record<string, string>) ?? {},
         custom_args: (res.custom_args as string[]) ?? [],
@@ -321,13 +318,6 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
         onSave={(val) => handleUpdate('system_prompt', val)}
         placeholder={t('agentFormSystemPromptPlaceholder')}
         multiline
-      />
-
-      <InlineTextField
-        label={t('agentFormLabelModel')}
-        value={agent.model_name}
-        onSave={(val) => handleUpdate('model_name', val)}
-        placeholder={t('agentFormModelPlaceholder')}
       />
 
       <hr className="divider-brutal" />

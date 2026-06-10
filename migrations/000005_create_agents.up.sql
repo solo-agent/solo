@@ -6,10 +6,7 @@ CREATE TABLE agents (
     model_provider  VARCHAR(50) NOT NULL DEFAULT 'anthropic',
     model_name      VARCHAR(100) NOT NULL,
     system_prompt   TEXT NOT NULL DEFAULT '',
-    temperature     FLOAT NOT NULL DEFAULT 0.7,
-    max_tokens      INT NOT NULL DEFAULT 4096,
     is_active       BOOLEAN NOT NULL DEFAULT true,
-    auto_join       BOOLEAN NOT NULL DEFAULT false,
     avatar_url      TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()

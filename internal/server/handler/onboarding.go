@@ -103,11 +103,11 @@ func (h *OnboardingHandler) CreateLucy(w http.ResponseWriter, r *http.Request) {
 	computerID := strings.TrimSpace(req.ComputerID)
 	_, err := h.pool.Exec(r.Context(),
 		`INSERT INTO agents (id, name, description, owner_id, model_provider, model_name,
-			system_prompt, temperature, max_tokens, runtime_id, custom_env, custom_args)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			system_prompt, runtime_id, custom_env, custom_args)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 		agentID, onboarding.LucyName, agentDesc, userID,
 		runtimeType, "", // model_provider = selected runtime, model_name = auto
-		onboarding.LucySystemPrompt, 0.7, 4096,
+		onboarding.LucySystemPrompt,
 		nullIfEmpty(computerID),
 		`{}`, `[]`,
 	)

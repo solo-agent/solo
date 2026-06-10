@@ -1,8 +1,7 @@
 // ============================================================================
 // AgentRuntimeTab — display Agent runtime configuration (v1.5)
-// - Shows: Runtime type, model name, temperature, max_tokens
+// - Shows: Runtime type, model name
 // - Environment variables key-value list
-// - Auto-join channels setting
 // - Read-only display (editing is handled via Profile tab or future enhancements)
 // ============================================================================
 
@@ -38,10 +37,7 @@ export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
         model_provider: (res.model_provider as string) || '',
         model_name: (res.model_name as string) || '',
         system_prompt: (res.system_prompt as string) || '',
-        temperature: (res.temperature as number) ?? 0.7,
-        max_tokens: (res.max_tokens as number) ?? 4096,
         is_active: (res.is_active as boolean) ?? false,
-        auto_join: (res.auto_join as boolean) ?? false,
         avatar_url: (res.avatar_url as string) || null,
         custom_env: (res.custom_env as Record<string, string>) ?? {},
         custom_args: (res.custom_args as string[]) ?? [],
@@ -125,18 +121,6 @@ export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
               {agent.model_name || t('agentRuntimeDefault')}
             </span>
           </div>
-          <div className="flex items-center justify-between px-3 py-2">
-            <span className="font-mono text-[11px] text-muted-foreground">Temperature</span>
-            <span className="font-mono text-sm text-foreground">
-              {agent.temperature.toFixed(1)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between px-3 py-2">
-            <span className="font-mono text-[11px] text-muted-foreground">Max Tokens</span>
-            <span className="font-mono text-sm text-foreground">
-              {agent.max_tokens.toLocaleString()}
-            </span>
-          </div>
         </div>
       </div>
 
@@ -171,25 +155,6 @@ export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
         )}
       </div>
 
-      {/* Auto-join setting */}
-      <div className="space-y-2">
-        <h3 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
-          {t('agentRuntimeAutoJoin')}
-        </h3>
-        <div className={agent.auto_join
-          ? 'border-2 border-black bg-brutal-success-light px-3 py-2'
-          : 'border-2 border-black bg-brutal-cream px-3 py-2'
-        }>
-          <span className={`badge-brutal text-[10px] ${agent.auto_join ? 'bg-brutal-success text-black' : 'bg-brutal-muted text-black'}`}>
-            {agent.auto_join ? t('enabled') : t('disabled')}
-          </span>
-          <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-            {agent.auto_join
-              ? t('agentRuntimeAutoJoinEnabled')
-              : t('agentRuntimeAutoJoinDisabled')}
-          </p>
-        </div>
-      </div>
     </div>
   );
 }

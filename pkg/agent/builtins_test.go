@@ -9,7 +9,7 @@ import (
 
 func TestBuiltins_AllTypesCreatable(t *testing.T) {
 	types := []string{
-		"claude", "local", "codex", "opencode", "cursor",
+		"claude", "codex", "opencode", "cursor",
 		"gemini", "kimi", "kiro", "copilot", "openclaw", "hermes", "pi",
 	}
 
@@ -24,22 +24,17 @@ func TestBuiltins_AllTypesCreatable(t *testing.T) {
 			t.Errorf("Create(%q): nil backend", typ)
 			continue
 		}
-		// "local" is an alias for claude — its Name() returns "claude".
-		wantName := typ
-		if typ == "local" {
-			wantName = "claude"
-		}
-		if got := b.Name(); got != wantName {
-			t.Errorf("Create(%q): Name() = %q, want %q", typ, got, wantName)
+		if got := b.Name(); got != typ {
+			t.Errorf("Create(%q): Name() = %q, want %q", typ, got, typ)
 		}
 	}
 }
 
-// ── ListMeta returns at least 12 entries (11 types + local alias) ─────────────
+// ── ListMeta returns at least 11 entries ──────────────────────────────
 
 func TestBuiltins_ListMeta(t *testing.T) {
 	expected := []string{
-		"claude", "local", "codex", "opencode", "cursor",
+		"claude", "codex", "opencode", "cursor",
 		"gemini", "kimi", "kiro", "copilot", "openclaw", "hermes", "pi",
 	}
 
@@ -87,11 +82,9 @@ func TestBuiltins_UnknownTypeError(t *testing.T) {
 func TestBuiltins_PersistentBackend(t *testing.T) {
 	reg := GlobalRegistry()
 
-	// claude, local, codex, opencode, hermes, kimi, kiro, and openclaw
-	// implement PersistentBackend. v1.4 added codex, opencode, hermes;
-	// v1.5 added kimi, kiro; v1.6 added openclaw (openclaw-acp-migration).
-	// claude/local predate the persistent era.
-	for _, typ := range []string{"claude", "local", "codex", "opencode", "hermes", "kimi", "kiro", "openclaw"} {
+	// claude, codex, opencode, hermes, kimi, kiro, and openclaw
+	// implement PersistentBackend.
+	for _, typ := range []string{"claude", "codex", "opencode", "hermes", "kimi", "kiro", "openclaw"} {
 		b, err := reg.Create(typ, BackendConfig{ProviderType: typ})
 		if err != nil {
 			t.Fatalf("Create(%q): %v", typ, err)
@@ -117,7 +110,7 @@ func TestBuiltins_PersistentBackend(t *testing.T) {
 
 func TestBuiltins_NewPersistentBackend(t *testing.T) {
 	// Persistent types should succeed.
-	for _, typ := range []string{"claude", "local", "codex", "opencode", "hermes", "kimi", "kiro", "openclaw"} {
+	for _, typ := range []string{"claude", "codex", "opencode", "hermes", "kimi", "kiro", "openclaw"} {
 		pb, err := NewPersistentBackend(typ)
 		if err != nil {
 			t.Fatalf("NewPersistentBackend(%q): unexpected error: %v", typ, err)
@@ -204,28 +197,3 @@ func TestBuiltins_FactoryReceivesConfig(t *testing.T) {
 	}
 }
 
-func TestBuiltins_LocalIsaClaudeAlias(t *testing.T) {
-	reg := GlobalRegistry()
-
-	bLocal, err := reg.Create("local", BackendConfig{ProviderType: "local"})
-	if err != nil {
-		t.Fatalf("Create(local): %v", err)
-	}
-	bClaude, err := reg.Create("claude", BackendConfig{ProviderType: "claude"})
-	if err != nil {
-		t.Fatalf("Create(claude): %v", err)
-	}
-
-	// Both should be *ClaudeBackend instances.
-	if _, ok := bLocal.(*ClaudeBackend); !ok {
-		t.Error("local backend is not *ClaudeBackend")
-	}
-	if _, ok := bClaude.(*ClaudeBackend); !ok {
-		t.Error("claude backend is not *ClaudeBackend")
-	}
-
-	// Name() from local should be "claude" (the underlying name).
-	if bLocal.Name() != "claude" {
-		t.Errorf("local Name() = %q, want 'claude'", bLocal.Name())
-	}
-}

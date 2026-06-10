@@ -19,6 +19,9 @@ export interface CliDetectionState {
   error: string | null;
 }
 
+/** Whitelist of runtimes available for agent creation. */
+const ALLOWED_RUNTIMES = new Set(["openclaw", "hermes", "claude", "opencode"]);
+
 /** Raw shape from backend — matches GET /api/v1/agent-backends/detect */
 interface DetectResponseItem {
   type: string;
@@ -48,6 +51,7 @@ export function useCliDetection(): CliDetectionState {
         if (!mountedRef.current) return;
         const map: Record<string, AgentBackendDetectItem> = {};
         for (const item of data) {
+          if (!ALLOWED_RUNTIMES.has(item.type)) continue;
           map[item.type] = {
             type: item.type,
             display_name: item.display_name,

@@ -214,8 +214,6 @@ func (m *MemoryManager) AutoSummarize(ctx context.Context, agentID string, conve
 		Model:       "claude-sonnet-4-20250514",
 		Messages:    []llm.Message{{Role: "user", Content: prompt}},
 		SystemPrompt: "You are a memory management assistant. Your task is to summarize agent conversations into structured memory entries.",
-		Temperature: 0.3,
-		MaxTokens:   4096,
 	})
 	if err != nil {
 		return fmt.Errorf("memory: LLM summarization call failed: %w", err)

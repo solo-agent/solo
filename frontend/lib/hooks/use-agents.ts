@@ -20,10 +20,7 @@ interface AgentResponse {
   model_provider: string;
   model_name: string;
   system_prompt: string;
-  temperature: number;
-  max_tokens: number;
   is_active: boolean;
-  auto_join: boolean;
   avatar_url: string;
   custom_env: Record<string, string> | null;
   custom_args: string[] | null;
@@ -42,10 +39,7 @@ function mapAgent(resp: AgentResponse): Agent {
     model_provider: resp.model_provider as Agent['model_provider'],
     model_name: resp.model_name,
     system_prompt: resp.system_prompt,
-    temperature: resp.temperature,
-    max_tokens: resp.max_tokens,
     is_active: resp.is_active,
-    auto_join: resp.auto_join,
     avatar_url: resp.avatar_url || null,
     custom_env: resp.custom_env ?? {},
     custom_args: resp.custom_args ?? [],
@@ -95,8 +89,6 @@ export function useAgents() {
       model_provider: input.model_provider,
       model_name: input.model_name,
       system_prompt: input.system_prompt || '',
-      temperature: input.temperature,
-      max_tokens: input.max_tokens,
       avatar_url: input.avatar_url || `pixel:${nextIndex}`,
       custom_env: input.custom_env || {},
       custom_args: input.custom_args || [],
@@ -113,8 +105,6 @@ export function useAgents() {
       model_provider: input.model_provider,
       model_name: input.model_name,
       system_prompt: input.system_prompt,
-      temperature: input.temperature,
-      max_tokens: input.max_tokens,
       custom_env: input.custom_env,
       custom_args: input.custom_args,
     });

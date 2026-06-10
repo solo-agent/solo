@@ -36,8 +36,6 @@ type ExecuteOptions struct {
 	Effort           string            `json:"effort,omitempty"`             // thinking effort level (Claude Code --effort, OpenClaw --thinking)
 	MaxTurns         int               `json:"max_turns,omitempty"`          // max agentic turns (Claude Code --max-turns)
 	ResumeSessionID  string            `json:"resume_session_id,omitempty"`  // ACP session/resume ID for protocol-level resume
-	MaxTokens        int               `json:"max_tokens,omitempty"`
-	Temperature      float64           `json:"temperature,omitempty"`
 	Env                       map[string]string `json:"env,omitempty"`
 	CustomArgs                []string          `json:"custom_args,omitempty"`
 	ExtraArgs                 []string          `json:"extra_args,omitempty"`                   // daemon-level global default args

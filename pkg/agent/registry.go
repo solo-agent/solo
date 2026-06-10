@@ -107,7 +107,11 @@ func (r *BackendRegistry) Detect() []BackendStatus {
 				out, err := exec.CommandContext(ctx, path, entry.Meta.DetectCommand).Output()
 				cancel()
 				if err == nil {
-					status.Version = strings.TrimSpace(string(out))
+					v := strings.TrimSpace(string(out))
+					if idx := strings.IndexByte(v, '\n'); idx >= 0 {
+						v = v[:idx]
+					}
+					status.Version = strings.TrimSpace(v)
 				}
 			}
 		}

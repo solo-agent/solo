@@ -258,7 +258,7 @@ export function AgentForm({
                 onBlur={field.onBlur}
                 options={Object.values(detection).map((rt) => ({
                   value: rt.type,
-                  label: `${rt.available ? '●' : '○'} ${rt.display_name}${rt.version ? ` (v${rt.version})` : ''}`,
+                  label: `${rt.available ? '●' : '○'} ${rt.display_name}${rt.version ? ` (${rt.version})` : ''}`,
                   disabled: !rt.available,
                 }))}
                 placeholder={t('agentFormSelectRuntime')}

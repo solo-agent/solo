@@ -68,10 +68,7 @@ export interface Agent {
   model_provider: AgentModelProvider;
   model_name: string;
   system_prompt: string;
-  temperature: number;
-  max_tokens: number;
   is_active: boolean;
-  auto_join: boolean;
   avatar_url: string | null;
   custom_env: Record<string, string>;
   custom_args: string[];
@@ -88,8 +85,6 @@ export interface CreateAgentInput {
   model_provider: AgentModelProvider;
   model_name?: string;
   system_prompt?: string;
-  temperature?: number;
-  max_tokens?: number;
   avatar_url?: string;
   custom_env?: Record<string, string>;
   custom_args?: string[];

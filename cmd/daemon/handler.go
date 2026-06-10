@@ -482,8 +482,6 @@ type llmMessage struct {
 type modelConfigPayload struct {
 	Provider    string  `json:"provider"`
 	Model       string  `json:"model"`
-	Temperature float64 `json:"temperature"`
-	MaxTokens   int     `json:"max_tokens"`
 }
 
 // runTaskResponse is returned after accepting a task.
@@ -512,12 +510,6 @@ func (h *daemonHandler) Run(w http.ResponseWriter, r *http.Request) {
 	if req.ChannelID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channel_id is required"})
 		return
-	}
-	if req.ModelConfig.MaxTokens <= 0 {
-		req.ModelConfig.MaxTokens = 4096
-	}
-	if req.ModelConfig.Temperature <= 0 {
-		req.ModelConfig.Temperature = 0.7
 	}
 
 	// Register the task
@@ -600,8 +592,6 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 		Model:        req.ModelConfig.Model,
 		Messages:     llmMsgs,
 		SystemPrompt: systemPrompt,
-		Temperature:  req.ModelConfig.Temperature,
-		MaxTokens:    req.ModelConfig.MaxTokens,
 	}
 
 	// Select the provider matching the agent type and stream
@@ -743,8 +733,6 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		SystemPrompt: req.SystemPrompt,
 		Model:        req.ModelConfig.Model,
 		Provider:     req.ModelConfig.Provider,
-		MaxTokens:    req.ModelConfig.MaxTokens,
-		Temperature:  req.ModelConfig.Temperature,
 	})
 	if err != nil {
 		slog.Error("task: workspace preparation failed", "task_id", req.TaskID, "error", err)
@@ -810,8 +798,6 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		SystemPrompt:  req.SystemPrompt,
 		Model:         req.ModelConfig.Model,
 		Provider:      req.ModelConfig.Provider,
-		MaxTokens:     req.ModelConfig.MaxTokens,
-		Temperature:   req.ModelConfig.Temperature,
 		CustomArgs:    agentInfo.CustomArgs,
 		Env:           agentEnv,
 		WorkspacePath: ws.WorkDir,
@@ -877,9 +863,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		SystemPrompt: systemPrompt,
 		WorkspaceDir: ws.WorkDir,
 		Model:        req.ModelConfig.Model,
-		MaxTokens:    req.ModelConfig.MaxTokens,
 		Env:          agentEnv,
-		Temperature:  req.ModelConfig.Temperature,
 		CustomArgs:   agentInfo.CustomArgs,
 		// ExtraArgs: daemonConfig.ExtraArgs[backend.Name()], // P1 reserved
 	}
@@ -1404,10 +1388,13 @@ func (h *daemonHandler) HandleSkillsList(w http.ResponseWriter, r *http.Request)
 	}
 
 	var provider string
-	_ = h.pool.QueryRow(r.Context(),
+	err := h.pool.QueryRow(r.Context(),
 		`SELECT COALESCE(model_provider, '') FROM agents WHERE id = $1 AND is_active = true`,
 		agentID,
 	).Scan(&provider)
+	if err != nil {
+		slog.Warn("skills list: db query failed", "agent_id", agentID, "error", err)
+	}
 	if provider == "" {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"skills": []skillListItem{}})
 		return
@@ -1420,10 +1407,15 @@ func (h *daemonHandler) HandleSkillsList(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	wsDir := ""
+	if h.workspaceManager != nil {
+		wsDir = h.workspaceManager.WorkspaceDir(agentID)
+	}
+
 	globalRoots := agentGlobalRoots(provider, home)
 	var wsRoots []skillloader.SkillRoot
 	if h.workspaceManager != nil {
-		wsRoots = agentWorkspaceRoots(provider, h.workspaceManager.WorkspaceDir(agentID))
+		wsRoots = agentWorkspaceRoots(provider, wsDir)
 	}
 
 	allRoots := append([]skillloader.SkillRoot{}, globalRoots...)
@@ -1446,11 +1438,6 @@ func (h *daemonHandler) HandleSkillsList(w http.ResponseWriter, r *http.Request)
 		})
 	}
 
-	// Collect unique scan paths, replace home dir with ~.
-	wsDir := ""
-	if h.workspaceManager != nil {
-		wsDir = h.workspaceManager.WorkspaceDir(agentID)
-	}
 	globalPaths := uniquePaths(globalRoots, home, "")
 	wsPaths := uniquePaths(wsRoots, home, wsDir)
 
@@ -1471,7 +1458,7 @@ func uniquePaths(roots []skillloader.SkillRoot, home, strip string) []string {
 			seen[r.Path] = true
 			p := r.Path
 			if strip != "" && strings.HasPrefix(p, strip) {
-				p = p[len(strip)+1:] // +1 for trailing /
+				p = p[len(strip)+1:] // +1 to skip the path separator after strip prefix
 			} else if home != "" && strings.HasPrefix(p, home) {
 				p = "~" + p[len(home):]
 			}

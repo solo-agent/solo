@@ -38,11 +38,11 @@ func (s *AgentService) TriggerAgentGreeting(ctx context.Context, channelID, agen
 	// Get agent info
 	var ag agentChannelInfo
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, model_provider, model_name, system_prompt, temperature, max_tokens
+		`SELECT id, name, model_provider, model_name, system_prompt
 		 FROM agents WHERE id = $1 AND is_active = true`,
 		agentID,
 	).Scan(&ag.ID, &ag.Name, &ag.ModelProvider, &ag.ModelName,
-		&ag.SystemPrompt, &ag.Temperature, &ag.MaxTokens)
+		&ag.SystemPrompt)
 	if err != nil {
 		slog.Error("TriggerAgentGreeting: failed to get agent info", "agent_id", agentID, "error", err)
 		return
@@ -84,10 +84,8 @@ func (s *AgentService) TriggerAgentGreeting(ctx context.Context, channelID, agen
 		},
 		SystemPrompt: ag.SystemPrompt,
 		ModelConfig: agent.ModelConfig{
-			Provider:    ag.ModelProvider,
-			Model:       ag.ModelName,
-			Temperature: ag.Temperature,
-			MaxTokens:   ag.MaxTokens,
+			Provider: ag.ModelProvider,
+			Model:    ag.ModelName,
 		},
 	}
 

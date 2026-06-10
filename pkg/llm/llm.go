@@ -19,8 +19,6 @@ type CompletionRequest struct {
 	Model        string    `json:"model"`
 	Messages     []Message `json:"messages"`
 	SystemPrompt string    `json:"system_prompt,omitempty"`
-	Temperature  float64   `json:"temperature"`
-	MaxTokens    int       `json:"max_tokens"`
 }
 
 // CompletionResponse contains the result of a non-streaming LLM completion.

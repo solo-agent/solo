@@ -34,7 +34,7 @@ async function apiLogin(request: APIRequestContext) {
   return accessToken;
 }
 
-async function createAgent(request: APIRequestContext, name: string, systemPrompt: string, autoJoin: boolean = false) {
+async function createAgent(request: APIRequestContext, name: string, systemPrompt: string) {
   const res = await request.post(`${API}/api/v1/agents`, {
     headers: { Authorization: `Bearer ${accessToken}` },
     data: {
@@ -42,9 +42,6 @@ async function createAgent(request: APIRequestContext, name: string, systemPromp
       system_prompt: systemPrompt,
       model_provider: 'claude',
       model_name: 'sonnet',
-      temperature: 0.7,
-      max_tokens: 4096,
-      auto_join: autoJoin,
     },
   });
   return res.json();

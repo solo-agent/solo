@@ -34,8 +34,6 @@ type Message struct {
 type ModelConfig struct {
 	Provider    string  `json:"provider"`
 	Model       string  `json:"model"`
-	Temperature float64 `json:"temperature"`
-	MaxTokens   int     `json:"max_tokens"`
 }
 
 // RunRequest contains all parameters needed to invoke an agent.

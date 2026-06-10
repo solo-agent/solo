@@ -214,8 +214,6 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 			ModelConfig: agent.ModelConfig{
 				Provider:    ag.ModelProvider,
 				Model:       ag.ModelName,
-				Temperature: ag.Temperature,
-				MaxTokens:   ag.MaxTokens,
 			},
 			TaskContext:    taskContext,
 				AgentChain:     newChain,
@@ -947,8 +945,6 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 			ModelConfig: agent.ModelConfig{
 				Provider:    ag.ModelProvider,
 				Model:       ag.ModelName,
-				Temperature: ag.Temperature,
-				MaxTokens:   ag.MaxTokens,
 			},
 			TaskContext:    taskContext,
 				AgentChain:     newChain,
@@ -1014,11 +1010,11 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 	// Get agent info
 	var ag agentChannelInfo
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, model_provider, model_name, system_prompt, temperature, max_tokens
+		`SELECT id, name, model_provider, model_name, system_prompt
 		 FROM agents WHERE id = $1 AND is_active = true`,
 		agentID,
 	).Scan(&ag.ID, &ag.Name, &ag.ModelProvider, &ag.ModelName,
-		&ag.SystemPrompt, &ag.Temperature, &ag.MaxTokens)
+		&ag.SystemPrompt)
 	if err != nil {
 		slog.Error("failed to get agent info for task trigger",
 			"agent_id", agentID, "task_id", taskID, "error", err,
@@ -1180,8 +1176,6 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 		ModelConfig: agent.ModelConfig{
 			Provider:    ag.ModelProvider,
 			Model:       ag.ModelName,
-			Temperature: ag.Temperature,
-			MaxTokens:   ag.MaxTokens,
 		},
 		// v1.3: No OriginTaskID — agents complete tasks via /done #N directives.
 	}
@@ -1206,15 +1200,13 @@ type agentChannelInfo struct {
 	ModelProvider string
 	ModelName     string
 	SystemPrompt  string
-	Temperature   float64
-	MaxTokens     int
 }
 
 // getChannelActiveAgents queries all active agent members of a channel.
 func (s *AgentService) getChannelActiveAgents(ctx context.Context, channelID string) ([]agentChannelInfo, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT a.id, a.name, a.model_provider, a.model_name,
-		        a.system_prompt, a.temperature, a.max_tokens
+		        a.system_prompt
 		 FROM channel_members cm
 		 JOIN agents a ON a.id = cm.member_id
 		 WHERE cm.channel_id = $1
@@ -1231,7 +1223,7 @@ func (s *AgentService) getChannelActiveAgents(ctx context.Context, channelID str
 	for rows.Next() {
 		var a agentChannelInfo
 		if err := rows.Scan(&a.ID, &a.Name, &a.ModelProvider, &a.ModelName,
-			&a.SystemPrompt, &a.Temperature, &a.MaxTokens); err != nil {
+			&a.SystemPrompt); err != nil {
 			return nil, err
 		}
 		agents = append(agents, a)

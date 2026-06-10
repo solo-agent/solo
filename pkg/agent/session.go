@@ -294,8 +294,6 @@ func (m *AgentSessionManager) createSession(ctx context.Context, agentID string,
 		SystemPrompt: systemPrompt,
 		WorkspaceDir: ws.WorkDir,
 		Model:        agentCfg.Model,
-		MaxTokens:    agentCfg.MaxTokens,
-		Temperature:  agentCfg.Temperature,
 		Env:          agentCfg.Env,
 		CustomArgs:   agentCfg.CustomArgs,
 	}

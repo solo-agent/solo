@@ -1,0 +1,3 @@
+ALTER TABLE agents DROP COLUMN IF EXISTS temperature;
+ALTER TABLE agents DROP COLUMN IF EXISTS max_tokens;
+ALTER TABLE agents DROP COLUMN IF EXISTS auto_join;

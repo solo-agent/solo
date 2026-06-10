@@ -31,8 +31,6 @@ func NewOpenAIProvider(apiKey string) *OpenAIProvider {
 type openAIRequest struct {
 	Model       string            `json:"model"`
 	Messages    []openAIMessage   `json:"messages"`
-	Temperature float64           `json:"temperature"`
-	MaxTokens   int               `json:"max_tokens"`
 	Stream      bool              `json:"stream,omitempty"`
 }
 
@@ -71,8 +69,6 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req *CompletionRequest) (
 	body := openAIRequest{
 		Model:       req.Model,
 		Messages:    messages,
-		Temperature: req.Temperature,
-		MaxTokens:   req.MaxTokens,
 	}
 
 	payload, err := json.Marshal(body)

@@ -32,7 +32,6 @@ type anthropicRequest struct {
 	Model       string                `json:"model"`
 	Messages    []anthropicMessage    `json:"messages"`
 	System      string                `json:"system,omitempty"`
-	Temperature float64               `json:"temperature"`
 	MaxTokens   int                   `json:"max_tokens"`
 	Stream      bool                  `json:"stream,omitempty"`
 }
@@ -68,8 +67,7 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest
 		Model:       req.Model,
 		Messages:    messages,
 		System:      req.SystemPrompt,
-		Temperature: req.Temperature,
-		MaxTokens:   req.MaxTokens,
+		MaxTokens:   4096,
 	}
 
 	payload, err := json.Marshal(body)
