@@ -45,11 +45,11 @@ const PROVIDER_PATHS: Record<string, { global: string[]; workspace: string[] }> 
   claude:   { global: ['~/.claude/skills/'],                workspace: ['.claude/skills/'] },
   local:    { global: ['~/.claude/skills/'],                workspace: ['.claude/skills/'] },
   codex:    { global: ['$CODEX_HOME/skills/'],              workspace: ['.codex/skills/'] },
-  opencode: { global: ['~/.config/opencode/skills/', '~/.claude/skills/'], workspace: ['.opencode/skills/', '.claude/skills/'] },
+  opencode: { global: ['~/.config/opencode/skills/', '~/.claude/skills/', '~/.agents/skills/'], workspace: ['.opencode/skills/', '.claude/skills/', '.agents/skills/'] },
   copilot:  { global: ['~/.copilot/skills/'],               workspace: ['.github/copilot/skills/'] },
   cursor:   { global: ['~/.cursor/skills/'],                workspace: ['.cursor/skills/'] },
   kiro:     { global: ['~/.kiro/skills/'],                  workspace: ['.kiro/skills/'] },
-  openclaw: { global: ['~/.openclaw/skills/'],              workspace: ['skills/'] },
+  openclaw: { global: ['~/.openclaw/skills/', '~/.agents/skills/'], workspace: ['skills/', '.agents/skills/'] },
   hermes:   { global: ['~/.hermes/skills/'],                workspace: ['.hermes/skills/'] },
   pi:       { global: ['~/.pi/agent/skills/'],              workspace: ['.pi/skills/'] },
 };
