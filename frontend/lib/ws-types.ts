@@ -57,8 +57,8 @@ export type WSServerEvent =
   // ---- 输入状态 ----
   | { type: 'typing'; channel_id: string; user_id: string }
   // ---- Agent 状态事件 (SOLO-47-F) ----
-  | { type: 'agent.thinking'; channel_id: string; agent_id: string; status: string; detail?: string }
-  | { type: 'agent.typing'; channel_id: string; agent_id: string; status: string; detail?: string }
+  | { type: 'agent.thinking'; channel_id: string; agent_id: string; status: string; detail?: string; agent_name?: string; thought?: string }
+  | { type: 'agent.typing'; channel_id: string; agent_id: string; status: string; detail?: string; agent_name?: string; thought?: string }
   | { type: 'agent.status'; channel_id: string; agent_id: string; status: string; detail?: string }
   | { type: 'agent.error'; channel_id: string; agent_id: string; status: string; detail?: string }
   // ---- Agent chunk events (agent view) ----

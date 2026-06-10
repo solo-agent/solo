@@ -210,7 +210,7 @@ export default function WorkspacePage() {
               </p>
             </div>
           </div>
-        ) : (
+        ) : selectedAgent ? (
           <>
             {/* Header bar */}
             <div className="flex items-center gap-3 h-14 flex-shrink-0 border-b-2 border-black px-4 bg-brutal-cream">
@@ -317,6 +317,8 @@ export default function WorkspacePage() {
               </>
             )}
           </>
+        ) : (
+          null
         )}
       </main>
     </div>

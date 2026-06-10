@@ -4,6 +4,7 @@ import { useEffect, useState, type ComponentPropsWithoutRef } from 'react';
 import { createHighlighter } from 'shiki';
 import { Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { sanitizeHtml } from '@/lib/sanitize';
@@ -164,7 +165,7 @@ export function MarkdownPreview({ content }: { content: string }) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw]}
-        components={mdComponents}
+        components={mdComponents as Components}
       >
         {content}
       </ReactMarkdown>

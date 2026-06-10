@@ -48,7 +48,7 @@ export function useChannelMembers(channelId: string | null) {
   const mountedRef = useRef(true);
   const channelIdRef = useRef(channelId);
   channelIdRef.current = channelId;
-  const loadMembersRef = useRef<() => Promise<void>>();
+  const loadMembersRef = useRef<(() => Promise<void>) | null>(null);
   const { onEvent } = useWebSocket();
 
   // Listen for member.added events and refetch in real time.
