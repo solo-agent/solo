@@ -117,6 +117,20 @@ func (h *daemonHandler) agentProviders() map[string]string {
 	return out
 }
 
+// registeredProviders returns all provider types that have session managers
+// registered, even if no agents are currently active. Used to scan global
+// skill directories on startup before any agent has been triggered.
+func (h *daemonHandler) registeredProviders() []string {
+	if h.sessionManagers == nil {
+		return nil
+	}
+	var out []string
+	for providerType := range h.sessionManagers {
+		out = append(out, providerType)
+	}
+	return out
+}
+
 // ── Token store (SOLO-254-B: persistent session token auto-refresh) ────────────
 
 // getOrGenerateToken returns a cached valid token for the agent, or generates a

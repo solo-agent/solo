@@ -50,6 +50,32 @@ func NewSkillService(pool *pgxpool.Pool) *SkillService {
 	return &SkillService{pool: pool}
 }
 
+// SyncGlobalSkills upserts global skills into the skills table without binding
+// them to any agent. Called on every heartbeat so the catalog is always fresh.
+func (s *SkillService) SyncGlobalSkills(ctx context.Context, skills []skillloader.DiscoveredSkill) (int, error) {
+	var upserted int
+	for _, ds := range skills {
+		var id string
+		err := s.pool.QueryRow(ctx, `
+			INSERT INTO skills (name, description, source_path, source_kind, body, body_hash)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (name) DO UPDATE
+				SET description = $2, source_path = $3, source_kind = $4,
+				    body = $5, body_hash = $6, updated_at = now()
+			WHERE skills.body_hash <> $6
+			RETURNING id
+		`, ds.Name, ds.Description, ds.SourcePath, ds.SourceKind, ds.Body, ds.BodyHash).Scan(&id)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			return upserted, fmt.Errorf("upsert skill %q: %w", ds.Name, err)
+		}
+		upserted++
+	}
+	return upserted, nil
+}
+
 // SyncFromDaemon reconciles per-agent skills reported by a daemon with the DB.
 // The reported map is agentID → discovered skills for that agent.
 // For each agent:

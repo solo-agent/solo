@@ -333,7 +333,8 @@ func sendHeartbeat() {
 		ActiveTasks: taskMgr.ListActiveTasks(),
 		AgentIDs:    daemonH.activeSessionAgentIDs(),
 		SystemInfo:  collectSystemInfo(),
-		AgentSkills: collectAgentSkills(daemonH.agentProviders()),
+		GlobalSkills: collectGlobalSkills(daemonH.registeredProviders()),
+		AgentSkills:  collectAgentSkills(daemonH.agentProviders()),
 	}
 
 	payload, err := json.Marshal(req)
@@ -419,7 +420,8 @@ type daemonHeartbeatPayload struct {
 	ActiveTasks []string                                `json:"active_tasks"`
 	AgentIDs    []string                                `json:"agent_ids"`
 	SystemInfo  SystemInfo                              `json:"system_info"`
-	AgentSkills map[string][]skillloader.DiscoveredSkill `json:"agent_skills,omitempty"`
+	AgentSkills  map[string][]skillloader.DiscoveredSkill `json:"agent_skills,omitempty"`
+	GlobalSkills []skillloader.DiscoveredSkill            `json:"global_skills,omitempty"`
 }
 
 // ---- Skill path resolution ------------------------------------------------
@@ -511,6 +513,45 @@ func agentWorkspaceRoots(provider, wsDir string) []skillloader.SkillRoot {
 	// Universal workspace fallback.
 	roots = append(roots, skillloader.SkillRoot{Path: filepath.Join(wsDir, ".agents", "skills"), Kind: "agents", Priority: 80})
 	return roots
+}
+
+// collectGlobalSkills scans global skill directories for all registered
+// provider types. Runs on every heartbeat regardless of whether any agents
+// are active, so the DB always has an up-to-date skill catalog.
+func collectGlobalSkills(providers []string) []skillloader.DiscoveredSkill {
+	if len(providers) == 0 {
+		return nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		slog.Warn("skill global scan: no home dir", "error", err)
+		return nil
+	}
+
+	var allRoots []skillloader.SkillRoot
+	seen := make(map[string]bool)
+	for _, provider := range providers {
+		for _, r := range agentGlobalRoots(provider, home) {
+			if !seen[r.Path] {
+				seen[r.Path] = true
+				allRoots = append(allRoots, r)
+			}
+		}
+	}
+
+	discovered, err := skillloader.ScanRoots(home, allRoots)
+	if err != nil {
+		slog.Warn("skill global scan failed", "error", err)
+		return nil
+	}
+	out := make([]skillloader.DiscoveredSkill, 0, len(discovered))
+	for _, ds := range discovered {
+		out = append(out, ds)
+	}
+	if len(out) > 0 {
+		slog.Debug("skill global scan", "providers", len(providers), "roots", len(allRoots), "count", len(out))
+	}
+	return out
 }
 
 // collectAgentSkills scans each agent's global and workspace skill directories.

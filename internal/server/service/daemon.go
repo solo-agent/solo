@@ -618,7 +618,8 @@ type DaemonHeartbeatRequest struct {
 	ActiveTasks []string                      `json:"active_tasks"`
 	AgentIDs    []string                      `json:"agent_ids,omitempty"`
 	SystemInfo  DaemonSystemInfo              `json:"system_info"`
-	AgentSkills map[string][]skillloader.DiscoveredSkill `json:"agent_skills,omitempty"`
+	AgentSkills  map[string][]skillloader.DiscoveredSkill `json:"agent_skills,omitempty"`
+	GlobalSkills []skillloader.DiscoveredSkill            `json:"global_skills,omitempty"`
 }
 
 type DaemonHeartbeatResponse struct {
