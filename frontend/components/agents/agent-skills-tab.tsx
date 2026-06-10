@@ -7,52 +7,17 @@
 
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { AlertCircle, Puzzle, Globe, Folder } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { useSkills } from '@/lib/hooks/use-skills';
-import { apiClient } from '@/lib/api-client';
 import { SkillDetailDrawer } from './skill-detail-drawer';
 import type { SkillSummary } from '@/lib/types';
 
 interface AgentSkillsTabProps {
   agentId: string;
   agentProvider?: string;
-}
-
-// Which skill kinds are visible to each agent provider type.
-// opencode also reads claude-ecosystem paths.
-const PROVIDER_KINDS: Record<string, string[]> = {
-  claude: ['claude', 'ws-claude'],
-  local: ['claude', 'ws-claude'],
-  codex: ['codex', 'ws-codex'],
-  opencode: ['opencode', 'claude', 'ws-opencode', 'ws-claude'],
-  copilot: ['copilot', 'ws-copilot'],
-  cursor: ['cursor', 'ws-cursor'],
-  kiro: ['kiro', 'ws-kiro'],
-  openclaw: ['openclaw', 'ws-openclaw'],
-  hermes: ['hermes', 'ws-hermes'],
-  pi: ['pi', 'ws-pi'],
-};
-
-// Scan paths shown in the UI for each provider.
-const PROVIDER_PATHS: Record<string, { global: string[]; workspace: string[] }> = {
-  claude:    { global: ['~/.claude/skills/'],              workspace: ['.claude/skills/'] },
-  local:     { global: ['~/.claude/skills/'],              workspace: ['.claude/skills/'] },
-  codex:     { global: ['$CODEX_HOME/skills/'],            workspace: ['.codex/skills/'] },
-  opencode:  { global: ['~/.config/opencode/skills/', '~/.claude/skills/'], workspace: ['.opencode/skills/', '.claude/skills/'] },
-  copilot:   { global: ['~/.copilot/skills/'],             workspace: ['.github/copilot/skills/'] },
-  cursor:    { global: ['~/.cursor/skills/'],              workspace: ['.cursor/skills/'] },
-  kiro:      { global: ['~/.kiro/skills/'],                workspace: ['.kiro/skills/'] },
-  openclaw:  { global: ['~/.openclaw/skills/'],            workspace: ['skills/'] },
-  hermes:    { global: ['~/.hermes/skills/'],              workspace: ['.hermes/skills/'] },
-  pi:        { global: ['~/.pi/agent/skills/'],            workspace: ['.pi/skills/'] },
-};
-
-function visibleKinds(provider?: string): string[] {
-  if (!provider) return [];
-  return PROVIDER_KINDS[provider] ?? [];
 }
 
 function isWorkspace(kind: string) {
@@ -109,32 +74,13 @@ function SkillList({ skills, emptyText }: { skills: SkillSummary[]; emptyText: s
   );
 }
 
-export function AgentSkillsTab({ agentId, agentProvider }: AgentSkillsTabProps) {
+export function AgentSkillsTab({ agentId: _agentId, agentProvider: _agentProvider }: AgentSkillsTabProps) {
   const { skills: catalog, isLoading, error, refetch } = useSkills();
-  const [resolvedProvider, setResolvedProvider] = useState(agentProvider);
-
-  useEffect(() => {
-    if (agentProvider) return;
-    let cancelled = false;
-    apiClient.get<{ model_provider?: string }>(`/api/v1/agents/${agentId}`).then((res) => {
-      if (!cancelled && res.model_provider) {
-        setResolvedProvider(res.model_provider);
-      }
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [agentId, agentProvider]);
-
-  const kinds = useMemo(() => visibleKinds(resolvedProvider), [resolvedProvider]);
 
   const { globalSkills, workspaceSkills } = useMemo(() => {
-    if (kinds.length === 0) {
-      return { globalSkills: catalog, workspaceSkills: [] as SkillSummary[] };
-    }
-    const kindSet = new Set(kinds);
     const global: SkillSummary[] = [];
     const workspace: SkillSummary[] = [];
     for (const s of catalog) {
-      if (!kindSet.has(s.source_kind)) continue;
       if (isWorkspace(s.source_kind)) {
         workspace.push(s);
       } else {
@@ -142,7 +88,7 @@ export function AgentSkillsTab({ agentId, agentProvider }: AgentSkillsTabProps) 
       }
     }
     return { globalSkills: global, workspaceSkills: workspace };
-  }, [catalog, kinds]);
+  }, [catalog]);
 
   if (isLoading) {
     return (
@@ -183,37 +129,10 @@ export function AgentSkillsTab({ agentId, agentProvider }: AgentSkillsTabProps) 
           <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
             {globalSkills.length + workspaceSkills.length}
           </span>
-          {resolvedProvider && (
-            <span className="badge-brutal text-[10px] bg-brutal-primary text-white px-1.5">
-              {resolvedProvider}
-            </span>
-          )}
         </div>
         <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-          由 Daemon 自动扫描，仅显示当前 Agent 可用的 Skill。
+          Daemon 自动扫描机器上所有已知路径的 Skill。按来源类型分组展示。
         </p>
-        {resolvedProvider && PROVIDER_PATHS[resolvedProvider] && (
-          <div className="mt-2 space-y-1 font-mono text-[10px] text-muted-foreground/80">
-            <div>
-              <span className="font-bold">全局:</span>{' '}
-              {PROVIDER_PATHS[resolvedProvider].global.map((p, i) => (
-                <span key={p}>
-                  {i > 0 && ', '}
-                  <code className="bg-brutal-cream px-1 border border-black/20">{p}</code>
-                </span>
-              ))}
-            </div>
-            <div>
-              <span className="font-bold">Workspace:</span>{' '}
-              {PROVIDER_PATHS[resolvedProvider].workspace.map((p, i) => (
-                <span key={p}>
-                  {i > 0 && ', '}
-                  <code className="bg-brutal-cream px-1 border border-black/20">{p}</code>
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
       {catalog.length === 0 ? (
@@ -223,11 +142,9 @@ export function AgentSkillsTab({ agentId, agentProvider }: AgentSkillsTabProps) 
             Daemon 启动后会在心跳时自动扫描并同步。
             请确保 Daemon 已重启并运行。
           </p>
-          {resolvedProvider && PROVIDER_PATHS[resolvedProvider] && (
-            <p className="mt-2 font-mono text-[10px] text-muted-foreground/70">
-              扫描路径: {PROVIDER_PATHS[resolvedProvider].global.join(', ')}
-            </p>
-          )}
+          <p className="mt-2 font-mono text-[10px] text-muted-foreground/70">
+            扫描路径: ~/.claude/skills/, ~/.codex/skills/ 等
+          </p>
         </div>
       ) : (
         <>
