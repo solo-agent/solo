@@ -22,7 +22,7 @@ interface AgentSkillsTabProps {
 }
 
 // Which skill kinds are visible to each agent provider type.
-// opencode sees both its own path and the claude-compat path.
+// opencode also reads claude-ecosystem paths.
 const PROVIDER_KINDS: Record<string, string[]> = {
   claude: ['claude', 'ws-claude'],
   local: ['claude', 'ws-claude'],
@@ -34,6 +34,20 @@ const PROVIDER_KINDS: Record<string, string[]> = {
   openclaw: ['openclaw', 'ws-openclaw'],
   hermes: ['hermes', 'ws-hermes'],
   pi: ['pi', 'ws-pi'],
+};
+
+// Scan paths shown in the UI for each provider.
+const PROVIDER_PATHS: Record<string, { global: string[]; workspace: string[] }> = {
+  claude:    { global: ['~/.claude/skills/'],              workspace: ['.claude/skills/'] },
+  local:     { global: ['~/.claude/skills/'],              workspace: ['.claude/skills/'] },
+  codex:     { global: ['$CODEX_HOME/skills/'],            workspace: ['.codex/skills/'] },
+  opencode:  { global: ['~/.config/opencode/skills/', '~/.claude/skills/'], workspace: ['.opencode/skills/', '.claude/skills/'] },
+  copilot:   { global: ['~/.copilot/skills/'],             workspace: ['.github/copilot/skills/'] },
+  cursor:    { global: ['~/.cursor/skills/'],              workspace: ['.cursor/skills/'] },
+  kiro:      { global: ['~/.kiro/skills/'],                workspace: ['.kiro/skills/'] },
+  openclaw:  { global: ['~/.openclaw/skills/'],            workspace: ['skills/'] },
+  hermes:    { global: ['~/.hermes/skills/'],              workspace: ['.hermes/skills/'] },
+  pi:        { global: ['~/.pi/agent/skills/'],            workspace: ['.pi/skills/'] },
 };
 
 function visibleKinds(provider?: string): string[] {
@@ -169,18 +183,51 @@ export function AgentSkillsTab({ agentId, agentProvider }: AgentSkillsTabProps) 
           <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
             {globalSkills.length + workspaceSkills.length}
           </span>
+          {resolvedProvider && (
+            <span className="badge-brutal text-[10px] bg-brutal-primary text-white px-1.5">
+              {resolvedProvider}
+            </span>
+          )}
         </div>
         <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-          由 Daemon 自动扫描，仅显示当前 Agent 类型可用的 Skill。
+          由 Daemon 自动扫描，仅显示当前 Agent 可用的 Skill。
         </p>
+        {resolvedProvider && PROVIDER_PATHS[resolvedProvider] && (
+          <div className="mt-2 space-y-1 font-mono text-[10px] text-muted-foreground/80">
+            <div>
+              <span className="font-bold">全局:</span>{' '}
+              {PROVIDER_PATHS[resolvedProvider].global.map((p, i) => (
+                <span key={p}>
+                  {i > 0 && ', '}
+                  <code className="bg-brutal-cream px-1 border border-black/20">{p}</code>
+                </span>
+              ))}
+            </div>
+            <div>
+              <span className="font-bold">Workspace:</span>{' '}
+              {PROVIDER_PATHS[resolvedProvider].workspace.map((p, i) => (
+                <span key={p}>
+                  {i > 0 && ', '}
+                  <code className="bg-brutal-cream px-1 border border-black/20">{p}</code>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {catalog.length === 0 ? (
         <div className="card-brutal bg-brutal-cream p-6 text-center">
           <p className="font-mono text-sm text-foreground">还没有发现任何 Skill</p>
           <p className="mt-2 font-mono text-[11px] text-muted-foreground">
-            在对应路径下放置 SKILL.md，Daemon 下次心跳自动同步
+            Daemon 启动后会在心跳时自动扫描并同步。
+            请确保 Daemon 已重启并运行。
           </p>
+          {resolvedProvider && PROVIDER_PATHS[resolvedProvider] && (
+            <p className="mt-2 font-mono text-[10px] text-muted-foreground/70">
+              扫描路径: {PROVIDER_PATHS[resolvedProvider].global.join(', ')}
+            </p>
+          )}
         </div>
       ) : (
         <>
