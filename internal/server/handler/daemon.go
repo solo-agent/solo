@@ -145,9 +145,9 @@ func (h *DaemonHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Sync skills reported by the daemon.
-	if h.skillSvc != nil && len(req.Skills) > 0 {
-		added, updated, removed, syncErr := h.skillSvc.SyncFromDaemon(r.Context(), req.Skills)
+	// Sync skills reported by the daemon per agent.
+	if h.skillSvc != nil && len(req.AgentSkills) > 0 {
+		added, updated, removed, syncErr := h.skillSvc.SyncFromDaemon(r.Context(), req.AgentSkills)
 		if syncErr != nil {
 			slog.Warn("skill sync from daemon heartbeat failed",
 				"request_id", reqID, "daemon_id", req.DaemonID, "error", syncErr,

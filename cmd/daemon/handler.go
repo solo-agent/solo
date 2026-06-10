@@ -103,6 +103,20 @@ func (h *daemonHandler) activeSessionAgentIDs() []string {
 	return ids
 }
 
+// agentProviders returns provider → agentIDs for all active sessions.
+func (h *daemonHandler) agentProviders() map[string]string {
+	if h.sessionManagers == nil {
+		return nil
+	}
+	out := make(map[string]string)
+	for providerType, sm := range h.sessionManagers {
+		for _, id := range sm.ActiveAgentIDs() {
+			out[id] = providerType
+		}
+	}
+	return out
+}
+
 // ── Token store (SOLO-254-B: persistent session token auto-refresh) ────────────
 
 // getOrGenerateToken returns a cached valid token for the agent, or generates a

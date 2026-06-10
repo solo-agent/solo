@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -51,89 +50,67 @@ func NewSkillService(pool *pgxpool.Pool) *SkillService {
 	return &SkillService{pool: pool}
 }
 
-// SyncFromDaemon reconciles skills reported by a daemon with the DB.
-// Daemon sends {name, desc, path, kind, body, body_hash} from its local scan.
-// Server inserts new, updates changed, and deletes skills whose source_path
-// no longer appears in the report (but only for paths managed by this daemon's
-// provider kind, to avoid deleting skills reported by other daemons).
-func (s *SkillService) SyncFromDaemon(ctx context.Context, reported []skillloader.DiscoveredSkill) (added, updated, removed int, err error) {
-	// Index reported skills by name.
-	reportedByName := make(map[string]skillloader.DiscoveredSkill, len(reported))
-	for _, ds := range reported {
-		reportedByName[ds.Name] = ds
-	}
-
-	rows, err := s.pool.Query(ctx, `SELECT id, name, body_hash, source_path FROM skills`)
+// SyncFromDaemon reconciles per-agent skills reported by a daemon with the DB.
+// The reported map is agentID → discovered skills for that agent.
+// For each agent:
+//   1. Upsert skills into the skills table (by name, keyed by body hash)
+//   2. Replace agent_skills bindings so the agent has exactly the reported set.
+// Returns aggregate counts across all agents.
+func (s *SkillService) SyncFromDaemon(ctx context.Context, reported map[string][]skillloader.DiscoveredSkill) (added, updated, removed int, err error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return 0, 0, 0, fmt.Errorf("list existing: %w", err)
+		return 0, 0, 0, fmt.Errorf("begin tx: %w", err)
 	}
-	defer rows.Close()
+	defer tx.Rollback(ctx)
 
-	type existingRow struct {
-		ID, Name, BodyHash, SourcePath string
-	}
-	existing := make(map[string]existingRow)
-	for rows.Next() {
-		var r existingRow
-		if err := rows.Scan(&r.ID, &r.Name, &r.BodyHash, &r.SourcePath); err != nil {
-			return 0, 0, 0, fmt.Errorf("scan: %w", err)
-		}
-		existing[r.Name] = r
-	}
-	if err := rows.Err(); err != nil {
-		return 0, 0, 0, err
-	}
-
-	for name, ds := range reportedByName {
-		es, ok := existing[name]
-		if !ok {
-			_, err := s.pool.Exec(ctx, `
+	// Upsert skills and bind per-agent.
+	for agentID, skills := range reported {
+		for _, ds := range skills {
+			var skillID string
+			err := tx.QueryRow(ctx, `
 				INSERT INTO skills (name, description, source_path, source_kind, body, body_hash)
 				VALUES ($1, $2, $3, $4, $5, $6)
-			`, ds.Name, ds.Description, ds.SourcePath, ds.SourceKind, ds.Body, ds.BodyHash)
+				ON CONFLICT (name) DO UPDATE
+					SET description = $2, source_path = $3, source_kind = $4,
+					    body = $5, body_hash = $6, updated_at = now()
+				WHERE skills.body_hash <> $6
+				RETURNING id
+			`, ds.Name, ds.Description, ds.SourcePath, ds.SourceKind, ds.Body, ds.BodyHash).Scan(&skillID)
 			if err != nil {
-				slog.Warn("skill sync insert failed", "name", name, "error", err)
-				continue
+				if errors.Is(err, pgx.ErrNoRows) {
+					continue // hash unchanged
+				}
+				return added, updated, removed, fmt.Errorf("upsert skill %q: %w", ds.Name, err)
 			}
-			added++
-			continue
+			updated++
 		}
-		if es.BodyHash == ds.BodyHash {
-			continue // unchanged
+
+		// Collect skill IDs for this agent.
+		skillIDs := make([]string, len(skills))
+		for i, ds := range skills {
+			var id string
+			if err := tx.QueryRow(ctx, `SELECT id FROM skills WHERE name = $1`, ds.Name).Scan(&id); err != nil {
+				return added, updated, removed, fmt.Errorf("lookup skill %q: %w", ds.Name, err)
+			}
+			skillIDs[i] = id
 		}
-		_, err := s.pool.Exec(ctx, `
-			UPDATE skills
-			SET description = $1, source_path = $2, source_kind = $3,
-			    body = $4, body_hash = $5, updated_at = now()
-			WHERE id = $6
-		`, ds.Description, ds.SourcePath, ds.SourceKind, ds.Body, ds.BodyHash, es.ID)
-		if err != nil {
-			slog.Warn("skill sync update failed", "name", name, "error", err)
-			continue
+
+		// Replace this agent's bindings (full replace).
+		if _, err := tx.Exec(ctx, `DELETE FROM agent_skills WHERE agent_id = $1`, agentID); err != nil {
+			return added, updated, removed, fmt.Errorf("clear bindings for %s: %w", agentID, err)
 		}
-		updated++
+		for _, id := range skillIDs {
+			if _, err := tx.Exec(ctx, `INSERT INTO agent_skills (agent_id, skill_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, agentID, id); err != nil {
+				return added, updated, removed, fmt.Errorf("bind skill %s for %s: %w", id, agentID, err)
+			}
+		}
 	}
 
-	// Delete skills that were not in the report.
-	for name, es := range existing {
-		if _, stillPresent := reportedByName[name]; stillPresent {
-			continue
-		}
-		if _, err := s.pool.Exec(ctx, `DELETE FROM skills WHERE id = $1`, es.ID); err != nil {
-			slog.Warn("skill sync delete failed", "name", name, "error", err)
-			continue
-		}
-		removed++
+	if err := tx.Commit(ctx); err != nil {
+		return added, updated, removed, err
 	}
 
 	return added, updated, removed, nil
-}
-
-type existingSkill struct {
-	ID         string
-	Name       string
-	BodyHash   string
-	SourcePath string
 }
 
 // ListAll returns summaries of every skill in the DB.

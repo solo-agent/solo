@@ -331,7 +331,7 @@ func sendHeartbeat() {
 		ActiveTasks: taskMgr.ListActiveTasks(),
 		AgentIDs:    daemonH.activeSessionAgentIDs(),
 		SystemInfo:  collectSystemInfo(),
-		Skills:      collectSkills(),
+		AgentSkills: collectAgentSkills(daemonH.agentProviders()),
 	}
 
 	payload, err := json.Marshal(req)
@@ -410,44 +410,87 @@ type daemonRegisterResponse struct {
 }
 
 type daemonHeartbeatPayload struct {
-	DaemonID    string                        `json:"daemon_id"`
-	Load        int32                         `json:"load"`
-	MaxLoad     int                           `json:"max_load"`
-	UptimeSec   int64                         `json:"uptime_seconds"`
-	ActiveTasks []string                      `json:"active_tasks"`
-	AgentIDs    []string                      `json:"agent_ids"`
-	SystemInfo  SystemInfo                    `json:"system_info"`
-	Skills      []skillloader.DiscoveredSkill `json:"skills,omitempty"`
+	DaemonID    string                                  `json:"daemon_id"`
+	Load        int32                                   `json:"load"`
+	MaxLoad     int                                     `json:"max_load"`
+	UptimeSec   int64                                   `json:"uptime_seconds"`
+	ActiveTasks []string                                `json:"active_tasks"`
+	AgentIDs    []string                                `json:"agent_ids"`
+	SystemInfo  SystemInfo                              `json:"system_info"`
+	AgentSkills map[string][]skillloader.DiscoveredSkill `json:"agent_skills,omitempty"`
 }
 
-// collectSkills scans the agent-native skill directories and returns the
-// discovered skills. See pkg/skillloader for the scanning and parsing logic.
-func collectSkills() []skillloader.DiscoveredSkill {
+// skillRootForProvider maps a backend provider type to the global skill
+// directory that CLI agent natively discovers.
+func skillRootForProvider(provider, home string) *skillloader.SkillRoot {
+	switch provider {
+	case "claude", "local":
+		return &skillloader.SkillRoot{Path: home + "/.claude/skills", Kind: "claude", Priority: 60}
+	case "codex":
+		return &skillloader.SkillRoot{Path: home + "/.codex/skills", Kind: "codex", Priority: 35}
+	default:
+		return nil
+	}
+}
+
+// collectAgentSkills scans each agent's native skill directories and returns
+// per-agent discovered skills. Uses agentProviders (provider type → agent IDs)
+// to determine which directories to scan for each agent.
+func collectAgentSkills(agentProviders map[string]string) map[string][]skillloader.DiscoveredSkill {
+	if len(agentProviders) == 0 {
+		return nil
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		slog.Warn("skill scan: no home dir", "error", err)
 		return nil
 	}
 
-	roots := []skillloader.SkillRoot{
-		{Path: home + "/.claude/skills", Kind: "claude", Priority: 60},
-		{Path: home + "/.codex/skills", Kind: "codex", Priority: 35},
+	// Collect unique roots by provider type (avoid duplicate scans).
+	scannedRoots := make(map[string]*skillloader.SkillRoot)
+	for _, provider := range agentProviders {
+		if scannedRoots[provider] != nil {
+			continue
+		}
+		scannedRoots[provider] = skillRootForProvider(provider, home)
 	}
 
-	discovered, err := skillloader.ScanRoots("", roots)
-	if err != nil {
-		slog.Warn("skill scan failed", "error", err)
-		return nil
+	// Map provider → its agent IDs.
+	providerAgents := make(map[string][]string)
+	for agentID, provider := range agentProviders {
+		providerAgents[provider] = append(providerAgents[provider], agentID)
 	}
 
-	var out []skillloader.DiscoveredSkill
-	for _, ds := range discovered {
-		out = append(out, ds)
+	out := make(map[string][]skillloader.DiscoveredSkill)
+	for provider, root := range scannedRoots {
+		if root == nil {
+			continue
+		}
+		discovered, err := skillloader.ScanRoots(home, []skillloader.SkillRoot{*root})
+		if err != nil {
+			slog.Warn("skill scan failed", "provider", provider, "path", root.Path, "error", err)
+			continue
+		}
+
+		flat := make([]skillloader.DiscoveredSkill, 0, len(discovered))
+		for _, ds := range discovered {
+			flat = append(flat, ds)
+		}
+
+		// Assign the same discovered skills to every agent of this provider.
+		for _, agentID := range providerAgents[provider] {
+			out[agentID] = flat
+		}
+
+		slog.Debug("skill scan for provider",
+			"provider", provider,
+			"path", root.Path,
+			"count", len(flat),
+			"agents", len(providerAgents[provider]),
+		)
 	}
 
-	if len(out) > 0 {
-		slog.Debug("skill scan complete", "count", len(out))
-	}
 	return out
 }
 
