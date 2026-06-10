@@ -438,6 +438,12 @@ func workspaceSkillDir(provider string) string {
 		return ".cursor/skills"
 	case "kiro":
 		return ".kiro/skills"
+	case "openclaw":
+		return ".openclaw/skills"
+	case "hermes":
+		return ".hermes/skills"
+	case "pi":
+		return ".pi/agent/skills"
 	default:
 		return ""
 	}
@@ -468,6 +474,12 @@ func skillRootForProvider(provider, home string) *skillloader.SkillRoot {
 		return &skillloader.SkillRoot{Path: filepath.Join(home, ".cursor", "skills"), Kind: "cursor", Priority: 35}
 	case "kiro":
 		return &skillloader.SkillRoot{Path: filepath.Join(home, ".kiro", "skills"), Kind: "kiro", Priority: 35}
+	case "openclaw":
+		return &skillloader.SkillRoot{Path: filepath.Join(home, ".openclaw", "skills"), Kind: "openclaw", Priority: 35}
+	case "hermes":
+		return &skillloader.SkillRoot{Path: filepath.Join(home, ".hermes", "skills"), Kind: "hermes", Priority: 35}
+	case "pi":
+		return &skillloader.SkillRoot{Path: filepath.Join(home, ".pi", "agent", "skills"), Kind: "pi", Priority: 35}
 	default:
 		return nil
 	}
