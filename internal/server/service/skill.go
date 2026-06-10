@@ -373,34 +373,41 @@ func resolveDataDir() string {
 }
 
 // buildRoots returns the priority table for skill root discovery.
+// Scans each agent backend's native global skill directory so solo
+// sees what the user has already installed for their CLI agents.
 func buildRoots(dataDir string) []skillloader.SkillRoot {
-	// Default 5-root priority table from design §2.
-	defaults := []skillloader.SkillRoot{
-		{Path: filepath.Join(dataDir, ".builtin-skills"), Kind: "builtin-global", Priority: 95},
-		{Path: filepath.Join(dataDir, ".claude", "skills"), Kind: "user-claude", Priority: 60},
-		{Path: filepath.Join(dataDir, ".codex", "skills"), Kind: "user-codex", Priority: 35},
-		{Path: filepath.Join(dataDir, "skills"), Kind: "user-mavis", Priority: 25},
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(dataDir, "skills"), Kind: "mavis", Priority: 25},
+		}
 	}
-	// Also include each agent's .builtin-skills dir as priority 100.
-	// We do this by reading dataDir/agents/*/.builtin-skills if the agents
-	// dir exists.
+
+	var roots []skillloader.SkillRoot
+
+	// Agent builtin-skills per agent (highest priority).
 	agentsDir := filepath.Join(dataDir, "agents")
 	if entries, err := os.ReadDir(agentsDir); err == nil {
-		var agentRoots []skillloader.SkillRoot
 		for _, e := range entries {
 			if !e.IsDir() {
 				continue
 			}
-			agentRoots = append(agentRoots, skillloader.SkillRoot{
+			roots = append(roots, skillloader.SkillRoot{
 				Path:     filepath.Join(agentsDir, e.Name(), ".builtin-skills"),
 				Kind:     "builtin-agent",
 				Priority: 100,
 			})
 		}
-		// Concatenate: agent roots (highest pri) + defaults
-		return append(agentRoots, defaults...)
 	}
-	return defaults
+
+	// Agent-native global skill directories.
+	roots = append(roots,
+		skillloader.SkillRoot{Path: filepath.Join(home, ".claude", "skills"), Kind: "claude", Priority: 60},
+		skillloader.SkillRoot{Path: filepath.Join(home, ".codex", "skills"), Kind: "codex", Priority: 35},
+		skillloader.SkillRoot{Path: filepath.Join(dataDir, "skills"), Kind: "mavis", Priority: 25},
+	)
+
+	return roots
 }
 
 func fileExists(p string) bool {

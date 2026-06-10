@@ -165,7 +165,7 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
         <div className="card-brutal bg-brutal-cream p-6 text-center">
           <p className="font-mono text-sm text-foreground">磁盘上还没有发现任何 Skill</p>
           <p className="mt-2 font-mono text-[11px] text-muted-foreground">
-            在 <code className="bg-white px-1.5 py-0.5 border border-black">~/.mavis/skills/</code> 下放一个含 <code className="bg-white px-1.5 py-0.5 border border-black">SKILL.md</code> 的目录
+            在 <code className="bg-white px-1.5 py-0.5 border border-black">~/.claude/skills/</code> 或 <code className="bg-white px-1.5 py-0.5 border border-black">~/.codex/skills/</code> 下放一个含 <code className="bg-white px-1.5 py-0.5 border border-black">SKILL.md</code> 的目录
           </p>
           <Button type="button" onClick={handleRescan} disabled={rescanning} size="sm" className="mt-4">
             <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
