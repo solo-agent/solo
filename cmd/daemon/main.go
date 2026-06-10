@@ -45,6 +45,7 @@ var (
 	machineLock      *agent.MachineLock
 	taskMgr          *taskManager
 		daemonH          *daemonHandler
+	workspaceMgr     *agent.WorkspaceManager
 )
 
 func main() {
@@ -112,7 +113,7 @@ func main() {
 		if err != nil {
 			continue // not all types support persistent sessions
 		}
-		workspaceMgr := agent.NewWorkspaceManager("")
+		workspaceMgr = agent.NewWorkspaceManager("")
 		memoryMgr := agent.NewMemoryManager("")
 		sessionMgr := agent.NewAgentSessionManager(psBackend, workspaceMgr, memoryMgr, slog.Default())
 		h.SetSessionManager(meta.Type, sessionMgr)
@@ -421,6 +422,27 @@ type daemonHeartbeatPayload struct {
 	AgentSkills map[string][]skillloader.DiscoveredSkill `json:"agent_skills,omitempty"`
 }
 
+// workspaceSkillDir returns the relative path inside the agent workspace CWD
+// where each provider discovers project-level skills.
+func workspaceSkillDir(provider string) string {
+	switch provider {
+	case "claude", "local":
+		return ".claude/skills"
+	case "codex":
+		return ".codex/skills"
+	case "opencode":
+		return ".opencode/skills"
+	case "copilot":
+		return ".github/copilot/skills"
+	case "cursor":
+		return ".cursor/skills"
+	case "kiro":
+		return ".kiro/skills"
+	default:
+		return ""
+	}
+}
+
 // skillRootForProvider maps a backend provider type to the global skill
 // directory that CLI agent natively discovers. Paths follow upstream
 // conventions documented by each provider. Keep in sync with:
@@ -451,9 +473,10 @@ func skillRootForProvider(provider, home string) *skillloader.SkillRoot {
 	}
 }
 
-// collectAgentSkills scans each agent's native skill directories and returns
-// per-agent discovered skills. Uses agentProviders (provider type → agent IDs)
-// to determine which directories to scan for each agent.
+// collectAgentSkills scans each agent's global and workspace skill directories.
+// Returns per-agent discovered skills. Global skills from the same provider are
+// shared across agents of that provider; workspace skills are agent-specific.
+// Workspace skills win on name collision (added after global, first-wins).
 func collectAgentSkills(agentProviders map[string]string) map[string][]skillloader.DiscoveredSkill {
 	if len(agentProviders) == 0 {
 		return nil
@@ -465,48 +488,78 @@ func collectAgentSkills(agentProviders map[string]string) map[string][]skillload
 		return nil
 	}
 
-	// Collect unique roots by provider type (avoid duplicate scans).
-	scannedRoots := make(map[string]*skillloader.SkillRoot)
-	for _, provider := range agentProviders {
-		if scannedRoots[provider] != nil {
-			continue
-		}
-		scannedRoots[provider] = skillRootForProvider(provider, home)
+	// Phase 1: scan global roots per provider (avoid duplicate scans).
+	type providerScan struct {
+		root    *skillloader.SkillRoot
+		agents  []string
 	}
-
-	// Map provider → its agent IDs.
-	providerAgents := make(map[string][]string)
+	scanned := make(map[string]*providerScan)
 	for agentID, provider := range agentProviders {
-		providerAgents[provider] = append(providerAgents[provider], agentID)
+		if scanned[provider] == nil {
+			scanned[provider] = &providerScan{
+				root:   skillRootForProvider(provider, home),
+				agents: nil,
+			}
+		}
+		scanned[provider].agents = append(scanned[provider].agents, agentID)
 	}
 
 	out := make(map[string][]skillloader.DiscoveredSkill)
-	for provider, root := range scannedRoots {
-		if root == nil {
-			continue
-		}
-		discovered, err := skillloader.ScanRoots(home, []skillloader.SkillRoot{*root})
-		if err != nil {
-			slog.Warn("skill scan failed", "provider", provider, "path", root.Path, "error", err)
-			continue
-		}
 
+	// Assign global skills to agents.
+	for provider, ps := range scanned {
+		if ps.root == nil {
+			continue
+		}
+		discovered, err := skillloader.ScanRoots(home, []skillloader.SkillRoot{*ps.root})
+		if err != nil {
+			slog.Warn("skill global scan failed", "provider", provider, "path", ps.root.Path, "error", err)
+			continue
+		}
 		flat := make([]skillloader.DiscoveredSkill, 0, len(discovered))
 		for _, ds := range discovered {
 			flat = append(flat, ds)
 		}
-
-		// Assign the same discovered skills to every agent of this provider.
-		for _, agentID := range providerAgents[provider] {
-			out[agentID] = flat
+		for _, agentID := range ps.agents {
+			out[agentID] = append(out[agentID], flat...)
 		}
-
-		slog.Debug("skill scan for provider",
-			"provider", provider,
-			"path", root.Path,
-			"count", len(flat),
-			"agents", len(providerAgents[provider]),
+		slog.Debug("skill global scan",
+			"provider", provider, "path", ps.root.Path,
+			"count", len(flat), "agents", len(ps.agents),
 		)
+	}
+
+	// Phase 2: scan each agent's workspace dir for project-level skills.
+	if workspaceMgr != nil {
+		for agentID, provider := range agentProviders {
+			relDir := workspaceSkillDir(provider)
+			if relDir == "" {
+				continue
+			}
+			wsDir := workspaceMgr.WorkspaceDir(agentID)
+			wsRoot := &skillloader.SkillRoot{
+				Path:     filepath.Join(wsDir, relDir),
+				Kind:     "workspace",
+				Priority: 100, // workspace skills override globals
+			}
+			discovered, err := skillloader.ScanRoots(wsDir, []skillloader.SkillRoot{*wsRoot})
+			if err != nil {
+				slog.Debug("skill workspace scan failed",
+					"agent_id", agentID, "path", wsRoot.Path, "error", err,
+				)
+				continue
+			}
+			flat := make([]skillloader.DiscoveredSkill, 0, len(discovered))
+			for _, ds := range discovered {
+				flat = append(flat, ds)
+			}
+			if len(flat) > 0 {
+				out[agentID] = append(out[agentID], flat...)
+				slog.Debug("skill workspace scan",
+					"agent_id", agentID, "path", wsRoot.Path, "count", len(flat),
+				)
+			}
+		}
 	}
 
 	return out
