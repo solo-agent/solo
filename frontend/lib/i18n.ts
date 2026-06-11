@@ -396,6 +396,7 @@ const en = {
   settingsEmailUnmodifiable: 'Email cannot be changed',
   settingsDisplayName: 'Display name',
   settingsDisplayNamePlaceholder: 'Enter your display name',
+  settingsDisplayNameHint: 'Display name is set during registration and cannot be changed',
   settingsSave: 'Save',
   settingsSaving: 'Saving...',
   settingsLoadError: 'Could not load user info',

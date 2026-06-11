@@ -9,32 +9,17 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Mail, ArrowLeft, AlertCircle, CheckCircle2, LogOut } from 'lucide-react';
+import { User, Mail, ArrowLeft, LogOut } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { t } from '@/lib/i18n';
-import { useUser } from '@/lib/hooks/use-user';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Spinner } from '@/components/ui/spinner';
-import { BrutalAlert } from '@/components/ui/brutal-alert';
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { isAuthenticated, isLoading: authLoading, logout } = useAuth();
-  const {
-    user,
-    isLoading: userLoading,
-    error: userError,
-    updateDisplayName,
-    isUpdating,
-    successMessage,
-    clearSuccess,
-    refetch,
-  } = useUser();
+  const { user, isAuthenticated, isLoading: authLoading, logout } = useAuth();
 
-  const [displayName, setDisplayName] = useState('');
   const [loggingOut, setLoggingOut] = useState(false);
 
   const handleLogout = useCallback(async () => {
@@ -48,22 +33,10 @@ export default function SettingsPage() {
   }, [logout, router]);
 
   useEffect(() => {
-    if (user?.display_name) {
-      setDisplayName(user.display_name);
-    }
-  }, [user?.display_name]);
-
-  useEffect(() => {
     if (!authLoading && !isAuthenticated) {
       router.push('/auth/login');
     }
   }, [authLoading, isAuthenticated, router]);
-
-  const handleSave = useCallback(async () => {
-    const trimmed = displayName.trim();
-    if (!trimmed) return;
-    await updateDisplayName(trimmed);
-  }, [displayName, updateDisplayName]);
 
   if (authLoading || !isAuthenticated) {
     return (
@@ -115,20 +88,8 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Error banner */}
-      {userError && (
-        <div className="mb-6 space-y-2">
-          <BrutalAlert variant="error" className="p-4">
-            {userError}
-          </BrutalAlert>
-          <Button variant="outline" size="sm" onClick={refetch}>
-            {t('retry')}
-          </Button>
-        </div>
-      )}
-
       {/* Loading state */}
-      {userLoading && (
+      {authLoading && (
         <div className="space-y-6">
           <div className="card-brutal p-6">
             <div className="space-y-4">
@@ -146,7 +107,7 @@ export default function SettingsPage() {
 
       {/* Profile form — v3.2 (Phase 2): upgraded from card-brutal to
           card-brutal-heavy for hero weight (4px border + 12px shadow). */}
-      {!userLoading && user && (
+      {!authLoading && user && (
         <>
           <div className="card-brutal-heavy">
             {/* Email (read-only) */}
@@ -161,51 +122,16 @@ export default function SettingsPage() {
               <p className="mt-1 font-mono text-[11px] text-muted-foreground">{t('settingsEmailUnmodifiable')}</p>
             </div>
 
-            {/* Display name (editable) */}
+            {/* Display name (read-only) */}
             <div className="px-6 py-5">
-              <Label
-                htmlFor="display-name"
-                className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground"
-              >
+              <Label className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                 {t('settingsDisplayName')}
               </Label>
-              <div className="mt-2 flex items-end gap-3">
-                <div className="flex-1">
-                  <Input
-                    id="display-name"
-                    value={displayName}
-                    onChange={(e) => {
-                      setDisplayName(e.target.value);
-                      clearSuccess();
-                    }}
-                    placeholder={t('settingsDisplayNamePlaceholder')}
-                    disabled={isUpdating}
-                    className="max-w-sm"
-                  />
-                </div>
-                <Button
-                  type="button"
-                  onClick={handleSave}
-                  disabled={
-                    isUpdating ||
-                    !displayName.trim() ||
-                    displayName.trim() === user.display_name
-                  }
-                  variant="default"
-                >
-                  {isUpdating ? t('settingsSaving') : t('settingsSave')}
-                </Button>
+              <div className="mt-2 flex items-center gap-2">
+                <User className="h-4 w-4 text-muted-foreground" />
+                <span className="font-body text-sm text-foreground">{user.display_name}</span>
               </div>
-
-              {/* Feedback messages */}
-              <div className="mt-3 space-y-1">
-                {successMessage && (
-                  <div className="flex items-center gap-1.5 font-mono text-xs text-brutal-success">
-                    <CheckCircle2 className="h-4 w-4" />
-                    <span>{successMessage}</span>
-                  </div>
-                )}
-              </div>
+              <p className="mt-1 font-mono text-[11px] text-muted-foreground">{t('settingsDisplayNameHint')}</p>
             </div>
           </div>
 

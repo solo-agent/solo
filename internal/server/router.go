@@ -123,7 +123,6 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 				"display_name": name,
 			})
 		})
-
 		// Channel routes
 		r.Get("/api/v1/server/info", channelHandler.ServerInfo)
 
