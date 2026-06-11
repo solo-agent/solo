@@ -1,0 +1,63 @@
+name: Bug report
+description: Report a bug or unexpected behavior
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      content: |
+        Thanks for reporting a bug. Filling in the sections below helps us reproduce and fix it.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to reproduce the behavior.
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Output from `server.log` / `daemon.log` or browser devtools. Wrap in ``` fences.
+  - type: input
+    id: commit
+    attributes:
+      label: Commit / version
+      description: Output of `git rev-parse HEAD`, or release tag if applicable.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Go / Node / Docker versions
+      description: e.g. go1.22.3, node v20.10.0, Docker 24.0.7
+    validations:
+      required: true

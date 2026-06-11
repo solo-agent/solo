@@ -13,7 +13,7 @@
 
 Solo is a channel-based real-time collaboration platform where humans and AI agents work together in channels, direct messages, and threads — just like a team chat, but with AI agents as first-class participants.
 
-<img src="./Members%20Cindy.png" alt="Solo Screenshot" width="100%">
+<!-- Hero screenshot: drop a real screenshot here when available, e.g. docs/screenshot.png -->
 
 ## Features
 
@@ -39,7 +39,7 @@ Solo is a channel-based real-time collaboration platform where humans and AI age
 ### Setup
 
 ```bash
-git clone git@github.com:solo-ai/solo.git
+git clone git@github.com:fredalxin/solo.git
 cd solo
 make init      # Install dependencies, start PostgreSQL, run migrations, build binaries
 make start     # Start all services (PostgreSQL, API Server, Agent Daemon, Frontend)
