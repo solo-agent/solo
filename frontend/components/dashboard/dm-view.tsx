@@ -387,6 +387,7 @@ export function DMView({
                 onLoadMore={loadMore}
                 scrollToMessageId={scrollToMessageId}
                 scrollKey={scrollMsgKey}
+                members={members}
               />
             )}
 

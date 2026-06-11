@@ -23,6 +23,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { cn } from '@/lib/utils';
+import { highlightSpecials, buildValidNames } from '@/lib/utils/highlight';
 import { Avatar } from '@/components/ui/avatar';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -94,18 +95,6 @@ function ParentMessageBlock({ message, task }: { message: Message; task?: Task }
 
 // ---- Shared Markdown components ----
 
-function highlightSpecials(text: string): string {
-  const parts = text.split(/(```[\s\S]*?```)/g);
-  return parts
-    .map((part, i) => {
-      if (i % 2 === 1) return part;
-      let processed = part.replace(/@([^\s@#]+)/g, '<span class="mention-highlight">@$1</span>');
-      processed = processed.replace(/#(\d+)/g, '<span class="tasknum-highlight">#$1</span>');
-      return processed;
-    })
-    .join('');
-}
-
 function CodeBlock({ className, children }: { className?: string; children?: React.ReactNode }) {
   const language = className?.replace('language-', '') ?? '';
   return (
@@ -172,7 +161,7 @@ const mdComponents = {
 
 // ---- Reply item ----
 
-function ReplyItem({ message }: { message: { id: string; display_name?: string; content: string; created_at: string; status?: string; sender_type?: string } }) {
+function ReplyItem({ message, validNames = [] }: { message: { id: string; display_name?: string; content: string; created_at: string; status?: string; sender_type?: string }; validNames?: string[] }) {
   const isFailed = message.status === 'failed';
   const isSending = message.status === 'sending';
   const isStreaming = message.status === 'streaming';
@@ -227,7 +216,7 @@ function ReplyItem({ message }: { message: { id: string; display_name?: string; 
                 rehypePlugins={[rehypeRaw]}
                 components={mdComponents as any}
               >
-                {highlightSpecials(message.content)}
+                {highlightSpecials(message.content, validNames)}
               </ReactMarkdown>
               {isStreaming && message.content && (
                 <span className="inline-block h-4 w-[2px] bg-brutal-primary align-middle animate-pulse ml-0.5" />
@@ -655,6 +644,8 @@ export function ThreadPanel({
   const { isConnected, subscribeThread, unsubscribeThread, onEvent } =
     useWebSocket();
 
+  const validNames = buildValidNames(members);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevMessageCount = useRef(0);
@@ -766,7 +757,7 @@ export function ThreadPanel({
             return (
               <div className="space-y-0 py-2">
                 {messages.map((reply) => (
-                  <ReplyItem key={reply.id} message={reply} />
+                  <ReplyItem key={reply.id} message={reply} validNames={validNames} />
                 ))}
               </div>
             );

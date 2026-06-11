@@ -499,6 +499,7 @@ export function ChannelView({
               onLoadMore={loadMore}
               scrollToMessageId={scrollToMessageId}
               scrollKey={scrollMsgKey}
+              members={members}
             />
             <MessageInput
               onSend={async (content, _mentionedAgentIds, asTask, taskTitle, attachmentIds) => {

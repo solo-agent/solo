@@ -29,6 +29,7 @@ import {
   ClipboardList,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { buildValidNames } from '@/lib/utils/highlight';
 import { Avatar } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -43,7 +44,7 @@ import {
 import { AgentMessage } from './agent-message';
 import { StreamingMessage } from './streaming-message';
 import { MessageAttachments } from './message-attachments';
-import type { Channel, Message, Task, TaskStatus } from '@/lib/types';
+import type { Channel, ChannelMember, Message, Task, TaskStatus } from '@/lib/types';
 import { sanitizeHtml } from '@/lib/sanitize';
 import { t } from '@/lib/i18n';
 // SOLO-island PR2: TypingIndicator removed — AgentIsland (mounted at the
@@ -67,6 +68,8 @@ interface MessageListProps {
   scrollToMessageId?: string;
   /** Re-trigger key so clicking the same search result twice still scrolls */
   scrollKey?: number;
+  /** Channel members for @mention whitelist in agent messages. */
+  members?: ChannelMember[];
 }
 
 // ---- Task header config (SOLO-225-F) ----
@@ -688,7 +691,9 @@ export function MessageList({
   onLoadMore,
   scrollToMessageId,
   scrollKey,
+  members = [],
 }: MessageListProps) {
+  const validNames = buildValidNames(members);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -877,7 +882,12 @@ export function MessageList({
             message.status === 'streaming' ? (
               <StreamingMessage key={message.id} message={message} />
             ) : message.sender_type === 'agent' ? (
-              <AgentMessage key={message.id} message={message} onReply={onReply} />
+              <AgentMessage
+                key={message.id}
+                message={message}
+                onReply={onReply}
+                validNames={validNames}
+              />
             ) : (
               <MessageItem
                 key={message.id}

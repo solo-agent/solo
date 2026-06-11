@@ -14,12 +14,15 @@ import rehypeRaw from 'rehype-raw';
 import { MessageSquare } from 'lucide-react';
 import type { Message } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { highlightSpecials } from '@/lib/utils/highlight';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { t } from '@/lib/i18n';
 
 interface AgentMessageProps {
   message: Message;
   onReply?: (message: Message) => void;
+  /** Lowercased display_names that may receive highlight. Empty = no @mentions highlighted. */
+  validNames?: string[];
 }
 
 /** Fenced code block renderer — black bg, Space Mono, green text */
@@ -48,19 +51,8 @@ function CodeBlock({
 }
 
 /** Wrap @mentions and #task-numbers in HTML spans, protecting code fences */
-function highlightSpecials(text: string): string {
-  const parts = text.split(/(```[\s\S]*?```)/g);
-  return parts
-    .map((part, i) => {
-      if (i % 2 === 1) return part; // code block — leave untouched
-      let processed = part.replace(/@([^\s@#]+)/g, '<span class="mention-highlight">@$1</span>');
-      processed = processed.replace(/#(\d+)/g, '<span class="tasknum-highlight">#$1</span>');
-      return processed;
-    })
-    .join('');
-}
 
-export function AgentMessage({ message, onReply }: AgentMessageProps) {
+export function AgentMessage({ message, onReply, validNames = [] }: AgentMessageProps) {
   const time = new Date(message.created_at).toLocaleString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
@@ -193,7 +185,7 @@ export function AgentMessage({ message, onReply }: AgentMessageProps) {
               },
             }}
           >
-            {highlightSpecials(message.content)}
+            {highlightSpecials(message.content, validNames)}
           </ReactMarkdown>
         </div>
 
