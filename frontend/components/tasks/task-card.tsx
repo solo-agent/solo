@@ -74,14 +74,10 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
           onClick?.(task);
         }
       }}
-      // v3.1: upgrade TaskCard to border-brutal-4 + shadow-brutal-2xl.
-      // Tasks are Solo's primary deliverable — the heavier border + 12px
-      // shadow makes them feel physical/placeable like sticky notes on a
-      // kanban. Hover lifts to shadow-brutal-3xl (16px) for tactile feedback.
-      // Inline (not the global .card-brutal class) because card-brutal is
-      // shared by 17 surfaces and a heavier version would be too much
-      // for settings/agent-detail/login cards.
-      className="w-full cursor-pointer text-left border-brutal-4 bg-white shadow-brutal-2xl transition-all duration-150 hover:-translate-y-0.5 hover:shadow-brutal-3xl"
+      // v3.2 (Phase 2): now uses the .card-brutal-heavy class. Same
+      // 4px border + 12px shadow + 16px hover lift as the inline version
+      // it replaces, but now reusable for other hero-tier cards.
+      className="card-brutal-heavy w-full cursor-pointer text-left"
     >
       <div className="p-4">
         {/* Top row: status + priority badges */}

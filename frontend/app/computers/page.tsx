@@ -39,6 +39,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { BrutalAlert } from '@/components/ui/brutal-alert';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { useToast } from '@/components/ui/toast';
+import { EmptyState } from '@/components/ui/empty-state';
 import { useAgents } from '@/lib/hooks/use-agents';
 import { AgentForm, type AgentFormValues } from '@/components/agents/agent-form';
 import { NavBar } from '@/components/ui/navbar';
@@ -308,26 +309,25 @@ export default function ComputersPage() {
 
             {/* Empty state — no computers at all */}
             {!isLoading && !error && computers.length === 0 && (
-              <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
-                <div className="mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-info shadow-brutal">
-                  <Monitor className="h-8 w-8 text-white" />
-                </div>
-                <h2 className="text-xl font-heading font-bold text-foreground">
-                  {t('computersNoComputers')}
-                </h2>
-                <p className="mt-2 font-body text-sm text-muted-foreground">
-                  {t('computersNoComputersDesc')}
-                </p>
-              </div>
+              <EmptyState
+                variant="dashed"
+                rotation={-0.5}
+                icon={
+                  <div className="flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-info shadow-brutal-sm">
+                    <Monitor className="h-6 w-6 text-white" />
+                  </div>
+                }
+                title={t('computersNoComputers')}
+                description={t('computersNoComputersDesc')}
+              />
             )}
 
             {/* Empty state — computers exist, none selected */}
             {!isLoading && !error && computers.length > 0 && !selectedComputer && (
-              <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
-                <p className="font-body text-sm text-muted-foreground">
-                  {t('computersSelectOne')}
-                </p>
-              </div>
+              <EmptyState
+                variant="dashed"
+                title={t('computersSelectOne')}
+              />
             )}
 
             {/* Computer detail card */}

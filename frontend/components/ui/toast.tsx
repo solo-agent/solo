@@ -96,8 +96,13 @@ function ToastItem({
 }) {
   return (
     <div
+      // v3.2 (Phase 2): shadow-brutal (5px) → shadow-brutal-lg (7px).
+      // The 7px shadow reads as "popped up" without being loud. The
+      // 1deg rotation from the original attempt was rolled back — it
+      // felt off because toasts stack vertically and tilted items
+      // shift their visual baseline, fighting the slide-in animation.
       className={cn(
-        'flex items-center gap-3 border-2 bg-white px-4 py-3 shadow-brutal',
+        'flex items-center gap-3 border-2 bg-white px-4 py-3 shadow-brutal-lg',
         'animate-slide-in-from-right min-w-[280px] max-w-[400px]',
         BG_MAP[toast.type],
       )}

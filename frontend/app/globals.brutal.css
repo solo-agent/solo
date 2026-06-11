@@ -434,6 +434,22 @@
   box-shadow: 7px 8px 0 0 var(--color-brutal-shadow);
 }
 
+/* Heavy variant: 4px border + 12px shadow, 16px on hover. For hero
+   surfaces only — landing features, task cards in kanban, agent
+   profile cards. NOT for dense lists (sidebar rows, settings rows)
+   where the 16px hover would feel like the layout is sliding. */
+.card-brutal-heavy {
+  border: 4px solid var(--color-brutal-black);
+  background: #fff;
+  box-shadow: 12px 12px 0 0 var(--color-brutal-shadow);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card-brutal-heavy:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 16px 16px 0 0 var(--color-brutal-shadow);
+}
+
 /* ============================================================
    Input
    ============================================================ */
@@ -453,6 +469,13 @@
 }
 
 .input-brutal:focus {
+  /* v3.2 (Phase 2): focus turns the field soft-yellow + grows the
+     hard shadow. The "claimed this field" feedback is the brutalist
+     answer to Material's floating label — instead of a thin blue
+     underline, the whole field announces itself. Using --color-brutal-
+     primary-light (soft tint) instead of the saturated primary so big
+     multi-line textareas (chat composer) don't blast the eye. */
+  background: var(--color-brutal-primary-light);
   box-shadow: 5px 5px 0 0 var(--color-brutal-shadow);
 }
 
@@ -588,6 +611,53 @@
 ::selection {
   background-color: var(--color-brutal-primary);
   color: #000;
+}
+
+/* ============================================================
+   Decorative Textures — Phase 2 spec
+   Apply to hero/empty-state/decorative regions only. Pattern is
+   low-contrast (5-8% black on the existing surface) so it adds
+   grain without competing with foreground content.
+   ============================================================ */
+
+/* Halftone — dot grid via radial-gradient. Looks like newsprint /
+   risograph print. Use on empty states, 404, marketing cards. */
+.bg-halftone {
+  background-image: radial-gradient(circle, rgba(0, 0, 0, 0.18) 1.2px, transparent 1.5px);
+  background-size: 14px 14px;
+  background-position: 0 0;
+}
+
+/* Grid — orthogonal line grid. Architectural / engineering feel.
+   Use behind hero blocks and on dashboard "scaffolding" areas. */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(0, 0, 0, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-position: 0 0;
+}
+
+/* Noise — SVG inline noise (fractal turbulence). Most "lived-in" of
+   the three, breaks up large flat color regions. Use sparingly. */
+.bg-noise {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  background-size: 200px 200px;
+}
+
+/* Disabled stripes — 45° diagonal hatch overlay. The brutal answer
+   to "this is blocked" — instead of fading (opacity-50, which reads
+   as "broken"), stripes say "deliberately not available". Apply on
+   top of the element's normal bg; transparent gaps let the element's
+   color show through. */
+.disabled-stripes {
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 4px,
+    rgba(0, 0, 0, 0.18) 4px,
+    rgba(0, 0, 0, 0.18) 8px
+  );
 }
 
 /* ============================================================

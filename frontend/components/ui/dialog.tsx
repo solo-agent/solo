@@ -55,8 +55,14 @@ export function Dialog({ open, onOpenChange, children, width = 'md' }: DialogPro
       ref={overlayRef}
     >
       <div
+        // v3.2 (Phase 2): shadow-brutal-xl (10px) → shadow-brutal-2xl
+        // (12px). The 0.5° rotation from the original attempt was
+        // rolled back — modal panels that wrap forms feel "off" when
+        // tilted because the form fields inside are axis-aligned and
+        // the rotation fights the user's reading baseline. Shadow
+        // alone carries the "popped up" feel.
         className={cn(
-          'mx-4 w-full border-4 border-black bg-card p-6 shadow-brutal-xl max-h-[90vh] overflow-y-auto',
+          'mx-4 w-full border-4 border-black bg-card p-6 shadow-brutal-2xl max-h-[90vh] overflow-y-auto',
           DIALOG_WIDTHS[width],
         )}
         role="dialog"

@@ -17,6 +17,7 @@ import { NavBar } from '@/components/ui/navbar';
 import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
+import { EmptyState } from '@/components/ui/empty-state';
 import { TasksLeftColumn } from '@/components/tasks/tasks-left-column';
 import { TaskBoard } from '@/components/tasks/task-board';
 import type { Task, TaskStatus, Message } from '@/lib/types';
@@ -371,44 +372,29 @@ export default function TasksPage() {
             <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-6">
               {!sourceIsLoading && !sourceError && tasks.length === 0 && sourceTasks.length > 0 ? (
                 // Filtered empty — tasks exist but our filters excluded them all
-                <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
-                  <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-cream">
-                    <Filter className="h-6 w-6 text-muted-foreground" />
-                  </div>
-                  <p className="font-body text-sm text-muted-foreground">{t('noTasksMatchingFilter')}</p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleClearFilters}
-                    className="mt-4"
-                  >
-                    {t('clearFilter')}
-                  </Button>
-                </div>
+                <EmptyState
+                  variant="dashed"
+                  icon={<Filter className="h-6 w-6 text-muted-foreground" />}
+                  title={t('noTasksMatchingFilter')}
+                  actionLabel={t('clearFilter')}
+                  onAction={handleClearFilters}
+                />
               ) : !sourceIsLoading && !sourceError && tasks.length === 0 && hasFilters ? (
                 // Selected channel/DM has no tasks
-                <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
-                  <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-cream">
-                    <Filter className="h-6 w-6 text-muted-foreground" />
-                  </div>
-                  <p className="font-body text-sm text-muted-foreground">{selectedSourceEmptyMessage}</p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleClearFilters}
-                    className="mt-4"
-                  >
-                    {t('clearFilter')}
-                  </Button>
-                </div>
+                <EmptyState
+                  variant="dashed"
+                  icon={<Filter className="h-6 w-6 text-muted-foreground" />}
+                  title={selectedSourceEmptyMessage}
+                  actionLabel={t('clearFilter')}
+                  onAction={handleClearFilters}
+                />
               ) : !sourceIsLoading && !sourceError && tasks.length === 0 ? (
                 // No tasks at all
-                <div className="flex flex-col items-center justify-center border-2 border-dashed border-black py-20">
-                  <div className="mb-3 flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-cream">
-                    <Plus className="h-6 w-6 text-muted-foreground" />
-                  </div>
-                  <p className="font-body text-sm text-muted-foreground">{t('noTasks')}</p>
-                </div>
+                <EmptyState
+                  variant="dashed"
+                  icon={<Plus className="h-6 w-6 text-muted-foreground" />}
+                  title={t('noTasks')}
+                />
               ) : (
                 <TaskBoard
                   tasks={tasks}

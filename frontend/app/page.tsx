@@ -26,15 +26,30 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-brutal-cream px-4">
-      <div className="w-full max-w-md text-center">
+    <div className="relative min-h-screen flex flex-col items-center justify-center bg-brutal-cream px-4 overflow-hidden">
+      {/* v3.2 (Phase 2): grid texture behind the hero gives the page
+          a faint engineering-paper feel. Low contrast (6% black lines)
+          so the foreground still wins. */}
+      <div className="absolute inset-0 bg-grid pointer-events-none" aria-hidden />
+
+      <div className="relative w-full max-w-md text-center">
         {/* Logo */}
         <div className="inline-flex h-16 w-16 items-center justify-center bg-brutal-primary border-brutal-4 shadow-brutal mb-6">
           <span className="font-heading font-black text-3xl text-white">S</span>
         </div>
 
-        {/* Value prop */}
-        <h1 className="font-heading font-black text-3xl text-black mb-3">
+        {/* Value prop — v3.2 (Phase 2): the wordmark is now hollow
+            (text-stroke) and slightly rotated to read like a sticker
+            slapped on the page. Brutalist "display" treatment reserved
+            for this hero position only. */}
+        <h1
+          className="font-heading font-black text-6xl text-black mb-3"
+          style={{
+            transform: 'rotate(-2deg)',
+            WebkitTextStroke: '2px #000',
+            color: 'transparent',
+          }}
+        >
           Solo
         </h1>
         <p className="font-sans text-lg text-muted-foreground mb-8 max-w-sm mx-auto">

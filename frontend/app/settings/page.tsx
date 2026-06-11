@@ -91,14 +91,21 @@ export default function SettingsPage() {
         </Button>
       </div>
 
-      {/* Page header */}
+      {/* Page header — v3.2 (Phase 2): h1 gets sticker rotation +
+          the title container uses card-brutal-heavy for hero weight. */}
       <div className="mb-8">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm">
+          <div
+            className="flex h-10 w-10 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm"
+            style={{ transform: 'rotate(-3deg)' }}
+          >
             <User className="h-6 w-6 text-white" />
           </div>
           <div>
-            <h1 className="font-heading text-2xl font-bold text-foreground">
+            <h1
+              className="font-heading text-2xl font-bold text-foreground"
+              style={{ transform: 'rotate(-0.5deg)' }}
+            >
               {t('settingsTitle')}
             </h1>
             <p className="mt-1 font-body text-sm text-muted-foreground">
@@ -137,10 +144,11 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Profile form */}
+      {/* Profile form — v3.2 (Phase 2): upgraded from card-brutal to
+          card-brutal-heavy for hero weight (4px border + 12px shadow). */}
       {!userLoading && user && (
         <>
-          <div className="card-brutal">
+          <div className="card-brutal-heavy">
             {/* Email (read-only) */}
             <div className="border-b-2 border-black px-6 py-5">
               <Label className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
