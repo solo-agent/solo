@@ -269,6 +269,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 				r.Get("/", computerHandler.Get)
 				r.Patch("/", computerHandler.Update)
 				r.Delete("/", computerHandler.Delete)
+				r.Post("/claim", computerHandler.Claim)
 
 				// Computer agents (v1.5)
 				r.Get("/agents", computerHandler.ListAgents)

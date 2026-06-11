@@ -98,6 +98,13 @@ export function useComputers() {
     setComputers((prev) => prev.filter((c) => c.id !== id));
   }, []);
 
+  const claimComputer = useCallback(async (id: string): Promise<Computer> => {
+    const res = await apiClient.post<ComputerResponse>(`/api/v1/computers/${id}/claim`);
+    const claimed = mapComputer(res);
+    setComputers((prev) => prev.map((c) => (c.id === id ? claimed : c)));
+    return claimed;
+  }, []);
+
   return {
     computers,
     isLoading,
@@ -105,6 +112,7 @@ export function useComputers() {
     addComputer,
     updateComputer,
     deleteComputer,
+    claimComputer,
     refetch: loadComputers,
   } as const;
 }

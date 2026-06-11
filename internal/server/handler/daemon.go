@@ -135,11 +135,13 @@ func (h *DaemonHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 				IP:       req.SystemInfo.IP,
 			}
 			if err := h.computerSvc.UpdateHeartbeat(r.Context(), req.DaemonID, daemonURL, req.AgentIDs, sysinfo); err != nil {
-				slog.Error("failed to update computer heartbeat in DB",
+				slog.Error("failed to update computer heartbeat in DB — returning 404 to trigger daemon re-registration",
 					"request_id", reqID,
 					"daemon_id", req.DaemonID,
 					"error", err,
 				)
+				writeError(w, http.StatusNotFound, "computer record missing — re-register required")
+				return
 			}
 		}
 	}

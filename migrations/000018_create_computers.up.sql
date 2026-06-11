@@ -1,7 +1,7 @@
 CREATE TABLE computers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(200) NOT NULL,
-    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    owner_id UUID REFERENCES users(id) ON DELETE SET NULL,
     daemon_id VARCHAR(100),
     daemon_url VARCHAR(500),
     status VARCHAR(20) NOT NULL DEFAULT 'offline',

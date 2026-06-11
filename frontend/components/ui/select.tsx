@@ -16,6 +16,7 @@
 'use client';
 
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -68,20 +69,44 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
   ) => {
     const [open, setOpen] = React.useState(false);
     const [activeIndex, setActiveIndex] = React.useState(-1);
+    const [dropdownPos, setDropdownPos] = React.useState<{ top: number; left: number; width: number } | null>(null);
     const containerRef = React.useRef<HTMLDivElement | null>(null);
+    const triggerRef = React.useRef<HTMLButtonElement | null>(null);
+    const dropdownRef = React.useRef<HTMLUListElement | null>(null);
+
+    // Compute dropdown position from trigger bounding rect on open.
+    React.useEffect(() => {
+      if (!open || !triggerRef.current) {
+        setDropdownPos(null);
+        return;
+      }
+      const update = () => {
+        if (!triggerRef.current) return;
+        const r = triggerRef.current.getBoundingClientRect();
+        setDropdownPos({ top: r.bottom + 4, left: r.left, width: r.width });
+      };
+      update();
+      window.addEventListener('scroll', update, true);
+      window.addEventListener('resize', update);
+      return () => {
+        window.removeEventListener('scroll', update, true);
+        window.removeEventListener('resize', update);
+      };
+    }, [open]);
 
     const selected = options.find((o) => o.value === value);
     const displayLabel = selected?.label ?? placeholder;
 
     React.useImperativeHandle(ref, () => containerRef.current as HTMLDivElement);
 
-    // Close on outside click
+    // Close on outside click (also considers portal-rendered dropdown)
     React.useEffect(() => {
       if (!open) return;
       const onDown = (e: MouseEvent) => {
-        if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-          setOpen(false);
-        }
+        const target = e.target as Node;
+        if (containerRef.current && containerRef.current.contains(target)) return;
+        if (dropdownRef.current && dropdownRef.current.contains(target)) return;
+        setOpen(false);
       };
       document.addEventListener('mousedown', onDown);
       return () => document.removeEventListener('mousedown', onDown);
@@ -148,6 +173,7 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
       >
         {name && <input type="hidden" name={name} value={value ?? ''} />}
         <button
+          ref={triggerRef}
           type="button"
           id={id}
           onClick={() => !disabled && setOpen((v) => !v)}
@@ -178,52 +204,50 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
             )}
           />
         </button>
-        {open && (
-          <ul
-            // v3.1: panel switched from white to cream. White-on-cream
-            // floated like a soft Material card; cream-on-cream with
-            // 2px black border + 5px hard shadow reads as a brutalist
-            // "piece of the page" with the items color-tiering
-            // cream (default) → yellow (hover) → black (selected).
-            role="listbox"
-            className="absolute left-0 right-0 top-full z-30 mt-1 max-h-60 overflow-y-auto border-2 border-black bg-brutal-cream shadow-brutal"
-          >
-            {options.map((opt, i) => {
-              const isSelected = opt.value === value;
-              const isActive = i === activeIndex;
-              return (
-                <li
-                  key={opt.value}
-                  role="option"
-                  aria-selected={isSelected}
-                  aria-disabled={opt.disabled}
-                  // preventDefault on mousedown keeps focus on the trigger so
-                  // keyboard navigation continues to work after selection.
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => selectOption(opt)}
-                  onMouseEnter={() => setActiveIndex(i)}
-                  className={cn(
-                    'cursor-pointer px-3 py-1.5 font-heading text-xs font-bold transition-colors',
-                    opt.disabled && 'cursor-not-allowed opacity-50',
-                    // Selected: invert — black bg, pink text. High contrast,
-                    // distinctly different from the hover state.
-                    isSelected
-                      ? 'bg-black text-brutal-primary'
-                      : // Hover/keyboard-active: bold primary CTA — no pastels.
-                        isActive
-                        ? 'bg-brutal-primary text-black'
-                        : // Default: cream (matches panel) + black ink —
-                          // the panel and item are one continuous brutal
-                          // surface; only hover/select add color.
-                          'bg-brutal-cream text-black',
-                  )}
-                >
-                  {opt.label}
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        {open &&
+          dropdownPos &&
+          createPortal(
+            <ul
+              ref={dropdownRef}
+              role="listbox"
+              style={{
+                position: 'fixed',
+                top: dropdownPos.top,
+                left: dropdownPos.left,
+                width: dropdownPos.width,
+                zIndex: 9999,
+              }}
+              className="max-h-60 overflow-y-auto border-2 border-black bg-brutal-cream shadow-brutal"
+            >
+              {options.map((opt, i) => {
+                const isSelected = opt.value === value;
+                const isActive = i === activeIndex;
+                return (
+                  <li
+                    key={opt.value}
+                    role="option"
+                    aria-selected={isSelected}
+                    aria-disabled={opt.disabled}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => selectOption(opt)}
+                    onMouseEnter={() => setActiveIndex(i)}
+                    className={cn(
+                      'cursor-pointer px-3 py-1.5 font-heading text-xs font-bold transition-colors',
+                      opt.disabled && 'cursor-not-allowed opacity-50',
+                      isSelected
+                        ? 'bg-black text-brutal-primary'
+                        : isActive
+                          ? 'bg-brutal-primary text-black'
+                          : 'bg-brutal-cream text-black',
+                    )}
+                  >
+                    {opt.label}
+                  </li>
+                );
+              })}
+            </ul>,
+            document.body,
+          )}
       </div>
     );
   },

@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Check, Monitor, Cpu, Sparkles, AlertCircle, ChevronDown } from 'lucide-react';
+import { Check, Monitor, Cpu, Sparkles, AlertCircle, ChevronDown, RefreshCw } from 'lucide-react';
 import { useCliDetection } from '@/lib/hooks/use-cli-detection';
 import { useComputers } from '@/lib/hooks/use-computers';
 import { useOnboarding } from '@/lib/hooks/use-onboarding';
+import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Select, type SelectOption } from '@/components/ui/select';
@@ -16,14 +17,17 @@ interface WizardCardProps {
 
 export function WizardCard({ channelId, onComplete }: WizardCardProps) {
   const { results: cliResults, isLoaded: cliLoaded } = useCliDetection();
-  const { computers, isLoading: computersLoading } = useComputers();
+  const { computers, isLoading: computersLoading, claimComputer, refetch } = useComputers();
   const { createLucy, isCreating, error: createError } = useOnboarding();
+  const { user } = useAuth();
 
   const [selectedRuntime, setSelectedRuntime] = useState<string>('');
   const [done, setDone] = useState(false);
+  const [claimingId, setClaimingId] = useState<string | null>(null);
 
-  const computerOnline = computers.some((c) => c.status === 'online');
-  const computerName = computers.find((c) => c.status === 'online')?.name ?? 'Unknown';
+  const myComputer = computers.find((c) => c.status === 'online' && c.owner_id === user?.id);
+  const unclaimedComputers = computers.filter((c) => c.status === 'online' && !c.owner_id);
+  const computerOnline = !!myComputer || unclaimedComputers.length > 0;
 
   const runtimeOptions: SelectOption[] = useMemo(() => {
     const options: SelectOption[] = [];
@@ -40,15 +44,24 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
 
   const hasAvailableRuntime = runtimeOptions.length > 0;
 
+  const handleClaim = async (computerId: string) => {
+    setClaimingId(computerId);
+    try {
+      await claimComputer(computerId);
+    } catch {
+      // error handled inline
+    } finally {
+      setClaimingId(null);
+    }
+  };
+
   const handleCreateLucy = async () => {
     if (!selectedRuntime || isCreating || done) return;
-    // Auto-bind to the first online computer
-    const onlineComputer = computers.find((c) => c.status === 'online');
     try {
       await createLucy({
         runtime_type: selectedRuntime,
         channel_id: channelId,
-        computer_id: onlineComputer?.id,
+        computer_id: myComputer?.id,
       });
       setDone(true);
       onComplete?.();
@@ -70,27 +83,65 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
       <div className="space-y-1 px-5 py-4">
         {/* Step 1: Computer */}
         <div className="flex items-start gap-3 py-2">
-          <div className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-success">
-            <Check className="h-3 w-3 text-black" />
+          <div
+            className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center border-2 border-black ${
+              computersLoading ? 'bg-brutal-muted' : myComputer ? 'bg-brutal-success' : 'bg-brutal-warning'
+            }`}
+          >
+            {computersLoading ? (
+              <Spinner size="sm" />
+            ) : myComputer ? (
+              <Check className="h-3 w-3 text-black" />
+            ) : (
+              <Monitor className="h-3 w-3 text-black" />
+            )}
           </div>
           <div className="min-w-0">
             <p className="font-heading text-sm font-bold text-foreground">
-              Computer Connected
+              {myComputer ? 'Computer Connected' : 'Connect Computer'}
             </p>
-            <p className="font-sans text-xs text-muted-foreground">
+            <div className="font-sans text-xs text-muted-foreground">
               {computersLoading ? (
                 'Detecting...'
-              ) : computerOnline ? (
+              ) : myComputer ? (
                 <span>
                   <Monitor className="mr-1 inline h-3 w-3" />
-                  {computerName} — online
+                  {myComputer.name} — online
                 </span>
+              ) : unclaimedComputers.length > 0 ? (
+                <div className="mt-1 space-y-1">
+                  {unclaimedComputers.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      disabled={claimingId === c.id}
+                      onClick={() => handleClaim(c.id)}
+                      className="flex w-full items-center gap-2 border-2 border-black px-2 py-1 text-left text-xs font-medium hover:bg-brutal-primary-light disabled:opacity-50"
+                    >
+                      <Monitor className="h-3 w-3 flex-shrink-0" />
+                      <span className="flex-1 truncate">{c.name || c.hostname || c.id}</span>
+                      {claimingId === c.id ? (
+                        <Spinner size="sm" />
+                      ) : (
+                        <span className="text-brutal-primary font-bold">Connect</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
               ) : (
                 <span className="text-brutal-danger">
-                  No computer detected. Run <code className="font-mono text-[11px]">make start</code> to connect.
+                  No computer detected.{' '}
+                  <button
+                    type="button"
+                    onClick={() => refetch()}
+                    className="inline-flex items-center gap-0.5 font-bold underline hover:text-brutal-primary"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Retry
+                  </button>
                 </span>
               )}
-            </p>
+            </div>
           </div>
         </div>
 
@@ -154,7 +205,7 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
                 <Button
                   variant="default"
                   size="sm"
-                  disabled={!selectedRuntime || isCreating || !hasAvailableRuntime}
+                  disabled={!selectedRuntime || isCreating || !hasAvailableRuntime || !myComputer}
                   onClick={handleCreateLucy}
                   className="gap-1.5"
                 >

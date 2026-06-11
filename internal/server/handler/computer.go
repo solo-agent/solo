@@ -245,6 +245,36 @@ func (h *ComputerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "computer deleted"})
 }
 
+// Claim handles POST /api/v1/computers/{computerID}/claim
+// Binds an unclaimed computer to the current user.
+func (h *ComputerHandler) Claim(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	computerID := chi.URLParam(r, "computerID")
+	if computerID == "" {
+		writeError(w, http.StatusBadRequest, "computer ID is required")
+		return
+	}
+
+	c, err := h.svc.ClaimComputer(r.Context(), computerID, userID)
+	if err != nil {
+		if err == service.ErrAlreadyClaimed {
+			writeError(w, http.StatusConflict, "computer is already claimed")
+			return
+		}
+		slog.Error("claim computer failed", "computer_id", computerID, "user_id", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to claim computer")
+		return
+	}
+
+	slog.Info("computer claimed", "computer_id", computerID, "user_id", userID)
+	writeJSON(w, http.StatusOK, toResponse(c))
+}
+
 // ComputerAgentResponse is the API response for an agent running on a computer.
 type ComputerAgentResponse struct {
 	ID          string `json:"id"`
