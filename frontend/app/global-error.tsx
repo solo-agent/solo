@@ -17,8 +17,8 @@ export default function GlobalError({
     <html lang="en">
       <body className="min-h-screen bg-brutal-cream font-sans">
         <div className="flex min-h-screen items-center justify-center p-8">
-          <div className="border-4 border-black shadow-brutal-xl bg-white rounded-none p-8 max-w-lg w-full">
-            <h1 className="font-heading font-bold text-3xl text-black mb-4">
+          <div className="border-brutal-4 shadow-brutal-xl bg-white rounded-none p-8 max-w-lg w-full">
+            <h1 className="font-heading font-black text-3xl text-black mb-4">
               Something went wrong
             </h1>
             <p className="font-body text-lg text-black/70 mb-2">

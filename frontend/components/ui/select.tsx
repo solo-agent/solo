@@ -180,8 +180,13 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
         </button>
         {open && (
           <ul
+            // v3.1: panel switched from white to cream. White-on-cream
+            // floated like a soft Material card; cream-on-cream with
+            // 2px black border + 5px hard shadow reads as a brutalist
+            // "piece of the page" with the items color-tiering
+            // cream (default) → yellow (hover) → black (selected).
             role="listbox"
-            className="absolute left-0 right-0 top-full z-30 mt-1 max-h-60 overflow-y-auto border-2 border-black bg-white shadow-brutal"
+            className="absolute left-0 right-0 top-full z-30 mt-1 max-h-60 overflow-y-auto border-2 border-black bg-brutal-cream shadow-brutal"
           >
             {options.map((opt, i) => {
               const isSelected = opt.value === value;
@@ -207,8 +212,10 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
                       : // Hover/keyboard-active: bold primary CTA — no pastels.
                         isActive
                         ? 'bg-brutal-primary text-black'
-                        : // Default: white card, black ink.
-                          'bg-white text-black',
+                        : // Default: cream (matches panel) + black ink —
+                          // the panel and item are one continuous brutal
+                          // surface; only hover/select add color.
+                          'bg-brutal-cream text-black',
                   )}
                 >
                   {opt.label}

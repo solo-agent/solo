@@ -9,10 +9,10 @@ export default function NotFoundPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-brutal-cream px-4">
       <div className="mx-auto flex max-w-sm flex-col items-center text-center">
-        <div className="mb-6 flex h-20 w-20 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal">
+        <div className="mb-6 flex h-20 w-20 items-center justify-center border-brutal-4 bg-brutal-primary shadow-brutal">
           <FileQuestion className="h-10 w-10 text-black" />
         </div>
-        <h1 className="font-heading text-4xl font-bold text-foreground">404</h1>
+        <h1 className="font-heading text-5xl font-black text-foreground">404</h1>
         <p className="mt-2 font-heading text-lg font-bold text-foreground">
           Page not found
         </p>

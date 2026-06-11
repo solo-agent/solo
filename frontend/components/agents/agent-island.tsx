@@ -56,6 +56,9 @@ interface StatusVisuals {
   iconClass: string;
   /** Whether the icon should be spinning (Loader2-style). */
   spin: boolean;
+  /** v3.1: use slow 10s rotation instead of default 1s. For long-running
+   *  tool calls the fast spin reads as anxious; slow reads as deliberate. */
+  slowSpin?: boolean;
   /** Whether the icon should pulse. */
   pulse: boolean;
   /** Short Chinese label used in badges and aria text. */
@@ -87,7 +90,11 @@ const STATUS_VISUALS: Record<IslandAgentStatus, StatusVisuals> = {
     icon: Loader2,
     dotClass: 'bg-brutal-info',
     iconClass: 'text-cyan-600',
+    // v3.1: spin-slow (10s/rev) is calmer than the default animate-spin.
+    // An agent executing a long tool call rotating fast reads as anxious;
+    // a slow turn reads as deliberate. Killed by prefers-reduced-motion.
     spin: true,
+    slowSpin: true,
     pulse: false,
     label: t('agentExecuting'),
     badgeClass: 'bg-brutal-info text-black',
@@ -322,7 +329,7 @@ function CollapsedPill({
             className={cn(
               'h-3.5 w-3.5 flex-shrink-0',
               vis.iconClass,
-              vis.spin && 'animate-spin',
+              vis.spin && (vis.slowSpin ? 'animate-spin-slow' : 'animate-spin'),
             )}
             aria-hidden
           />
@@ -449,7 +456,7 @@ function AgentRow({ agent, onClick }: { agent: IslandAgent; onClick?: () => void
             className={cn(
               'h-2.5 w-2.5 flex-shrink-0',
               vis.iconClass,
-              vis.spin && 'animate-spin',
+              vis.spin && (vis.slowSpin ? 'animate-spin-slow' : 'animate-spin'),
             )}
             aria-hidden
           />

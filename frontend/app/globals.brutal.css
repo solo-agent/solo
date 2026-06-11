@@ -1,9 +1,35 @@
 /* ============================================================
-   globals.brutal.css — Solo Neubrutalist Design System v3.0
+   globals.brutal.css — Solo Neubrutalist Design System v3.1
    Based on neubrutalism.com canonical patterns
    Replaces globals.css as the primary stylesheet
 
-   v3.0 changelog:
+   v3.1 changelog:
+   - Added shadow-brutal-2xl (12px) and shadow-brutal-3xl (16px) tokens,
+     for hero/landing/feature cards that need exaggerated depth. The base
+     .shadow-brutal / -sm / -lg / -xl tokens are unchanged so existing
+     call sites are not affected.
+   - Added .border-brutal-4 utility for hero/decorative elements where
+     the default 2px reads as too thin. Existing 2/3/8px utilities
+     unchanged.
+   - Added 3 decoration animations: spin-slow (10s linear, decorative
+     stars/badges), bounce-slow (2s, attention elements), pulse-brutal
+     (2s scale 1→1.03, CTAs). All are killed by prefers-reduced-motion.
+   - Mobile shadow scale extended to cover the new 2xl/3xl tokens.
+
+   v3.0 changelog (audit: solid, no fixes needed in 3.1):
+   - A11y: BrutalAlert has role=alert/status, ui/ components forward ARIA
+     props, global focus-visible 3px info outline. WCAG AA contrast passes
+     on every primary/light/dark color pair with black text (≥4.5:1).
+   - Dark mode: canvas/shadow inversion keeps brutal aesthetic intact;
+     hard-offset white shadow reads correctly on dark canvas.
+   - Motion: prefers-reduced-motion covers all custom animations + global
+     transition-duration override.
+   - Dedup opportunity (not fixed in 3.1): <Tag> component (1 use) and
+     .badge-brutal class (16 uses) overlap conceptually; chose not to
+     consolidate because their size/typography differ slightly. Future
+     cleanup: make <Tag> use .badge-brutal as base, add a size variant.
+
+   v3.0 changelog (history):
    - Added semantic color tokens (primary/accent/info/success/warning/danger/violet/muted)
      with light/light-light pairs. Old hex-named tokens kept as deprecated aliases
      pointing to the new names; remove aliases in v4.0.
@@ -119,6 +145,9 @@
   --animate-slide-in-from-left: slide-in-from-left 0.2s ease-out;
   --animate-fade-in: fade-in 0.3s ease-out;
   --animate-indeterminate-progress: indeterminate-progress 0.6s linear infinite;
+  --animate-spin-slow: spin-slow 10s linear infinite;
+  --animate-bounce-slow: bounce-slow 2s ease-in-out infinite;
+  --animate-pulse-brutal: pulse-brutal 2s ease-in-out infinite;
 }
 
 @keyframes slide-in-from-right {
@@ -140,6 +169,33 @@
   0% { transform: translateX(-100%); }
   50% { transform: translateX(100%); }
   100% { transform: translateX(200%); }
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 10s linear infinite;
+}
+
+@keyframes bounce-slow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.animate-bounce-slow {
+  animation: bounce-slow 2s ease-in-out infinite;
+}
+
+@keyframes pulse-brutal {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+
+.animate-pulse-brutal {
+  animation: pulse-brutal 2s ease-in-out infinite;
 }
 
 /* ============================================================
@@ -209,6 +265,17 @@
   box-shadow: 10px 10px 0 0 var(--color-brutal-shadow);
 }
 
+/* 12px / 16px — for hero, landing features, and other elements that need
+   exaggerated depth. Most product surfaces still use the base .shadow-brutal
+   (5px) to avoid the "stamp collection" effect in dense lists. */
+.shadow-brutal-2xl {
+  box-shadow: 12px 12px 0 0 var(--color-brutal-shadow);
+}
+
+.shadow-brutal-3xl {
+  box-shadow: 16px 16px 0 0 var(--color-brutal-shadow);
+}
+
 /* Colored shadow variants (override the black with a color shadow token) */
 .shadow-brutal-primary {
   --tw-shadow-color: var(--color-brutal-primary);
@@ -245,6 +312,13 @@
 
 .border-brutal-thickest {
   border: 8px solid var(--color-brutal-black);
+}
+
+/* 4px — the canonical neubrutalist default. Use on hero elements,
+   feature cards, and decorative frames where 2px reads as too thin.
+   Most call sites still use 2px; this utility is opt-in. */
+.border-brutal-4 {
+  border: 4px solid var(--color-brutal-black);
 }
 
 /* ============================================================
@@ -562,6 +636,8 @@
   .animate-pulse,
   .animate-bounce,
   .animate-spin-slow,
+  .animate-bounce-slow,
+  .animate-pulse-brutal,
   .animate-fade-in,
   .animate-slide-in-from-left,
   .animate-slide-in-from-right,
@@ -589,6 +665,12 @@
   }
   .shadow-brutal-xl {
     box-shadow: 8px 8px 0 0 var(--color-brutal-shadow);
+  }
+  .shadow-brutal-2xl {
+    box-shadow: 10px 10px 0 0 var(--color-brutal-shadow);
+  }
+  .shadow-brutal-3xl {
+    box-shadow: 12px 12px 0 0 var(--color-brutal-shadow);
   }
 }
 
@@ -700,6 +782,10 @@
   padding: 0 0.25rem;
   border: 2px solid var(--color-brutal-black);
   box-shadow: 2px 2px 0 0 var(--color-brutal-shadow);
+  /* v3.1: a slow 2s bounce draws the eye to "@named agent" mentions
+     in chat without feeling like an unread-red-dot alert. The bounce
+     is gentle (low amplitude) — killed by prefers-reduced-motion. */
+  animation: bounce-slow 2s ease-in-out infinite;
 }
 
 .tasknum-highlight {

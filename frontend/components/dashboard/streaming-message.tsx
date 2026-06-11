@@ -71,13 +71,16 @@ function TypingDots() {
       {dots.map((i) => (
         <span
           key={i}
+          // v3.1: bounce-slow (2s ease-in-out) reads as a calm
+          // "agent is composing" — the previous 0.8s hard bounce felt
+          // frantic for long-running generations. Stagger preserved
+          // so the three dots still ripple. Killed by prefers-reduced-motion.
           className={cn(
             'inline-block h-1.5 w-1.5 bg-brutal-primary',
-            'animate-bounce',
+            'animate-bounce-slow',
           )}
           style={{
-            animationDelay: `${i * 0.15}s`,
-            animationDuration: '0.8s',
+            animationDelay: `${i * 0.4}s`,
           }}
         />
       ))}

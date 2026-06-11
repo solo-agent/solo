@@ -636,6 +636,12 @@ export function MessageInput({
               'absolute bottom-2 right-2 flex h-8 items-center justify-center gap-1.5 px-3',
               'btn-brutal btn-brutal-primary',
               !canSend && 'opacity-40 pointer-events-none',
+              // v3.1: when the user has typed something and the send is
+              // armed, a slow 2s pulse draws the eye without being frantic.
+              // Killed by prefers-reduced-motion. Disabled state is already
+              // handled above (opacity-40 + pointer-events-none), so the
+              // pulse only runs on the active, ready-to-send state.
+              canSend && 'animate-pulse-brutal',
               asTask ? 'w-auto' : 'w-8 p-0',
             )}
             aria-label={asTask ? t('createTask') : t('sendMessage')}

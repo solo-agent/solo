@@ -93,7 +93,10 @@ export function ConnectionBanner() {
       className={`fixed left-0 right-0 top-0 z-50 flex items-center justify-center gap-2 border-b-2 border-black py-1.5 text-xs font-medium text-black ${bgColor} animate-in slide-in-from-top-0.5 transition-transform duration-100 ease-linear`}
     >
       <IconComponent
-        className={`h-3.5 w-3.5 ${bannerType === 'reconnecting' ? 'animate-spin' : ''}`}
+        // v3.1: spin-slow (10s/rev) reads as a deliberate "we're working
+        // on restoring the connection" — the 1s default spin felt urgent
+        // for what is actually a passive wait. Killed by prefers-reduced-motion.
+        className={`h-3.5 w-3.5 ${bannerType === 'reconnecting' ? 'animate-spin-slow' : ''}`}
       />
       <span>{bannerText}</span>
     </div>

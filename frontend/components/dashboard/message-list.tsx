@@ -258,7 +258,10 @@ const MessageItem = memo(function MessageItem({
           aria-label={t('unreadThreadReply')}
           title={t('unreadReply')}
         >
-          <span className="block h-2.5 w-2.5 bg-brutal-danger border border-black animate-fade-in" />
+          {/* v3.1: fade-in plays once on first render, then bounce-slow
+              keeps the dot gently noticeable so users see the unread
+              reply on subsequent scrolls. Killed by prefers-reduced-motion. */}
+          <span className="block h-2.5 w-2.5 bg-brutal-danger border border-black animate-fade-in animate-bounce-slow" />
         </button>
       )}
 
@@ -584,7 +587,13 @@ function ScrollToBottom({ onClick }: { onClick: () => void }) {
       <button
         type="button"
         onClick={onClick}
-        className="btn-brutal btn-brutal-sm h-8 gap-1 text-xs"
+        // v3.1: added px-2.5 — the .btn-brutal class deliberately doesn't
+        // set padding (consumers set it per use), and this button was
+        // shipping without it, so the long "Back to latest" text was
+        // flush against the right 2px border. px-2.5 (10px each side)
+        // balances the existing 18px left margin (14px icon + 4px gap)
+        // so the button reads as a proper brutal pill, not a chopped label.
+        className="btn-brutal btn-brutal-sm h-8 gap-1 px-2.5 text-xs"
         aria-label={t('scrollToLatest')}
       >
         <ChevronDown className="h-3.5 w-3.5" />
@@ -599,7 +608,10 @@ function ScrollToBottom({ onClick }: { onClick: () => void }) {
 function LoadMoreSpinner() {
   return (
     <div className="flex items-center justify-center gap-2 py-3 font-mono text-xs text-muted-foreground">
-      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      {/* v3.1: spin-slow (10s/rev) reads as a deliberate "fetching older
+          history" rather than the default 1s spin which feels urgent.
+          Killed by prefers-reduced-motion. */}
+      <Loader2 className="h-3.5 w-3.5 animate-spin-slow" />
       <span>{t('loadEarlierMessages')}</span>
     </div>
   );

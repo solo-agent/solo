@@ -34,7 +34,9 @@ export function InboxBadge({ unreadCount, isSelected, onClick }: InboxBadgeProps
       <span>Inbox</span>
       {unreadCount > 0 && (
         <span
-          className="ml-auto flex h-5 min-w-[20px] items-center justify-center border-2 border-black bg-brutal-danger px-1.5 font-mono text-[11px] font-bold text-white"
+          // v3.1: bounce-slow draws the eye to unread state without
+          // being frantic. Killed by prefers-reduced-motion.
+          className="ml-auto flex h-5 min-w-[20px] items-center justify-center border-2 border-black bg-brutal-danger px-1.5 font-mono text-[11px] font-bold text-white animate-bounce-slow"
           aria-label={t('inboxUnread', { n: unreadCount })}
         >
           {unreadCount > 99 ? '99+' : unreadCount}

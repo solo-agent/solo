@@ -16,8 +16,8 @@ export default function DashboardError({
 
   return (
     <div className="flex flex-1 items-center justify-center p-8 bg-brutal-cream">
-      <div className="border-4 border-black shadow-brutal-xl bg-white rounded-none p-8 max-w-lg w-full text-center">
-        <h1 className="font-heading font-bold text-3xl text-black mb-4">
+      <div className="border-brutal-4 shadow-brutal-xl bg-white rounded-none p-8 max-w-lg w-full text-center">
+        <h1 className="font-heading font-black text-3xl text-black mb-4">
           Dashboard failed to load
         </h1>
         <p className="font-body text-lg text-black/70 mb-2">

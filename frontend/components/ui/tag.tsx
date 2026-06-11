@@ -6,6 +6,11 @@
 //     "agent"   → violet (AI/agent context)
 //     "deleted" → muted stone (soft / archived)
 // - Renders as <span>; pass `as="button"` only via children composition.
+// - Note (v3.1 audit): this component overlaps conceptually with the
+//   `.badge-brutal` CSS class (used 16x in the codebase vs Tag's 1 use).
+//   They are intentionally NOT consolidated: Tag is smaller / uppercase
+//   (10px), badge-brutal is the larger agent/system message pill. Future
+//   cleanup: pick one as canonical and have the other delegate to it.
 // ============================================================================
 
 import * as React from "react";

@@ -53,7 +53,11 @@ export function MentionDropdown({
 
   return createPortal(
     <div
-      className="fixed z-[100] border-2 border-black bg-white shadow-brutal-sm rounded-none"
+      // v3.1: panel switched from white+sm-shadow to cream+brutal-shadow.
+      // White-on-cream floated like a Material card; cream-on-cream with
+      // 2px black border + 5px hard shadow reads as brutalist "a piece
+      // of the page" instead of a modern soft dropdown.
+      className="fixed z-[100] border-2 border-black bg-brutal-cream shadow-brutal rounded-none"
       style={{
         left: anchor.left,
         width: anchor.width,
@@ -76,9 +80,12 @@ export function MentionDropdown({
                 data-index={index}
                 className={cn(
                   'flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold transition-colors',
+                  // v3.1: 3-tier color hierarchy — cream (default, blends
+                  // with panel) → yellow (hover/active) → black (selected).
+                  // White default looked flat on the new cream panel.
                   index === selectedIndex
                     ? 'bg-black text-brutal-primary'
-                    : 'text-foreground hover:bg-brutal-primary hover:text-black',
+                    : 'bg-brutal-cream text-foreground hover:bg-brutal-primary hover:text-black',
                 )}
                 role="option"
                 aria-selected={index === selectedIndex}

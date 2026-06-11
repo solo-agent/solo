@@ -37,7 +37,10 @@ export function EmptyState({
       className={cn(
         "flex flex-col items-center justify-center gap-3 px-6 py-10 text-center",
         variant === "plain"
-          ? "border-2 border-black bg-white shadow-brutal-sm"
+          // v3.1: upgrade default empty state to 4px border + 12px shadow.
+          // The dashed variant stays light — it's for "no results" panels
+          // where the area itself is empty, not a placeable container.
+          ? "border-brutal-4 bg-white shadow-brutal-2xl"
           : "border-2 border-dashed border-brutal-muted bg-transparent",
         className,
       )}
