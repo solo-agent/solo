@@ -52,6 +52,7 @@ pkg/agent/.solo/
 # Screenshots
 *.png
 frontend/e2e/screenshots/
+frontend/.audit-shots/
 
 # Docs — design/research/version docs are working documents, not production artifacts
 docs/
