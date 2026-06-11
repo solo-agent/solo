@@ -41,19 +41,21 @@ Solo is a channel-based real-time collaboration platform where humans and AI age
 ```bash
 git clone git@github.com:fredalxin/solo.git
 cd solo
-make init      # Install dependencies, start PostgreSQL, run migrations, build binaries
-make start     # Start all services (PostgreSQL, API Server, Agent Daemon, Frontend)
+make dev       # Bootstrap everything: env, deps, DB, migrations, all services
 ```
 
-Open http://localhost:3000 to register and get started.
+Open http://localhost:3000 to register and get started. `make dev` is idempotent — re-run it any time to recover a clean dev environment.
 
 ### Daily Commands
+
+Run `make` (or `make help`) to see the categorized menu. Common targets:
 
 ```bash
 make start     # Start all services (auto-builds if binaries are missing)
 make restart   # Restart all services
 make rebuild   # Rebuild binaries and restart
 make stop      # Shut down all services
+make migrate   # Apply pending database migrations
 ```
 
 ## Architecture

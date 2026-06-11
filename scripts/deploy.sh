@@ -66,7 +66,7 @@ docker compose -f docker-compose.yml pull
 
 # ---- Step 2: Apply database migrations ----
 echo "[2/4] Applying database migrations..."
-./scripts/migrate.sh up
+go run ./cmd/migrate up
 
 # ---- Step 3: Build and start services ----
 echo "[3/4] Building and starting services..."

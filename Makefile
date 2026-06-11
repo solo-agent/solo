@@ -1,117 +1,45 @@
-.PHONY: init start restart rebuild stop pg-ready migrate build
+.PHONY: help dev init start restart rebuild stop build migrate db-reset
+.DEFAULT_GOAL := help
 
-# ── 0. Common: wait for PostgreSQL to be ready (30s timeout) ──────────────
-pg-ready:
-	@if docker exec solo-postgres pg_isready -U solo -d solo >/dev/null 2>&1; then \
-		exit 0; \
-	fi
-	@docker compose up -d --remove-orphans postgres >/dev/null 2>&1 || true
-	@for i in $$(seq 1 30); do \
-		docker exec solo-postgres pg_isready -U solo -d solo >/dev/null 2>&1 && exit 0; \
-		sleep 1; \
-	done; \
-	echo "ERROR: PostgreSQL not ready after 30s"; exit 1
+ENV_FILE ?= .env
 
-# ── 0. Common: run migrations (idempotent, any failure exits immediately) ──
-migrate: pg-ready
-	@echo "=== Running database migrations ==="
-	@docker exec -i solo-postgres psql -U solo -d solo -v ON_ERROR_STOP=1 -q -c \
-		"CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now());" >/dev/null
-	@set -e; for f in migrations/*.up.sql; do \
-		v=$$(basename $$f .up.sql); \
-		applied=$$(docker exec -i solo-postgres psql -U solo -d solo -tAc "SELECT 1 FROM schema_migrations WHERE version='$$v'"); \
-		if [ "$$applied" = "1" ]; then \
-			echo "  ✓ $$v (already applied, skipped)"; \
-		else \
-			echo "  → $$v"; \
-			docker exec -i solo-postgres psql -U solo -d solo -v ON_ERROR_STOP=1 -q < "$$f"; \
-			docker exec -i solo-postgres psql -U solo -d solo -v ON_ERROR_STOP=1 -q -c \
-				"INSERT INTO schema_migrations(version) VALUES ('$$v');" >/dev/null; \
-		fi; \
-	done
+ifneq ($(wildcard $(ENV_FILE)),)
+include $(ENV_FILE)
+export
+endif
 
-# ── 0. Common: build binaries ──────────────────────────────────────────────
-build:
-	@mkdir -p .pids
-	@go build -o .pids/server ./cmd/server/
-	@go build -o .pids/daemon ./cmd/daemon/
-	@go build -o .pids/solo ./cmd/solo/
+##@ Quick start
 
-# ── 1. First-time setup ────────────────────────────────────────────────────
-init:
-	@echo "=== Initializing .env ==="
+help: ## Show available make targets
+	@awk 'BEGIN {FS = ":.*## "; \
+		printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nFirst time:\n  \033[36mmake dev\033[0m       Bootstrap and start everything in one shot\n\n"} \
+		/^##@/ {printf "\n\033[1m%s\033[0m\n", substr($$0, 5); next} \
+		/^[a-zA-Z0-9_.-]+:.*## / {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+dev: ## Bootstrap from scratch and start all services
+	@bash scripts/dev.sh
+
+##@ Lifecycle
+
+init: ## Install deps, set up DB, run migrations, build binaries (no start)
 	@cp -n .env.example .env 2>/dev/null || true
 	@echo "=== Installing frontend dependencies ==="
 	@cd frontend && npm install
+	@bash scripts/ensure-postgres.sh
 	@$(MAKE) migrate
-	@echo "=== Building binaries ==="
 	@$(MAKE) build
 	@echo "=== Initialization complete ==="
 
-# ── 2. Start all services ──────────────────────────────────────────────────
-start: pg-ready
-	@mkdir -p .pids
-	@echo "PostgreSQL ✓"
-	@# Server
-	@if [ -f .pids/server.pid ] && kill -0 $$(cat .pids/server.pid) 2>/dev/null; then \
-		echo "Server already running"; \
-	else \
-		if [ ! -f .pids/server ]; then \
-			echo "Building server..."; \
-			go build -o .pids/server ./cmd/server/; \
-		fi; \
-		.pids/server > server.log 2>&1 & \
-		echo $$! > .pids/server.pid; \
-		ok=0; \
-		for i in $$(seq 1 30); do \
-			curl -sf http://localhost:8080/readyz >/dev/null 2>&1 && { ok=1; break; }; \
-			sleep 0.5; \
-		done; \
-		if [ $$ok -ne 1 ]; then \
-			echo "ERROR: Server on :8080 did not become ready, recent logs:"; \
-			tail -20 server.log; \
-			exit 1; \
-		fi; \
-		echo "Server :8080 ✓"; \
-	fi
-	@# Daemon
-	@if [ -f .pids/daemon.pid ] && kill -0 $$(cat .pids/daemon.pid) 2>/dev/null; then \
-		echo "Daemon already running"; \
-	else \
-		if [ ! -f .pids/daemon ]; then \
-			echo "Building daemon..."; \
-			go build -o .pids/daemon ./cmd/daemon/; \
-			go build -o .pids/solo ./cmd/solo/; \
-		fi; \
-		.pids/daemon > daemon.log 2>&1 & \
-		echo $$! > .pids/daemon.pid; \
-		sleep 2; \
-		if ! kill -0 $$(cat .pids/daemon.pid) 2>/dev/null; then \
-			echo "ERROR: Daemon failed to start, recent logs:"; \
-			tail -20 daemon.log; \
-			exit 1; \
-		fi; \
-		echo "Daemon :8081 ✓"; \
-	fi
-	@# Frontend
-	@if [ -f .pids/frontend.pid ] && kill -0 $$(cat .pids/frontend.pid) 2>/dev/null; then \
-		echo "Frontend already running"; \
-	else \
-		cd frontend && npm run dev > /dev/null 2>&1 & \
-		echo $$! > ../.pids/frontend.pid; \
-		echo "Frontend :3000 ✓"; \
-	fi
-	@echo "=== All services started ==="
-	@echo "  http://localhost:3000"
+start: ## Start all services (ensures DB, runs migrations, auto-builds if needed)
+	@bash scripts/ensure-postgres.sh
+	@go run ./cmd/migrate up
+	@bash scripts/start-services.sh
 
-# ── 3. Restart ─────────────────────────────────────────────────────────────
-restart: stop start
+restart: stop start ## Restart all services
 
-# ── 4. Rebuild and restart ─────────────────────────────────────────────────
-rebuild: stop build start
+rebuild: stop build start ## Rebuild binaries and restart all services
 
-# ── 5. Shut down all ───────────────────────────────────────────────────────
-stop:
+stop: ## Shut down all services
 	@echo "=== Stopping all services ==="
 	@-lsof -ti :8080 | xargs kill 2>/dev/null && echo "Server stopped" || echo "Server not running"
 	@-lsof -ti :8081 | xargs kill 2>/dev/null && echo "Daemon stopped" || echo "Daemon not running"
@@ -119,3 +47,39 @@ stop:
 	@rm -f .pids/*.pid
 	@sleep 1
 	@echo "=== All services stopped ==="
+
+##@ Build & Database
+
+build: ## Build server, daemon, solo CLI, and migrate binaries
+	@mkdir -p .pids
+	@go build -o .pids/server ./cmd/server/
+	@go build -o .pids/daemon ./cmd/daemon/
+	@go build -o .pids/solo ./cmd/solo/
+	@go build -o .pids/migrate ./cmd/migrate/
+
+migrate: ## Apply database migrations (idempotent)
+	@bash scripts/ensure-postgres.sh
+	@go run ./cmd/migrate up
+
+# Drop and recreate the current env's database, then run all migrations.
+# Use for a clean slate in local dev. Only affects the DB named in
+# DATABASE_URL; the postgres container itself is untouched. Refuses to run
+# against a remote host.
+db-reset: ## Drop and recreate the local database, then re-run all migrations
+	@if [ ! -f "$(ENV_FILE)" ]; then echo "ERROR: $(ENV_FILE) not found. Run 'make dev' first."; exit 1; fi
+	@case "$(DATABASE_URL)" in \
+		""|*@localhost:*|*@localhost/*|*@127.0.0.1:*|*@127.0.0.1/*|*@\[::1\]:*|*@\[::1\]/*) ;; \
+		*) echo "Refusing to reset: DATABASE_URL points at a remote host."; exit 1 ;; \
+	esac
+	@bash scripts/ensure-postgres.sh
+	@DB_USER=$$(printf '%s' "$(DATABASE_URL)" | sed -E 's|^postgres(ql)?://([^:@]+):.*|\2|'); \
+	 DB_NAME=$$(printf '%s' "$(DATABASE_URL)" | sed -E 's|^.*/([^/?]+)(\?.*)?$$|\1|'); \
+	 CONTAINER=$${SOLO_POSTGRES_CONTAINER:-solo-postgres}; \
+	 echo "==> Dropping and recreating database '$$DB_NAME'..."; \
+	 docker exec "$$CONTAINER" psql -U "$$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
+	   -c "DROP DATABASE IF EXISTS \"$$DB_NAME\" WITH (FORCE);" \
+	   -c "CREATE DATABASE \"$$DB_NAME\";"; \
+	 echo "==> Running migrations..."; \
+	 go run ./cmd/migrate up
+	@echo ""
+	@echo "✓ Database reset. Run 'make start' to launch the app."

@@ -14,24 +14,23 @@ almost everything.
 git clone git@github.com:fredalxin/solo.git
 cd solo
 
-# 2. One-time setup: copy env, install deps, run migrations, build binaries
-cp .env.example .env
-make init
-
-# 3. Start everything (PostgreSQL, API server, agent daemon, frontend)
-make start
+# 2. Bootstrap and start everything in one shot
+make dev
 ```
 
-Open <http://localhost:3000> to register an account and try it out.
+Open <http://localhost:3000> to register an account and try it out. `make dev`
+is idempotent — re-run it any time to get back to a clean dev environment.
 
-Daily commands:
+Daily commands (run `make help` for the full menu):
 
 | Command        | What it does                                          |
 | -------------- | ----------------------------------------------------- |
+| `make dev`     | Bootstrap from scratch (env, deps, DB, migrations, services) |
 | `make start`   | Start all services (auto-builds if binaries missing)  |
 | `make restart` | Restart all services                                  |
 | `make rebuild` | Rebuild binaries and restart                          |
 | `make stop`    | Shut everything down                                  |
+| `make migrate` | Apply pending database migrations                     |
 
 ## Project layout
 
