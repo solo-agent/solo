@@ -158,7 +158,7 @@ export function InboxView() {
             <div className="flex-1 overflow-y-auto">
               {items.map((item) => (
                 <InboxItem
-                  key={item.id}
+                  key={`${item.type}-${item.id}`}
                   item={item}
                   onClick={handleItemClick}
                 />

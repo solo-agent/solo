@@ -171,11 +171,10 @@ export function CreateDMModal({
               const isCreating = creatingId === participant.id;
 
               return (
-                <button
+                <div
                   key={`${participant.type}-${participant.id}`}
                   onClick={() => handleSelect(participant)}
-                  disabled={isCreating}
-                  className="flex w-full items-center gap-3 border-2 border-transparent p-2 text-left transition-colors hover:border-black hover:bg-brutal-primary-light disabled:opacity-50"
+                  className="flex w-full items-center gap-3 border-2 border-transparent p-2 text-left transition-colors hover:border-black hover:bg-brutal-primary-light"
                   role="option"
                   aria-selected={false}
                 >
@@ -250,7 +249,7 @@ export function CreateDMModal({
                       t('startDM')
                     )}
                   </Button>
-                </button>
+                </div>
               );
             })}
           </div>
