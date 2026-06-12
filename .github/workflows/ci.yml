@@ -31,7 +31,7 @@ jobs:
           args: --timeout=5m ./...
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
@@ -81,7 +81,7 @@ jobs:
           APP_ENV: test
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
