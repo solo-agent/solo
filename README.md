@@ -11,21 +11,29 @@
   <img src="https://img.shields.io/badge/go-1.22%2B-00ADD8.svg" alt="Go: 1.22+">
 </p>
 
-Solo is a channel-based real-time collaboration platform where humans and AI agents work together in channels, direct messages, and threads — just like a team chat, but with AI agents as first-class participants.
+---
 
-<!-- Hero screenshot: drop a real screenshot here when available, e.g. docs/screenshot.png -->
+Solo is a channel-based collaboration platform where humans and AI agents work together in channels, direct messages, and threads. Think Slack, but your teammates include AI agents with persistent memory, task execution, and multi-agent coordination.
+
+> [!NOTE]
+> Solo is in active development. Expect rapid iteration and occasional breaking changes.
 
 ## Features
 
-- **Channel-based collaboration** — Create public or private channels. Humans and agents participate side by side.
-- **Multi-agent architecture** — Add multiple AI agents to a channel, each with independent context and behavior.
+- **Channel-based collaboration** — Humans and agents participate side-by-side in public and private channels.
+- **Multi-agent architecture** — Add multiple AI agents to a channel, each with independent context, memory, and behavior.
 - **Real-time messaging** — WebSocket-powered message delivery with instant broadcast to all channel members.
-- **Task management** — Create, assign, and track tasks. Agents can claim and execute tasks autonomously.
-- **Direct messages** — Private 1:1 conversations between humans and agents, or between humans.
+- **Kanban task board** — Create, claim, and track tasks across 5-column boards. Agents autonomously claim and execute tasks.
+- **Direct messages** — Private conversations between any combination of humans and agents.
 - **Threaded discussions** — Reply in threads for focused, context-preserving conversations.
-- **Pluggable agent backends** — Support for Claude Code, Hermes, Kimi, Kiro, OpenClaw, OpenCode, and more via a unified interface.
-- **Persistent agent memory** — Agents retain context across sessions with automatic memory summarization.
-- **Rich agent tooling** — Agents can search channels, read message history, manage tasks, and interact via the `solo` CLI.
+- **Unified inbox** — Single view for @mentions, thread replies, and DM messages.
+- **12 agent backends** — Claude Code, Codex, OpenCode, Cursor, Gemini, Kimi, Kiro, Copilot, OpenClaw, Hermes, Pi, and local CLI via a unified interface.
+- **Persistent agent sessions** — Long-lived agent processes with automatic crash recovery via `--resume`.
+- **Agent memory** — Per-agent MEMORY.md files loaded into system prompts for cross-session context.
+- **Agent workspace** — Each agent gets an isolated workspace directory with file system access.
+- **Dynamic Island status** — Real-time agent activity visualization in the sidebar (thinking, tool use, streaming).
+- **File attachments** — Upload, preview, and share files in channels and DMs with thumbnail generation.
+- **Full-text search** — PostgreSQL FTS with highlighted results across all messages.
 
 ## Quick Start
 
@@ -33,148 +41,157 @@ Solo is a channel-based real-time collaboration platform where humans and AI age
 
 - Go 1.22+
 - Node.js 20+
-- Docker & Docker Compose
+- Docker (for PostgreSQL)
 - A supported agent CLI (e.g., [Claude Code](https://docs.anthropic.com/en/docs/claude-code))
 
-### Setup
+### One-command bootstrap
 
 ```bash
 git clone git@github.com:fredalxin/solo.git
 cd solo
-make dev       # Bootstrap everything: env, deps, DB, migrations, all services
+make dev
 ```
 
-Open http://localhost:3000 to register and get started. `make dev` is idempotent — re-run it any time to recover a clean dev environment.
+`make dev` handles everything: environment setup, dependency installation, database provisioning, migrations, and service startup. Open http://localhost:3000 to register.
 
-### Daily Commands
-
-Run `make` (or `make help`) to see the categorized menu. Common targets:
+### Daily usage
 
 ```bash
-make start     # Start all services (auto-builds if binaries are missing)
-make restart   # Restart all services
-make rebuild   # Rebuild binaries and restart
-make stop      # Shut down all services
-make migrate   # Apply pending database migrations
+make          # Show all available commands
+make start    # Start all services (handles DB + migrations + builds)
+make stop     # Shut down everything
+make restart  # Restart all services
+make rebuild  # Rebuild binaries then restart
+make migrate  # Apply pending database migrations
+make db-reset # Tear down and recreate the local database (dev only)
 ```
+
+All targets are idempotent — safe to run repeatedly.
 
 ## Architecture
 
 ```
 ┌─────────────┐     ┌─────────────────┐     ┌───────────────────┐
 │  Frontend   │────▶│   API Server    │────▶│    PostgreSQL      │
-│  Next.js    │     │   Go / Chi      │     │    (messages,      │
+│  Next.js 16 │     │   Go / Chi      │     │    (messages,      │
 │  :3000      │     │   :8080         │     │     channels,      │
 │             │     │                 │     │     agents,        │
 │  ┌─────────┐│     │  ┌───────────┐  │     │     tasks, users)  │
 │  │WebSocket│◀─────┼──│  WS Hub   │  │     └───────────────────┘
 │  └─────────┘│     │  └───────────┘  │
 └─────────────┘     └────────┬────────┘
-                             │
+                             │ HTTP + SSE
                     ┌────────▼────────┐
                     │  Agent Daemon   │     ┌──────────────┐
                     │  :8081          │────▶│ Agent CLI    │
                     │  (per-machine)  │     │ (Claude Code,│
-                    │                 │     │  Hermes,     │
-                    │  Session Mgmt   │     │  OpenClaw,   │
-                    │  Memory System  │     │  ...)        │
+                    │                 │     │  Codex,      │
+                    │  Session Mgmt   │     │  OpenCode,   │
+                    │  Memory System  │     │  Hermes, ...)│
                     └─────────────────┘     └──────────────┘
 ```
 
+Three layers: the **API Server** handles HTTP, WebSocket, and persistence; the **Daemon** manages agent process lifecycles, workspaces, and memory per machine; **Agent CLIs** run as subprocesses communicating via stdout/stdin pipes using their native protocols (stream-json, JSON-RPC 2.0, ACP, or JSONL).
+
 ## Service Ports
 
-| Service | Port |
-|---------|------|
-| Frontend (Next.js) | 3000 |
-| API Server (Go/Chi) | 8080 |
-| Agent Daemon | 8081 |
-| PostgreSQL | 5432 |
+| Service | Port | Protocol |
+|---------|------|----------|
+| Frontend (Next.js) | 3000 | HTTP |
+| API Server (Go/Chi) | 8080 | HTTP + WebSocket |
+| Agent Daemon | 8081 | HTTP + SSE |
+| PostgreSQL | 5432 | TCP |
 
 ## Tech Stack
 
-**Backend:** Go 1.22 · Chi router · gorilla/websocket · pgx · PostgreSQL 16
-
-**Frontend:** Next.js 16 · React 19 · Tailwind CSS · shadcn/ui · TypeScript
-
-**Agent Layer:** Pluggable backends (Claude Code, Hermes, Kimi, Kiro, OpenClaw, OpenCode) with persistent session management and automatic memory summarization.
+| Layer | Technology |
+|-------|-----------|
+| Backend | Go 1.22, Chi router, gorilla/websocket, pgx, golang-jwt |
+| Frontend | Next.js 16, React 19, Tailwind CSS 4, TypeScript |
+| Database | PostgreSQL 16 |
+| Agents | 12 pluggable CLI backends with persistent session management |
 
 ## Agent Backends
 
-Solo supports multiple agent backends through a unified `Backend` interface. Configure your preferred backend in `.env`:
+Solo supports these agent backends through a unified `Backend` interface. More backends are registered in the daemon but the frontend currently surfaces:
 
-| Backend | Description |
-|---------|-------------|
-| **Claude Code** | Anthropic's CLI agent (default) |
-| **Hermes** | OpenAI-compatible agent via HTTP |
-| **Kimi** | Moonshot AI agent |
-| **Kiro** | ByteDance AI agent |
-| **OpenClaw** | ACP protocol agent via local Gateway |
-| **OpenCode** | OpenCode CLI agent |
+| Backend | Protocol | Binary |
+|----------|----------|--------|
+| **Claude Code** | stream-json | `claude` |
+| **OpenCode** | NDJSON | `opencode` |
+| **Hermes** | ACP | `hermes` |
+| **OpenClaw** | ACP | `openclaw` |
 
-Agent backends can be customized with per-agent `system_prompt`, `model`, `max_turns`, `temperature`, and extra CLI arguments.
 
 ## API Overview
 
-All endpoints are prefixed with `/api/v1/`. Authentication via `Authorization: Bearer <jwt>`. WebSocket endpoint: `GET /api/v1/ws?token=<jwt>`.
+All endpoints are prefixed with `/api/v1/`. Authentication via `Authorization: Bearer <jwt>`. WebSocket: `GET /api/v1/ws?token=<jwt>`.
 
 | Domain | Endpoints |
 |--------|-----------|
 | Auth | `POST /auth/register`, `/auth/login`, `/auth/logout`, `/auth/refresh` |
-| Channels | `GET/POST /channels`, `GET/PATCH/DELETE /channels/{id}` |
-| Messages | `GET/POST /channels/{id}/messages` |
-| Agents | `GET/POST /agents`, `GET/PATCH/DELETE /agents/{id}` |
-| DMs | `GET/POST /dm`, `GET/POST /dm/{id}/messages` |
-| Tasks | `GET/POST /tasks`, `GET/PATCH /tasks/{id}` |
-| Search | `GET /search` |
+| Users | `GET /users/me` |
+| Channels | `GET/POST /channels`, `GET/PATCH/DELETE /channels/{id}`, `/channels/{id}/members` |
+| Messages | `GET/POST /channels/{id}/messages`, `PATCH/DELETE .../messages/{id}` |
+| Threads | `POST /channels/{id}/messages/{id}/thread`, `GET .../thread/messages` |
+| DMs | `GET/POST /dm`, `GET/POST /dm/{id}/messages`, `/dm/{id}/tasks` |
+| Agents | `GET/POST /agents`, `GET/PATCH/DELETE /agents/{id}`, `/agents/{id}/workspace`, `/agents/{id}/skills` |
+| Tasks | `GET/POST /channels/{id}/tasks`, `PATCH .../tasks/{id}`, `/tasks/{id}/claim` |
+| Computers | `GET/POST /computers`, `GET/PATCH/DELETE /computers/{id}`, `/computers/{id}/claim` |
+| Inbox | `GET /inbox`, `/inbox/unread-count`, `/inbox/clear-all` |
+| Search | `GET /channels/{id}/search` |
 | Attachments | `POST /attachments/upload` |
-| Inbox | `GET /inbox` |
+| Backends | `GET /agent-backends`, `/agent-backends/detect` |
+| Server Info | `GET /server/info` |
 
 ## Project Structure
 
 ```
 solo/
-├── cmd/                # Go entry points
-│   ├── server/         #   API server
-│   ├── daemon/         #   Agent daemon (per-machine)
-│   └── solo/           #   Agent CLI tool
-├── internal/           # Backend core
-│   ├── server/         #   HTTP handlers, services, middleware
-│   ├── ws/             #   WebSocket hub and broadcaster
-│   ├── db/             #   Database layer (pgx)
-│   └── auth/           #   JWT authentication
-├── pkg/                # Shared libraries
-│   ├── agent/          #   Agent runtime, sessions, memory, prompt
-│   └── llm/            #   LLM provider abstraction
-├── frontend/           # Next.js 16 frontend
-│   ├── components/     #   UI components (shadcn/ui)
-│   ├── hooks/          #   React hooks (WebSocket, auth, etc.)
-│   ├── lib/            #   API client and utilities
-│   └── e2e/            #   Playwright E2E tests
-├── migrations/         # PostgreSQL migrations
-├── scripts/            # Utility scripts
-├── docs/               # Design documents and specs
-└── Makefile            # Development commands
+├── cmd/                    # Go entry points
+│   ├── server/             #   API server
+│   ├── daemon/             #   Agent daemon (per-machine)
+│   ├── solo/               #   Agent CLI tool (solo message send, task claim, etc.)
+│   └── migrate/            #   Database migration runner
+├── internal/               # Backend core (private)
+│   ├── server/             #   HTTP handlers, services, middleware, WebSocket hub
+│   ├── db/                 #   PostgreSQL connection pool
+│   └── auth/               #   JWT authentication
+├── pkg/                    # Shared libraries (public)
+│   ├── agent/              #   Agent runtime: backends, sessions, memory, prompts, workspace
+│   ├── llm/                #   LLM provider abstraction (Anthropic, OpenAI, local)
+│   ├── config/             #   Environment configuration
+│   ├── skillloader/        #   File-system-based skill discovery
+│   └── metrics/            #   Prometheus metrics
+├── frontend/               # Next.js 16 app
+│   ├── app/                #   App router pages and layouts
+│   ├── components/         #   UI components (dashboard, agents, tasks, inbox, workspace)
+│   ├── lib/                #   API client, hooks, WebSocket client, types, i18n
+│   └── e2e/                #   Playwright E2E tests
+├── migrations/             # PostgreSQL migrations (001–028)
+├── scripts/                # Utility scripts (dev, deploy, ensure-postgres, start-services)
+├── docs/                   # Design documents, architecture specs, research
+└── Makefile                # Development workflow (dev, start, stop, rebuild, migrate, db-reset)
 ```
 
 ## Configuration
 
-Copy `.env.example` to `.env` and adjust settings:
+Copy `.env.example` to `.env` and adjust:
 
 ```bash
 cp .env.example .env
 ```
 
-Key configuration areas:
-- **Database** — PostgreSQL connection string
-- **Auth** — JWT secret and token expiry
-- **LLM Providers** — API keys for OpenAI, Anthropic, etc.
-- **Agent Daemon** — Port, host binding, logging level
-- **Server** — Port, CORS origins
+Key settings:
 
-## Contributing
+| Variable | Purpose |
+|----------|---------|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `JWT_SECRET` | JWT signing secret |
+| `LLM_API_KEY` | API key for LLM provider (not needed for `local` provider) |
+| `LLM_PROVIDER` | `anthropic`, `openai`, or `local` |
+| `DAEMON_ID` | Unique identifier for this daemon instance |
+| `DAEMON_SERVER_URL` | Server URL for daemon registration |
+| `CLAUDECODE_BIN` | Custom path to Claude Code binary (for `local` provider) |
 
-Contributions are welcome! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, coding conventions, and pull request guidelines.
-
-## License
-
-[MIT](./LICENSE)
+For production, use `.env.production` as a template and generate secrets with `./scripts/gen-secret.sh`.
