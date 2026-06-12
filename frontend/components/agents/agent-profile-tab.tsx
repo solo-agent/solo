@@ -8,12 +8,17 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Pencil, Check, X, Circle, AlertCircle, RefreshCw, Bot } from 'lucide-react';
+import Link from 'next/link';
+import { Pencil, Check, X, AlertCircle, RefreshCw } from 'lucide-react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
+import { Decoration } from '@/components/ui/decoration';
+import { BrutalSeparator } from '@/components/ui/brutal-separator';
+import { useComputers } from '@/lib/hooks/use-computers';
+import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 import type { Agent } from '@/lib/types';
 
@@ -107,7 +112,7 @@ function InlineTextField({
 
   return (
     <div className="space-y-1">
-      <span className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
+      <span className="inline-block bg-brutal-primary-light border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-black">
         {label}
       </span>
       <div className="flex items-center gap-2 group">
@@ -158,12 +163,24 @@ function StatusToggle({
 
   return (
     <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2">
-        <Circle className={`h-3 w-3 ${active ? 'fill-brutal-success text-brutal-success' : 'fill-brutal-muted text-brutal-muted'}`} />
-        <span className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
-          {active ? t('agentProfileEnabled') : t('agentProfileDisabled')}
-        </span>
-      </div>
+      {/* v3.3: status pill is now a chunky badge-brutal instead of a
+          thin dot + muted text — adds a saturated status color block
+          to the panel without changing the toggle's interaction. */}
+      <span
+        className={cn(
+          'inline-flex items-center gap-1.5 border-2 border-black px-2 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider',
+          active ? 'bg-brutal-success text-black' : 'bg-brutal-muted text-black',
+        )}
+      >
+        <span
+          className={cn(
+            'h-2 w-2 border border-black',
+            active ? 'bg-white' : 'bg-black',
+          )}
+          aria-hidden
+        />
+        {active ? t('agentProfileEnabled') : t('agentProfileDisabled')}
+      </span>
       <button
         type="button"
         onClick={handleToggle}
@@ -200,6 +217,10 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { showToast } = useToast();
+  // v3.3: reverse-lookup the computer that owns this agent so the META
+  // block can show "Connected Computer: <name>".
+  const { computers } = useComputers();
+  const connectedComputer = computers.find((c) => c.agent_ids?.includes(agentId));
 
   const loadAgent = useCallback(async () => {
     setIsLoading(true);
@@ -277,16 +298,33 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
 
   return (
     <div className="space-y-5">
-      {/* Avatar + Name */}
-      <div className="flex items-center gap-3">
-        <PixelAvatar agentId={agent.id} avatarUrl={agent.avatar_url} size="md" />
-        <div>
-          <h3 className="font-heading font-bold text-base text-foreground">{agent.name}</h3>
-          <p className="font-mono text-[11px] text-muted-foreground">{agent.model_provider || t('agentProfileNoRuntime')}</p>
+      {/* Avatar + Name — v3.3: framed avatar (2px border + cream
+          backdrop + sticker tilt) anchors the header; violet rotating
+          star sticker adds a complementary color accent. */}
+      <div className="relative">
+        <div className="flex items-center gap-3">
+          <div
+            className="border-2 border-black shadow-brutal-sm bg-brutal-cream"
+            style={{ transform: 'rotate(-2deg)' }}
+          >
+            <PixelAvatar agentId={agent.id} avatarUrl={agent.avatar_url} size="md" />
+          </div>
+          <div>
+            <h3 className="font-heading font-bold text-base text-foreground">{agent.name}</h3>
+            <p className="font-mono text-[11px] text-muted-foreground">{agent.model_provider || t('agentProfileNoRuntime')}</p>
+          </div>
         </div>
+        <Decoration
+          shape="star"
+          color="violet"
+          size="sm"
+          animation="spin"
+          rotation={14}
+          className="absolute -top-3 -right-3"
+        />
       </div>
 
-      <hr className="divider-brutal" />
+      <BrutalSeparator />
 
       {/* Status toggle */}
       <StatusToggle
@@ -294,53 +332,88 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
         onToggle={(active) => handleUpdate('is_active', active)}
       />
 
-      <hr className="divider-brutal" />
+      <BrutalSeparator />
 
-      {/* Editable fields */}
-      <InlineTextField
-        label={t('agentFormName')}
-        value={agent.name}
-        onSave={(val) => handleUpdate('name', val)}
-        placeholder={t('agentFormNamePlaceholder')}
-      />
-
-      <InlineTextField
-        label={t('agentFormDesc')}
-        value={agent.description}
-        onSave={(val) => handleUpdate('description', val)}
-        placeholder={t('agentFormDescPlaceholder')}
-        multiline
-      />
-
-      <InlineTextField
-        label={t('agentFormSystemPrompt')}
-        value={agent.system_prompt}
-        onSave={(val) => handleUpdate('system_prompt', val)}
-        placeholder={t('agentFormSystemPromptPlaceholder')}
-        multiline
-      />
-
-      <hr className="divider-brutal" />
-
-      {/* Read-only metadata */}
+      {/* v3.3: Name field removed (the avatar/header above already
+          shows the name). Description + System Prompt are grouped under
+          a single `★ INFO` tilted sticker section. */}
       <div className="space-y-2">
-        <h4 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
-          {t('agentProfileMeta')}
+        <h4>
+          <span
+            className="inline-flex items-center gap-1.5 border-2 border-black bg-brutal-primary px-2.5 py-1 font-heading text-[11px] font-black uppercase tracking-widest text-black shadow-brutal-sm"
+            style={{ transform: 'rotate(-0.8deg)' }}
+          >
+            ★ {t('agentProfileInfo')}
+          </span>
         </h4>
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="font-mono text-[11px] text-muted-foreground">Computer Name</span>
-            <span className="font-mono text-[11px] text-foreground">
+        <div className="space-y-4">
+          <InlineTextField
+            label={t('agentFormDesc')}
+            value={agent.description}
+            onSave={(val) => handleUpdate('description', val)}
+            placeholder={t('agentFormDescPlaceholder')}
+            multiline
+          />
+
+          <InlineTextField
+            label={t('agentFormSystemPrompt')}
+            value={agent.system_prompt}
+            onSave={(val) => handleUpdate('system_prompt', val)}
+            placeholder={t('agentFormSystemPromptPlaceholder')}
+            multiline
+          />
+        </div>
+      </div>
+
+      <BrutalSeparator />
+
+      {/* Read-only metadata — v3.3: bare layout (no card-brutal wrapper)
+          to match the chunky-sticker-title + naked-fields style of the
+          Computers detail. Section header is a tilted primary chip. */}
+      <div className="space-y-2">
+        <h4>
+          <span
+            className="inline-flex items-center gap-1.5 border-2 border-black bg-brutal-primary px-2.5 py-1 font-heading text-[11px] font-black uppercase tracking-widest text-black shadow-brutal-sm"
+            style={{ transform: 'rotate(-0.8deg)' }}
+          >
+            ★ {t('agentProfileMeta')}
+          </span>
+        </h4>
+        <div className="space-y-1">
+          <div className="flex items-center gap-3 py-1.5">
+            <span className="inline-block bg-brutal-primary-light border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-black flex-shrink-0">
+              ID
+            </span>
+            <span className="font-mono text-xs text-foreground">
               {agent.owner_id?.slice(0, 8) ?? '—'}
             </span>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="font-mono text-[11px] text-muted-foreground">{t('agentProfileCreatedAt')}</span>
-            <span className="font-mono text-[11px] text-foreground">{formatDate(agent.created_at)}</span>
+          <div className="flex items-center gap-3 py-1.5">
+            <span className="inline-block bg-brutal-primary-light border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-black flex-shrink-0">
+              {t('agentProfileCreatedAt')}
+            </span>
+            <span className="font-mono text-xs text-foreground">{formatDate(agent.created_at)}</span>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="font-mono text-[11px] text-muted-foreground">{t('agentProfileCreatedBy')}</span>
-            <span className="font-mono text-[11px] text-foreground">{agent.owner_id?.slice(0, 8) ?? '—'}</span>
+          <div className="flex items-center gap-3 py-1.5">
+            <span className="inline-block bg-brutal-primary-light border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-black flex-shrink-0">
+              {t('agentProfileCreatedBy')}
+            </span>
+            <span className="font-mono text-xs text-foreground">{agent.owner_id?.slice(0, 8) ?? '—'}</span>
+          </div>
+          <div className="flex items-center gap-3 py-1.5">
+            <span className="inline-block bg-brutal-primary-light border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-black flex-shrink-0">
+              Computer
+            </span>
+            {connectedComputer ? (
+              <Link
+                href="/computers"
+                className="font-mono text-xs text-foreground underline decoration-dotted underline-offset-2 hover:text-brutal-primary transition-colors"
+              >
+                {connectedComputer.name}
+              </Link>
+            ) : (
+              <span className="font-mono text-xs italic text-muted-foreground">Not connected</span>
+            )}
           </div>
         </div>
       </div>
