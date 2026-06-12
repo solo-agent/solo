@@ -2,7 +2,7 @@
 # Solo - Multi-stage Dockerfile
 # =============================================================================
 # Stage 1: Build Go binaries
-FROM golang:1.22-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates tzdata
 
@@ -21,7 +21,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/daemon ./cmd/daem
 
 # =============================================================================
 # Stage 2: Runtime image — reuse golang:alpine (already cached)
-FROM golang:1.22-alpine
+FROM golang:1.26-alpine
 
 # Create a non-root user for running the services
 RUN addgroup -S solo && adduser -S -G solo solo
