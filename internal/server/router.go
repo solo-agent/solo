@@ -60,6 +60,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	daemonHandler := handler.NewDaemonHandler(dm, agentSvc, computerSvc)
 	_ = service.NewAgentRelationshipService(pool)
 	relHandler := handler.NewAgentRelationshipHandler(pool)
+		depHandler := handler.NewTaskDependencyHandler(taskSvc)
 	mentionSvc := service.NewMentionService(pool)
 	taskHandler := handler.NewTaskHandler(pool, hub, agentSvc, taskSvc, mentionSvc)
 	searchHandler := handler.NewSearchHandler(pool)
@@ -222,6 +223,14 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 
 			// Onboarding wizard
 			r.Post("/api/v1/onboarding/create-lucy", onboardingHandler.CreateLucy)
+
+		// Task dependency routes (collaboration Step 1)
+		r.Post("/api/v1/task-dependencies", depHandler.AddDependency)
+		r.Delete("/api/v1/task-dependencies", depHandler.RemoveDependency)
+		r.Get("/api/v1/tasks/{taskID}/blockers", depHandler.ListBlockers)
+		r.Get("/api/v1/tasks/{taskID}/blocked", depHandler.ListBlocked)
+		r.Get("/api/v1/tasks/{taskID}/is-blocked", depHandler.IsBlocked)
+
 
 		// Global tasks routes (all channels)
 		r.Route("/api/v1/tasks", func(r chi.Router) {

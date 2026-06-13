@@ -898,6 +898,140 @@ func (s *TaskService) ListAllUserTasks(ctx context.Context, userID string, chann
 	return tasks, rows.Err()
 }
 
+// ---- Task Dependencies ----
+
+type TaskDependency struct {
+	BlockerTaskID string `json:"blocker_task_id"`
+	BlockedTaskID string `json:"blocked_task_id"`
+	CreatedAt     string `json:"created_at"`
+}
+
+// AddDependency creates a dependency: blocked_task waits for blocker_task.
+// Detects cycles by walking the dependency chain.
+func (s *TaskService) AddDependency(ctx context.Context, blockerTaskID, blockedTaskID string) (*TaskDependency, error) {
+	if blockerTaskID == blockedTaskID {
+		return nil, fmt.Errorf("a task cannot depend on itself")
+	}
+	if err := s.checkDependencyCycle(ctx, blockerTaskID, blockedTaskID); err != nil {
+		return nil, err
+	}
+
+	var dep TaskDependency
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO task_dependencies (blocker_task_id, blocked_task_id)
+		VALUES ($1, $2)
+		RETURNING blocker_task_id, blocked_task_id, created_at::text
+	`, blockerTaskID, blockedTaskID).Scan(&dep.BlockerTaskID, &dep.BlockedTaskID, &dep.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("add dependency: %w", err)
+	}
+	return &dep, nil
+}
+
+func (s *TaskService) checkDependencyCycle(ctx context.Context, blockerID, blockedID string) error {
+	visited := map[string]bool{blockedID: true}
+	queue := []string{blockerID}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		if current == blockedID {
+			return fmt.Errorf("this dependency would create a cycle")
+		}
+		if visited[current] {
+			continue
+		}
+		visited[current] = true
+
+		rows, err := s.pool.Query(ctx, `
+			SELECT blocker_task_id FROM task_dependencies
+			WHERE blocked_task_id = $1
+		`, current)
+		if err != nil {
+			return fmt.Errorf("cycle check: %w", err)
+		}
+		var blockers []string
+		for rows.Next() {
+			var b string
+			if err := rows.Scan(&b); err != nil {
+				rows.Close()
+				return err
+			}
+			blockers = append(blockers, b)
+		}
+		rows.Close()
+		queue = append(queue, blockers...)
+	}
+	return nil
+}
+
+// ListBlockers returns tasks that block the given task.
+func (s *TaskService) ListBlockers(ctx context.Context, taskID string) ([]TaskDependency, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT blocker_task_id, blocked_task_id, created_at::text
+		FROM task_dependencies WHERE blocked_task_id = $1
+		ORDER BY created_at
+	`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list blockers: %w", err)
+	}
+	defer rows.Close()
+	return scanDependencies(rows)
+}
+
+// ListBlocked returns tasks that the given task blocks.
+func (s *TaskService) ListBlocked(ctx context.Context, taskID string) ([]TaskDependency, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT blocker_task_id, blocked_task_id, created_at::text
+		FROM task_dependencies WHERE blocker_task_id = $1
+		ORDER BY created_at
+	`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list blocked: %w", err)
+	}
+	defer rows.Close()
+	return scanDependencies(rows)
+}
+
+// IsTaskBlocked checks whether a task has unfinished blockers.
+func (s *TaskService) IsTaskBlocked(ctx context.Context, taskID string) (bool, error) {
+	var count int
+	err := s.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM task_dependencies td
+		INNER JOIN tasks t ON t.id = td.blocker_task_id
+		WHERE td.blocked_task_id = $1 AND t.status != 'done' AND t.status != 'closed'
+	`, taskID).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("check blocked: %w", err)
+	}
+	return count > 0, nil
+}
+
+// RemoveDependency deletes a dependency between two tasks.
+func (s *TaskService) RemoveDependency(ctx context.Context, blockerTaskID, blockedTaskID string) error {
+	tag, err := s.pool.Exec(ctx, `
+		DELETE FROM task_dependencies WHERE blocker_task_id = $1 AND blocked_task_id = $2
+	`, blockerTaskID, blockedTaskID)
+	if err != nil {
+		return fmt.Errorf("remove dependency: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("dependency not found")
+	}
+	return nil
+}
+
+func scanDependencies(rows pgx.Rows) ([]TaskDependency, error) {
+	var deps []TaskDependency
+	for rows.Next() {
+		var d TaskDependency
+		if err := rows.Scan(&d.BlockerTaskID, &d.BlockedTaskID, &d.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan dependency: %w", err)
+		}
+		deps = append(deps, d)
+	}
+	return deps, nil
+}
+
 // isPgUniqueViolation checks if an error is a PostgreSQL unique constraint violation.
 func isPgUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
