@@ -5,12 +5,16 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
-import { Users, Loader2, ClipboardList, MessageSquare, Eye, Plus, BookOpen } from 'lucide-react';
+import {
+  Users, Loader2, ClipboardList, MessageSquare, Eye, Plus, BookOpen,
+  GitBranch, Bell, Shield,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
 import { useChannelMembers } from '@/lib/hooks/use-channel-members';
 import { useWebSocket } from '@/lib/ws-context';
 import { useTasks } from '@/lib/hooks/use-tasks';
+import { useAuth } from '@/lib/auth-context';
 import { MessageList } from './message-list';
 import { MessageInput } from './message-input';
 import { MemberList } from './member-list';
@@ -26,6 +30,9 @@ import {
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast';
 import { WizardCard } from '@/components/onboarding/wizard-card';
+import { ChannelBinding } from '@/components/channel-binding';
+import { ReminderManager } from '@/components/reminder-manager';
+import { WatchdogPanel } from '@/components/watchdog-panel';
 import { t } from '@/lib/i18n';
 import type { Channel, Message, Task, TaskStatus } from '@/lib/types';
 
@@ -138,6 +145,16 @@ export function ChannelView({
   const [isKnowledgeOpen, setIsKnowledgeOpen] = useState(false);
 
   const { showToast } = useToast();
+  const { user } = useAuth();
+
+  // Derive admin status for ChannelBinding
+  const currentMember = members.find((m) => m.member_id === user?.id);
+  const isAdmin = currentMember?.role === 'owner' || currentMember?.role === 'admin';
+
+  // ---- Dialog states for right-panel integrations ----
+  const [isChannelBindingOpen, setIsChannelBindingOpen] = useState(false);
+  const [isReminderOpen, setIsReminderOpen] = useState(false);
+  const [isWatchdogOpen, setIsWatchdogOpen] = useState(false);
 
   const {
     tasks: channelTasks,
@@ -469,6 +486,45 @@ export function ChannelView({
             >
               <BookOpen className="h-4 w-4" />
             </button>
+            {/* Channel Binding button */}
+            <button
+              type="button"
+              onClick={() => setIsChannelBindingOpen(true)}
+              className={cn(
+                'flex h-8 w-8 items-center justify-center border-2 border-black shadow-brutal-sm transition-colors',
+                'bg-white hover:bg-brutal-cream',
+              )}
+              aria-label={t('channelBindingTitle')}
+              title={t('channelBindingTitle')}
+            >
+              <GitBranch className="h-4 w-4" />
+            </button>
+            {/* Reminder Manager button */}
+            <button
+              type="button"
+              onClick={() => setIsReminderOpen(true)}
+              className={cn(
+                'flex h-8 w-8 items-center justify-center border-2 border-black shadow-brutal-sm transition-colors',
+                'bg-white hover:bg-brutal-cream',
+              )}
+              aria-label={t('reminderManagerTitle')}
+              title={t('reminderManagerTitle')}
+            >
+              <Bell className="h-4 w-4" />
+            </button>
+            {/* Watchdog panel button */}
+            <button
+              type="button"
+              onClick={() => setIsWatchdogOpen(true)}
+              className={cn(
+                'flex h-8 w-8 items-center justify-center border-2 border-black shadow-brutal-sm transition-colors',
+                'bg-white hover:bg-brutal-cream',
+              )}
+              aria-label={t('watchdogPanelTitle')}
+              title={t('watchdogPanelTitle')}
+            >
+              <Shield className="h-4 w-4" />
+            </button>
             {/* SOLO-237-F: Channel-internal search */}
             {channelViewTab === 'messages' && (
               <ChannelSearch
@@ -684,6 +740,65 @@ export function ChannelView({
           <KnowledgePanel
             channelId={channel.id}
             compact
+          />
+        </div>
+      </Dialog>
+
+      {/* Channel Binding Dialog */}
+      <Dialog open={isChannelBindingOpen} onOpenChange={setIsChannelBindingOpen} width="md">
+        <DialogHeader>
+          <DialogTitle>
+            <GitBranch className="inline h-4 w-4 mr-1.5 -mt-0.5" />
+            {t('channelBindingTitle')}
+            <span className="ml-2 font-mono text-sm font-normal text-muted-foreground">
+              #{channel.name}
+            </span>
+          </DialogTitle>
+          <DialogCloseButton onClick={() => setIsChannelBindingOpen(false)} />
+        </DialogHeader>
+        <div className="max-h-[60vh] overflow-y-auto">
+          <ChannelBinding
+            channelId={channel.id}
+            channelName={channel.name}
+            isAdmin={isAdmin}
+          />
+        </div>
+      </Dialog>
+
+      {/* Reminder Manager Dialog */}
+      <Dialog open={isReminderOpen} onOpenChange={setIsReminderOpen} width="md">
+        <DialogHeader>
+          <DialogTitle>
+            <Bell className="inline h-4 w-4 mr-1.5 -mt-0.5" />
+            {t('reminderManagerTitle')}
+            <span className="ml-2 font-mono text-sm font-normal text-muted-foreground">
+              #{channel.name}
+            </span>
+          </DialogTitle>
+          <DialogCloseButton onClick={() => setIsReminderOpen(false)} />
+        </DialogHeader>
+        <div className="max-h-[60vh] overflow-y-auto">
+          <ReminderManager
+            channelId={channel.id}
+          />
+        </div>
+      </Dialog>
+
+      {/* Watchdog Panel Dialog */}
+      <Dialog open={isWatchdogOpen} onOpenChange={setIsWatchdogOpen} width="md">
+        <DialogHeader>
+          <DialogTitle>
+            <Shield className="inline h-4 w-4 mr-1.5 -mt-0.5" />
+            {t('watchdogPanelTitle')}
+            <span className="ml-2 font-mono text-sm font-normal text-muted-foreground">
+              #{channel.name}
+            </span>
+          </DialogTitle>
+          <DialogCloseButton onClick={() => setIsWatchdogOpen(false)} />
+        </DialogHeader>
+        <div className="max-h-[60vh] overflow-y-auto">
+          <WatchdogPanel
+            channelId={channel.id}
           />
         </div>
       </Dialog>

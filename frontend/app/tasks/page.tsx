@@ -6,7 +6,7 @@
 
 import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Plus, Filter, X } from 'lucide-react';
+import { Plus, Filter, X, Network } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { t } from '@/lib/i18n';
 import { useTasks, useDMTasks } from '@/lib/hooks/use-tasks';
@@ -21,6 +21,14 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { TasksLeftColumn } from '@/components/tasks/tasks-left-column';
 import { TaskBoard } from '@/components/tasks/task-board';
 import type { Task, TaskStatus, Message } from '@/lib/types';
+import { SwarmStatusPanel } from '@/components/swarm/swarm-status';
+import { SwarmDAG } from '@/components/swarm/swarm-dag';
+import {
+  Dialog,
+  DialogHeader,
+  DialogTitle,
+  DialogCloseButton,
+} from '@/components/ui/dialog';
 
 // SOLO-63-F: Lazy-load ThreadPanel
 const ThreadPanel = lazy(() =>
@@ -28,6 +36,23 @@ const ThreadPanel = lazy(() =>
 );
 
 export default function TasksPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center bg-brutal-cream">
+          <div className="flex flex-col items-center gap-3">
+            <Spinner size="md" />
+            <p className="font-mono text-sm text-muted-foreground">{t('loading')}</p>
+          </div>
+        </div>
+      }
+    >
+      <TasksPageContent />
+    </Suspense>
+  );
+}
+
+function TasksPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
@@ -168,6 +193,10 @@ export default function TasksPage() {
   // Thread panel state
   const [threadMessage, setThreadMessage] = useState<Message | null>(null);
   const [threadTask, setThreadTask] = useState<Task | null>(null);
+
+  // Swarm panel state (for parent tasks with subtasks)
+  const [isSwarmOpen, setIsSwarmOpen] = useState(false);
+  const [swarmTask, setSwarmTask] = useState<Task | null>(null);
 
   // Auth guard
   useEffect(() => {
@@ -414,25 +443,105 @@ export default function TasksPage() {
             style={{ width: threadMessage ? 400 : 0, opacity: threadMessage ? 1 : 0 }}
           >
             {threadMessage && (
-              <Suspense
-                fallback={
-                  <div className="flex h-full items-center justify-center">
-                    <Spinner size="sm" />
+              <div className="flex flex-col h-full">
+                {/* Overlay header with close + swarm button */}
+                <div className="flex items-center justify-between flex-shrink-0 h-10 px-3 border-b-2 border-black bg-white">
+                  <span className="font-heading text-xs font-bold uppercase tracking-wider text-foreground truncate">
+                    {threadTask ? `#${threadTask.task_number ?? ''} ${threadTask.title.slice(0, 30)}` : 'Task'}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    {threadTask && (threadTask.subtask_count ?? 0) > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSwarmTask(threadTask);
+                          setIsSwarmOpen(true);
+                        }}
+                        className="flex h-7 items-center gap-1 px-2 border-2 border-black bg-brutal-violet-light text-black text-[10px] font-heading font-bold shadow-brutal-sm hover:-translate-y-px active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
+                        title={t('swarmStatusTitle')}
+                      >
+                        <Network className="h-3 w-3" />
+                        {threadTask.done_subtask_count ?? 0}/{threadTask.subtask_count}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleThreadClose}
+                      className="flex h-7 w-7 items-center justify-center border-2 border-black bg-white shadow-brutal-sm hover:bg-brutal-cream active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
+                      aria-label={t('close')}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
                   </div>
-                }
-              >
-                <ThreadPanel
-                  parentMessage={threadMessage}
-                  onClose={handleThreadClose}
-                  task={threadTask ?? undefined}
-                  onClaimTask={handleClaim}
-                  onUnclaimTask={handleUnclaim}
-                />
-              </Suspense>
+                </div>
+                {/* Thread content */}
+                <div className="flex-1 overflow-hidden">
+                  <Suspense
+                    fallback={
+                      <div className="flex h-full items-center justify-center">
+                        <Spinner size="sm" />
+                      </div>
+                    }
+                  >
+                    <ThreadPanel
+                      parentMessage={threadMessage}
+                      onClose={handleThreadClose}
+                      task={threadTask ?? undefined}
+                      onClaimTask={handleClaim}
+                      onUnclaimTask={handleUnclaim}
+                    />
+                  </Suspense>
+                </div>
+              </div>
             )}
           </div>
         </div>
       </main>
+
+      {/* Swarm Status Dialog — for parent tasks with subtasks */}
+      <Dialog open={isSwarmOpen} onOpenChange={setIsSwarmOpen} width="lg">
+        <DialogHeader>
+          <DialogTitle>
+            <Network className="inline h-4 w-4 mr-1.5 -mt-0.5" />
+            {t('swarmStatusTitle')}
+            {swarmTask && (
+              <span className="ml-2 font-mono text-sm font-normal text-muted-foreground">
+                #{swarmTask.task_number ?? ''}
+              </span>
+            )}
+          </DialogTitle>
+          <DialogCloseButton onClick={() => setIsSwarmOpen(false)} />
+        </DialogHeader>
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto">
+          {swarmTask && (
+            <SwarmStatusPanel
+              taskId={swarmTask.id}
+              channelId={swarmTask.channel_id}
+              onSubtaskClick={(subtaskId) => {
+                // Find the subtask in source tasks and open its thread
+                const sub = sourceTasks.find((t) => t.id === subtaskId);
+                if (sub) {
+                  setIsSwarmOpen(false);
+                  setThreadMessage({
+                    id: sub.message_id || sub.id,
+                    channel_id: sub.channel_id,
+                    user_id: sub.creator_id,
+                    display_name: sub.creator_name || sub.creator_id.slice(0, 8),
+                    content: sub.description || sub.title,
+                    created_at: sub.created_at,
+                    status: 'sent',
+                    sender_type: 'user',
+                    task_number: sub.task_number,
+                    task_status: sub.status,
+                    task_claimer_name: sub.claimer_name || sub.assignee_name,
+                  });
+                  setThreadTask(sub);
+                }
+              }}
+            />
+          )}
+        </div>
+      </Dialog>
     </div>
   );
 }
