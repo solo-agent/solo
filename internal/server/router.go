@@ -58,6 +58,8 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	threadHandler := handler.NewThreadHandler(pool, hub, agentSvc)
 	dmHandler := handler.NewDMHandler(pool, hub, agentSvc, taskSvc)
 	daemonHandler := handler.NewDaemonHandler(dm, agentSvc, computerSvc)
+	_ = service.NewAgentRelationshipService(pool)
+	relHandler := handler.NewAgentRelationshipHandler(pool)
 	mentionSvc := service.NewMentionService(pool)
 	taskHandler := handler.NewTaskHandler(pool, hub, agentSvc, taskSvc, mentionSvc)
 	searchHandler := handler.NewSearchHandler(pool)
@@ -201,6 +203,18 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 				r.Get("/skills", agentHandler.AgentSkills)
 			})
 		})
+
+			// Agent relationships (collaboration Step 1)
+			r.Route("/api/v1/agent-relationships", func(r chi.Router) {
+				r.Post("/", relHandler.Create)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Patch("/", relHandler.Update)
+					r.Delete("/", relHandler.Delete)
+				})
+			})
+			r.Get("/api/v1/agents/{agentID}/relationships", relHandler.ListByAgent)
+			r.Get("/api/v1/channels/{channelID}/relationships", relHandler.ListByChannel)
+
 
 		// Agent backends metadata (registered backend adapters)
 		r.Get("/api/v1/agent-backends", agentHandler.AgentBackends)
