@@ -3,6 +3,7 @@ package service
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,6 +15,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/solo-ai/solo/internal/realtime"
 )
 
 // KnowledgeEntry represents a single knowledge document with vector embedding.
@@ -53,11 +56,17 @@ type UpdateKnowledgeRequest struct {
 type KnowledgeService struct {
 	pool     *pgxpool.Pool
 	embedSvc *EmbeddingService
+	hub      realtime.Broadcaster
 }
 
 // NewKnowledgeService creates a new KnowledgeService.
 func NewKnowledgeService(pool *pgxpool.Pool, embedSvc *EmbeddingService) *KnowledgeService {
 	return &KnowledgeService{pool: pool, embedSvc: embedSvc}
+}
+
+// SetHub injects a WebSocket broadcaster for real-time events.
+func (s *KnowledgeService) SetHub(hub realtime.Broadcaster) {
+	s.hub = hub
 }
 
 // Create inserts a new knowledge entry and asynchronously generates its embedding.
@@ -117,6 +126,16 @@ func (s *KnowledgeService) Create(ctx context.Context, authorAgentID string, req
 	}()
 
 	slog.Info("knowledge entry created", "id", id, "channel_id", req.ChannelID, "title", req.Title)
+
+	// Broadcast knowledge_created event.
+	if s.hub != nil {
+		payload, _ := json.Marshal(map[string]interface{}{
+			"type":    "knowledge_created",
+			"payload": entry,
+		})
+		s.hub.BroadcastToChannel(req.ChannelID, payload)
+	}
+
 	return entry, nil
 }
 
@@ -286,6 +305,16 @@ func (s *KnowledgeService) Update(ctx context.Context, id, agentID string, req U
 	entry.UpdatedAt = now
 
 	slog.Info("knowledge entry updated", "id", id)
+
+	// Broadcast knowledge_updated event.
+	if s.hub != nil {
+		payload, _ := json.Marshal(map[string]interface{}{
+			"type":    "knowledge_updated",
+			"payload": entry,
+		})
+		s.hub.BroadcastToChannel(existing.ChannelID, payload)
+	}
+
 	return &entry, nil
 }
 

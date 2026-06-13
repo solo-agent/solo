@@ -2,11 +2,18 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// Sentinel errors for delegation state transitions.
+var (
+	ErrDelegationNotFound      = errors.New("delegation not found")
+	ErrInvalidStatusTransition = errors.New("invalid status transition for delegation")
 )
 
 type AgentDelegationService struct {
@@ -58,6 +65,11 @@ func (s *AgentDelegationService) Accept(ctx context.Context, delegationID, agent
 	return s.transitionStatus(ctx, delegationID, agentID, "started", []string{"queued", "delivered"})
 }
 
+// MarkDelivered marks a delegation as delivered (BUG-009).
+func (s *AgentDelegationService) MarkDelivered(ctx context.Context, delegationID, agentID string) (*AgentDelegation, error) {
+	return s.transitionStatus(ctx, delegationID, agentID, "delivered", []string{"queued"})
+}
+
 // Reject transitions a delegation from queued/delivered to rejected.
 func (s *AgentDelegationService) Reject(ctx context.Context, delegationID, agentID, reason string) (*AgentDelegation, error) {
 	d, err := s.transitionStatus(ctx, delegationID, agentID, "rejected", []string{"queued", "delivered"})
@@ -95,7 +107,7 @@ func (s *AgentDelegationService) transitionStatus(ctx context.Context, id, agent
 		&d.StartIfInactive, &d.RejectionReason, &d.CreatedAt, &d.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("delegation not found or invalid status transition")
+		return nil, ErrInvalidStatusTransition
 	}
 	if err != nil {
 		return nil, fmt.Errorf("transition delegation: %w", err)

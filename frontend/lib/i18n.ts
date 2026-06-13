@@ -496,6 +496,8 @@ const en = {
 
   // ── Agent Runtime Tab ──
   agentRuntimeError: 'Could not load runtime config',
+  agentRuntimeNotConfigured: 'Not configured',
+  agentRuntimeDefault: 'Default',
   agentRuntimeType: 'Runtime Type',
   agentRuntimeModelConfig: 'Model Config',
   agentRuntimeEnvVars: 'Environment Variables',
@@ -650,6 +652,11 @@ const en = {
   taskIsolatedWorkspace: 'Isolated Workspace',
   taskWorktreePath: 'Worktree',
   taskIsolate: 'Isolate',
+  taskWorktreeActive: 'Worktree active',
+  taskWorktreeInactive: 'Worktree inactive',
+  taskWorktreeOpenFiles: 'Open files',
+  taskWorktreeConflict: 'Editing conflict: {agent} is editing {file}',
+  taskWorktreeConflictTitle: 'Workspace Conflict',
 
   // ── Knowledge Base (Step 4) ──
   knowledgeSearchTitle: 'Knowledge Search',
@@ -687,6 +694,13 @@ const en = {
   knowledgeViewAll: 'View all',
   knowledgeFilterChannel: 'Filter by channel',
   knowledgeFilterAuthor: 'Filter by author',
+  knowledgeTitleMinLength: 'Title must be at least 3 characters',
+  knowledgeContentMinLength: 'Content must be at least 10 characters',
+  knowledgeNoChannel: 'Please select a channel',
+  knowledgeTagSuggestions: 'Suggestions:',
+  knowledgeSearchLoading: 'Searching knowledge base...',
+  knowledgePanelButton: 'Knowledge',
+  knowledgePanelClose: 'Close knowledge panel',
 
   // ── Reminders (Step 6) ──
   reminderManagerTitle: 'Reminders',
@@ -814,6 +828,17 @@ const en = {
   swarmLegendInProgress: 'In Progress',
   swarmLegendBlocked: 'Blocked',
   swarmLegendPending: 'Pending',
+  swarmDagTitle: 'Swarm DAG',
+  swarmDagNoData: 'No subtask data available',
+  swarmDagBlocked: 'Blocked by #{n}',
+  swarmDagArrowHint: '→ depends on',
+  swarmDecomposedToast: 'Task #{parent} decomposed into {n} subtasks',
+  swarmAllDoneToast: 'Swarm #{parent} complete — all {n} subtasks done',
+
+  // ── Step 6 WS Notifications ──
+  reminderFiredToast: 'Reminder: {message}',
+  taskEscalatedToast: 'Task #{n} escalated to {agent} ({level})',
+  taskUnclaimedToast: 'Task #{n} auto-unclaimed ({reason})',
 } as const;
 
 type TranslationKey = keyof typeof en;

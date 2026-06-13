@@ -107,6 +107,9 @@ func (s *WatchdogService) CheckOverdueTasks(ctx context.Context) ([]TaskWatchdog
 
 // HandleOverdueTask processes a single overdue task based on its timeout_action.
 func (s *WatchdogService) HandleOverdueTask(ctx context.Context, w TaskWatchdog) {
+	// T6.4.3: Look up the task's channel for proper broadcasting.
+	taskChannelID := s.taskChannel(ctx, w.TaskID)
+
 	switch w.TimeoutAction {
 	case "remind":
 		slog.Info("watchdog: reminding claimer",
@@ -120,6 +123,13 @@ func (s *WatchdogService) HandleOverdueTask(ctx context.Context, w TaskWatchdog)
 				"task_id":     w.TaskID,
 				"message":     fmt.Sprintf("Task %s is overdue (deadline was %s)", w.TaskID, w.Deadline.Format(time.RFC3339)),
 			}))
+			if taskChannelID != "" {
+				s.hub.BroadcastToChannel(taskChannelID, jsonEnvelope("reminder_fired", map[string]interface{}{
+					"task_id":    w.TaskID,
+					"channel_id": taskChannelID,
+					"message":    fmt.Sprintf("Task %s is overdue", w.TaskID),
+				}))
+			}
 		}
 
 		// Update deadline to re-check later (push back 24h to avoid spam).
@@ -146,6 +156,14 @@ func (s *WatchdogService) HandleOverdueTask(ctx context.Context, w TaskWatchdog)
 				"claimer_id": w.ClaimerID,
 				"message":    "Your task has been escalated due to timeout.",
 			}))
+			if taskChannelID != "" {
+				s.hub.BroadcastToChannel(taskChannelID, jsonEnvelope("task_escalated", map[string]interface{}{
+					"task_id":     w.TaskID,
+					"channel_id":  taskChannelID,
+					"claimer_id":  w.ClaimerID,
+					"escalate_to": w.EscalateTo,
+				}))
+			}
 		}
 		// Escalate to the next level.
 		_, err := s.pool.Exec(ctx,
@@ -171,11 +189,83 @@ func (s *WatchdogService) HandleOverdueTask(ctx context.Context, w TaskWatchdog)
 		s.pool.Exec(ctx, `DELETE FROM task_watchdog WHERE task_id = $1`, w.TaskID)
 
 		if s.hub != nil {
-			s.hub.BroadcastToChannel("", jsonEnvelope("task_unclaimed_auto", map[string]interface{}{
-				"task_id": w.TaskID,
-				"reason":  "timeout",
+			// T6.4.3: Broadcast to the correct channel instead of empty string.
+			s.hub.BroadcastToChannel(taskChannelID, jsonEnvelope("task_unclaimed_auto", map[string]interface{}{
+				"task_id":    w.TaskID,
+				"channel_id": taskChannelID,
+				"reason":     "timeout",
 			}))
 		}
 	}
 }
 
+// taskChannel looks up the channel ID for a task.
+func (s *WatchdogService) taskChannel(ctx context.Context, taskID string) string {
+	var channelID string
+	_ = s.pool.QueryRow(ctx, `SELECT channel_id FROM tasks WHERE id = $1`, taskID).Scan(&channelID)
+	return channelID
+}
+
+// VerifyEscalationChain checks whether an escalates_to relationship exists
+// between the claimer and the escalate target (T6.4.5).
+func (s *WatchdogService) VerifyEscalationChain(ctx context.Context, claimerID, escalateToID string) error {
+	var exists bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(
+			SELECT 1 FROM agent_relationships
+			WHERE from_agent_id = $1 AND to_agent_id = $2 AND rel_type = 'escalates_to'
+		)`, claimerID, escalateToID,
+	).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("verify escalation chain: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("no escalates_to relationship from %s to %s", claimerID, escalateToID)
+	}
+	return nil
+}
+
+// ListStaleTasks returns tasks that are past their claim deadline or
+// have no watchdog but are claimed (T6.2.3).
+func (s *WatchdogService) ListStaleTasks(ctx context.Context, channelID string) ([]TaskWatchdog, error) {
+	query := `SELECT tw.task_id, tw.claimer_id, tw.claimed_at, tw.deadline, tw.last_activity,
+		          tw.timeout_action, tw.escalate_to::text, tw.created_at
+		   FROM task_watchdog tw
+		   JOIN tasks t ON tw.task_id = t.id
+		   WHERE t.status NOT IN ('done', 'closed')`
+	args := []any{}
+	argIdx := 1
+
+	if channelID != "" {
+		query += fmt.Sprintf(" AND t.channel_id = $%d", argIdx)
+		args = append(args, channelID)
+		argIdx++
+	}
+
+	query += " ORDER BY tw.deadline ASC LIMIT 50"
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list stale tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var watchdogs []TaskWatchdog
+	for rows.Next() {
+		var w TaskWatchdog
+		var escalateTo *string
+		if err := rows.Scan(&w.TaskID, &w.ClaimerID, &w.ClaimedAt, &w.Deadline,
+			&w.LastActivity, &w.TimeoutAction, &escalateTo, &w.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan stale task: %w", err)
+		}
+		w.EscalateTo = escalateTo
+		watchdogs = append(watchdogs, w)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if watchdogs == nil {
+		watchdogs = []TaskWatchdog{}
+	}
+	return watchdogs, nil
+}

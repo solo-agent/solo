@@ -93,7 +93,11 @@ func runCLI(args []string) int {
 		handleThread(args[1:], baseURL, token)
 	case "agent":
 		handleAgent(args[1:], baseURL, token)
-	default:
+		case "knowledge":
+			handleKnowledge(args[1:], baseURL, token)
+		case "remind":
+			handleRemind(args[1:], baseURL, token)
+		default:
 		fmt.Fprintf(os.Stderr, "solo: error: unknown command %q\n", args[0])
 		printUsage()
 		return exitUsage
@@ -169,6 +173,10 @@ func handleTask(args []string, baseURL, token string) {
 		handleTaskBlocked(args[1:], baseURL, token)
 		case "split":
 			handleTaskSplit(args[1:], baseURL, token)
+		case "swarm-status":
+			handleTaskSwarmStatus(args[1:], baseURL, token)
+		case "swarm-decompose":
+			handleTaskSwarmDecompose(args[1:], baseURL, token)
 		default:
 		fmt.Fprintf(os.Stderr, "solo: error: unknown task subcommand %q\n", args[0])
 		printUsage()
@@ -578,8 +586,14 @@ func handleChannel(args []string, baseURL, token string) {
 		handleChannelMembers(args[1:], baseURL, token)
 	case "join":
 		handleChannelJoin(args[1:], baseURL, token)
-		case "memory":
-			handleChannelMemory(args[1:], baseURL, token)
+	case "memory":
+		handleChannelMemory(args[1:], baseURL, token)
+	case "bind":
+		handleChannelBind(args[1:], baseURL, token)
+	case "unbind":
+		handleChannelUnbind(args[1:], baseURL, token)
+	case "workspace":
+		handleChannelWorkspace(args[1:], baseURL, token)
 	default:
 		fmt.Fprintf(os.Stderr, "solo: error: unknown channel subcommand %q\n", args[0])
 		printUsage()
@@ -1191,6 +1205,115 @@ func handleTaskSplit(args []string, baseURL, token string) {
 	doExit(exitOK)
 }
 
+// --- channel bind ---
+
+func handleChannelBind(args []string, baseURL, token string) {
+	var channelID, repoURL, repoBranch string
+	fs := flag.NewFlagSet("channel bind", flag.ExitOnError)
+	fs.StringVar(&channelID, "c", "", "Channel ID or #name")
+	fs.StringVar(&channelID, "channel", "", "Channel ID or #name")
+	fs.StringVar(&repoURL, "repo", "", "Repository URL (required)")
+	fs.StringVar(&repoBranch, "branch", "main", "Git branch (default: main)")
+	fs.Parse(args)
+
+	if channelID == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: -c <channel_id> is required")
+		doExit(exitUsage)
+	}
+	if repoURL == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: --repo <url> is required")
+		doExit(exitUsage)
+	}
+
+	resolved, resolveErr := resolveChannelParam(baseURL, token, channelID)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+
+	reqBody, _ := json.Marshal(map[string]string{
+		"repo_url":    repoURL,
+		"repo_branch": repoBranch,
+	})
+	url := fmt.Sprintf("%s/api/v1/channels/%s/bind-project", baseURL, resolved)
+	statusCode, body, err := doHTTP(http.MethodPost, url, token, reqBody)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	fmt.Println(string(body))
+	doExit(exitOK)
+}
+
+// --- channel unbind ---
+
+func handleChannelUnbind(args []string, baseURL, token string) {
+	var channelID string
+	fs := flag.NewFlagSet("channel unbind", flag.ExitOnError)
+	fs.StringVar(&channelID, "c", "", "Channel ID or #name (required)")
+	fs.StringVar(&channelID, "channel", "", "Channel ID or #name (required)")
+	fs.Parse(args)
+
+	if channelID == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: -c <channel_id> is required")
+		doExit(exitUsage)
+	}
+
+	resolved, resolveErr := resolveChannelParam(baseURL, token, channelID)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+
+	url := fmt.Sprintf("%s/api/v1/channels/%s/bind-project", baseURL, resolved)
+	statusCode, body, err := doHTTP(http.MethodDelete, url, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	fmt.Println(string(body))
+	doExit(exitOK)
+}
+
+// --- channel workspace ---
+
+func handleChannelWorkspace(args []string, baseURL, token string) {
+	var channelID string
+	fs := flag.NewFlagSet("channel workspace", flag.ExitOnError)
+	fs.StringVar(&channelID, "c", "", "Channel ID or #name (required)")
+	fs.StringVar(&channelID, "channel", "", "Channel ID or #name (required)")
+	fs.Parse(args)
+
+	if channelID == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: -c <channel_id> is required")
+		doExit(exitUsage)
+	}
+
+	resolved, resolveErr := resolveChannelParam(baseURL, token, channelID)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+
+	url := fmt.Sprintf("%s/api/v1/channels/%s/binding", baseURL, resolved)
+	statusCode, body, err := doHTTP(http.MethodGet, url, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	fmt.Println(string(body))
+	doExit(exitOK)
+}
+
 // --- channel memory ---
 
 func handleChannelMemory(args []string, baseURL, token string) {
@@ -1371,6 +1494,34 @@ func resolveTarget(baseURL, token, target string) (channelID, threadMsgID string
 		channelID, err = resolveChannelName(baseURL, token, namePart)
 	}
 	return
+}
+
+// resolveAgentParam strips the @ prefix (if present) and resolves an agent
+// name/handle to its UUID via the server info API. UUIDs are returned as-is.
+// Returns an error if the agent name cannot be resolved to a UUID (T2.1.3).
+func resolveAgentParam(baseURL, token, agent string) (string, error) {
+	agent = strings.TrimPrefix(agent, "@")
+	// UUID check: 36 chars with 4 dashes
+	if len(agent) == 36 && strings.Count(agent, "-") == 4 {
+		return agent, nil
+	}
+	url := fmt.Sprintf("%s/api/v1/server/info", baseURL)
+	_, body, err := doHTTP(http.MethodGet, url, token, nil)
+	if err != nil {
+		return "", fmt.Errorf("resolve agent: %w", err)
+	}
+	var resp struct {
+		Agents []struct{ ID, Name, Handle string }
+	}
+	if json.Unmarshal(body, &resp) != nil {
+		return "", fmt.Errorf("parse server info")
+	}
+	for _, a := range resp.Agents {
+		if a.Name == agent || a.Handle == agent {
+			return a.ID, nil
+		}
+	}
+	return "", fmt.Errorf("agent %q not found — use an agent UUID or check the agent name", agent)
 }
 
 func resolveChannelName(baseURL, token, name string) (string, error) {
@@ -1581,6 +1732,352 @@ func printJSONError(statusCode int, message string) {
 // Usage
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// knowledge
+// ---------------------------------------------------------------------------
+
+func handleKnowledge(args []string, baseURL, token string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "solo: error: knowledge subcommand required (add, get, search, import)")
+		printUsage()
+		doExit(exitUsage)
+	}
+	switch args[0] {
+	case "add":
+		handleKnowledgeAdd(args[1:], baseURL, token)
+	case "get":
+		handleKnowledgeGet(args[1:], baseURL, token)
+	case "search":
+		handleKnowledgeSearch(args[1:], baseURL, token)
+	case "import":
+		handleKnowledgeImport(args[1:], baseURL, token)
+	default:
+		fmt.Fprintf(os.Stderr, "solo: error: unknown knowledge subcommand %q\n", args[0])
+		printUsage()
+		doExit(exitUsage)
+	}
+}
+
+func handleKnowledgeAdd(args []string, baseURL, token string) {
+	var channel, title, content string
+	fs := flag.NewFlagSet("knowledge add", flag.ExitOnError)
+	fs.StringVar(&channel, "channel", "", "Channel ID or #name (required)")
+	fs.StringVar(&channel, "c", "", "Channel ID or #name (required)")
+	fs.StringVar(&title, "title", "", "Entry title (required)")
+	fs.StringVar(&content, "content", "", "Entry content (required)")
+	fs.Parse(args)
+	if channel == "" || title == "" || content == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: --channel, --title, and --content are required")
+		doExit(exitUsage)
+	}
+	resolved, err := resolveChannelParam(baseURL, token, channel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", err)
+		doExit(exitBusiness)
+	}
+	reqBody, _ := json.Marshal(map[string]string{"channel_id": resolved, "title": title, "content": content})
+	url := baseURL + "/api/v1/knowledge"
+	statusCode, body, err := doHTTP(http.MethodPost, url, token, reqBody)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	fmt.Println(string(body))
+	doExit(exitOK)
+}
+
+func handleKnowledgeGet(args []string, baseURL, token string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "solo: error: knowledge ID is required")
+		doExit(exitUsage)
+	}
+	id := args[0]
+	url := baseURL + "/api/v1/knowledge/" + id
+	statusCode, body, err := doHTTP(http.MethodGet, url, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	fmt.Println(string(body))
+	doExit(exitOK)
+}
+
+func handleKnowledgeSearch(args []string, baseURL, token string) {
+	var query, channel string
+	fs := flag.NewFlagSet("knowledge search", flag.ExitOnError)
+	fs.StringVar(&query, "q", "", "Search query (required)")
+	fs.StringVar(&channel, "channel", "", "Channel ID or #name (required)")
+	fs.StringVar(&channel, "c", "", "Channel ID or #name (required)")
+	fs.Parse(args)
+	if query == "" || channel == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: --q and --channel are required")
+		doExit(exitUsage)
+	}
+	resolved, err := resolveChannelParam(baseURL, token, channel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", err)
+		doExit(exitBusiness)
+	}
+	url := fmt.Sprintf("%s/api/v1/knowledge/search?q=%s&channel_id=%s", baseURL, url.QueryEscape(query), url.QueryEscape(resolved))
+	statusCode, body, err := doHTTP(http.MethodGet, url, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	fmt.Println(string(body))
+	doExit(exitOK)
+}
+
+func handleKnowledgeImport(args []string, baseURL, token string) {
+	var channel string
+	fs := flag.NewFlagSet("knowledge import", flag.ExitOnError)
+	fs.StringVar(&channel, "channel", "", "Channel ID or #name (required)")
+	fs.StringVar(&channel, "c", "", "Channel ID or #name (required)")
+	fs.Parse(args)
+	if channel == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: --channel is required")
+		doExit(exitUsage)
+	}
+	resolved, err := resolveChannelParam(baseURL, token, channel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", err)
+		doExit(exitBusiness)
+	}
+	reqBody, _ := json.Marshal(map[string]string{"channel_id": resolved})
+	url := baseURL + "/api/v1/knowledge/import-decisions"
+	statusCode, body, err := doHTTP(http.MethodPost, url, token, reqBody)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	fmt.Println(string(body))
+	doExit(exitOK)
+}
+
+// ---------------------------------------------------------------------------
+// remind
+// ---------------------------------------------------------------------------
+
+func handleRemind(args []string, baseURL, token string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "solo: error: remind subcommand required (create, list, delete)")
+		printUsage()
+		doExit(exitUsage)
+	}
+	switch args[0] {
+	case "create":
+		handleRemindCreate(args[1:], baseURL, token)
+	case "list":
+		handleRemindList(args[1:], baseURL, token)
+	case "delete":
+		handleRemindDelete(args[1:], baseURL, token)
+	default:
+		fmt.Fprintf(os.Stderr, "solo: error: unknown remind subcommand %q\n", args[0])
+		printUsage()
+		doExit(exitUsage)
+	}
+}
+
+func handleRemindCreate(args []string, baseURL, token string) {
+	var agentID, remindAt, message string
+	fs := flag.NewFlagSet("remind create", flag.ExitOnError)
+	fs.StringVar(&agentID, "agent", "", "Agent ID or @name (required)")
+	fs.StringVar(&remindAt, "at", "", "Reminder time in RFC3339 format (required)")
+	fs.StringVar(&message, "msg", "", "Reminder message (required)")
+	fs.Parse(args)
+	if agentID == "" {
+		agentID = os.Getenv("SOLO_AGENT_ID")
+	}
+	if agentID == "" || remindAt == "" || message == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: --agent, --at, and --msg are required")
+		doExit(exitUsage)
+	}
+	resolved, err := resolveAgentParam(baseURL, token, agentID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", err)
+		doExit(exitBusiness)
+	}
+	reqBody, _ := json.Marshal(map[string]string{
+		"agent_id":      resolved,
+		"reminder_type": "custom",
+		"remind_at":     remindAt,
+		"message":       message,
+	})
+	url := baseURL + "/api/v1/reminders"
+	statusCode, body, err := doHTTP(http.MethodPost, url, token, reqBody)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	fmt.Println(string(body))
+	doExit(exitOK)
+}
+
+func handleRemindList(args []string, baseURL, token string) {
+	var agentID string
+	fs := flag.NewFlagSet("remind list", flag.ExitOnError)
+	fs.StringVar(&agentID, "agent", "", "Agent ID or @name")
+	fs.Parse(args)
+	var resolvedID string
+	if agentID != "" {
+		var err error
+		resolvedID, err = resolveAgentParam(baseURL, token, agentID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "solo: error: %v\n", err)
+			doExit(exitBusiness)
+		}
+	}
+	url := baseURL + "/api/v1/reminders"
+	if resolvedID != "" {
+		url += "?agent_id=" + resolvedID
+	}
+	statusCode, body, err := doHTTP(http.MethodGet, url, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	fmt.Println(string(body))
+	doExit(exitOK)
+}
+
+func handleRemindDelete(args []string, baseURL, token string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "solo: error: reminder ID is required")
+		doExit(exitUsage)
+	}
+	id := args[0]
+	url := baseURL + "/api/v1/reminders/" + id
+	statusCode, body, err := doHTTP(http.MethodDelete, url, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	fmt.Println("Reminder deleted.")
+	doExit(exitOK)
+}
+
+// ---------------------------------------------------------------------------
+// task swarm-status
+// ---------------------------------------------------------------------------
+
+func handleTaskSwarmStatus(args []string, baseURL, token string) {
+	var channelID string
+	var taskNum int
+	fs := flag.NewFlagSet("task swarm-status", flag.ExitOnError)
+	fs.StringVar(&channelID, "c", "", "Channel ID or #name (required)")
+	fs.StringVar(&channelID, "channel", "", "Channel ID or #name (required)")
+	fs.IntVar(&taskNum, "n", 0, "Task number")
+	fs.Parse(args)
+	if channelID == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: -c <channel_id> is required")
+		doExit(exitUsage)
+	}
+	resolved, err := resolveChannelParam(baseURL, token, channelID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", err)
+		doExit(exitBusiness)
+	}
+	taskID := strconv.Itoa(taskNum)
+	if taskID == "0" && len(args) > 0 {
+		taskID = args[0]
+	}
+	url := fmt.Sprintf("%s/api/v1/tasks/%s/swarm-status?channel_id=%s", baseURL, taskID, resolved)
+	statusCode, body, err := doHTTP(http.MethodGet, url, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	fmt.Println(string(body))
+	doExit(exitOK)
+}
+
+// ---------------------------------------------------------------------------
+// task swarm-decompose
+// ---------------------------------------------------------------------------
+
+func handleTaskSwarmDecompose(args []string, baseURL, token string) {
+	var channelID string
+	var taskNum int
+	var titles string
+	fs := flag.NewFlagSet("task swarm-decompose", flag.ExitOnError)
+	fs.StringVar(&channelID, "c", "", "Channel ID or #name (required)")
+	fs.StringVar(&channelID, "channel", "", "Channel ID or #name (required)")
+	fs.IntVar(&taskNum, "n", 0, "Task number (required)")
+	fs.StringVar(&titles, "titles", "", "Comma-separated subtask titles (required)")
+	fs.Parse(args)
+	if channelID == "" || taskNum <= 0 || titles == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: -c, -n, and --titles are required")
+		doExit(exitUsage)
+	}
+	resolved, err := resolveChannelParam(baseURL, token, channelID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", err)
+		doExit(exitBusiness)
+	}
+	parentID, err := resolveTaskNumberToID(baseURL, token, resolved, taskNum)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", err)
+		doExit(exitBusiness)
+	}
+	titleList := strings.Split(titles, ",")
+	subtasks := make([]map[string]interface{}, 0, len(titleList))
+	for i, t := range titleList {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		subtasks = append(subtasks, map[string]interface{}{
+			"title":             t,
+			"description":       "",
+			"depends_on_indices": []int{},
+		})
+		_ = i
+	}
+	if len(subtasks) == 0 {
+		fmt.Fprintln(os.Stderr, "solo: error: no valid subtask titles provided")
+		doExit(exitUsage)
+	}
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"channel_id": resolved,
+		"subtasks":   subtasks,
+	})
+	url := fmt.Sprintf("%s/api/v1/tasks/%s/decompose", baseURL, parentID)
+	statusCode, body, err := doHTTP(http.MethodPost, url, token, reqBody)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	fmt.Println(string(body))
+	doExit(exitOK)
+}
+
 func printUsage() {
 	fmt.Fprintln(os.Stderr, `Usage:
   solo message send  -c <content> --target <target>     (or stdin heredoc)
@@ -1597,6 +2094,9 @@ func printUsage() {
   solo channel members -c <channel_id> [--output json]
   solo channel join  --target <#channel-name>
   solo channel memory [set] -c <channel_id> [-f <file>]
+  solo channel bind   -c <channel_id> --repo <url> [--branch <branch>]
+  solo channel unbind -c <channel_id>
+  solo channel workspace -c <channel_id>
   solo agent delegate [--to <@agent>] [--task <n>] [--msg <message>]
   solo thread unfollow --target <#channel:shortid>
 

@@ -8,7 +8,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { Calendar, User, ChevronRight, GitBranch, Lock, AlertTriangle } from 'lucide-react';
+import { Calendar, User, ChevronRight, GitBranch, Lock, AlertTriangle, ExternalLink } from 'lucide-react';
 import type { Task, TaskStatus, TaskPriority } from '@/lib/types';
 import { t } from '@/lib/i18n';
 
@@ -60,11 +60,15 @@ interface TaskCardProps {
   isIsolated?: boolean;
   /** Worktree path for display (Step 3) */
   worktreePath?: string;
+  /** Whether the worktree is currently active (green dot) vs inactive (gray dot) (Step 3) */
+  isWorktreeActive?: boolean;
+  /** Called when the worktree "open files" button is clicked (Step 3) */
+  onWorktreeClick?: (taskId: string) => void;
 }
 
 // ---- Component ----
 
-export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, onParentClick, isIsolated, worktreePath }: TaskCardProps) {
+export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, onParentClick, isIsolated, worktreePath, isWorktreeActive, onWorktreeClick }: TaskCardProps) {
   const statusConf = STATUS_CONFIG[task.status] || STATUS_CONFIG.todo;
   const priorityConf = PRIORITY_CONFIG[task.priority] || PRIORITY_CONFIG.normal;
   const hasSubtasks = (task.subtask_count ?? 0) > 0;
@@ -120,18 +124,57 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
 
         {/* Isolated workspace indicator (Step 3) */}
         {isIsolated && (
-          <div className="mt-1.5">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {/* Active/Inactive dot + label */}
             <span
               className={cn(
                 'inline-flex items-center gap-1 px-1.5 py-0.5',
                 'font-heading text-[10px] font-bold uppercase tracking-wider',
-                'border-2 border-black bg-brutal-warning-light text-black',
+                'border-2 border-black',
+                isWorktreeActive
+                  ? 'bg-brutal-success-light text-brutal-success'
+                  : 'bg-brutal-muted-light text-muted-foreground',
               )}
-              title={worktreePath ? `${t('taskWorktreePath')}: ${worktreePath}` : undefined}
+              title={isWorktreeActive ? t('taskWorktreeActive') : t('taskWorktreeInactive')}
             >
+              <span
+                className={cn(
+                  'inline-block h-2 w-2 rounded-full',
+                  isWorktreeActive ? 'bg-brutal-success' : 'bg-brutal-muted',
+                )}
+                aria-hidden
+              />
               <GitBranch className="h-3 w-3" />
               {t('taskIsolatedWorkspace')}
             </span>
+            {/* Open files link */}
+            {onWorktreeClick && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onWorktreeClick(task.id);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onWorktreeClick(task.id);
+                  }
+                }}
+                className={cn(
+                  'inline-flex items-center gap-1 px-1.5 py-0.5',
+                  'font-heading text-[10px] font-bold uppercase tracking-wider',
+                  'border-2 border-black bg-white hover:bg-brutal-primary-light',
+                  'active:translate-x-0.5 active:translate-y-0.5',
+                  'transition-all cursor-pointer',
+                )}
+                title={worktreePath || t('taskWorktreeOpenFiles')}
+              >
+                <ExternalLink className="h-2.5 w-2.5" />
+                {t('taskWorktreeOpenFiles')}
+              </button>
+            )}
           </div>
         )}
 

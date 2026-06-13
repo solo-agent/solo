@@ -26,6 +26,7 @@ type TaskHandler struct {
 	svc        *service.TaskService
 	mentionSvc *service.MentionService
 	swarm      *service.SwarmCoordinator
+	watchdog   *service.WatchdogService
 }
 
 // NewTaskHandler creates a new TaskHandler.
@@ -42,6 +43,11 @@ func NewTaskHandler(pool *pgxpool.Pool, hub realtime.Broadcaster, agentSvc *serv
 // SetSwarmCoordinator injects the SwarmCoordinator into the handler.
 func (h *TaskHandler) SetSwarmCoordinator(s *service.SwarmCoordinator) {
 	h.swarm = s
+}
+
+// SetWatchdogService injects the WatchdogService into the handler.
+func (h *TaskHandler) SetWatchdogService(s *service.WatchdogService) {
+	h.watchdog = s
 }
 
 // --- Request/Response types ---
@@ -192,17 +198,12 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if dbErr != nil {
 		slog.Error("failed to persist task system message", "task_id", task.ID, "error", dbErr)
 	} else {
-		// Channel broadcast handled by broadcastSystemMessageWithID below
-		// (with showInChannel=true), which includes task badge metadata.
-		// Create a thread for the task message
 		threadSvc := service.NewThreadService(h.pool)
 		tid, isNew, threadErr := threadSvc.GetOrCreateThread(r.Context(), channelID, msgID)
 		if threadErr != nil {
 			slog.Error("failed to create thread for task", "task_id", task.ID, "error", threadErr)
 		} else {
 			threadID = tid
-			// Link the task to its message so TriggerAgentForTask can route
-			// agent responses to this thread.
 			_, updErr := h.pool.Exec(r.Context(),
 				`UPDATE tasks SET message_id = $1 WHERE id = $2`,
 				msgID, task.ID,
@@ -223,7 +224,6 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	resp := toTaskResponse(task)
 	writeJSON(w, http.StatusCreated, resp)
 
-	// Broadcast task.created event to channel subscribers
 	dueDate := ""
 	if task.DueDate != nil {
 		dueDate = task.DueDate.Format(time.RFC3339)
@@ -246,15 +246,12 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   resp.UpdatedAt,
 	})
 
-	// Broadcast message.updated so the frontend TaskBadge shows task metadata
 	if task.MessageID != "" {
-		}
+	}
 
 	h.broadcastSystemMessageWithID(task.ChannelID, threadID, task.TaskNumber, task.Title, i18n.Active.SysTaskCreated, msgID, now, true)
 
-	// Trigger all channel agents for auto-claim (same as asTask message flow)
 	if h.agentSvc != nil {
-		// Parse @mentions from title + description for priority claim window
 		contentForMentions := task.Title
 		if task.Description != "" {
 			contentForMentions += " " + task.Description
@@ -382,29 +379,27 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 	resp := toTaskResponse(task)
 	writeJSON(w, http.StatusOK, resp)
 
-	// Broadcast task.updated event to channel subscribers
 	var dueDateStr string
 	if task.DueDate != nil {
 		dueDateStr = task.DueDate.Format(time.RFC3339)
 	}
 	ws.BroadcastTaskUpdated(h.hub, ws.TaskUpdatedPayload{
-		ID:          task.ID,
-		TaskNumber:  task.TaskNumber,
-		ChannelID:   task.ChannelID,
-		Title:       task.Title,
-		Description: task.Description,
-		Status:      task.Status,
-		ClaimerID:   task.ClaimerID,
-		ClaimerName: task.ClaimerName,
-		Priority:    task.Priority,
-		DueDate:     dueDateStr,
-		MessageID:   task.MessageID,
-		UpdatedAt:   task.UpdatedAt.Format(time.RFC3339),
-		SubtaskCount:     task.SubtaskCount,
+		ID:              task.ID,
+		TaskNumber:      task.TaskNumber,
+		ChannelID:       task.ChannelID,
+		Title:           task.Title,
+		Description:     task.Description,
+		Status:          task.Status,
+		ClaimerID:       task.ClaimerID,
+		ClaimerName:     task.ClaimerName,
+		Priority:        task.Priority,
+		DueDate:         dueDateStr,
+		MessageID:       task.MessageID,
+		UpdatedAt:       task.UpdatedAt.Format(time.RFC3339),
+		SubtaskCount:    task.SubtaskCount,
 		DoneSubtaskCount: task.DoneSubtaskCount,
 	})
 
-	// Resolve thread ID for syncing system notification to the task's thread.
 	var threadID string
 	if task.MessageID != "" {
 		tid, err := h.resolveThreadID(r.Context(), task.MessageID)
@@ -413,7 +408,6 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Broadcast system message if status changed
 	if req.Status != nil && *req.Status != "" {
 		statusText := formatStatusDisplay(*req.Status)
 		h.broadcastSystemMessage(task.ChannelID, threadID, task.TaskNumber, task.Title, "状态已更新为 "+statusText)
@@ -437,7 +431,6 @@ func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get task before deleting for system message and broadcast
 	task, getErr := h.svc.GetTask(r.Context(), channelID, taskID, userID)
 	if getErr != nil {
 		switch {
@@ -465,7 +458,6 @@ func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve thread ID for syncing system notification to the task's thread.
 	var threadID string
 	if task.MessageID != "" {
 		tid, err := h.resolveThreadID(r.Context(), task.MessageID)
@@ -474,10 +466,8 @@ func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Broadcast system message before task is deleted
 	h.broadcastSystemMessage(channelID, threadID, task.TaskNumber, task.Title, i18n.Active.SysTaskDeleted)
 
-	// Broadcast task.deleted event to channel subscribers
 	ws.BroadcastTaskDeleted(h.hub, ws.TaskDeletedPayload{
 		ID:         taskID,
 		ChannelID:  channelID,
@@ -503,11 +493,9 @@ func (h *TaskHandler) Claim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve task_number to UUID
 	t, err := h.svc.GetTask(r.Context(), channelID, taskID, userID)
 	if err != nil { writeError(w, http.StatusNotFound, "task not found"); return }
 
-	// Check @mention priority claim window (P25-04-B)
 	if h.agentSvc != nil {
 		allowed, reason := h.agentSvc.CheckClaimWindow(t.ID, userID)
 		if !allowed {
@@ -524,12 +512,13 @@ func (h *TaskHandler) Claim(w http.ResponseWriter, r *http.Request) {
 		case err == service.ErrTaskNotChannelMember:
 			writeError(w, http.StatusForbidden, "not a channel member")
 		case err == service.ErrTaskAlreadyClaimed:
-			// Per spec: silent conflict, return 409 — frontend handles silently
 			writeError(w, http.StatusConflict, "already assigned — do not reply, someone else is working on it")
 		case err == service.ErrTaskInTerminalState:
 			writeError(w, http.StatusConflict, "task is in a terminal state")
 		case err == service.ErrTaskNotClaimable:
 			writeError(w, http.StatusConflict, "task status does not allow claiming")
+		case err == service.ErrTaskBlocked:
+			writeError(w, http.StatusConflict, "task is blocked by incomplete dependencies")
 		default:
 			slog.Error("failed to claim task", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to claim task")
@@ -537,7 +526,6 @@ func (h *TaskHandler) Claim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Close the claim window on successful claim within the window
 	if h.agentSvc != nil {
 		h.agentSvc.CloseClaimWindow(t.ID)
 	}
@@ -545,32 +533,27 @@ func (h *TaskHandler) Claim(w http.ResponseWriter, r *http.Request) {
 	resp := toTaskResponse(task)
 	writeJSON(w, http.StatusOK, resp)
 
-	// Broadcast task.updated event
 	var dueDateStr string
 	if task.DueDate != nil {
 		dueDateStr = task.DueDate.Format(time.RFC3339)
 	}
 	ws.BroadcastTaskUpdated(h.hub, ws.TaskUpdatedPayload{
-		ID:          task.ID,
-		TaskNumber:  task.TaskNumber,
-		ChannelID:   task.ChannelID,
-		Title:       task.Title,
-		Description: task.Description,
-		Status:      task.Status,
-		ClaimerID:   task.ClaimerID,
-		ClaimerName: task.ClaimerName,
-		Priority:    task.Priority,
-		DueDate:     dueDateStr,
-		MessageID:   task.MessageID,
-		UpdatedAt:   task.UpdatedAt.Format(time.RFC3339),
-		SubtaskCount:     task.SubtaskCount,
+		ID:              task.ID,
+		TaskNumber:      task.TaskNumber,
+		ChannelID:       task.ChannelID,
+		Title:           task.Title,
+		Description:     task.Description,
+		Status:          task.Status,
+		ClaimerID:       task.ClaimerID,
+		ClaimerName:     task.ClaimerName,
+		Priority:        task.Priority,
+		DueDate:         dueDateStr,
+		MessageID:       task.MessageID,
+		UpdatedAt:       task.UpdatedAt.Format(time.RFC3339),
+		SubtaskCount:    task.SubtaskCount,
 		DoneSubtaskCount: task.DoneSubtaskCount,
 	})
 
-	// Claim notification goes to thread only — channel badge update via message.updated below.
-
-	// Persist claim system message to the task's thread so the discussion
-	// history includes the claim event.
 	if task.MessageID != "" {
 		threadSvc := service.NewThreadService(h.pool)
 		threadID, _, tErr := threadSvc.GetOrCreateThread(r.Context(), channelID, task.MessageID)
@@ -583,8 +566,6 @@ func (h *TaskHandler) Claim(w http.ResponseWriter, r *http.Request) {
 				 VALUES ($1, $2, 'system', '00000000-0000-0000-0000-000000000000', $3, 'system', $4, $5, $5)`,
 				claimMsgID, channelID, claimContent, threadID, claimNow,
 			)
-			// Broadcast claim message to thread subscribers only
-			// Also broadcast to thread subscribers via thread.message.new
 			var replyCount int
 			h.pool.QueryRow(r.Context(),
 				`SELECT reply_count FROM threads WHERE id = $1`, threadID,
@@ -632,7 +613,6 @@ func (h *TaskHandler) Unclaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve task_number to UUID
 	t, err := h.svc.GetTask(r.Context(), channelID, taskID, userID)
 	if err != nil { writeError(w, http.StatusNotFound, "task not found"); return }
 
@@ -657,7 +637,6 @@ func (h *TaskHandler) Unclaim(w http.ResponseWriter, r *http.Request) {
 	resp := toTaskResponse(task)
 	writeJSON(w, http.StatusOK, resp)
 
-	// Broadcast task.updated event
 	var dueDateStr string
 	if task.DueDate != nil {
 		dueDateStr = task.DueDate.Format(time.RFC3339)
@@ -676,7 +655,6 @@ func (h *TaskHandler) Unclaim(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   task.UpdatedAt.Format(time.RFC3339),
 	})
 
-	// Resolve thread ID for syncing system notification to the task's thread.
 	var threadID string
 	if task.MessageID != "" {
 		tid, err := h.resolveThreadID(r.Context(), task.MessageID)
@@ -685,9 +663,6 @@ func (h *TaskHandler) Unclaim(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Broadcast message.updated so the frontend TaskBadge updates in real-time
-
-	// Persist and broadcast unclaim notification to thread
 	if threadID != "" {
 		msgID := uuid.New().String()
 		now := time.Now()
@@ -745,8 +720,6 @@ func (h *TaskHandler) ConvertToTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ensure a thread exists for the converted message so task discussion is
-	// organized under the thread.
 	var threadID string
 	threadSvc := service.NewThreadService(h.pool)
 	tid, _, tErr := threadSvc.GetOrCreateThread(r.Context(), channelID, messageID)
@@ -754,18 +727,11 @@ func (h *TaskHandler) ConvertToTask(w http.ResponseWriter, r *http.Request) {
 		slog.Error("failed to create thread for converted task", "task_id", task.ID, "error", tErr)
 	} else {
 		threadID = tid
-		slog.Debug("task thread ready for converted message",
-			"task_id", task.ID,
-			"thread_id", threadID,
-		)
 	}
 
 	resp := toTaskResponse(task)
 	writeJSON(w, http.StatusCreated, resp)
 
-	// Trigger all channel agents for auto-claim (same as asTask message flow).
-	// Must happen before broadcasts so the frontend receives task.created before
-	// any agent responses arrive via WebSocket.
 	if h.agentSvc != nil {
 		contentForMentions := task.Title
 		if task.Description != "" {
@@ -781,10 +747,6 @@ func (h *TaskHandler) ConvertToTask(w http.ResponseWriter, r *http.Request) {
 		go h.agentSvc.TriggerAllAgentsForTask(context.Background(), task.ChannelID, task.ID, task.TaskNumber, task.Title, mentionedAgentIDs, nil)
 	}
 
-	// Broadcast message.updated for the original message so the frontend
-	// knows it now has task fields (task_number, task_status, etc.).
-
-	// Broadcast task.created event
 	dueDate := ""
 	if task.DueDate != nil {
 		dueDate = task.DueDate.Format(time.RFC3339)
@@ -807,13 +769,11 @@ func (h *TaskHandler) ConvertToTask(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   resp.UpdatedAt,
 	})
 
-	// Broadcast system message
 	h.broadcastSystemMessageWithID(task.ChannelID, threadID, task.TaskNumber, task.Title, i18n.Active.SysTaskCreatedFromMsg, uuid.New().String(), time.Now(), true)
 }
 
 // --- System message helpers ---
 
-// resolveThreadID looks up the thread ID for a given root message ID.
 func (h *TaskHandler) resolveThreadID(ctx context.Context, messageID string) (string, error) {
 	var threadID string
 	err := h.pool.QueryRow(ctx,
@@ -823,23 +783,14 @@ func (h *TaskHandler) resolveThreadID(ctx context.Context, messageID string) (st
 	return threadID, err
 }
 
-// broadcastSystemMessage sends a system message to the channel via WebSocket.
-// When threadID is non-empty, persists the message to DB with thread_id and
-// also broadcasts a thread.message.new event to thread subscribers.
-// broadcastTaskMessageUpdated sends a message.updated event for the original
-// user message when a task's status or claimer changes. This enables the
-// frontend TaskBadge to update in real-time without a page refresh.
 func (h *TaskHandler) broadcastSystemMessage(channelID, threadID string, taskNumber int, title, action string) {
 	h.broadcastSystemMessageWithID(channelID, threadID, taskNumber, title, action, uuid.New().String(), time.Now(), false)
 }
 
-// broadcastSystemMessageWithID sends a system message with a specific ID and timestamp.
-// When threadID is non-empty, persists to DB (upsert) and broadcasts to thread subscribers.
 func (h *TaskHandler) broadcastSystemMessageWithID(channelID, threadID string, taskNumber int, title, action, msgID string, ts time.Time, showInChannel bool) {
 	content := formatSystemMessage(taskNumber, title, action)
 
 	if showInChannel {
-		// Initial task creation — show in channel WITH task badge.
 		msg := ws.MessageNewPayload{
 			ID:          msgID,
 			ChannelID:   channelID,
@@ -849,15 +800,13 @@ func (h *TaskHandler) broadcastSystemMessageWithID(channelID, threadID string, t
 			Content:     content,
 			ContentType: "system",
 			TaskNumber:  taskNumber,
-			TaskStatus:  "", // system notification, not claimable task badge
+			TaskStatus:  "",
 			CreatedAt:   ts.UTC().Format(time.RFC3339),
 		}
 		h.hub.BroadcastToChannel(channelID, ws.Envelope(ws.EventMessageNew, msg))
 	}
 
 	if threadID != "" {
-		// Persist to DB. i18n.Active.SysTaskCreated stays as channel message (thread_id=NULL)
-		// so it appears in the channel list. Other actions go into the thread.
 		var nullableThreadID interface{}
 		if !showInChannel {
 			nullableThreadID = threadID
@@ -907,13 +856,10 @@ func (h *TaskHandler) broadcastSystemMessageWithID(channelID, threadID string, t
 	}
 }
 
-
-
 func formatSystemMessage(taskNumber int, title, action string) string {
 	return fmt.Sprintf("📋 Task #%d %s: %s", taskNumber, action, title)
 }
 
-// formatStatusDisplay converts internal status value to display text.
 func formatStatusDisplay(status string) string {
 	switch status {
 	case service.TaskStatusTodo:
@@ -933,7 +879,6 @@ func formatStatusDisplay(status string) string {
 
 // --- Global handlers ---
 
-// ListAll handles GET /api/v1/tasks
 func (h *TaskHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
@@ -956,7 +901,6 @@ func (h *TaskHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toTaskResponseList(tasks))
 }
 
-// CreateGlobal handles POST /api/v1/tasks
 func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
@@ -978,9 +922,6 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// insert a user message first, then convert to task.
-	// Agents receive the original message format with @mention context preserved,
-	// not a stripped system notification.
 	now := time.Now()
 	msgID := uuid.New().String()
 	senderType := "user"
@@ -1000,7 +941,6 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve sender name for broadcast
 	senderName := userID
 	if err := h.pool.QueryRow(r.Context(),
 		`SELECT COALESCE(
@@ -1015,7 +955,6 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
-	// Broadcast message.new (user message, appears in channel)
 	if h.hub != nil {
 		msgPayload := ws.Envelope(ws.EventMessageNew, ws.MessageNewPayload{
 			ID: msgID, ChannelID: req.ChannelID,
@@ -1025,7 +964,6 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 		h.hub.BroadcastToChannel(req.ChannelID, msgPayload)
 	}
 
-	// Convert message to task
 	task, err := h.svc.ConvertMessageToTask(r.Context(), req.ChannelID, msgID, userID)
 	if err != nil {
 		slog.Error("failed to convert message to task", "error", err)
@@ -1033,7 +971,6 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create thread for the task message
 	var threadID string
 	threadSvc := service.NewThreadService(h.pool)
 	tid, _, threadErr := threadSvc.GetOrCreateThread(r.Context(), task.ChannelID, msgID)
@@ -1046,7 +983,6 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 	resp := toTaskResponse(task)
 	writeJSON(w, http.StatusCreated, resp)
 
-	// Broadcast message.updated with task badge
 	if h.hub != nil {
 		msgUpdated := ws.Envelope(ws.EventMessageUpdated, ws.MessageUpdatedPayload{
 			ID: msgID, ChannelID: task.ChannelID,
@@ -1056,7 +992,6 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 		h.hub.BroadcastToChannel(task.ChannelID, msgUpdated)
 	}
 
-	// Broadcast task.created
 	dueDate := ""
 	if task.DueDate != nil {
 		dueDate = task.DueDate.Format(time.RFC3339)
@@ -1070,12 +1005,10 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: resp.CreatedAt, UpdatedAt: resp.UpdatedAt,
 	})
 
-	// Broadcast system notification only to thread
 	if threadID != "" {
 		h.broadcastSystemMessageWithID(task.ChannelID, threadID, task.TaskNumber, task.Title, i18n.Active.SysTaskCreated, uuid.New().String(), now, false)
 	}
 
-	// Trigger agents for auto-claim
 	if h.agentSvc != nil {
 		contentForMentions := task.Title
 		if task.Description != "" {
@@ -1092,7 +1025,6 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GetGlobal handles GET /api/v1/tasks/{taskID}
 func (h *TaskHandler) GetGlobal(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
@@ -1119,7 +1051,6 @@ func (h *TaskHandler) GetGlobal(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toTaskResponse(task))
 }
 
-// UpdateGlobal handles PATCH /api/v1/tasks/{taskID}
 func (h *TaskHandler) UpdateGlobal(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
@@ -1132,7 +1063,6 @@ func (h *TaskHandler) UpdateGlobal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up the task to find its channel ID
 	task, err := h.svc.GetTaskGlobal(r.Context(), taskID, userID)
 	if err != nil {
 		if err == service.ErrTaskNotFound {
@@ -1177,29 +1107,27 @@ func (h *TaskHandler) UpdateGlobal(w http.ResponseWriter, r *http.Request) {
 	resp := toTaskResponse(updated)
 	writeJSON(w, http.StatusOK, resp)
 
-	// Broadcast task.updated (same as channel-scoped Update)
 	var dueDateStr string
 	if updated.DueDate != nil {
 		dueDateStr = updated.DueDate.Format(time.RFC3339)
 	}
 	ws.BroadcastTaskUpdated(h.hub, ws.TaskUpdatedPayload{
-		ID:          updated.ID,
-		TaskNumber:  updated.TaskNumber,
-		ChannelID:   updated.ChannelID,
-		Title:       updated.Title,
-		Description: updated.Description,
-		Status:      updated.Status,
-		ClaimerID:   updated.ClaimerID,
-		ClaimerName: updated.ClaimerName,
-		Priority:    updated.Priority,
-		DueDate:     dueDateStr,
-		MessageID:   updated.MessageID,
-		UpdatedAt:   updated.UpdatedAt.Format(time.RFC3339),
-		SubtaskCount:     updated.SubtaskCount,
+		ID:              updated.ID,
+		TaskNumber:      updated.TaskNumber,
+		ChannelID:       updated.ChannelID,
+		Title:           updated.Title,
+		Description:     updated.Description,
+		Status:          updated.Status,
+		ClaimerID:       updated.ClaimerID,
+		ClaimerName:     updated.ClaimerName,
+		Priority:        updated.Priority,
+		DueDate:         dueDateStr,
+		MessageID:       updated.MessageID,
+		UpdatedAt:       updated.UpdatedAt.Format(time.RFC3339),
+		SubtaskCount:    updated.SubtaskCount,
 		DoneSubtaskCount: updated.DoneSubtaskCount,
 	})
 
-	// Resolve thread ID for syncing system notification to the task's thread.
 	var threadID string
 	if updated.MessageID != "" {
 		tid, err := h.resolveThreadID(r.Context(), updated.MessageID)
@@ -1208,7 +1136,6 @@ func (h *TaskHandler) UpdateGlobal(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Broadcast system message if status changed
 	if req.Status != nil && *req.Status != "" {
 		statusText := formatStatusDisplay(*req.Status)
 		h.broadcastSystemMessage(updated.ChannelID, threadID, updated.TaskNumber, updated.Title, "状态已更新为 "+statusText)
@@ -1218,7 +1145,6 @@ func (h *TaskHandler) UpdateGlobal(w http.ResponseWriter, r *http.Request) {
 
 }
 
-// DeleteGlobal handles DELETE /api/v1/tasks/{taskID}
 func (h *TaskHandler) DeleteGlobal(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
@@ -1231,7 +1157,6 @@ func (h *TaskHandler) DeleteGlobal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up the task to find its channel ID
 	task, err := h.svc.GetTaskGlobal(r.Context(), taskID, userID)
 	if err != nil {
 		if err == service.ErrTaskNotFound {
@@ -1256,7 +1181,6 @@ func (h *TaskHandler) DeleteGlobal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Broadcast task.deleted (same as channel-scoped Delete)
 	ws.BroadcastTaskDeleted(h.hub, ws.TaskDeletedPayload{
 		ID:         taskID,
 		ChannelID:  task.ChannelID,
@@ -1268,7 +1192,6 @@ func (h *TaskHandler) DeleteGlobal(w http.ResponseWriter, r *http.Request) {
 
 // --- Swarm handlers ---
 
-// DecomposeTask handles POST /api/v1/tasks/{taskID}/decompose
 func (h *TaskHandler) DecomposeTask(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
@@ -1315,7 +1238,6 @@ func (h *TaskHandler) DecomposeTask(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// SwarmStatus handles GET /api/v1/tasks/{taskID}/swarm-status
 func (h *TaskHandler) SwarmStatus(w http.ResponseWriter, r *http.Request) {
 	_, ok := requireUserID(r)
 	if !ok {
@@ -1348,7 +1270,6 @@ func (h *TaskHandler) SwarmStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, status)
 }
 
-// ListSwarmClaimable handles GET /api/v1/tasks/swarm-claimable
 func (h *TaskHandler) ListSwarmClaimable(w http.ResponseWriter, r *http.Request) {
 	_, ok := requireUserID(r)
 	if !ok {
@@ -1365,13 +1286,108 @@ func (h *TaskHandler) ListSwarmClaimable(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "channel_id query parameter is required")
 		return
 	}
-
 	tasks, err := h.swarm.ListClaimableSwarmTasks(r.Context(), channelID)
 	if err != nil {
 		slog.Error("failed to list claimable swarm tasks", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list claimable swarm tasks")
 		return
 	}
-
 	writeJSON(w, http.StatusOK, toTaskResponseList(tasks))
+}
+
+func (h *TaskHandler) ListStale(w http.ResponseWriter, r *http.Request) {
+	_, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	if h.watchdog == nil {
+		writeError(w, http.StatusInternalServerError, "watchdog service not available")
+		return
+	}
+
+	channelID := r.URL.Query().Get("channel_id")
+	stale, err := h.watchdog.ListStaleTasks(r.Context(), channelID)
+	if err != nil {
+		slog.Error("failed to list stale tasks", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list stale tasks")
+		return
+	}
+	writeJSON(w, http.StatusOK, stale)
+}
+
+// IsolateTask handles POST /api/v1/tasks/{id}/isolate (T3.2.5).
+func (h *TaskHandler) IsolateTask(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	_ = userID
+
+	taskID := chi.URLParam(r, "taskID")
+	if taskID == "" {
+		writeError(w, http.StatusBadRequest, "task ID is required")
+		return
+	}
+
+	task, err := h.svc.GetTaskGlobal(r.Context(), taskID, userID)
+	if err != nil {
+		if err == service.ErrTaskNotFound {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get task")
+		return
+	}
+
+	var bindPath string
+	dbErr := h.pool.QueryRow(r.Context(),
+		`SELECT bind_path FROM channel_bindings WHERE channel_id = $1`,
+		task.ChannelID,
+	).Scan(&bindPath)
+	if dbErr != nil {
+		writeError(w, http.StatusNotFound, "channel is not bound to a project repository")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"status":         "isolated",
+		"task_id":        taskID,
+		"channel_id":     task.ChannelID,
+		"workspace_path": bindPath,
+		"task_number":    task.TaskNumber,
+	})
+}
+
+// UnisolateTask handles DELETE /api/v1/tasks/{id}/isolate (T3.2.5).
+func (h *TaskHandler) UnisolateTask(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	_ = userID
+
+	taskID := chi.URLParam(r, "taskID")
+	if taskID == "" {
+		writeError(w, http.StatusBadRequest, "task ID is required")
+		return
+	}
+
+	task, err := h.svc.GetTaskGlobal(r.Context(), taskID, userID)
+	if err != nil {
+		if err == service.ErrTaskNotFound {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get task")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":      "un-isolated",
+		"task_id":     taskID,
+		"task_number": task.TaskNumber,
+	})
 }

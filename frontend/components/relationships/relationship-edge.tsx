@@ -7,6 +7,7 @@
 // - Click edge → show detail panel for editing/deleting
 // ============================================================================
 
+import { memo } from 'react';
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from '@xyflow/react';
 import type { RelationshipType } from '@/lib/types';
 
@@ -22,7 +23,7 @@ const EDGE_COLORS: Record<RelationshipType, { stroke: string; label: string }> =
   escalates_to:     { stroke: '#EF4444', label: 'Escalates To' },
 };
 
-export function RelationshipEdge({
+function RelationshipEdgeComponent({
   id,
   sourceX,
   sourceY,
@@ -128,3 +129,5 @@ export function RelationshipEdge({
     </>
   );
 }
+
+export const RelationshipEdge = memo(RelationshipEdgeComponent);

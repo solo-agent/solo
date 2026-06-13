@@ -72,6 +72,7 @@ var (
 	ErrTaskInTerminalState   = errors.New("task is in a terminal state and cannot be claimed")
 	ErrTaskNotClaimable      = errors.New("task status does not allow claiming")
 	ErrTaskNotClaimer        = errors.New("you are not the claimer of this task")
+	ErrTaskBlocked           = errors.New("task is blocked by incomplete dependencies")
 )
 
 // Task represents a task in a channel.
@@ -342,6 +343,15 @@ func (s *TaskService) ClaimTask(ctx context.Context, channelID, taskID, userID s
 		return nil, ErrTaskAlreadyClaimed
 	}
 
+	// T1.2.4: Check if task is blocked by incomplete dependencies.
+	blocked, blockErr := s.IsTaskBlocked(ctx, taskID)
+	if blockErr != nil {
+		return nil, fmt.Errorf("check blocked: %w", blockErr)
+	}
+	if blocked {
+		return nil, ErrTaskBlocked
+	}
+
 	// Determine new status.
 	newStatus := currentStatus
 	if currentStatus == TaskStatusTodo {
@@ -524,6 +534,15 @@ func (s *TaskService) GetTask(ctx context.Context, channelID, taskID, userID str
 	if dueDate != nil {
 		task.DueDate = dueDate
 	}
+
+	// T1.2.4: Populate BlockerIDs array.
+	_ = s.pool.QueryRow(ctx, `
+		SELECT COALESCE(array_agg(td.blocker_task_id) FILTER (WHERE td.blocker_task_id IS NOT NULL), '{}')
+		FROM task_dependencies td
+		JOIN tasks t2 ON td.blocker_task_id = t2.id
+		WHERE td.blocked_task_id = $1 AND t2.status NOT IN ('done', 'closed')
+	`, task.ID).Scan(&task.BlockerIDs)
+
 	return &task, nil
 }
 func (s *TaskService) ListTasks(ctx context.Context, channelID, userID string, filter TaskFilter) ([]Task, error) {
@@ -929,6 +948,19 @@ func (s *TaskService) AddDependency(ctx context.Context, blockerTaskID, blockedT
 	if blockerTaskID == blockedTaskID {
 		return nil, fmt.Errorf("a task cannot depend on itself")
 	}
+
+	// BUG-012: Validate that both tasks exist before INSERT.
+	for _, tid := range []string{blockerTaskID, blockedTaskID} {
+		var exists bool
+		err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE id = $1)`, tid).Scan(&exists)
+		if err != nil {
+			return nil, fmt.Errorf("check task existence: %w", err)
+		}
+		if !exists {
+			return nil, fmt.Errorf("task not found: %s", tid)
+		}
+	}
+
 	if err := s.checkDependencyCycle(ctx, blockerTaskID, blockedTaskID); err != nil {
 		return nil, err
 	}

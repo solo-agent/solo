@@ -8,12 +8,14 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Search, X, Filter, Loader2, BookOpen, User, Calendar, Tag } from 'lucide-react';
+import { Search, X, Loader2, BookOpen, User, Calendar, Tag, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
 import { Select, type SelectOption } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
 import { apiClient } from '@/lib/api-client';
 import type { KnowledgeEntry, KnowledgeSearchResponse } from '@/lib/types';
 
@@ -228,38 +230,70 @@ export function KnowledgeSearch({ channelId, onResultClick, channels, compact }:
         )}
       </div>
 
-      {/* Loading */}
+      {/* Loading skeletons */}
       {isLoading && (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <div className="space-y-2">
+          <div className="flex items-center justify-center py-2">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mr-2" />
+            <span className="font-mono text-xs text-muted-foreground">
+              {t('knowledgeSearchLoading')}
+            </span>
+          </div>
+          {[1, 2, 3].map((i) => (
+            <div key={i} className={cn(
+              'border-2 border-black bg-white p-3',
+              compact ? 'shadow-brutal-sm' : 'shadow-brutal',
+            )}>
+              <Skeleton className="h-4 w-3/4 mb-2" />
+              <Skeleton className="h-3 w-full mb-1" />
+              <Skeleton className="h-3 w-2/3" />
+              <div className="flex gap-3 mt-2">
+                <Skeleton className="h-3 w-16" />
+                <Skeleton className="h-3 w-20" />
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
       {/* Error */}
       {error && !isLoading && (
-        <div className="border-2 border-black bg-brutal-danger-light px-3 py-2">
-          <p className="font-mono text-xs text-brutal-danger">{error}</p>
+        <div className="border-2 border-black bg-brutal-danger-light px-4 py-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-brutal-danger flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-heading text-xs font-bold text-brutal-danger">{error}</p>
+              <button
+                type="button"
+                onClick={() => doSearch(query, filterChannelId)}
+                className="mt-1 font-mono text-[10px] font-bold underline hover:text-black"
+              >
+                {t('retry')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Empty state */}
+      {/* Empty state — no query entered yet */}
       {!isLoading && !error && !hasSearched && !query && (
-        <div className="flex flex-col items-center justify-center py-8 text-center">
-          <Search className="h-8 w-8 text-muted-foreground mb-2" />
-          <p className="font-mono text-xs text-muted-foreground">
-            {t('knowledgeSearchEmpty')}
-          </p>
-        </div>
+        <EmptyState
+          icon={<Search className="h-5 w-5" />}
+          title={t('knowledgeSearchEmpty')}
+          variant="dashed"
+          className="py-6"
+        />
       )}
 
       {/* No results */}
       {!isLoading && !error && hasSearched && results.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-8 text-center">
-          <BookOpen className="h-8 w-8 text-muted-foreground mb-2" />
-          <p className="font-heading text-sm font-bold text-foreground">
-            {t('knowledgeNoResults')}
-          </p>
-        </div>
+        <EmptyState
+          icon={<BookOpen className="h-5 w-5" />}
+          title={t('knowledgeNoResults')}
+          variant="plain"
+          rotation={-1}
+          className="py-6"
+        />
       )}
 
       {/* Results */}

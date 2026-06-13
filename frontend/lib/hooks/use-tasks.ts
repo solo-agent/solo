@@ -207,11 +207,25 @@ export function useTasks(filters?: TaskFilters) {
         return;
       }
 
-      // Step 2: task.unblocked — refresh the task to get updated blocker state
+      // Step 2: task.unblocked — granular update of the unblocked task
+      // (T2.4.5) Auto-refresh task list when dependency is resolved.
       if (event.type === 'task.unblocked') {
         if (channelFilter && event.channel_id !== channelFilter) return;
-        // Refresh the unblocked task
-        loadTasks();
+        // Fetch just the unblocked task to get its updated blocker_ids/blocked_by_count
+        const unblockedTaskId = event.blocked_task_id;
+        apiClient.get<TaskResponse>(`/api/v1/tasks/${unblockedTaskId}`).then((resp) => {
+          setTasks((prev) => {
+            const idx = prev.findIndex((t) => t.id === unblockedTaskId);
+            if (idx === -1) return prev;
+            const updated = mapTask(resp);
+            const copy = [...prev];
+            copy[idx] = updated;
+            return copy;
+          });
+        }).catch(() => {
+          // Fall back to full refetch on fetch failure
+          loadTasks();
+        });
         return;
       }
     });

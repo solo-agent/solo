@@ -7,8 +7,8 @@
 
 'use client';
 
-import { useState } from 'react';
-import { BookOpen, X, Plus, FileText, Loader2 } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { BookOpen, X, Plus, FileText, Loader2, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,14 @@ import { Dialog, DialogHeader, DialogTitle, DialogCloseButton, DialogFooter } fr
 import { useToast } from '@/components/ui/toast';
 import { apiClient } from '@/lib/api-client';
 import type { CreateKnowledgeInput, KnowledgeEntry } from '@/lib/types';
+
+// Common tag suggestions grouped by category
+const TAG_SUGGESTIONS = [
+  'architecture', 'api', 'database', 'frontend', 'backend',
+  'deployment', 'testing', 'security', 'performance', 'monitoring',
+  'cli', 'configuration', 'migration', 'best-practice', 'gotcha',
+  'onboarding', 'changelog', 'decision', 'troubleshooting',
+];
 
 interface KnowledgeCreateProps {
   /** Pre-selected channel (optional) */
@@ -50,7 +58,21 @@ export function KnowledgeCreate({
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const { showToast } = useToast();
+
+  // Filter tag suggestions based on what hasn't been added yet
+  const availableSuggestions = useMemo(
+    () => TAG_SUGGESTIONS.filter((t) => !tags.includes(t)),
+    [tags],
+  );
+
+  // Filter suggestions based on current input
+  const filteredSuggestions = useMemo(() => {
+    if (!tagInput.trim()) return availableSuggestions.slice(0, 5);
+    const lower = tagInput.toLowerCase();
+    return availableSuggestions.filter((s) => s.includes(lower)).slice(0, 5);
+  }, [tagInput, availableSuggestions]);
 
   const resetForm = () => {
     setTitle('');
@@ -60,8 +82,20 @@ export function KnowledgeCreate({
     setTagInput('');
   };
 
+  const validate = (): string[] => {
+    const errors: string[] = [];
+    if (!selectedChannelId) errors.push(t('knowledgeNoChannel'));
+    if (!title.trim()) errors.push(t('knowledgeTitleRequired'));
+    else if (title.trim().length < 3) errors.push(t('knowledgeTitleMinLength'));
+    if (!content.trim()) errors.push(t('knowledgeContentRequired'));
+    else if (content.trim().length < 10) errors.push(t('knowledgeContentMinLength'));
+    return errors;
+  };
+
   const handleSubmit = async () => {
-    if (!title.trim() || !content.trim() || !selectedChannelId) return;
+    const errors = validate();
+    setValidationErrors(errors);
+    if (errors.length > 0) return;
     setIsSubmitting(true);
     try {
       const body: CreateKnowledgeInput = {
@@ -125,6 +159,7 @@ export function KnowledgeCreate({
 
   const handleOpen = () => {
     resetForm();
+    setValidationErrors([]);
     setOpen(true);
   };
 
@@ -152,6 +187,18 @@ export function KnowledgeCreate({
         </DialogHeader>
 
         <div className="space-y-4">
+          {/* Validation errors */}
+          {validationErrors.length > 0 && (
+            <div className="border-2 border-black bg-brutal-danger-light px-3 py-2">
+              {validationErrors.map((err, i) => (
+                <div key={i} className="flex items-start gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5 text-brutal-danger flex-shrink-0 mt-px" />
+                  <p className="font-mono text-xs text-brutal-danger">{err}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Channel selector */}
           <div>
             <label className="block font-heading text-sm font-bold mb-1.5">
@@ -227,6 +274,30 @@ export function KnowledgeCreate({
                 className="flex-1 min-w-[120px] border-none outline-none bg-transparent font-mono text-xs text-foreground placeholder:text-muted-foreground"
               />
             </div>
+            {/* Tag suggestions */}
+            {filteredSuggestions.length > 0 && (
+              <div className="mt-1.5">
+                <span className="font-mono text-[10px] text-muted-foreground mr-1">
+                  {t('knowledgeTagSuggestions')}
+                </span>
+                <div className="flex flex-wrap gap-1 mt-0.5">
+                  {filteredSuggestions.map((suggestion) => (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      onClick={() => addTag(suggestion)}
+                      className={cn(
+                        'px-1.5 py-0.5 border-2 border-black bg-brutal-muted-light',
+                        'font-mono text-[10px] hover:bg-brutal-primary-light',
+                        'active:translate-x-0.5 active:translate-y-0.5 transition-all',
+                      )}
+                    >
+                      + {suggestion}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Import from decisions */}

@@ -812,6 +812,11 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		// so agents can decide whether to claim tasks.
 		if req.TaskContext != "" {
 			systemPrompt += "\n\n" + req.TaskContext
+			}
+		// T4.3.1: Inject relevant knowledge from knowledge base into system prompt.
+		knowledgeCtx := h.InjectRelevantKnowledge(ctx, req.ChannelID, req.SystemPrompt)
+		if knowledgeCtx != "" {
+			systemPrompt += knowledgeCtx
 		}
 
 

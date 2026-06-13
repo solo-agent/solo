@@ -93,7 +93,18 @@ export type WSServerEvent =
   | { type: 'dm.message.new'; id: string; dm_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; created_at: string; attachments?: Attachment[]; thread_id?: string }
   | { type: 'dm.updated'; dm_id: string; last_message?: { content: string; sender_id: string; sender_name: string; created_at: string }; last_reply_at?: string; unread_count: number }
   // ---- Inbox events (v1.5) ----
-  | { type: 'inbox.updated'; };
+  | { type: 'inbox.updated'; }
+  // ---- Workspace conflict event (Step 3) ----
+  | { type: 'workspace_conflict'; channel_id: string; task_id: string; agent_id: string; agent_name?: string; file_path: string; message: string; timestamp: string }
+  // ---- Knowledge events (Step 4) ----
+  | { type: 'knowledge_created'; entry_id: string; channel_id: string; title: string }
+  | { type: 'knowledge_updated'; entry_id: string; channel_id: string; title: string }
+  // ---- Step 6 events: reminder + watchdog + swarm ----
+  | { type: 'reminder_fired'; reminder_id: string; agent_id: string; agent_name?: string; channel_id?: string; task_id?: string; message: string; fired_at: string }
+  | { type: 'task_escalated'; task_id: string; task_number?: number; channel_id: string; escalated_to_agent_id: string; escalated_to_name?: string; level: 'yellow' | 'red'; timestamp: string }
+  | { type: 'task_unclaimed_auto'; task_id: string; task_number?: number; channel_id: string; previous_claimer_id: string; reason: string; timestamp: string }
+  | { type: 'swarm_decomposed'; parent_task_id: string; parent_task_number?: number; channel_id: string; subtask_count: number }
+  | { type: 'swarm_all_done'; parent_task_id: string; parent_task_number?: number; channel_id: string; completed_count: number; timestamp: string };
 
 /** 客户端发送的 WebSocket 命令 */
 export type WSClientCommand =

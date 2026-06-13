@@ -5,15 +5,17 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/solo-ai/solo/internal/realtime"
 	"github.com/solo-ai/solo/internal/server/service"
 )
 
 type TaskDependencyHandler struct {
 	taskSvc *service.TaskService
+	hub     realtime.Broadcaster
 }
 
-func NewTaskDependencyHandler(taskSvc *service.TaskService) *TaskDependencyHandler {
-	return &TaskDependencyHandler{taskSvc: taskSvc}
+func NewTaskDependencyHandler(taskSvc *service.TaskService, hub realtime.Broadcaster) *TaskDependencyHandler {
+	return &TaskDependencyHandler{taskSvc: taskSvc, hub: hub}
 }
 
 // AddDependency handles POST /api/v1/task-dependencies
@@ -43,11 +45,26 @@ func (h *TaskDependencyHandler) AddDependency(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
+
+	// T2.2.7: Broadcast task_blocked event.
+	if h.hub != nil {
+		h.hub.Broadcast(realtime.Envelope("task_blocked", map[string]interface{}{
+			"blocked_task_id": body.BlockedTaskID,
+			"blocker_task_id": body.BlockerTaskID,
+		}))
+	}
+
 	writeJSON(w, http.StatusCreated, dep)
 }
 
 // ListBlockers handles GET /api/v1/tasks/{taskID}/blockers
 func (h *TaskDependencyHandler) ListBlockers(w http.ResponseWriter, r *http.Request) {
+	_, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
 	taskID := chi.URLParam(r, "taskID")
 	deps, err := h.taskSvc.ListBlockers(r.Context(), taskID)
 	if err != nil {
@@ -59,6 +76,12 @@ func (h *TaskDependencyHandler) ListBlockers(w http.ResponseWriter, r *http.Requ
 
 // ListBlocked handles GET /api/v1/tasks/{taskID}/blocked
 func (h *TaskDependencyHandler) ListBlocked(w http.ResponseWriter, r *http.Request) {
+	_, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
 	taskID := chi.URLParam(r, "taskID")
 	deps, err := h.taskSvc.ListBlocked(r.Context(), taskID)
 	if err != nil {
@@ -70,6 +93,12 @@ func (h *TaskDependencyHandler) ListBlocked(w http.ResponseWriter, r *http.Reque
 
 // IsBlocked handles GET /api/v1/tasks/{taskID}/is-blocked
 func (h *TaskDependencyHandler) IsBlocked(w http.ResponseWriter, r *http.Request) {
+	_, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
 	taskID := chi.URLParam(r, "taskID")
 	blocked, err := h.taskSvc.IsTaskBlocked(r.Context(), taskID)
 	if err != nil {
@@ -81,6 +110,12 @@ func (h *TaskDependencyHandler) IsBlocked(w http.ResponseWriter, r *http.Request
 
 // RemoveDependency handles DELETE /api/v1/task-dependencies
 func (h *TaskDependencyHandler) RemoveDependency(w http.ResponseWriter, r *http.Request) {
+	_, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
 	var body struct {
 		BlockerTaskID string `json:"blocker_task_id"`
 		BlockedTaskID string `json:"blocked_task_id"`
@@ -89,10 +124,23 @@ func (h *TaskDependencyHandler) RemoveDependency(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if body.BlockerTaskID == "" || body.BlockedTaskID == "" {
+		writeError(w, http.StatusBadRequest, "blocker_task_id and blocked_task_id are required")
+		return
+	}
 
 	if err := h.taskSvc.RemoveDependency(r.Context(), body.BlockerTaskID, body.BlockedTaskID); err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+
+	// T2.2.7: Broadcast task_unblocked event.
+	if h.hub != nil {
+		h.hub.Broadcast(realtime.Envelope("task_unblocked", map[string]interface{}{
+			"blocked_task_id": body.BlockedTaskID,
+			"blocker_task_id": body.BlockerTaskID,
+		}))
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }

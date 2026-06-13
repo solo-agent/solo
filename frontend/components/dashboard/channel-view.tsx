@@ -5,7 +5,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
-import { Users, Loader2, ClipboardList, MessageSquare, Eye, Plus } from 'lucide-react';
+import { Users, Loader2, ClipboardList, MessageSquare, Eye, Plus, BookOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
 import { useChannelMembers } from '@/lib/hooks/use-channel-members';
@@ -35,6 +35,7 @@ const ThreadPanel = lazy(() =>
 );
 
 import { AgentViewPanel } from './agent-view-panel';
+import { KnowledgePanel } from '@/components/knowledge/knowledge-panel';
 
 interface ChannelViewProps {
   channel: Channel;
@@ -132,6 +133,9 @@ export function ChannelView({
 
   // ---- Member popover state ----
   const [isMemberPopoverOpen, setIsMemberPopoverOpen] = useState(false);
+
+  // ---- Knowledge panel state (Step 4) ----
+  const [isKnowledgeOpen, setIsKnowledgeOpen] = useState(false);
 
   const { showToast } = useToast();
 
@@ -452,6 +456,19 @@ export function ChannelView({
             >
               <Eye className="h-4 w-4" />
             </button>
+            {/* Knowledge panel button (Step 4) */}
+            <button
+              type="button"
+              onClick={() => setIsKnowledgeOpen(true)}
+              className={cn(
+                'flex h-8 w-8 items-center justify-center border-2 border-black shadow-brutal-sm transition-colors',
+                'bg-white hover:bg-brutal-cream',
+              )}
+              aria-label={t('knowledgePanelButton')}
+              title={t('knowledgePanelButton')}
+            >
+              <BookOpen className="h-4 w-4" />
+            </button>
             {/* SOLO-237-F: Channel-internal search */}
             {channelViewTab === 'messages' && (
               <ChannelSearch
@@ -647,6 +664,26 @@ export function ChannelView({
             }}
             onRemoveAgent={(memberId) => removeMember('agent', memberId)}
             showHeader={false}
+          />
+        </div>
+      </Dialog>
+
+      {/* Knowledge Panel Dialog (Step 4) */}
+      <Dialog open={isKnowledgeOpen} onOpenChange={setIsKnowledgeOpen} width="md">
+        <DialogHeader>
+          <DialogTitle>
+            <BookOpen className="inline h-4 w-4 mr-1.5 -mt-0.5" />
+            {t('knowledgeChannelPanelTitle')}
+            <span className="ml-2 font-mono text-sm font-normal text-muted-foreground">
+              #{channel.name}
+            </span>
+          </DialogTitle>
+          <DialogCloseButton onClick={() => setIsKnowledgeOpen(false)} />
+        </DialogHeader>
+        <div className="max-h-[60vh] overflow-y-auto">
+          <KnowledgePanel
+            channelId={channel.id}
+            compact
           />
         </div>
       </Dialog>

@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ReactFlow,
   Background,
@@ -20,6 +20,7 @@ import {
   type Connection,
   type Edge,
   type Node,
+  type NodeMouseHandler,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Loader2, Plus, Trash2, LayoutGrid, Undo2, Redo2, Download } from 'lucide-react';
@@ -27,8 +28,10 @@ import { NavBar } from '@/components/ui/navbar';
 import { RelationshipNode } from '@/components/relationships/relationship-node';
 import { RelationshipEdge } from '@/components/relationships/relationship-edge';
 import { TypeSelector } from '@/components/relationships/type-selector';
+import { RelationshipDetailPanel } from '@/components/relationships/relationship-detail-panel';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
+import { useChannels } from '@/lib/hooks/use-channels';
 import { t } from '@/lib/i18n';
 import type { Agent, AgentRelationship, RelationshipType, CreateRelationshipInput } from '@/lib/types';
 import { useAgents } from '@/lib/hooks/use-agents';
@@ -49,6 +52,7 @@ interface UndoEntry {
 
 export default function RelationshipsPage() {
   const { agents, isLoading: agentsLoading } = useAgents();
+  const { channels } = useChannels();
   const [relationships, setRelationships] = useState<AgentRelationship[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -59,8 +63,11 @@ export default function RelationshipsPage() {
     targetName: string;
   } | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
+  const [detailRel, setDetailRel] = useState<AgentRelationship | null>(null);
+  const [detailAgent, setDetailAgent] = useState<Agent | null>(null);
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
   const [redoStack, setRedoStack] = useState<UndoEntry[]>([]);
+  const edgeToRelationshipMap = useRef<Map<string, AgentRelationship>>(new Map());
 
   // ---- Fetch data ----
 
@@ -98,16 +105,22 @@ export default function RelationshipsPage() {
   }, [agents]);
 
   const initialEdges: Edge[] = useMemo(() => {
-    return relationships.map((r) => ({
-      id: r.id,
-      source: r.from_agent_id,
-      target: r.to_agent_id,
-      type: 'relationship',
-      data: {
-        relType: r.rel_type,
-        channelName: r.channel_name,
-      },
-    }));
+    const map = new Map<string, AgentRelationship>();
+    const edges = relationships.map((r) => {
+      map.set(r.id, r);
+      return {
+        id: r.id,
+        source: r.from_agent_id,
+        target: r.to_agent_id,
+        type: 'relationship',
+        data: {
+          relType: r.rel_type,
+          channelName: r.channel_name,
+        },
+      };
+    });
+    edgeToRelationshipMap.current = map;
+    return edges;
   }, [relationships]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -128,6 +141,14 @@ export default function RelationshipsPage() {
       if (event.type === 'relationship_created') {
         setEdges((prev) => {
           if (prev.find((e) => e.id === event.id)) return prev;
+          const newRel: AgentRelationship = {
+            id: event.id,
+            from_agent_id: event.from_agent_id,
+            to_agent_id: event.to_agent_id,
+            rel_type: event.rel_type as RelationshipType,
+            channel_id: event.channel_id,
+          };
+          edgeToRelationshipMap.current.set(event.id, newRel);
           return [...prev, {
             id: event.id,
             source: event.from_agent_id,
@@ -137,8 +158,32 @@ export default function RelationshipsPage() {
           }];
         });
       }
+      if (event.type === 'relationship_updated') {
+        setEdges((prev) => prev.map((e) => {
+          if (e.id !== event.id) return e;
+          const existing = edgeToRelationshipMap.current.get(event.id);
+          if (existing) {
+            existing.rel_type = event.rel_type as RelationshipType;
+            if (event.channel_id !== undefined) existing.channel_id = event.channel_id;
+          }
+          return {
+            ...e,
+            data: { ...e.data, relType: event.rel_type as RelationshipType, channelName: (event as { channel_name?: string }).channel_name },
+          };
+        }));
+        // Update detail panel if showing this relationship
+        setDetailRel((prev) => {
+          if (prev?.id === event.id) {
+            return { ...prev, rel_type: event.rel_type as RelationshipType, channel_id: event.channel_id };
+          }
+          return prev;
+        });
+      }
       if (event.type === 'relationship_deleted') {
         setEdges((prev) => prev.filter((e) => e.id !== event.id));
+        edgeToRelationshipMap.current.delete(event.id);
+        // Close detail panel if showing this relationship
+        setDetailRel((prev) => prev?.id === event.id ? null : prev);
       }
     });
     return unsub;
@@ -213,11 +258,41 @@ export default function RelationshipsPage() {
     setShowSelector(null);
   }, [showSelector, pushUndo, setEdges]);
 
-  // ---- Edge click → select and delete ----
+  // ---- Edge click → show detail panel ----
 
   const onEdgeClick = useCallback((_event: React.MouseEvent, edge: Edge) => {
     setSelectedEdge(edge);
+    const rel = edgeToRelationshipMap.current.get(edge.id);
+    if (rel) {
+      setDetailRel(rel);
+      setDetailAgent(null);
+    }
   }, []);
+
+  const onNodeClick: NodeMouseHandler = useCallback((_event, node) => {
+    setSelectedEdge(null);
+    const agent = agents.find((a) => a.id === node.id);
+    if (agent) {
+      setDetailAgent(agent);
+      setDetailRel(null);
+    }
+  }, [agents]);
+
+  const closeDetailPanel = useCallback(() => {
+    setDetailRel(null);
+    setDetailAgent(null);
+    setSelectedEdge(null);
+  }, []);
+
+  const handleDetailUpdate = useCallback(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleDetailDelete = useCallback((id: string) => {
+    setEdges((prev) => prev.filter((e) => e.id !== id));
+    edgeToRelationshipMap.current.delete(id);
+    setSelectedEdge(null);
+  }, [setEdges]);
 
   const deleteSelectedEdge = useCallback(async () => {
     if (!selectedEdge) return;
@@ -225,10 +300,12 @@ export default function RelationshipsPage() {
     try {
       await apiClient.delete(`/api/v1/agent-relationships/${selectedEdge.id}`);
       setEdges((prev) => prev.filter((e) => e.id !== selectedEdge.id));
+      edgeToRelationshipMap.current.delete(selectedEdge.id);
     } catch (err) {
       console.error('Failed to delete relationship:', err);
     }
     setSelectedEdge(null);
+    setDetailRel(null);
   }, [selectedEdge, pushUndo, setEdges]);
 
   // ---- Keyboard shortcuts ----
@@ -388,7 +465,8 @@ export default function RelationshipsPage() {
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onEdgeClick={onEdgeClick}
-            onPaneClick={() => setSelectedEdge(null)}
+            onPaneClick={() => { setSelectedEdge(null); closeDetailPanel(); }}
+            onNodeClick={onNodeClick}
             nodeTypes={NODE_TYPES}
             edgeTypes={EDGE_TYPES}
             fitView
@@ -422,6 +500,17 @@ export default function RelationshipsPage() {
                 onCancel={() => setShowSelector(null)}
               />
             </div>
+          )}
+
+          {/* Detail panel */}
+          {(detailRel || detailAgent) && (
+            <RelationshipDetailPanel
+              relationship={detailRel}
+              agent={detailAgent}
+              onClose={closeDetailPanel}
+              onUpdate={handleDetailUpdate}
+              onDelete={handleDetailDelete}
+            />
           )}
 
           {/* Empty state overlay */}

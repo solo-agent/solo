@@ -96,6 +96,15 @@ func (s *SwarmCoordinator) DecomposeTask(ctx context.Context, parentTaskID, chan
 		"subtask_count", len(created),
 	)
 
+	// T6.4.3: Broadcast swarm_decomposed event.
+	if s.hub != nil {
+		s.hub.BroadcastToChannel(channelID, jsonEnvelope("swarm_decomposed", map[string]interface{}{
+			"parent_task_id": parentTaskID,
+			"channel_id":     channelID,
+			"subtask_count":  len(created),
+		}))
+	}
+
 	return created, nil
 }
 

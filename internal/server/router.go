@@ -58,9 +58,10 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	threadHandler := handler.NewThreadHandler(pool, hub, agentSvc)
 	dmHandler := handler.NewDMHandler(pool, hub, agentSvc, taskSvc)
 	daemonHandler := handler.NewDaemonHandler(dm, agentSvc, computerSvc)
-	_ = service.NewAgentRelationshipService(pool)
-	relHandler := handler.NewAgentRelationshipHandler(pool)
-	depHandler := handler.NewTaskDependencyHandler(taskSvc)
+	relSvc := service.NewAgentRelationshipService(pool)
+	relSvc.SetHub(hub)
+	relHandler := handler.NewAgentRelationshipHandler(pool, relSvc)
+	depHandler := handler.NewTaskDependencyHandler(taskSvc, hub)
 	delHandler := handler.NewAgentDelegationHandler(pool)
 	mentionSvc := service.NewMentionService(pool)
 	taskHandler := handler.NewTaskHandler(pool, hub, agentSvc, taskSvc, mentionSvc)
@@ -70,17 +71,20 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	onboardingHandler := handler.NewOnboardingHandler(pool, agentSvc)
 	channelMemoryHandler := handler.NewChannelMemoryHandler(pool)
 	channelBindingHandler := handler.NewChannelBindingHandler(pool)
+	agentSvc.SetChannelBindingService(service.NewChannelBindingService(pool)) // T3.2.3
 
 	// Knowledge, Swarm, Reminder, Watchdog services (Step 4 + Step 6)
 	embedSvc := service.NewEmbeddingService()
 	knowledgeSvc := service.NewKnowledgeService(pool, embedSvc)
+	knowledgeSvc.SetHub(hub)
 	knowledgeHandler := handler.NewKnowledgeHandler(pool, knowledgeSvc)
 	swarmCoordinator := service.NewSwarmCoordinator(pool, taskSvc, hub)
 	reminderSvc := service.NewReminderService(pool, hub)
 	watchdogSvc := service.NewWatchdogService(pool, hub)
 	reminderHandler := handler.NewReminderHandler(reminderSvc)
+	watchdogHandler := handler.NewWatchdogHandler(watchdogSvc, taskSvc)
 	taskHandler.SetSwarmCoordinator(swarmCoordinator)
-	_ = watchdogSvc
+	taskHandler.SetWatchdogService(watchdogSvc)
 
 	// Attachment handler
 	uploadDir := os.Getenv("ATTACHMENTS_DIR")
@@ -234,7 +238,9 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 
 		// Agent relationships (collaboration Step 1)
 		r.Route("/api/v1/agent-relationships", func(r chi.Router) {
+			r.Get("/", relHandler.List)
 			r.Post("/", relHandler.Create)
+			r.Get("/check-cycle", relHandler.CheckCycle)
 			r.Route("/{id}", func(r chi.Router) {
 				r.Patch("/", relHandler.Update)
 				r.Delete("/", relHandler.Delete)
@@ -242,6 +248,9 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		})
 		r.Get("/api/v1/agents/{agentID}/relationships", relHandler.ListByAgent)
 		r.Get("/api/v1/channels/{channelID}/relationships", relHandler.ListByChannel)
+
+		// Relationship graph (Step 5 — Visualization)
+		r.Get("/api/v1/relationships/graph", relHandler.Graph)
 
 		// Agent backends metadata (registered backend adapters)
 		r.Get("/api/v1/agent-backends", agentHandler.AgentBackends)
@@ -270,10 +279,14 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Route("/api/v1/tasks", func(r chi.Router) {
 			r.Get("/", taskHandler.ListAll)
 			r.Post("/", taskHandler.CreateGlobal)
+			// Stale tasks (Step 6 — Watchdog)
+			r.Get("/stale", taskHandler.ListStale)
 			r.Route("/{taskID}", func(r chi.Router) {
 				r.Get("/", taskHandler.GetGlobal)
 				r.Patch("/", taskHandler.UpdateGlobal)
 				r.Delete("/", taskHandler.DeleteGlobal)
+				// Watchdog (Step 6)
+				r.Patch("/watchdog", watchdogHandler.SetWatchdog)
 			})
 		})
 
@@ -374,6 +387,10 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Post("/api/v1/tasks/{taskID}/decompose", taskHandler.DecomposeTask)
 		r.Get("/api/v1/tasks/{taskID}/swarm-status", taskHandler.SwarmStatus)
 		r.Get("/api/v1/tasks/swarm-claimable", taskHandler.ListSwarmClaimable)
+
+		// Task isolate routes (T3.2.5)
+		r.Post("/api/v1/tasks/{taskID}/isolate", taskHandler.IsolateTask)
+		r.Delete("/api/v1/tasks/{taskID}/isolate", taskHandler.UnisolateTask)
 	})
 
 	// WebSocket endpoint (authenticates via ?token query param — browser

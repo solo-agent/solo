@@ -59,6 +59,14 @@ type AgentService struct {
 	// mentionSvc is used to resolve @mentions in agent responses
 	// for agent-to-agent trigger chains.
 	mentionSvc *MentionService
+
+	// bindingSvc resolves working directories for channel-bound projects (T3.2.3).
+	bindingSvc *ChannelBindingService
+}
+
+// SetChannelBindingService injects the channel binding service for CWD resolution.
+func (s *AgentService) SetChannelBindingService(svc *ChannelBindingService) {
+	s.bindingSvc = svc
 }
 
 // NewAgentService creates a new AgentService.
@@ -1162,6 +1170,16 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 	taskContent += "\n- To reply to this message, use the `target` and `msg` fields above."
 	taskContent += "\n- To claim or update this task, use the `channel` field above (e.g. `solo task claim -n N -c <channel>`)."
 
+	// T3.2.3: Resolve working directory for the agent in this channel.
+	var workDir string
+	var sysPrompt = ag.SystemPrompt
+	if s.bindingSvc != nil {
+		workDir = s.bindingSvc.ResolveWorkingDirectory(ctx, channelID, ag.ID)
+	}
+	if workDir != "" {
+		sysPrompt = fmt.Sprintf("[Working Directory: %s]\n\n%s", workDir, sysPrompt)
+	}
+
 	contextMsgs := []agent.Message{
 		{Role: agent.RoleUser, Content: taskContent, SenderID: ""},
 	}
@@ -1172,12 +1190,12 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 		ChannelID:    channelID,
 		ThreadID:     threadID,
 		Messages:     contextMsgs,
-		SystemPrompt: ag.SystemPrompt,
+		SystemPrompt: sysPrompt,
 		ModelConfig: agent.ModelConfig{
 			Provider:    ag.ModelProvider,
 			Model:       ag.ModelName,
 		},
-		// v1.3: No OriginTaskID — agents complete tasks via /done #N directives.
+		WorkingDirectory: workDir,
 	}
 
 	slog.Info("triggering agent for task",
@@ -1492,7 +1510,8 @@ type daemonTaskRequest struct {
 	TaskContext  string            `json:"task_context,omitempty"`   // SOLO-221-B: summary of pending tasks in channel
 	AgentChain   []string          `json:"agent_chain,omitempty"`    // SOLO-228-B: agent trigger chain for loop prevention
 	MentionedNames  []string        `json:"mentioned_names,omitempty"` // v1.3: names of @mentioned agents for context awareness
-	InitialGreeting string          `json:"initial_greeting,omitempty"` // greeting message to prepend as system context
+	InitialGreeting  string          `json:"initial_greeting,omitempty"` // greeting message to prepend as system context
+	WorkingDirectory string          `json:"working_directory,omitempty"` // T3.2.3: resolved CWD for agent
 }
 // containsStr returns true if the slice s contains value v.
 func containsStr(s []string, v string) bool {
