@@ -29,6 +29,7 @@ import {
   DialogCloseButton,
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast';
+import { useStep6Events } from '@/lib/hooks/use-step6-events';
 import { WizardCard } from '@/components/onboarding/wizard-card';
 import { ChannelBinding } from '@/components/channel-binding';
 import { ReminderManager } from '@/components/reminder-manager';
@@ -173,6 +174,14 @@ export function ChannelView({
   useEffect(() => {
     if (channelViewTab === 'tasks') refetchTasks();
   }, [channelViewTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Step 6 WebSocket events (T6.4.3): channel-level toasts + task board refresh
+  useStep6Events({
+    onTaskBoardRefresh: refetchTasks,
+    onSwarmRefresh: (_parentTaskId) => {
+      refetchTasks();
+    },
+  });
 
   // ---- Agent member status tracking (SOLO-47-F) ----
   // SOLO-island PR2: removed thinkingAgentNames/typingAgentNames state and

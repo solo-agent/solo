@@ -137,40 +137,73 @@ func (s *WatchdogService) HandleOverdueTask(ctx context.Context, w TaskWatchdog)
 		s.pool.Exec(ctx, `UPDATE task_watchdog SET deadline = $1 WHERE task_id = $2`, newDeadline, w.TaskID)
 
 	case "escalate":
-		slog.Info("watchdog: escalating",
-			"task_id", w.TaskID,
-			"claimer_id", w.ClaimerID,
-			"escalate_to", w.EscalateTo,
-		)
-		if w.EscalateTo != nil && *w.EscalateTo != "" && s.hub != nil {
-			s.hub.SendToUser(*w.EscalateTo, jsonEnvelope("task_escalated", map[string]interface{}{
-				"task_id":     w.TaskID,
-				"claimer_id":  w.ClaimerID,
-				"escalate_to": *w.EscalateTo,
-			}))
+		// T6.4.5: Verify escalates_to relationship before allowing escalation.
+		// If no valid escalation target, fall back to unclaim.
+		escalationValid := true
+		if w.EscalateTo != nil && *w.EscalateTo != "" {
+			if err := s.VerifyEscalationChain(ctx, w.ClaimerID, *w.EscalateTo); err != nil {
+				slog.Warn("watchdog: escalation chain invalid, falling back to unclaim",
+					"task_id", w.TaskID,
+					"claimer_id", w.ClaimerID,
+					"escalate_to", w.EscalateTo,
+					"error", err,
+				)
+				escalationValid = false
+			}
+		} else {
+			// No escalation target set — cannot escalate.
+			escalationValid = false
 		}
-		// Notify the claimer too.
-		if s.hub != nil {
-			s.hub.SendToUser(w.ClaimerID, jsonEnvelope("task_escalated", map[string]interface{}{
-				"task_id":    w.TaskID,
-				"claimer_id": w.ClaimerID,
-				"message":    "Your task has been escalated due to timeout.",
-			}))
-			if taskChannelID != "" {
-				s.hub.BroadcastToChannel(taskChannelID, jsonEnvelope("task_escalated", map[string]interface{}{
-					"task_id":     w.TaskID,
-					"channel_id":  taskChannelID,
-					"claimer_id":  w.ClaimerID,
-					"escalate_to": w.EscalateTo,
+		if !escalationValid {
+			// Fall back to unclaim.
+			s.pool.Exec(ctx,
+				`UPDATE tasks SET claimer_id = NULL, status = 'todo', updated_at = now() WHERE id = $1`, w.TaskID,
+			)
+			s.pool.Exec(ctx, `DELETE FROM task_watchdog WHERE task_id = $1`, w.TaskID)
+			if s.hub != nil {
+				taskChannelID := s.taskChannel(ctx, w.TaskID)
+				s.hub.BroadcastToChannel(taskChannelID, jsonEnvelope("task_unclaimed_auto", map[string]interface{}{
+					"task_id":    w.TaskID,
+					"channel_id": taskChannelID,
+					"reason":     "escalation_chain_invalid",
 				}))
 			}
-		}
-		// Escalate to the next level.
-		_, err := s.pool.Exec(ctx,
-			`UPDATE task_watchdog SET timeout_action = 'unclaim', deadline = $1 WHERE task_id = $2`,
-			time.Now().Add(12*time.Hour), w.TaskID)
-		if err != nil {
-			slog.Warn("watchdog: failed to escalate", "task_id", w.TaskID, "error", err)
+		} else {
+			slog.Info("watchdog: escalating",
+				"task_id", w.TaskID,
+				"claimer_id", w.ClaimerID,
+				"escalate_to", w.EscalateTo,
+			)
+			if w.EscalateTo != nil && *w.EscalateTo != "" && s.hub != nil {
+				s.hub.SendToUser(*w.EscalateTo, jsonEnvelope("task_escalated", map[string]interface{}{
+					"task_id":     w.TaskID,
+					"claimer_id":  w.ClaimerID,
+					"escalate_to": *w.EscalateTo,
+				}))
+			}
+			// Notify the claimer too.
+			if s.hub != nil {
+				s.hub.SendToUser(w.ClaimerID, jsonEnvelope("task_escalated", map[string]interface{}{
+					"task_id":    w.TaskID,
+					"claimer_id": w.ClaimerID,
+					"message":    "Your task has been escalated due to timeout.",
+				}))
+				if taskChannelID != "" {
+					s.hub.BroadcastToChannel(taskChannelID, jsonEnvelope("task_escalated", map[string]interface{}{
+						"task_id":     w.TaskID,
+						"channel_id":  taskChannelID,
+						"claimer_id":  w.ClaimerID,
+						"escalate_to": w.EscalateTo,
+					}))
+				}
+			}
+			// Escalate to the next level.
+			_, err := s.pool.Exec(ctx,
+				`UPDATE task_watchdog SET timeout_action = 'unclaim', deadline = $1 WHERE task_id = $2`,
+				time.Now().Add(12*time.Hour), w.TaskID)
+			if err != nil {
+				slog.Warn("watchdog: failed to escalate", "task_id", w.TaskID, "error", err)
+			}
 		}
 
 	case "unclaim":

@@ -90,6 +90,19 @@ func (h *daemonHandler) HandleWorktreeCreate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// T3.2.4: Detect workspace conflicts — check if other agents in the channel
+	// have active worktrees modifying the same repository.
+	conflicts := h.detectConflicts(req.ChannelID, req.AgentID)
+	if len(conflicts) > 0 {
+		slog.Warn("worktree create: workspace conflict detected",
+			"channel_id", req.ChannelID,
+			"agent_id", req.AgentID,
+			"conflict_count", len(conflicts),
+		)
+		// Notify server to broadcast workspace_conflict WebSocket event.
+		go h.notifyServerConflict(req.ChannelID, req.AgentID, conflicts)
+	}
+
 	// Generate a unique branch name.
 	branchName := fmt.Sprintf("solo/task-%d-%s", req.TaskNumber, time.Now().Format("20060102-150405"))
 
@@ -118,11 +131,16 @@ func (h *daemonHandler) HandleWorktreeCreate(w http.ResponseWriter, r *http.Requ
 		"branch", branchName,
 	)
 
-	writeJSON(w, http.StatusCreated, worktreeCreateResponse{
-		WorktreePath: worktreePath,
-		BranchName:   branchName,
-		Status:       "created",
-	})
+	resp := map[string]interface{}{
+		"worktree_path": worktreePath,
+		"branch_name":   branchName,
+		"status":        "created",
+	}
+	if len(conflicts) > 0 {
+		resp["warning"] = "workspace_conflict"
+		resp["conflicting_agents"] = conflicts
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // HandleWorktreeCleanup handles POST /internal/daemon/worktree/cleanup.
@@ -221,4 +239,78 @@ func (h *daemonHandler) HandleWorktreeCleanup(w http.ResponseWriter, r *http.Req
 func agentWorktreeRoot(agentID string) string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".solo", "agents", agentID, "worktrees")
+}
+
+// conflictInfo describes a workspace conflict with another agent.
+type conflictInfo struct {
+	AgentID      string `json:"agent_id"`
+	AgentName    string `json:"agent_name"`
+	WorktreePath string `json:"worktree_path"`
+}
+
+// detectConflicts checks whether other agents in the same channel have active
+// worktrees modifying the same repository. Returns a list of conflicting agents.
+// A conflict exists when another agent in the channel has an active task that
+// could be modifying files in the bound repository.
+func (h *daemonHandler) detectConflicts(channelID, currentAgentID string) []conflictInfo {
+	// Query other active agents in the channel that have existing worktree directories.
+	rows, err := h.pool.Query(nil,
+		`SELECT a.id, a.name
+		 FROM agents a
+		 INNER JOIN channel_members cm ON cm.member_id = a.id AND cm.member_type = 'agent'
+		 WHERE cm.channel_id = $1 AND a.is_active = true AND a.id != $2`,
+		channelID, currentAgentID,
+	)
+	if err != nil {
+		slog.Warn("worktree: detectConflicts query failed", "error", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var conflicts []conflictInfo
+	for rows.Next() {
+		var agentID, agentName string
+		if err := rows.Scan(&agentID, &agentName); err != nil {
+			continue
+		}
+		// Check if this agent has any existing worktree directories on disk.
+		root := agentWorktreeRoot(agentID)
+		entries, readErr := os.ReadDir(root)
+		if readErr != nil || len(entries) == 0 {
+			continue
+		}
+		// Found at least one worktree directory — potential conflict.
+		for _, e := range entries {
+			if e.IsDir() {
+				conflicts = append(conflicts, conflictInfo{
+					AgentID:      agentID,
+					AgentName:    agentName,
+					WorktreePath: filepath.Join(root, e.Name()),
+				})
+				break // one active worktree is enough to flag this agent
+			}
+		}
+	}
+	return conflicts
+}
+
+// notifyServerConflict sends a workspace_conflict notification to the server
+// so it can broadcast the event to connected WebSocket clients.
+func (h *daemonHandler) notifyServerConflict(channelID, currentAgentID string, conflicts []conflictInfo) {
+	if h.serverURL == "" || len(conflicts) == 0 {
+		return
+	}
+
+	payload, _ := json.Marshal(map[string]interface{}{
+		"channel_id":      channelID,
+		"agent_id":        currentAgentID,
+		"conflicting_with": conflicts,
+	})
+	url := h.serverURL + "/internal/daemon/workspace/conflict"
+	if err := h.sendInternalRequest(url, payload); err != nil {
+		slog.Warn("worktree: failed to notify server of conflict",
+			"channel_id", channelID,
+			"error", err,
+		)
+	}
 }

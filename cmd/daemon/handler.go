@@ -589,6 +589,12 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 			systemPrompt += req.TaskContext
 		}
 
+	// T4.3.1: Inject relevant knowledge from knowledge base.
+	knowledgeCtx := h.InjectRelevantKnowledge(ctx, req.ChannelID, req.SystemPrompt)
+	if knowledgeCtx != "" {
+		systemPrompt += knowledgeCtx
+	}
+
 	llmReq := &llm.CompletionRequest{
 		Model:        req.ModelConfig.Model,
 		Messages:     llmMsgs,
@@ -989,7 +995,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	// v1.3: - only CLI-sent messages appear in channel.
 	// If solo message send was called, API already created the message.
 	// Direct text output is internal thinking, not channel messages.
-	
+
 
 	// Check context cancellation
 	if ctx.Err() != nil {
@@ -1823,6 +1829,8 @@ func (h *daemonHandler) deliverReminderMessage(ctx context.Context, id, agentID 
 }
 
 // checkWatchdog queries overdue task watchdogs and applies timeout actions.
+// T6.4.5: Before escalating, verifies the escalates_to relationship exists.
+// If no valid escalation target, falls back to unclaim.
 func (h *daemonHandler) checkWatchdog(ctx context.Context) {
 	rows, err := h.pool.Query(ctx,
 		`SELECT tw.task_id, tw.claimer_id, tw.timeout_action, tw.escalate_to::text, tw.deadline
@@ -1854,6 +1862,18 @@ func (h *daemonHandler) checkWatchdog(ctx context.Context) {
 			h.pool.Exec(ctx, `UPDATE task_watchdog SET deadline = $1 WHERE task_id = $2`, newDeadline, taskID)
 
 		case "escalate":
+			// T6.4.5: Verify escalates_to relationship before escalating.
+			validEscalation := h.verifyEscalationRelationship(ctx, claimerID, escalateTo)
+			if !validEscalation {
+				slog.Warn("ticker: escalation chain invalid, falling back to unclaim",
+					"task_id", taskID, "claimer_id", claimerID, "escalate_to", ptrStr(escalateTo))
+				// Fall back to unclaim.
+				h.pool.Exec(ctx,
+					`UPDATE tasks SET claimer_id = NULL, status = 'todo', updated_at = now() WHERE id = $1`, taskID,
+				)
+				h.pool.Exec(ctx, `DELETE FROM task_watchdog WHERE task_id = $1`, taskID)
+				continue
+			}
 			slog.Info("ticker: escalating overdue task", "task_id", taskID, "claimer_id", claimerID)
 			if escalateTo != nil && *escalateTo != "" {
 				msg := fmt.Sprintf("Escalation: Task %s assigned to agent %s is overdue", taskID, claimerID)
@@ -1873,6 +1893,34 @@ func (h *daemonHandler) checkWatchdog(ctx context.Context) {
 			h.pool.Exec(ctx, `DELETE FROM task_watchdog WHERE task_id = $1`, taskID)
 		}
 	}
+}
+
+// verifyEscalationRelationship checks whether a valid escalates_to relationship
+// exists between claimer and escalate target. Returns false if no target is set.
+func (h *daemonHandler) verifyEscalationRelationship(ctx context.Context, claimerID string, escalateTo *string) bool {
+	if escalateTo == nil || *escalateTo == "" {
+		return false
+	}
+	var exists bool
+	err := h.pool.QueryRow(ctx,
+		`SELECT EXISTS(
+			SELECT 1 FROM agent_relationships
+			WHERE from_agent_id = $1 AND to_agent_id = $2 AND rel_type = 'escalates_to'
+		)`, claimerID, *escalateTo,
+	).Scan(&exists)
+	if err != nil {
+		slog.Warn("ticker: failed to verify escalation relationship", "error", err)
+		return false
+	}
+	return exists
+}
+
+// ptrStr safely dereferences a *string, returning "" if nil.
+func ptrStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // InjectRelevantKnowledge searches the knowledge base for entries relevant to

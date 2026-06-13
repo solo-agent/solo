@@ -13,6 +13,7 @@ import { useTasks, useDMTasks } from '@/lib/hooks/use-tasks';
 import { useChannels } from '@/lib/hooks/use-channels';
 import { useDM } from '@/lib/hooks/use-dm';
 import { useToast } from '@/components/ui/toast';
+import { useStep6Events } from '@/lib/hooks/use-step6-events';
 import { NavBar } from '@/components/ui/navbar';
 import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
@@ -103,6 +104,19 @@ function TasksPageContent() {
   const sourceIsLoading = filterDmId ? dmTasksLoading : tasksLoading;
   const sourceError = filterDmId ? dmTasksError : tasksError;
   const sourceRefetch = filterDmId ? refetchDMTasks : refetchTasks;
+
+  // Step 6 WebSocket events (T6.4.3): auto-refresh task board + show toasts
+  useStep6Events({
+    onTaskBoardRefresh: sourceRefetch,
+    onSwarmRefresh: (parentTaskId) => {
+      sourceRefetch();
+      // If the swarm dialog is open for this parent, close it to force
+      // a fresh SwarmStatusPanel fetch on next open.
+      if (swarmTask?.id === parentTaskId) {
+        setIsSwarmOpen(false);
+      }
+    },
+  });
 
   // ---- Client-side filtering (assignee/creator always; channel only on non-DM path) ----
   const tasks = useMemo(() => {

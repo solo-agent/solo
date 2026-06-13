@@ -75,6 +75,11 @@ type DaemonManager struct {
 	stopCh chan struct{}
 }
 
+// Broadcaster returns the realtime Broadcaster injected at construction.
+func (dm *DaemonManager) Broadcaster() realtime.Broadcaster {
+	return dm.hub
+}
+
 // NewDaemonManager creates a new DaemonManager.
 func NewDaemonManager(pool *pgxpool.Pool, hub realtime.Broadcaster) *DaemonManager {
 	return &DaemonManager{

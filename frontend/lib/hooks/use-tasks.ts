@@ -37,6 +37,7 @@ interface TaskResponse {
   blocker_ids?: string[];
   blocked_by_count?: number;
   blocking_count?: number;
+  worktree_path?: string;
   created_at: string;
   updated_at: string;
 }
@@ -65,6 +66,7 @@ function mapTask(resp: TaskResponse): Task {
     blocker_ids: resp.blocker_ids,
     blocked_by_count: resp.blocked_by_count,
     blocking_count: resp.blocking_count,
+    worktree_path: resp.worktree_path,
     created_at: resp.created_at,
     updated_at: resp.updated_at,
   };

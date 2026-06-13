@@ -104,6 +104,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Post("/register", daemonHandler.Register)
 		r.Post("/heartbeat", daemonHandler.Heartbeat)
 		r.Post("/unregister", daemonHandler.Unregister)
+		r.Post("/workspace/conflict", daemonHandler.WorkspaceConflict)
 
 		// Task callbacks from daemon
 		r.Route("/tasks/{taskID}", func(r chi.Router) {

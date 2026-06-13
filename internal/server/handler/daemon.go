@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/solo-ai/solo/internal/realtime"
 	"github.com/solo-ai/solo/internal/server/middleware"
 	"github.com/solo-ai/solo/internal/server/service"
 )
@@ -185,6 +186,44 @@ func (h *DaemonHandler) Unregister(w http.ResponseWriter, r *http.Request) {
 	)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "unregistered"})
+}
+
+// WorkspaceConflict handles POST /internal/daemon/workspace/conflict
+// Accepts conflict notifications from daemons and broadcasts workspace_conflict
+// WebSocket events to connected clients in the affected channel.
+func (h *DaemonHandler) WorkspaceConflict(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ChannelID       string                   `json:"channel_id"`
+		AgentID         string                   `json:"agent_id"`
+		ConflictingWith []map[string]interface{} `json:"conflicting_with"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.ChannelID == "" {
+		writeError(w, http.StatusBadRequest, "channel_id is required")
+		return
+	}
+
+	// Broadcast workspace_conflict event to the channel.
+	hub := h.dm.Broadcaster()
+	if hub != nil {
+		payload := map[string]interface{}{
+			"channel_id":       req.ChannelID,
+			"agent_id":         req.AgentID,
+			"conflicting_with": req.ConflictingWith,
+		}
+		envelope := realtime.Envelope("workspace_conflict", payload)
+		hub.BroadcastToChannel(req.ChannelID, envelope)
+		slog.Info("workspace_conflict broadcast to channel",
+			"channel_id", req.ChannelID,
+			"agent_id", req.AgentID,
+			"conflict_count", len(req.ConflictingWith),
+		)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "broadcast"})
 }
 
 // TaskComplete handles POST /internal/daemon/tasks/{taskID}/complete

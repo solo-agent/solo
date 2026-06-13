@@ -176,6 +176,8 @@ export interface Task {
   blocked_by_count?: number;
   /** 此任务阻塞的其他任务数 (用于在 blocker 卡片上显示) */
   blocking_count?: number;
+  /** Isolated worktree path (Step 3: task isolation) */
+  worktree_path?: string;
   due_date?: string;
   created_at: string;
   updated_at: string;

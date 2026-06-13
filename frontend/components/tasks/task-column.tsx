@@ -12,7 +12,7 @@ import { Decoration } from '@/components/ui/decoration';
 
 import { useState, useRef, useEffect } from 'react';
 import { cn } from '@/lib/utils';
-import { Clock, ChevronRight, ChevronDown } from 'lucide-react';
+import { Clock, ChevronRight, ChevronDown, GitBranch } from 'lucide-react';
 import type { Task, TaskStatus } from '@/lib/types';
 import { t } from '@/lib/i18n';
 
@@ -292,6 +292,20 @@ function TaskCard({
                 {' '}{t('subTask')}{parentTaskNumber ? ` of #${parentTaskNumber}` : ''}
               </span>
             )}
+          </div>
+        )}
+
+        {/* Worktree indicator (Step 3) */}
+        {task.worktree_path && (
+          <div className="mb-1.5">
+            <span
+              className="inline-flex items-center gap-1 px-1 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider border-2 border-black bg-brutal-success-light text-brutal-success"
+              title={t('taskWorktreeActive')}
+            >
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-brutal-success" aria-hidden />
+              <GitBranch className="h-3 w-3" />
+              {t('taskIsolatedWorkspace')}
+            </span>
           </div>
         )}
 

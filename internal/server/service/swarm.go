@@ -11,6 +11,41 @@ import (
 	"github.com/solo-ai/solo/internal/realtime"
 )
 
+// ChannelConfig holds channel-level configuration read from channels.config JSONB.
+type ChannelConfig struct {
+	MaxSwarmDecomposesPerDay    int `json:"max_swarm_decomposes_per_day,omitempty"`
+	DefaultWatchdogDeadlineHours int `json:"default_watchdog_deadline_hours,omitempty"`
+}
+
+// DefaultChannelConfig returns sensible defaults for channel configuration.
+func DefaultChannelConfig() ChannelConfig {
+	return ChannelConfig{
+		MaxSwarmDecomposesPerDay:     5,
+		DefaultWatchdogDeadlineHours: 48,
+	}
+}
+
+// getChannelConfig reads the channel config JSONB and returns it merged with defaults.
+func getChannelConfig(ctx context.Context, pool *pgxpool.Pool, channelID string) ChannelConfig {
+	cfg := DefaultChannelConfig()
+	var raw []byte
+	err := pool.QueryRow(ctx,
+		`SELECT config FROM channels WHERE id = $1`, channelID,
+	).Scan(&raw)
+	if err != nil || len(raw) == 0 {
+		return cfg
+	}
+	// Merge: unmarshal into cfg so defaults survive missing keys.
+	json.Unmarshal(raw, &cfg)
+	if cfg.MaxSwarmDecomposesPerDay <= 0 {
+		cfg.MaxSwarmDecomposesPerDay = DefaultChannelConfig().MaxSwarmDecomposesPerDay
+	}
+	if cfg.DefaultWatchdogDeadlineHours <= 0 {
+		cfg.DefaultWatchdogDeadlineHours = DefaultChannelConfig().DefaultWatchdogDeadlineHours
+	}
+	return cfg
+}
+
 // SwarmCoordinator handles multi-agent task decomposition and coordination.
 type SwarmCoordinator struct {
 	pool     *pgxpool.Pool
@@ -43,6 +78,16 @@ func (s *SwarmCoordinator) DecomposeTask(ctx context.Context, parentTaskID, chan
 	parent, err := s.taskSvc.GetTask(ctx, channelID, parentTaskID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get parent task: %w", err)
+	}
+
+	// T6.4.5: Per-channel daily decompose rate limiting.
+	cfg := getChannelConfig(ctx, s.pool, channelID)
+	dailyCount, countErr := s.countDailyDecomposes(ctx, channelID)
+	if countErr != nil {
+		slog.Warn("swarm: failed to count daily decomposes", "channel_id", channelID, "error", countErr)
+	}
+	if dailyCount >= cfg.MaxSwarmDecomposesPerDay {
+		return nil, fmt.Errorf("daily decompose limit reached for channel (max %d/day)", cfg.MaxSwarmDecomposesPerDay)
 	}
 
 	var created []Task
@@ -221,6 +266,19 @@ func (s *SwarmCoordinator) GetSwarmStatus(ctx context.Context, parentTaskID, cha
 		"in_progress": inProgress,
 		"progress":    progress,
 	}, nil
+}
+
+// countDailyDecomposes counts how many swarm decompositions were created in this
+// channel in the last 24 hours. Used for rate limiting (T6.4.5).
+func (s *SwarmCoordinator) countDailyDecomposes(ctx context.Context, channelID string) (int, error) {
+	var count int
+	err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM tasks
+		 WHERE channel_id = $1 AND is_swarm = true
+		   AND created_at >= now() - INTERVAL '24 hours'`,
+		channelID,
+	).Scan(&count)
+	return count, err
 }
 
 // AfterTaskCompleted is called when a task transitions to 'done'. It handles

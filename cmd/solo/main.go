@@ -93,11 +93,11 @@ func runCLI(args []string) int {
 		handleThread(args[1:], baseURL, token)
 	case "agent":
 		handleAgent(args[1:], baseURL, token)
-		case "knowledge":
-			handleKnowledge(args[1:], baseURL, token)
-		case "remind":
-			handleRemind(args[1:], baseURL, token)
-		default:
+	case "knowledge":
+		handleKnowledge(args[1:], baseURL, token)
+	case "remind":
+		handleRemind(args[1:], baseURL, token)
+	default:
 		fmt.Fprintf(os.Stderr, "solo: error: unknown command %q\n", args[0])
 		printUsage()
 		return exitUsage
@@ -171,13 +171,17 @@ func handleTask(args []string, baseURL, token string) {
 		handleTaskUnblock(args[1:], baseURL, token)
 	case "blocked":
 		handleTaskBlocked(args[1:], baseURL, token)
-		case "split":
-			handleTaskSplit(args[1:], baseURL, token)
-		case "swarm-status":
-			handleTaskSwarmStatus(args[1:], baseURL, token)
-		case "swarm-decompose":
-			handleTaskSwarmDecompose(args[1:], baseURL, token)
-		default:
+	case "split":
+		handleTaskSplit(args[1:], baseURL, token)
+	case "swarm-status":
+		handleTaskSwarmStatus(args[1:], baseURL, token)
+	case "swarm-decompose":
+		handleTaskSwarmDecompose(args[1:], baseURL, token)
+	case "isolate":
+		handleTaskIsolate(args[1:], baseURL, token)
+	case "unisolate":
+		handleTaskUnisolate(args[1:], baseURL, token)
+	default:
 		fmt.Fprintf(os.Stderr, "solo: error: unknown task subcommand %q\n", args[0])
 		printUsage()
 		doExit(exitUsage)
@@ -188,11 +192,14 @@ func handleTask(args []string, baseURL, token string) {
 
 func handleTaskList(args []string, baseURL, token string) {
 	var channel, status, output string
+	var stale, blocked bool
 	fs := flag.NewFlagSet("task list", flag.ExitOnError)
 	fs.StringVar(&channel, "c", "", "Channel ID or #name (optional, omit for all channels)")
 	fs.StringVar(&channel, "channel", "", "Channel ID or #name (optional, omit for all channels)")
 	fs.StringVar(&status, "status", "", "Filter by todo|in_progress|in_review|done")
 	fs.StringVar(&output, "output", "", "Output format: json")
+	fs.BoolVar(&stale, "stale", false, "List stale tasks (T6.2.5)")
+	fs.BoolVar(&blocked, "blocked", false, "List blocked tasks (T2.2.2)")
 	fs.Parse(args)
 
 	if fs.NArg() > 0 {
@@ -202,6 +209,28 @@ func handleTaskList(args []string, baseURL, token string) {
 	if output != "" && output != "json" {
 		fmt.Fprintf(os.Stderr, "solo: error: invalid --output value %q (only \"json\" is supported)\n", output)
 		doExit(exitUsage)
+	}
+
+	// --stale uses the dedicated stale-tasks endpoint (T6.2.5)
+	if stale {
+		url := fmt.Sprintf("%s/api/v1/tasks/stale", baseURL)
+		statusCode, body, err := doHTTP(http.MethodGet, url, token, nil)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+			doExit(exitUsage)
+		}
+		if statusCode >= 400 {
+			if output == "json" {
+				printJSONError(statusCode, extractErrorMessage(body))
+			}
+			handleNonProxyHTTPError(statusCode, body)
+		}
+		if output == "json" {
+			printJSONEnvelope(body)
+		} else {
+			fmt.Println(string(body))
+		}
+		doExit(exitOK)
 	}
 
 	if channel != "" {
@@ -219,8 +248,11 @@ func handleTaskList(args []string, baseURL, token string) {
 	} else {
 		url = fmt.Sprintf("%s/api/v1/tasks", baseURL)
 	}
-	if status != "" {
+	if status != "" || blocked {
 		url += "?status=" + status
+		if blocked {
+			url += "&blocked=true"
+		}
 	}
 
 	statusCode, body, err := doHTTP(http.MethodGet, url, token, nil)
@@ -247,7 +279,7 @@ func handleTaskList(args []string, baseURL, token string) {
 // --- task claim ---
 
 func handleTaskClaim(args []string, baseURL, token string) {
-	var channel, messageID string
+	var channel, messageID, deadline, escalateTo string
 	var number int
 	fs := flag.NewFlagSet("task claim", flag.ExitOnError)
 	fs.StringVar(&channel, "c", "", "Channel ID or #name")
@@ -256,6 +288,8 @@ func handleTaskClaim(args []string, baseURL, token string) {
 	fs.IntVar(&number, "number", 0, "Task number")
 	fs.StringVar(&messageID, "m", "", "Message ID (from msg= header)")
 	fs.StringVar(&messageID, "message-id", "", "Message ID (from msg= header)")
+	fs.StringVar(&deadline, "deadline", "", "Claim deadline (duration like \"24h\" or ISO timestamp) — T6.2.5")
+	fs.StringVar(&escalateTo, "escalate-to", "", "Escalate unclaimed task to @agent — T6.2.5")
 	fs.Parse(args)
 
 	if channel == "" {
@@ -313,6 +347,35 @@ func handleTaskClaim(args []string, baseURL, token string) {
 	}
 	if statusCode >= 400 {
 		handleNonProxyHTTPError(statusCode, body)
+	}
+
+	// T6.2.5: --deadline / --escalate-to set a watchdog on the claimed task.
+	if deadline != "" || escalateTo != "" {
+		var claimed struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(body, &claimed) == nil && claimed.ID != "" {
+			wdBody := map[string]string{}
+			if deadline != "" {
+				wdBody["deadline"] = deadline
+			}
+			if escalateTo != "" {
+				resolvedEscalate, resErr := resolveAgentParam(baseURL, token, escalateTo)
+				if resErr != nil {
+					fmt.Fprintf(os.Stderr, "solo: error: --escalate-to: %v\n", resErr)
+					doExit(exitBusiness)
+				}
+				wdBody["escalate_to"] = resolvedEscalate
+			}
+			wdReqBody, _ := json.Marshal(wdBody)
+			watchdogURL := fmt.Sprintf("%s/api/v1/tasks/%s/watchdog", baseURL, claimed.ID)
+			wdCode, wdResp, wdErr := doHTTP(http.MethodPatch, watchdogURL, token, wdReqBody)
+			if wdErr != nil {
+				fmt.Fprintf(os.Stderr, "solo: watchdog set failed: %v\n", wdErr)
+			} else if wdCode >= 400 {
+				fmt.Fprintf(os.Stderr, "solo: watchdog set error: %s\n", extractErrorMessage(wdResp))
+			}
+		}
 	}
 
 	// Parse response to show result with thread target
@@ -379,6 +442,7 @@ func handleTaskUpdate(args []string, baseURL, token string) {
 func handleTaskCreate(args []string, baseURL, token string) {
 	var channel, title, description, priority string
 	var parent int
+	var swarm bool
 	fs := flag.NewFlagSet("task create", flag.ExitOnError)
 	fs.StringVar(&channel, "c", "", "Channel ID or #name (required)")
 	fs.StringVar(&channel, "channel", "", "Channel ID or #name (required)")
@@ -386,6 +450,7 @@ func handleTaskCreate(args []string, baseURL, token string) {
 	fs.StringVar(&description, "description", "", "Task description")
 	fs.StringVar(&priority, "priority", "", "Task priority: p0|p1|p2|p3")
 	fs.IntVar(&parent, "parent", 0, "Parent task number")
+	fs.BoolVar(&swarm, "swarm", false, "Trigger Swarm decomposition after create (T6.3.7)")
 	fs.Parse(args)
 
 	if channel == "" {
@@ -405,7 +470,7 @@ func handleTaskCreate(args []string, baseURL, token string) {
 		}
 	}
 
-channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
+	channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
 	if resolveErr != nil {
 		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
 		doExit(exitBusiness)
@@ -440,6 +505,26 @@ channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
 	}
 
 	fmt.Println(string(body))
+
+	// T6.3.7: --swarm triggers Swarm decomposition on the freshly created task.
+	if swarm {
+		var created struct{ ID string `json:"id"` }
+		if json.Unmarshal(body, &created) == nil && created.ID != "" {
+			decomposeURL := fmt.Sprintf("%s/api/v1/tasks/%s/decompose", baseURL, created.ID)
+			swarmBody, _ := json.Marshal(map[string]string{"channel_id": channelID})
+			sc, swarmResp, swarmErr := doHTTP(http.MethodPost, decomposeURL, token, swarmBody)
+			if swarmErr != nil {
+				fmt.Fprintf(os.Stderr, "solo: swarm decompose failed: %v\n", swarmErr)
+			} else if sc >= 400 {
+				fmt.Fprintf(os.Stderr, "solo: swarm decompose error: %s\n", extractErrorMessage(swarmResp))
+			} else {
+				fmt.Println(string(swarmResp))
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "solo: warning: --swarm set but could not parse task ID from create response")
+		}
+	}
+
 	doExit(exitOK)
 }
 
@@ -905,8 +990,8 @@ func handleAgentDelegate(args []string, baseURL, token string) {
 		handleDelegateAccept(args[1:], baseURL, token)
 	case "reject":
 		handleDelegateReject(args[1:], baseURL, token)
-		case "complete":
-			handleDelegateComplete(args[1:], baseURL, token)
+	case "complete":
+		handleDelegateComplete(args[1:], baseURL, token)
 	default:
 		// Default: create a new delegation
 		handleDelegateCreate(args, baseURL, token)
@@ -1136,6 +1221,97 @@ func handleTaskBlocked(args []string, baseURL, token string) {
 	fmt.Println(string(respBody))
 }
 
+// --- task isolate (T3.2.1) ---
+
+func handleTaskIsolate(args []string, baseURL, token string) {
+	var channelID string
+	var number int
+	fs := flag.NewFlagSet("task isolate", flag.ExitOnError)
+	fs.StringVar(&channelID, "c", "", "Channel ID or #name (required)")
+	fs.StringVar(&channelID, "channel", "", "Channel ID or #name (required)")
+	fs.IntVar(&number, "n", 0, "Task number (required)")
+	fs.IntVar(&number, "number", 0, "Task number (required)")
+	fs.Parse(args)
+
+	if channelID == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: -c <channel_id> is required")
+		doExit(exitUsage)
+	}
+	if number <= 0 {
+		fmt.Fprintln(os.Stderr, "solo: error: -n <number> must be a positive integer")
+		doExit(exitUsage)
+	}
+
+	resolved, resolveErr := resolveChannelParam(baseURL, token, channelID)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+
+	taskID, err := resolveTaskNumberToID(baseURL, token, resolved, number)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", err)
+		doExit(exitBusiness)
+	}
+
+	url := fmt.Sprintf("%s/api/v1/tasks/%s/isolate", baseURL, taskID)
+	statusCode, body, err := doHTTP(http.MethodPost, url, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	fmt.Println(string(body))
+	doExit(exitOK)
+}
+
+// --- task unisolate (T3.2.2) ---
+
+func handleTaskUnisolate(args []string, baseURL, token string) {
+	var channelID string
+	var number int
+	fs := flag.NewFlagSet("task unisolate", flag.ExitOnError)
+	fs.StringVar(&channelID, "c", "", "Channel ID or #name (required)")
+	fs.StringVar(&channelID, "channel", "", "Channel ID or #name (required)")
+	fs.IntVar(&number, "n", 0, "Task number (required)")
+	fs.IntVar(&number, "number", 0, "Task number (required)")
+	fs.Parse(args)
+
+	if channelID == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: -c <channel_id> is required")
+		doExit(exitUsage)
+	}
+	if number <= 0 {
+		fmt.Fprintln(os.Stderr, "solo: error: -n <number> must be a positive integer")
+		doExit(exitUsage)
+	}
+
+	resolved, resolveErr := resolveChannelParam(baseURL, token, channelID)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+
+	taskID, err := resolveTaskNumberToID(baseURL, token, resolved, number)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", err)
+		doExit(exitBusiness)
+	}
+
+	url := fmt.Sprintf("%s/api/v1/tasks/%s/isolate", baseURL, taskID)
+	statusCode, body, err := doHTTP(http.MethodDelete, url, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	fmt.Println(string(body))
+	doExit(exitOK)
+}
 
 // --- task split ---
 
@@ -2082,15 +2258,17 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, `Usage:
   solo message send  -c <content> --target <target>     (or stdin heredoc)
   solo message read  --target <target> [--before <id>] [--limit <n>]
-  solo task list     -c <channel_id> [--status <s>] [--output json]
-  solo task claim    -n <number> -c <channel_id> [-m <message_id>]
+  solo task list     -c <channel_id> [--status <s>] [--stale] [--blocked] [--output json]
+  solo task claim    -n <number> -c <channel_id> [-m <message_id>] [--deadline <duration>] [--escalate-to <@agent>]
   solo task update   -n <number> -c <channel_id> -s <status>
-  solo task create   -c <channel_id> --title <title> [--description <desc>] [--priority <p0-p3>] [--parent <n>]
+  solo task create   -c <channel_id> --title <title> [--description <desc>] [--priority <p0-p3>] [--parent <n>] [--swarm]
   solo task unclaim  -n <number> -c <channel_id>
   solo task split    -n <number> -c <channel_id> --titles <title1,title2,...>
   solo task block    -n <number> --on <number>
   solo task unblock  -n <number> --on <number>
   solo task blocked  -n <number>
+  solo task isolate  -n <number> -c <channel_id>
+  solo task unisolate -n <number> -c <channel_id>
   solo channel members -c <channel_id> [--output json]
   solo channel join  --target <#channel-name>
   solo channel memory [set] -c <channel_id> [-f <file>]
