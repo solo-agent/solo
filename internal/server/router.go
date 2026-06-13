@@ -61,6 +61,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	_ = service.NewAgentRelationshipService(pool)
 	relHandler := handler.NewAgentRelationshipHandler(pool)
 		depHandler := handler.NewTaskDependencyHandler(taskSvc)
+		delHandler := handler.NewAgentDelegationHandler(pool)
 	mentionSvc := service.NewMentionService(pool)
 	taskHandler := handler.NewTaskHandler(pool, hub, agentSvc, taskSvc, mentionSvc)
 	searchHandler := handler.NewSearchHandler(pool)
@@ -223,6 +224,16 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 
 			// Onboarding wizard
 			r.Post("/api/v1/onboarding/create-lucy", onboardingHandler.CreateLucy)
+
+		// Agent delegation routes (collaboration Step 1)
+		r.Post("/api/v1/agent-delegations", delHandler.Create)
+		r.Get("/api/v1/agent-delegations/incoming", delHandler.ListIncoming)
+		r.Get("/api/v1/agent-delegations/outgoing", delHandler.ListOutgoing)
+		r.Post("/api/v1/agent-delegations/{id}/accept", delHandler.Accept)
+		r.Post("/api/v1/agent-delegations/{id}/reject", delHandler.Reject)
+		r.Post("/api/v1/agent-delegations/{id}/complete", delHandler.Complete)
+		r.Post("/api/v1/agent-delegations/{id}/fail", delHandler.Fail)
+
 
 		// Task dependency routes (collaboration Step 1)
 		r.Post("/api/v1/task-dependencies", depHandler.AddDependency)
