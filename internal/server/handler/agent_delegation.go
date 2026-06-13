@@ -17,6 +17,14 @@ func NewAgentDelegationHandler(pool *pgxpool.Pool) *AgentDelegationHandler {
 	return &AgentDelegationHandler{svc: service.NewAgentDelegationService(pool)}
 }
 
+// agentIDFromRequest returns the agent ID from query param, falling back to X-User-ID.
+func agentIDFromRequest(r *http.Request) string {
+	if id := r.URL.Query().Get("agent_id"); id != "" {
+		return id
+	}
+	return r.Header.Get("X-User-ID")
+}
+
 // Create handles POST /api/v1/agent-delegations
 func (h *AgentDelegationHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
@@ -47,7 +55,11 @@ func (h *AgentDelegationHandler) Create(w http.ResponseWriter, r *http.Request) 
 // Accept handles POST /api/v1/agent-delegations/{id}/accept
 func (h *AgentDelegationHandler) Accept(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	agentID := r.Header.Get("X-User-ID")
+	agentID := agentIDFromRequest(r)
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "agent_id is required")
+		return
+	}
 
 	d, err := h.svc.Accept(r.Context(), id, agentID)
 	if err != nil {
@@ -60,12 +72,18 @@ func (h *AgentDelegationHandler) Accept(w http.ResponseWriter, r *http.Request) 
 // Reject handles POST /api/v1/agent-delegations/{id}/reject
 func (h *AgentDelegationHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	agentID := r.Header.Get("X-User-ID")
+	agentID := agentIDFromRequest(r)
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "agent_id is required")
+		return
+	}
 
 	var body struct {
 		Reason string `json:"reason"`
 	}
-	json.NewDecoder(r.Body).Decode(&body)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		// Body is optional for reject
+	}
 
 	d, err := h.svc.Reject(r.Context(), id, agentID, body.Reason)
 	if err != nil {
@@ -78,7 +96,11 @@ func (h *AgentDelegationHandler) Reject(w http.ResponseWriter, r *http.Request) 
 // Complete handles POST /api/v1/agent-delegations/{id}/complete
 func (h *AgentDelegationHandler) Complete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	agentID := r.Header.Get("X-User-ID")
+	agentID := agentIDFromRequest(r)
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "agent_id is required")
+		return
+	}
 
 	d, err := h.svc.MarkComplete(r.Context(), id, agentID)
 	if err != nil {
@@ -91,7 +113,11 @@ func (h *AgentDelegationHandler) Complete(w http.ResponseWriter, r *http.Request
 // Fail handles POST /api/v1/agent-delegations/{id}/fail
 func (h *AgentDelegationHandler) Fail(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	agentID := r.Header.Get("X-User-ID")
+	agentID := agentIDFromRequest(r)
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "agent_id is required")
+		return
+	}
 
 	d, err := h.svc.MarkFailed(r.Context(), id, agentID)
 	if err != nil {
@@ -101,9 +127,13 @@ func (h *AgentDelegationHandler) Fail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, d)
 }
 
-// ListIncoming handles GET /api/v1/agent-delegations/incoming?status=queued
+// ListIncoming handles GET /api/v1/agent-delegations/incoming?agent_id=...&status=...
 func (h *AgentDelegationHandler) ListIncoming(w http.ResponseWriter, r *http.Request) {
-	agentID := r.Header.Get("X-User-ID")
+	agentID := agentIDFromRequest(r)
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "agent_id is required")
+		return
+	}
 	status := r.URL.Query().Get("status")
 
 	delegations, err := h.svc.ListIncoming(r.Context(), agentID, status)
@@ -114,9 +144,13 @@ func (h *AgentDelegationHandler) ListIncoming(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, delegations)
 }
 
-// ListOutgoing handles GET /api/v1/agent-delegations/outgoing?status=queued
+// ListOutgoing handles GET /api/v1/agent-delegations/outgoing?agent_id=...&status=...
 func (h *AgentDelegationHandler) ListOutgoing(w http.ResponseWriter, r *http.Request) {
-	agentID := r.Header.Get("X-User-ID")
+	agentID := agentIDFromRequest(r)
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "agent_id is required")
+		return
+	}
 	status := r.URL.Query().Get("status")
 
 	delegations, err := h.svc.ListOutgoing(r.Context(), agentID, status)

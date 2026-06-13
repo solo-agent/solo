@@ -59,31 +59,46 @@ func (s *AgentRelationshipService) Create(ctx context.Context, req CreateRelatio
 	return &rel, nil
 }
 
-// checkReportsToCycle walks the reports_to chain from toAgent upward. If
-// fromAgent appears anywhere in that chain, adding this edge would form a cycle.
+// checkReportsToCycle uses BFS to walk all reports_to chains upward from
+// toAgent. If fromAgent appears anywhere in the transitive closure, adding
+// this edge would form a cycle.
 func (s *AgentRelationshipService) checkReportsToCycle(ctx context.Context, fromAgentID, toAgentID string) error {
-	current := toAgentID
 	visited := map[string]bool{fromAgentID: true}
-	for i := 0; i < 100; i++ { // safety limit
-		var next string
-		err := s.pool.QueryRow(ctx, `
+	queue := []string{toAgentID}
+	depth := 0
+
+	for len(queue) > 0 && depth < 100 {
+		next := queue[0]
+		queue = queue[1:]
+		if visited[next] {
+			continue
+		}
+		visited[next] = true
+		depth++
+
+		rows, err := s.pool.Query(ctx, `
 			SELECT to_agent_id FROM agent_relationships
 			WHERE from_agent_id = $1 AND rel_type = 'reports_to'
-			LIMIT 1
-		`, current).Scan(&next)
-		if err == pgx.ErrNoRows {
-			return nil // reached the root, no cycle
-		}
+		`, next)
 		if err != nil {
 			return fmt.Errorf("cycle check failed: %w", err)
 		}
-		if visited[next] {
-			return fmt.Errorf("adding this reports_to relationship would create a cycle")
+		var managers []string
+		for rows.Next() {
+			var m string
+			if err := rows.Scan(&m); err != nil {
+				rows.Close()
+				return err
+			}
+			managers = append(managers, m)
 		}
-		visited[next] = true
-		current = next
+		rows.Close()
+		queue = append(queue, managers...)
 	}
-	return fmt.Errorf("reports_to chain exceeds maximum depth (100)")
+	if depth >= 100 {
+		return fmt.Errorf("reports_to chain exceeds maximum depth (100)")
+	}
+	return nil
 }
 
 // ListByAgent returns all relationships involving the given agent.

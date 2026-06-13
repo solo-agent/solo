@@ -18,6 +18,13 @@ func NewTaskDependencyHandler(taskSvc *service.TaskService) *TaskDependencyHandl
 
 // AddDependency handles POST /api/v1/task-dependencies
 func (h *TaskDependencyHandler) AddDependency(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	_ = userID
+
 	var body struct {
 		BlockerTaskID string `json:"blocker_task_id"`
 		BlockedTaskID string `json:"blocked_task_id"`

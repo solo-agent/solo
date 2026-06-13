@@ -91,6 +91,8 @@ func runCLI(args []string) int {
 		handleServer(args[1:], baseURL, token)
 	case "thread":
 		handleThread(args[1:], baseURL, token)
+	case "agent":
+		handleAgent(args[1:], baseURL, token)
 	default:
 		fmt.Fprintf(os.Stderr, "solo: error: unknown command %q\n", args[0])
 		printUsage()
@@ -159,6 +161,12 @@ func handleTask(args []string, baseURL, token string) {
 		handleTaskCreate(args[1:], baseURL, token)
 	case "unclaim":
 		handleTaskUnclaim(args[1:], baseURL, token)
+	case "block":
+		handleTaskBlock(args[1:], baseURL, token)
+	case "unblock":
+		handleTaskUnblock(args[1:], baseURL, token)
+	case "blocked":
+		handleTaskBlocked(args[1:], baseURL, token)
 	default:
 		fmt.Fprintf(os.Stderr, "solo: error: unknown task subcommand %q\n", args[0])
 		printUsage()
@@ -847,6 +855,232 @@ func handleThreadUnfollow(args []string, baseURL, token string) {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// agent
+// ---------------------------------------------------------------------------
+
+func handleAgent(args []string, baseURL, token string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "solo: error: agent subcommand required (delegate)")
+		printUsage()
+		doExit(exitUsage)
+	}
+	switch args[0] {
+	case "delegate":
+		handleAgentDelegate(args[1:], baseURL, token)
+	default:
+		fmt.Fprintf(os.Stderr, "solo: error: unknown agent subcommand %q\n", args[0])
+		printUsage()
+		doExit(exitUsage)
+	}
+}
+
+func handleAgentDelegate(args []string, baseURL, token string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "solo: error: delegate subcommand required (list, accept, reject)")
+		doExit(exitUsage)
+	}
+	switch args[0] {
+	case "list":
+		handleDelegateList(args[1:], baseURL, token)
+	case "accept":
+		handleDelegateAccept(args[1:], baseURL, token)
+	case "reject":
+		handleDelegateReject(args[1:], baseURL, token)
+	default:
+		// Default: create a new delegation
+		handleDelegateCreate(args, baseURL, token)
+	}
+}
+
+func handleDelegateCreate(args []string, baseURL, token string) {
+	var toAgent, taskID, message string
+	flags := flag.NewFlagSet("agent delegate", flag.ContinueOnError)
+	flags.StringVar(&toAgent, "to", "", "Target agent @name")
+	flags.StringVar(&taskID, "task", "", "Task ID or number")
+	flags.StringVar(&message, "msg", "", "Delegation message")
+	flags.Parse(args)
+
+	agentID := os.Getenv("SOLO_AGENT_ID")
+	channelID := os.Getenv("SOLO_CHANNEL_ID")
+	if agentID == "" || channelID == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: SOLO_AGENT_ID and SOLO_CHANNEL_ID must be set")
+		doExit(exitUsage)
+	}
+	if toAgent == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: --to @agent-name is required")
+		doExit(exitUsage)
+	}
+
+	body := map[string]any{
+		"from_agent_id": agentID,
+		"to_agent_id":   strings.TrimPrefix(toAgent, "@"),
+		"channel_id":    channelID,
+	}
+	if taskID != "" {
+		body["task_id"] = taskID
+	}
+	if message != "" {
+		body["message"] = message
+	}
+	reqBody, _ := json.Marshal(body)
+	url := baseURL + "/api/v1/agent-delegations"
+	statusCode, respBody, err := doHTTP("POST", url, token, reqBody)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: delegate failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, respBody)
+		doExit(exitBusiness)
+	}
+	fmt.Println(string(respBody))
+}
+
+func handleDelegateList(args []string, baseURL, token string) {
+	var statusFilter string
+	flags := flag.NewFlagSet("agent delegate list", flag.ContinueOnError)
+	flags.StringVar(&statusFilter, "status", "", "Filter by status")
+	flags.Parse(args)
+
+	agentID := os.Getenv("SOLO_AGENT_ID")
+	url := baseURL + "/api/v1/agent-delegations/incoming"
+	if statusFilter != "" {
+		url += "?status=" + statusFilter
+	}
+	statusCode, respBody, err := doHTTP("GET", url, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: list delegations: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, respBody)
+		doExit(exitBusiness)
+	}
+	_ = agentID
+	fmt.Println(string(respBody))
+}
+
+func handleDelegateAccept(args []string, baseURL, token string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "solo: error: delegation ID required")
+		doExit(exitUsage)
+	}
+	url := baseURL + "/api/v1/agent-delegations/" + args[0] + "/accept"
+	statusCode, respBody, err := doHTTP("POST", url, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: accept delegation: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, respBody)
+		doExit(exitBusiness)
+	}
+	fmt.Println(string(respBody))
+}
+
+func handleDelegateReject(args []string, baseURL, token string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "solo: error: delegation ID required")
+		doExit(exitUsage)
+	}
+	var reason string
+	flags := flag.NewFlagSet("agent delegate reject", flag.ContinueOnError)
+	flags.StringVar(&reason, "reason", "", "Rejection reason")
+	flags.Parse(args[1:])
+
+	body := map[string]any{"reason": reason}
+	reqBody, _ := json.Marshal(body)
+	url := baseURL + "/api/v1/agent-delegations/" + args[0] + "/reject"
+	statusCode, respBody, err := doHTTP("POST", url, token, reqBody)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: reject delegation: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, respBody)
+		doExit(exitBusiness)
+	}
+	fmt.Println(string(respBody))
+}
+
+
+func handleTaskBlock(args []string, baseURL, token string) {
+	var taskNum int
+	var onTaskNum int
+	flags := flag.NewFlagSet("task block", flag.ContinueOnError)
+	flags.IntVar(&taskNum, "n", 0, "Task number to block")
+	flags.IntVar(&onTaskNum, "on", 0, "Task number that this task depends on")
+	flags.Parse(args)
+	if taskNum == 0 || onTaskNum == 0 {
+		fmt.Fprintln(os.Stderr, "solo: error: -n and --on are required")
+		doExit(exitUsage)
+	}
+	channelID := os.Getenv("SOLO_CHANNEL_ID")
+	taskID := os.Getenv("SOLO_TASK_ID")
+	if taskNum > 0 {
+		taskID = fmt.Sprintf("task:%d:%s", taskNum, channelID)
+	}
+	body := map[string]any{"blocked_task_id": taskID, "blocker_task_id": fmt.Sprintf("task:%d:%s", onTaskNum, channelID)}
+	reqBody, _ := json.Marshal(body)
+	_, respBody, err := doHTTP("POST", baseURL+"/api/v1/task-dependencies", token, reqBody)
+	if err != nil {
+		printJSONError(500, err.Error())
+		doExit(exitUsage)
+	}
+	fmt.Println(string(respBody))
+}
+
+func handleTaskUnblock(args []string, baseURL, token string) {
+	var taskNum int
+	var onTaskNum int
+	flags := flag.NewFlagSet("task unblock", flag.ContinueOnError)
+	flags.IntVar(&taskNum, "n", 0, "Task number to unblock")
+	flags.IntVar(&onTaskNum, "on", 0, "Dependency task number")
+	flags.Parse(args)
+	if taskNum == 0 || onTaskNum == 0 {
+		fmt.Fprintln(os.Stderr, "solo: error: -n and --on are required")
+		doExit(exitUsage)
+	}
+	channelID := os.Getenv("SOLO_CHANNEL_ID")
+	body := map[string]any{
+		"blocked_task_id": fmt.Sprintf("task:%d:%s", taskNum, channelID),
+		"blocker_task_id": fmt.Sprintf("task:%d:%s", onTaskNum, channelID),
+	}
+	reqBody, _ := json.Marshal(body)
+	url := baseURL + "/api/v1/task-dependencies"
+	statusCode, respBody, err := doHTTP("DELETE", url, token, reqBody)
+	if err != nil {
+		printJSONError(500, err.Error())
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, respBody)
+		doExit(exitBusiness)
+	}
+	fmt.Println("Dependency removed")
+}
+
+func handleTaskBlocked(args []string, baseURL, token string) {
+	var taskNum int
+	flags := flag.NewFlagSet("task blocked", flag.ContinueOnError)
+	flags.IntVar(&taskNum, "n", 0, "Task number to check")
+	flags.Parse(args)
+	channelID := os.Getenv("SOLO_CHANNEL_ID")
+	taskID := os.Getenv("SOLO_TASK_ID")
+	if taskNum > 0 {
+		taskID = fmt.Sprintf("task:%d:%s", taskNum, channelID)
+	}
+	url := baseURL + "/api/v1/tasks/" + taskID + "/is-blocked"
+	_, respBody, err := doHTTP("GET", url, token, nil)
+	if err != nil {
+		printJSONError(500, err.Error())
+		doExit(exitUsage)
+	}
+	fmt.Println(string(respBody))
+}
+
+
 // HTTP helper
 // ---------------------------------------------------------------------------
 
