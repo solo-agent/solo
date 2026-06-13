@@ -8,6 +8,8 @@
 
 'use client';
 
+import { Decoration } from '@/components/ui/decoration';
+
 import { useState, useRef, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { Clock, ChevronRight, ChevronDown } from 'lucide-react';
@@ -25,35 +27,44 @@ const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
 };
 
 // ---- Status display config ----
+// v3.3: shadowClass drives the hover color-coded shadow on each card.
+// Static card keeps the neutral .shadow-brutal-lg (7px black), hover swaps
+// to a tinted 9px shadow in the status color so the kanban reads as a
+// status-coded heat map without adding any new visual primitive.
 
 export const STATUS_COLUMN_CONFIG: Record<
   TaskStatus,
-  { label: string; bgClass: string; textClass: string }
+  { label: string; bgClass: string; textClass: string; shadowClass: string }
 > = {
   todo: {
     label: 'TODO',
     bgClass: 'bg-brutal-warning',
     textClass: 'text-black',
+    shadowClass: 'hover:shadow-brutal-warning',
   },
   in_progress: {
     label: 'IN PROGRESS',
     bgClass: 'bg-brutal-info',
     textClass: 'text-black',
+    shadowClass: 'hover:shadow-brutal-info',
   },
   in_review: {
     label: 'IN REVIEW',
     bgClass: 'bg-brutal-violet',
     textClass: 'text-black',
+    shadowClass: 'hover:shadow-brutal-violet',
   },
   done: {
     label: 'DONE',
     bgClass: 'bg-brutal-success',
     textClass: 'text-black',
+    shadowClass: 'hover:shadow-brutal-success',
   },
   closed: {
     label: 'CLOSED',
     bgClass: 'bg-brutal-muted',
     textClass: 'text-black',
+    shadowClass: 'hover:shadow-brutal-accent',
   },
 };
 
@@ -208,11 +219,39 @@ function TaskCard({
       }}
       className={cn(
         'card-brutal w-full cursor-pointer text-left',
-        'hover:shadow-brutal-lg',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-primary focus-visible:ring-offset-2',
       )}
+      style={{
+        ['--card-hover-shadow' as string]: task.status === 'todo' ? 'var(--color-brutal-warning)' :
+          task.status === 'in_progress' ? 'var(--color-brutal-info)' :
+          task.status === 'in_review' ? 'var(--color-brutal-violet)' :
+          task.status === 'done' ? 'var(--color-brutal-success)' :
+          'var(--color-brutal-accent)',
+      }}
     >
-      <div className="p-3">
+      <div className="p-3 relative">
+        {/* v3.3: status-driven sticker in the card corner. done gets a
+            green check, in_progress a pulsing zap, etc. — gives the
+            kanban a tactile "stamped on the card" feel. */}
+        {task.status === 'done' && (
+          <Decoration
+            shape="star"
+            color="success"
+            size="sm"
+            rotation={12}
+            className="absolute -top-2 -right-2 z-10"
+          />
+        )}
+        {task.status === 'in_progress' && (
+          <Decoration
+            shape="zap"
+            color="info"
+            size="sm"
+            animation="pulse"
+            rotation={-8}
+            className="absolute -top-2 -right-2 z-10"
+          />
+        )}
         {/* Task number */}
         {taskNum && (
           <span className="mb-1 block font-mono text-[11px] font-medium text-muted-foreground">

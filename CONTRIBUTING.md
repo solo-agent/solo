@@ -11,7 +11,7 @@ almost everything.
 
 ```bash
 # 1. Clone
-git clone git@github.com:fredalxin/solo.git
+git clone git@github.com:solo-agent/solo.git
 cd solo
 
 # 2. Bootstrap and start everything in one shot

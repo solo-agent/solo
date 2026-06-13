@@ -177,6 +177,11 @@ export function useThread(): UseThreadReturn {
       if (event.type === 'thread.message.new' && event.thread.thread_id === tid) {
         // Replace streaming placeholder if one exists, otherwise append
         setMessages((prev) => {
+          // Skip WS if the user has a pending send — API response will handle it.
+          // Otherwise WS and API race and the same message appears twice.
+          if (event.message.sender_type === 'user' && prev.some((m) => m.status === 'sending' && m.sender_type === 'user')) {
+            return prev;
+          }
           const hasStreaming = prev.some((m) => m.id === event.message.id && m.status === 'streaming');
           const exists = prev.some((m) => m.id === event.message.id);
           const newMsg = {
@@ -193,9 +198,10 @@ export function useThread(): UseThreadReturn {
           };
           const result = prev.map((m) =>
             m.id === event.message.id ? newMsg : m,
-          ).concat(
-            hasStreaming ? [] : [newMsg],
           );
+          if (!exists && !hasStreaming) {
+            result.push(newMsg);
+          }
           return result;
         });
       }

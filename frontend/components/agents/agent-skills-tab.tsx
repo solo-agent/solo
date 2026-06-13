@@ -126,13 +126,18 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
 
   return (
     <div className="space-y-4">
+      {/* v3.3: section tag uses a violet chip to match the Profile
+          field tag style and add a third color to the panel. */}
       <div className="flex items-center gap-2">
-        <Puzzle className="h-4 w-4" />
-        <h3 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
+        <span
+          className="inline-flex items-center gap-1.5 border-2 border-black bg-brutal-primary px-2.5 py-1 font-heading text-[11px] font-black uppercase tracking-widest text-black shadow-brutal-sm"
+          style={{ transform: 'rotate(-0.8deg)' }}
+        >
+          <Puzzle className="h-3 w-3" />
           {t('agentSkillCatalog')}
-        </h3>
-        <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
-          {skills.length}
+          <span className="ml-1 inline-block border-2 border-black bg-white px-1 font-mono text-[9px] text-black">
+            {skills.length}
+          </span>
         </span>
       </div>
 

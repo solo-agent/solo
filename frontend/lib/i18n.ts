@@ -177,6 +177,10 @@ const en = {
   passwordMinLength: 'Password must be at least 8 characters',
   confirmPasswordRequired: 'Please confirm your password',
   passwordsMismatch: 'Passwords do not match',
+  displayName: 'Display name',
+  displayNamePlaceholder: 'Your name',
+  displayNameRequired: 'Display name is required',
+  displayNameMaxLength: 'Display name cannot exceed 50 characters',
 
   // ── Dashboard ──
   dashboardLoadError: 'Dashboard failed to load',
@@ -478,6 +482,7 @@ const en = {
   agentProfileCreatedAt: 'Created',
   agentProfileCreatedBy: 'Created by',
   agentProfileMeta: 'Meta',
+  agentProfileInfo: 'Info',
 
   // ── Agent Skills Tab ──
   agentSkillCatalog: 'Skill Catalog',
@@ -492,10 +497,9 @@ const en = {
   // ── Agent Runtime Tab ──
   agentRuntimeError: 'Could not load runtime config',
   agentRuntimeType: 'Runtime Type',
-  agentRuntimeNotConfigured: 'Not configured',
   agentRuntimeModelConfig: 'Model Config',
-  agentRuntimeDefault: 'Default',
   agentRuntimeEnvVars: 'Environment Variables',
+  agentRuntimeConfig: 'Runtime Config',
   agentRuntimeNoEnvVars: 'No environment variables configured',
   agentRuntimeSave: 'Save',
   agentRuntimeSaving: 'Saving...',

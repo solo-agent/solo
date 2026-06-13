@@ -13,13 +13,16 @@ import type { Task, TaskStatus, TaskPriority } from '@/lib/types';
 import { t } from '@/lib/i18n';
 
 // ---- Status display config ----
+// v3.3: shadowClass powers hover color-coded shadow (status as visual info).
+// Static card keeps the neutral 12px black shadow; hover swaps to a tinted
+// 12px shadow in the status color so the list reads like a temperature gauge.
 
-const STATUS_CONFIG: Record<TaskStatus, { label: string; bgClass: string }> = {
-  todo: { label: 'TODO', bgClass: 'bg-brutal-warning text-black' },
-  in_progress: { label: 'IN PROGRESS', bgClass: 'bg-brutal-info text-black' },
-  in_review: { label: 'IN REVIEW', bgClass: 'bg-brutal-violet text-black' },
-  done: { label: 'DONE', bgClass: 'bg-brutal-success text-black' },
-  closed: { label: 'CLOSED', bgClass: 'bg-brutal-muted text-black' },
+const STATUS_CONFIG: Record<TaskStatus, { label: string; bgClass: string; shadowClass: string }> = {
+  todo: { label: 'TODO', bgClass: 'bg-brutal-warning text-black', shadowClass: 'hover:shadow-brutal-warning' },
+  in_progress: { label: 'IN PROGRESS', bgClass: 'bg-brutal-info text-black', shadowClass: 'hover:shadow-brutal-info' },
+  in_review: { label: 'IN REVIEW', bgClass: 'bg-brutal-violet text-black', shadowClass: 'hover:shadow-brutal-violet' },
+  done: { label: 'DONE', bgClass: 'bg-brutal-success text-black', shadowClass: 'hover:shadow-brutal-success' },
+  closed: { label: 'CLOSED', bgClass: 'bg-brutal-muted text-black', shadowClass: 'hover:shadow-brutal-accent' },
 };
 
 const PRIORITY_CONFIG: Record<TaskPriority, { label: string; bgClass: string }> = {
@@ -77,7 +80,12 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
       // v3.2 (Phase 2): now uses the .card-brutal-heavy class. Same
       // 4px border + 12px shadow + 16px hover lift as the inline version
       // it replaces, but now reusable for other hero-tier cards.
-      className="card-brutal-heavy w-full cursor-pointer text-left"
+      // v3.3: statusClass swaps the static black shadow for a tinted one
+      // on hover — color reinforces status without a second visual signal.
+      className={cn(
+        'card-brutal-heavy w-full cursor-pointer text-left',
+        statusConf.shadowClass,
+      )}
     >
       <div className="p-4">
         {/* Top row: status + priority badges */}

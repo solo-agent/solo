@@ -71,13 +71,33 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="card-brutal p-6 w-full">
+    <div
+      className="card-brutal-heavy p-8 w-full relative"
+      style={{ transform: 'rotate(-1.2deg)' }}
+    >
+      {/* Sticker badge */}
+      <div
+        className="absolute -top-3 -right-3 h-12 w-12 rounded-full bg-brutal-accent border-2 border-black shadow-brutal-sm flex items-center justify-center animate-bounce-slow z-10"
+        style={{ transform: 'rotate(12deg)' }}
+      >
+        <span className="font-heading font-bold text-[10px] text-black leading-none text-center">★<br />NEW</span>
+      </div>
+
       {/* Logo + Title */}
       <div className="text-center mb-6">
-        <div className="inline-flex h-10 w-10 items-center justify-center bg-brutal-primary border-2 border-black shadow-brutal-sm mb-3">
-          <span className="font-heading font-bold text-lg text-black">S</span>
+        <div className="inline-flex h-14 w-14 items-center justify-center bg-brutal-primary border-brutal border-black shadow-brutal mb-4 animate-pulse-brutal">
+          <span className="font-heading font-bold text-2xl text-black">S</span>
         </div>
-        <h1 className="font-heading font-bold text-xl text-black">{t('welcomeBack')}</h1>
+        <h1
+          className="font-heading font-bold text-3xl mb-1"
+          style={{
+            WebkitTextStroke: '1.5px #000',
+            color: 'transparent',
+            letterSpacing: '-0.02em',
+          }}
+        >
+          {t('welcomeBack')}
+        </h1>
         <p className="font-sans text-sm text-muted-foreground mt-1">{t('loginToSolo')}</p>
       </div>
 

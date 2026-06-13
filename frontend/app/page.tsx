@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { Decoration } from "@/components/ui/decoration";
 
 export default function Home() {
   const router = useRouter();
@@ -33,6 +34,32 @@ export default function Home() {
       <div className="absolute inset-0 bg-grid pointer-events-none" aria-hidden />
 
       <div className="relative w-full max-w-md text-center">
+        {/* v3.3: scattered sticker ornaments around the hero. */}
+        <Decoration
+          shape="star"
+          color="accent"
+          size="sm"
+          animation="spin"
+          rotation={-12}
+          className="absolute -top-4 -left-6"
+        />
+        <Decoration
+          shape="zap"
+          color="warning"
+          size="sm"
+          animation="bounce"
+          rotation={14}
+          className="absolute -top-2 -right-8"
+        />
+        <Decoration
+          shape="sparkle"
+          color="info"
+          size="sm"
+          animation="pulse"
+          rotation={6}
+          className="absolute top-1/2 -left-12"
+        />
+
         {/* Logo */}
         <div className="inline-flex h-16 w-16 items-center justify-center bg-brutal-primary border-brutal-4 shadow-brutal mb-6">
           <span className="font-heading font-black text-3xl text-white">S</span>
@@ -90,13 +117,23 @@ export default function Home() {
           </div>
         </div>
 
-        {/* CTA — pulse animation draws eye to the conversion action. */}
+        {/* CTA — v3.3: yellow button now casts a yellow hard shadow
+            (inline style beats .btn-brutal's black shadow in cascade).
+            The CTA's relative + mb-10 wrapping gives the 7px shadow
+            physical room and pushes the helper text clear of the shadow
+            box, so "Sign In" no longer collides with the shadow. */}
         <div className="space-y-3">
-          <Link href="/auth/register">
-            <Button variant="default" className="w-full text-base py-3 animate-pulse-brutal">
-              Get Started
-            </Button>
-          </Link>
+          <div className="relative mb-10">
+            <Link href="/auth/register">
+              <Button
+                variant="default"
+                className="w-full text-base py-3 animate-pulse-brutal"
+                style={{ boxShadow: '7px 7px 0 0 var(--color-brutal-primary)' }}
+              >
+                Get Started
+              </Button>
+            </Link>
+          </div>
           <p className="font-sans text-sm text-muted-foreground">
             Already have an account?{" "}
             <Link

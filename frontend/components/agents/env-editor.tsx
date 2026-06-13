@@ -58,18 +58,18 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
 
   const lastEmittedRef = useRef('');
 
-  const emit = useCallback(
-    (next: EnvEntry[]) => {
-      const result: Record<string, string> = {};
-      for (const e of next) {
-        const k = e.key.trim();
-        if (k) result[k] = e.value;
-      }
-      lastEmittedRef.current = JSON.stringify(result);
-      onChange?.(result);
-    },
-    [onChange],
-  );
+  // Emit changes to parent via useEffect to avoid setState-during-render
+  useEffect(() => {
+    const result: Record<string, string> = {};
+    for (const e of entries) {
+      const k = e.key.trim();
+      if (k) result[k] = e.value;
+    }
+    const next = JSON.stringify(result);
+    if (next === lastEmittedRef.current) return;
+    lastEmittedRef.current = next;
+    onChange?.(result);
+  }, [entries, onChange]);
 
   const addEntry = useCallback(() => {
     setEntries((prev) => [...prev, { id: nextEnvId(), key: '', value: '' }]);
@@ -77,26 +77,18 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
 
   const updateEntry = useCallback(
     (id: string, field: 'key' | 'value', newVal: string) => {
-      setEntries((prev) => {
-        const next = prev.map((e) =>
-          e.id === id ? { ...e, [field]: newVal } : e,
-        );
-        emit(next);
-        return next;
-      });
+      setEntries((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, [field]: newVal } : e)),
+      );
     },
-    [emit],
+    [],
   );
 
   const removeEntry = useCallback(
     (id: string) => {
-      setEntries((prev) => {
-        const next = prev.filter((e) => e.id !== id);
-        emit(next);
-        return next;
-      });
+      setEntries((prev) => prev.filter((e) => e.id !== id));
     },
-    [emit],
+    [],
   );
 
   return (

@@ -17,8 +17,8 @@ const registerFormSchema = z
   .object({
     displayName: z
       .string()
-      .min(1, "请输入显示名称")
-      .max(50, "显示名称不能超过 50 个字符"),
+      .min(1, t('displayNameRequired'))
+      .max(50, t('displayNameMaxLength')),
     email: z
       .string()
       .min(1, t('emailRequired'))
@@ -94,13 +94,32 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="card-brutal p-6 w-full">
+    <div
+      className="card-brutal-heavy p-8 w-full relative"
+      style={{ transform: 'rotate(1.2deg)' }}
+    >
+      {/* Sticker badge */}
+      <div
+        className="absolute -top-3 -left-3 h-12 w-12 rounded-full bg-brutal-info border-2 border-black shadow-brutal-sm flex items-center justify-center animate-spin-slow z-10"
+      >
+        <span className="font-heading font-bold text-[10px] text-black leading-none text-center">✦<br />JOIN</span>
+      </div>
+
       {/* Logo + Title */}
       <div className="text-center mb-6">
-        <div className="inline-flex h-10 w-10 items-center justify-center bg-brutal-primary border-2 border-black shadow-brutal-sm mb-3">
-          <span className="font-heading font-bold text-lg text-black">S</span>
+        <div className="inline-flex h-14 w-14 items-center justify-center bg-brutal-primary border-brutal border-black shadow-brutal mb-4 animate-pulse-brutal">
+          <span className="font-heading font-bold text-2xl text-black">S</span>
         </div>
-        <h1 className="font-heading font-bold text-xl text-black">{t('createAccount')}</h1>
+        <h1
+          className="font-heading font-bold text-3xl mb-1"
+          style={{
+            WebkitTextStroke: '1.5px #000',
+            color: 'transparent',
+            letterSpacing: '-0.02em',
+          }}
+        >
+          {t('createAccount')}
+        </h1>
         <p className="font-sans text-sm text-muted-foreground mt-1">{t('registerToSolo')}</p>
       </div>
 
@@ -114,12 +133,12 @@ export default function RegisterPage() {
             htmlFor="displayName"
             className="font-heading font-bold text-sm block"
           >
-            显示名称
+            {t('displayName')}
           </label>
           <input
             id="displayName"
             type="text"
-            placeholder="你的名字"
+            placeholder={t('displayNamePlaceholder')}
             autoComplete="name"
             disabled={isSubmitting}
             aria-invalid={!!errors.displayName}

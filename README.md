@@ -10,7 +10,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/go-1.22%2B-00ADD8.svg" alt="Go">
-  <a href="https://github.com/fredalxin/solo/stargazers"><img src="https://img.shields.io/github/stars/fredalxin/solo?style=flat" alt="Stars"></a>
+  <a href="https://github.com/solo-agent/solo/stargazers"><img src="https://img.shields.io/github/stars/solo-agent/solo?style=flat" alt="Stars"></a>
 </p>
 
 ---
@@ -33,7 +33,7 @@ Browser (Next.js :3000) ←→ Server (Go :8080) ←→ Daemon (:8081) ←→ Ag
 ## Quick Start
 
 ```bash
-git clone git@github.com:fredalxin/solo.git
+git clone git@github.com:solo-agent/solo.git
 cd solo
 make dev
 ```

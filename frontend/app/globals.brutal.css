@@ -276,18 +276,43 @@
   box-shadow: 16px 16px 0 0 var(--color-brutal-shadow);
 }
 
-/* Colored shadow variants (override the black with a color shadow token) */
+/* Colored shadow variants — v3.3: full box-shadow (offset + color), not
+   just --tw-shadow-color. The old definitions only overrode the color
+   variable and required a paired .shadow-brutal-* to render anything,
+   which is why nobody used them. Now they stand alone and read as
+   "color-coded hard shadow" — status-driven emphasis in lists, or
+   brand-tinted CTAs. */
 .shadow-brutal-primary {
-  --tw-shadow-color: var(--color-brutal-primary);
+  box-shadow: 5px 5px 0 0 var(--color-brutal-primary);
 }
 .shadow-brutal-accent {
-  --tw-shadow-color: var(--color-brutal-accent);
+  box-shadow: 5px 5px 0 0 var(--color-brutal-accent);
 }
-.shadow-brutal-blue {
-  --tw-shadow-color: var(--color-brutal-info);
+.shadow-brutal-info {
+  box-shadow: 5px 5px 0 0 var(--color-brutal-info);
 }
 .shadow-brutal-success {
-  --tw-shadow-color: var(--color-brutal-success);
+  box-shadow: 5px 5px 0 0 var(--color-brutal-success);
+}
+.shadow-brutal-warning {
+  box-shadow: 5px 5px 0 0 var(--color-brutal-warning);
+}
+.shadow-brutal-danger {
+  box-shadow: 5px 5px 0 0 var(--color-brutal-danger);
+}
+.shadow-brutal-violet {
+  box-shadow: 5px 5px 0 0 var(--color-brutal-violet);
+}
+
+/* Larger offsets for hero-tier color shadows (matches .shadow-brutal-2xl rhythm) */
+.shadow-brutal-primary-lg {
+  box-shadow: 7px 7px 0 0 var(--color-brutal-primary);
+}
+.shadow-brutal-accent-lg {
+  box-shadow: 7px 7px 0 0 var(--color-brutal-accent);
+}
+.shadow-brutal-info-lg {
+  box-shadow: 7px 7px 0 0 var(--color-brutal-info);
 }
 
 /* ============================================================
@@ -431,7 +456,7 @@
 
 .card-brutal:hover {
   transform: translate(-1px, -2px);
-  box-shadow: 7px 8px 0 0 var(--color-brutal-shadow);
+  box-shadow: 7px 8px 0 0 var(--card-hover-shadow, var(--color-brutal-shadow));
 }
 
 /* Heavy variant: 4px border + 12px shadow, 16px on hover. For hero

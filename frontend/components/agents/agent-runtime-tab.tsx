@@ -90,71 +90,73 @@ export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
   const envKeys = Object.keys(agent.custom_env ?? {});
 
   return (
-    <div className="space-y-5">
-      {/* Runtime type */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Cpu className="h-4 w-4 flex-shrink-0" />
-          <h3 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
+    <div className="space-y-2">
+      <h4>
+        <span
+          className="inline-flex items-center gap-1.5 border-2 border-black bg-brutal-primary px-2.5 py-1 font-heading text-[11px] font-black uppercase tracking-widest text-black shadow-brutal-sm"
+          style={{ transform: 'rotate(-0.8deg)' }}
+        >
+          ★ {t('agentRuntimeConfig')}
+        </span>
+      </h4>
+      <div className="space-y-1">
+        {/* Runtime type */}
+        <div className="flex items-center gap-3 py-1.5">
+          <span className="inline-block bg-brutal-primary-light border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-black flex-shrink-0">
+            <Cpu className="inline h-3 w-3 mr-1 -mt-0.5" />
             {t('agentRuntimeType')}
-          </h3>
-        </div>
-        <div className="card-brutal bg-brutal-cream p-3">
-          <p className="font-mono text-sm text-foreground">
+          </span>
+          <span className="font-mono text-xs text-foreground">
             {agent.model_provider || t('agentRuntimeNotConfigured')}
-          </p>
-        </div>
-      </div>
-
-      {/* Model configuration */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Layers className="h-4 w-4 flex-shrink-0" />
-          <h3 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
-            {t('agentRuntimeModelConfig')}
-          </h3>
-        </div>
-        <div className="card-brutal bg-brutal-cream divide-y-2 divide-black">
-          <div className="flex items-center justify-between px-3 py-2">
-            <span className="font-mono text-[11px] text-muted-foreground">Model</span>
-            <span className="font-mono text-sm text-foreground">
-              {agent.model_name || t('agentRuntimeDefault')}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Environment variables */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Terminal className="h-4 w-4 flex-shrink-0" />
-          <h3 className="font-heading text-xs font-bold text-muted-foreground uppercase tracking-wider">
-            {t('agentRuntimeEnvVars')}
-          </h3>
-          <span className="badge-brutal text-[10px]">
-            {envKeys.length}
           </span>
         </div>
-        {envKeys.length > 0 ? (
-          <div className="card-brutal bg-brutal-cream divide-y-2 divide-black">
-            {envKeys.map((key) => (
-              <div key={key} className="flex items-center justify-between px-3 py-2">
-                <span className="font-mono text-xs font-bold text-foreground">{key}</span>
-                <span className="font-mono text-[11px] text-muted-foreground max-w-[160px] truncate">
-                  {agent.custom_env?.[key] || ''}
-                </span>
-              </div>
-            ))}
+
+        {/* Model configuration */}
+        <div className="flex items-center gap-3 py-1.5">
+          <span className="inline-block bg-brutal-primary-light border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-black flex-shrink-0">
+            <Layers className="inline h-3 w-3 mr-1 -mt-0.5" />
+            Model
+          </span>
+          <span className="font-mono text-xs text-foreground">
+            {agent.model_name || t('agentRuntimeDefault')}
+          </span>
+        </div>
+
+        {/* Environment variables — v3.3: label sits on its own row, and
+            the K=V pairs render vertically beneath it so multi-env setups
+            don't force the label to wrap or stretch horizontally. */}
+        <div className="py-1.5">
+          <div className="flex items-center gap-3">
+            <span className="inline-block bg-brutal-primary-light border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-black flex-shrink-0">
+              <Terminal className="inline h-3 w-3 mr-1 -mt-0.5" />
+              {t('agentRuntimeEnvVars')}
+              <span className="ml-1 inline-block border-2 border-black bg-white px-1 font-mono text-[9px] text-black">
+                {envKeys.length}
+              </span>
+            </span>
           </div>
-        ) : (
-          <div className="card-brutal bg-brutal-cream p-3 text-center">
-            <p className="font-mono text-xs italic text-muted-foreground">
+          {envKeys.length > 0 ? (
+            <div className="mt-2 flex flex-col items-start gap-1.5 pl-1">
+              {envKeys.map((key) => (
+                <div
+                  key={key}
+                  className="inline-flex max-w-full items-center gap-2 border border-black bg-white px-2 py-0.5 font-mono text-[11px]"
+                >
+                  <span className="font-bold text-foreground whitespace-nowrap">{key}</span>
+                  <span className="text-muted-foreground">=</span>
+                  <span className="text-foreground truncate">
+                    {agent.custom_env?.[key] || ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-2 pl-1 font-mono text-xs italic text-muted-foreground">
               {t('agentRuntimeNoEnvVars')}
             </p>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-
     </div>
   );
 }

@@ -267,9 +267,9 @@ export default function ComputersPage() {
 
       <main className="flex flex-1 flex-col overflow-hidden">
         {/* Top bar (page label lives in the left column) */}
-        <div className="flex flex-shrink-0 items-center h-14 border-b-2 border-black px-4" />
+        <div className="flex flex-shrink-0 items-center h-14 border-b-2 border-black bg-brutal-cream px-4" />
         <div className="flex-1 overflow-y-auto px-6 py-6">
-          <div className="mx-auto w-full max-w-3xl">
+          <div className="w-full">
             {/* Error state */}
             {error && (
               <div className="mb-6 space-y-2">
@@ -416,12 +416,7 @@ function ComputerCard({
   const osInfo = getOsIcon(computer.os);
 
   return (
-    <div
-      className={cn(
-        'border-2 border-black bg-white transition-all duration-300',
-        isExpanded ? 'shadow-brutal-lg' : 'shadow-brutal card-brutal',
-      )}
-    >
+    <div className="transition-all duration-300">
       {/* Card header — click to expand */}
       <button
         type="button"
@@ -439,9 +434,24 @@ function ComputerCard({
               <h3 className="truncate text-base font-heading font-bold text-foreground">
                 {computer.name}
               </h3>
-              <StatusDot isOnline={isOnline} />
+              {/* v3.3: chunky status pill replacing the bare dot. */}
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1.5 border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider',
+                  isOnline ? 'bg-brutal-success text-black' : 'bg-brutal-muted text-black',
+                )}
+              >
+                <span
+                  className={cn(
+                    'h-1.5 w-1.5 border border-black',
+                    isOnline ? 'bg-white' : 'bg-black',
+                  )}
+                  aria-hidden
+                />
+                {isOnline ? t('online') : t('offline')}
+              </span>
             </div>
-            <p className="mt-1 font-body text-xs text-muted-foreground">
+            <p className="mt-1 font-mono text-[11px] text-muted-foreground">
               {isOnline
                 ? `${t('computersLastHeartbeat')}: ${relativeTime(computer.last_heartbeat)}`
                 : `${t('offline')} ${relativeTime(computer.last_heartbeat, false)}`}
@@ -449,31 +459,27 @@ function ComputerCard({
           </div>
         </div>
 
-        {/* Quick info — enhanced with system info */}
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 font-body text-xs text-muted-foreground">
-          {/* OS + hostname */}
-          <span className="flex items-center gap-1.5">
+        {/* Quick info — v3.3: inline chunky pill rows instead of bare muted text. */}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 border-2 border-black bg-brutal-cream px-1.5 py-0.5 font-mono text-[11px] text-black">
             {osInfo.icon}
             <span className="truncate max-w-[120px]">
               {computer.hostname || osInfo.label}
             </span>
           </span>
-          {/* IP */}
           {computer.ip && (
-            <span className="flex items-center gap-1 font-mono">
+            <span className="inline-flex items-center gap-1 border-2 border-black bg-brutal-cream px-1.5 py-0.5 font-mono text-[11px] text-black">
               <Globe className="h-3 w-3" />
               {computer.ip}
             </span>
           )}
         </div>
 
-        {/* Expand indicator */}
-        <div className="mt-2 flex justify-center">
-          {isExpanded ? (
-            <ChevronUp className="h-4 w-4 text-muted-foreground" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-muted-foreground" />
-          )}
+        {/* Expand indicator — v3.3: chunky 2px-bordered pill, not a thin chevron. */}
+        <div className="mt-3 flex justify-center">
+          <span className="inline-flex h-5 w-5 items-center justify-center border-2 border-black bg-white text-[10px] font-bold text-black">
+            {isExpanded ? '−' : '+'}
+          </span>
         </div>
       </button>
 
@@ -484,33 +490,38 @@ function ComputerCard({
           isExpanded ? 'max-h-[1200px] opacity-100' : 'max-h-0 opacity-0',
         )}
       >
-        <div className="border-t-2 border-black px-6 pb-6 pt-4">
+        <div className="border-t-2 border-black px-6 pb-6 pt-4 space-y-6">
           {/* Section: System Info */}
-          <SectionHeader label={t('computersSystemInfo')} />
-          <div className="mt-3 space-y-2 font-body text-sm">
-            {computer.os && (
-              <InfoRow label={t('computersOS')}>
-                <span className="flex items-center gap-1.5">
-                  {osInfo.icon}
-                  {osInfo.label}
-                </span>
-              </InfoRow>
-            )}
-            {computer.hostname && (
-              <InfoRow label={t('computersHostname')}>
-                <span className="font-mono text-xs">{computer.hostname}</span>
-              </InfoRow>
-            )}
-            {computer.ip && (
-              <InfoRow label={t('computersIP')}>
-                <span className="font-mono text-xs">{computer.ip}</span>
-              </InfoRow>
-            )}
-          </div>
+          <section>
+            <SectionHeader label={t('computersSystemInfo')} />
+            <div className="space-y-1 font-body text-sm">
+              {computer.os && (
+                <InfoRow label={t('computersOS')}>
+                  <span className="flex items-center gap-1.5">
+                    {osInfo.icon}
+                    {osInfo.label}
+                  </span>
+                </InfoRow>
+              )}
+              {computer.hostname && (
+                <InfoRow label={t('computersHostname')}>
+                  <span className="font-mono text-xs">{computer.hostname}</span>
+                </InfoRow>
+              )}
+              {computer.ip && (
+                <InfoRow label={t('computersIP')}>
+                  <span className="font-mono text-xs">{computer.ip}</span>
+                </InfoRow>
+              )}
+            </div>
+          </section>
 
-          {/* Section: Basic Info */}
-          <SectionHeader label={t('computersBasicInfo')} className="mt-6" />
-          <div className="mt-3 space-y-2 font-body text-sm">
+          {/* Section: Basic Info — separated by a full-width 2px divider
+              to match teams detail's tab-bar-style structure. */}
+          <hr className="border-t-2 border-black" />
+          <section>
+            <SectionHeader label={t('computersBasicInfo')} />
+            <div className="space-y-1 font-body text-sm">
             <InfoRow label={t('computersName')}>
               {editingId === computer.id ? (
                 <div className="flex items-center gap-2">
@@ -573,33 +584,40 @@ function ComputerCard({
               </InfoRow>
             )}
           </div>
+          </section>
 
           {/* Section: Status */}
-          <SectionHeader label={t('computersStatus')} className="mt-6" />
-          <div className="mt-3 space-y-2 font-body text-sm">
-            <InfoRow label={t('computersCurrent')}>
-              <div className="flex items-center gap-2">
-                <StatusDot isOnline={isOnline} />
-                <span>{isOnline ? t('online') : t('offline')}</span>
-              </div>
-            </InfoRow>
-            <InfoRow label={t('computersLastHeartbeat')}>
-              <span>
-                {computer.last_heartbeat
-                  ? formatDateTime(computer.last_heartbeat)
-                  : t('never')}
-              </span>
-            </InfoRow>
-            <InfoRow label={t('computersRegistered')}>
-              <span>{formatDateTime(computer.created_at)}</span>
-            </InfoRow>
-          </div>
+          <hr className="border-t-2 border-black" />
+          <section>
+            <SectionHeader label={t('computersStatus')} />
+            <div className="space-y-1 font-body text-sm">
+              <InfoRow label={t('computersCurrent')}>
+                <div className="flex items-center gap-2">
+                  <StatusDot isOnline={isOnline} />
+                  <span>{isOnline ? t('online') : t('offline')}</span>
+                </div>
+              </InfoRow>
+              <InfoRow label={t('computersLastHeartbeat')}>
+                <span>
+                  {computer.last_heartbeat
+                    ? formatDateTime(computer.last_heartbeat)
+                    : t('never')}
+                </span>
+              </InfoRow>
+              <InfoRow label={t('computersRegistered')}>
+                <span>{formatDateTime(computer.created_at)}</span>
+              </InfoRow>
+            </div>
+          </section>
 
           {/* Section: Connected Agents (v1.5) */}
-          <SectionHeader label={t('computersConnectedAgents')} className="mt-6" />
-          <div className="mt-3">
-            <ConnectedAgents key={agentVersion} computerId={isExpanded ? computer.id : null} onCreateAgent={onCreateAgent} />
-          </div>
+          <hr className="border-t-2 border-black" />
+          <section>
+            <SectionHeader label={t('computersConnectedAgents')} />
+            <div className="mt-3">
+              <ConnectedAgents key={agentVersion} computerId={isExpanded ? computer.id : null} onCreateAgent={onCreateAgent} />
+            </div>
+          </section>
 
         </div>
       </div>
@@ -697,22 +715,23 @@ function StatusDot({ isOnline }: { isOnline: boolean }) {
 
 function SectionHeader({ label, className }: { label: string; className?: string }) {
   return (
-    <h3
-      className={cn(
-        'flex items-center gap-2 font-heading text-sm font-bold text-foreground',
-        className,
-      )}
-    >
-      <span className="h-1 w-1 bg-brutal-primary" />
-      {label}
+    <h3 className={cn('mb-3', className)}>
+      <span
+        className="inline-flex items-center gap-1.5 border-2 border-black bg-brutal-primary px-2.5 py-1 font-heading text-[11px] font-black uppercase tracking-widest text-black shadow-brutal-sm"
+        style={{ transform: 'rotate(-0.8deg)' }}
+      >
+        ★ {label}
+      </span>
     </h3>
   );
 }
 
 function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-start gap-3">
-      <span className="w-20 flex-shrink-0 text-xs text-muted-foreground">{label}</span>
+    <div className="flex items-center gap-3 py-1.5">
+      <span className="inline-block bg-brutal-primary-light border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-black flex-shrink-0">
+        {label}
+      </span>
       <div className="flex-1 min-w-0">{children}</div>
     </div>
   );

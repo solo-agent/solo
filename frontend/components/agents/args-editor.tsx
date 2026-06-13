@@ -24,19 +24,24 @@ export function ArgsEditor({ value, onChange, disabled }: ArgsEditorProps) {
 
   // Sync external value changes (e.g., edit form pre-fill), but only when
   // the length differs — user edits are the source of truth after initial load.
+  const lastEmittedRef = useRef(JSON.stringify(value ?? []));
+
   useEffect(() => {
     const incoming = value ?? [];
+    const incomingStr = JSON.stringify(incoming);
+    if (incomingStr === lastEmittedRef.current) return;
     if (incoming.length !== tags.length) {
       setTags(incoming);
     }
   }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const emit = useCallback(
-    (next: string[]) => {
-      onChange?.(next);
-    },
-    [onChange],
-  );
+  // Emit changes to parent via useEffect to avoid setState-during-render
+  useEffect(() => {
+    const next = JSON.stringify(tags);
+    if (next === lastEmittedRef.current) return;
+    lastEmittedRef.current = next;
+    onChange?.(tags);
+  }, [tags, onChange]);
 
   const addTag = useCallback(
     (raw: string) => {
@@ -45,23 +50,17 @@ export function ArgsEditor({ value, onChange, disabled }: ArgsEditorProps) {
       // Prevent duplicates
       setTags((prev) => {
         if (prev.includes(trimmed)) return prev;
-        const next = [...prev, trimmed];
-        emit(next);
-        return next;
+        return [...prev, trimmed];
       });
     },
-    [emit],
+    [],
   );
 
   const removeTag = useCallback(
     (idx: number) => {
-      setTags((prev) => {
-        const next = prev.filter((_, i) => i !== idx);
-        emit(next);
-        return next;
-      });
+      setTags((prev) => prev.filter((_, i) => i !== idx));
     },
-    [emit],
+    [],
   );
 
   const handleKeyDown = useCallback(
