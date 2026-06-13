@@ -1,0 +1,2 @@
+ALTER TABLE tasks DROP COLUMN IF EXISTS is_swarm;
+ALTER TABLE tasks DROP COLUMN IF EXISTS swarm_plan;

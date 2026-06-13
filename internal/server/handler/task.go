@@ -25,6 +25,7 @@ type TaskHandler struct {
 	agentSvc   *service.AgentService
 	svc        *service.TaskService
 	mentionSvc *service.MentionService
+	swarm      *service.SwarmCoordinator
 }
 
 // NewTaskHandler creates a new TaskHandler.
@@ -38,6 +39,11 @@ func NewTaskHandler(pool *pgxpool.Pool, hub realtime.Broadcaster, agentSvc *serv
 	}
 }
 
+// SetSwarmCoordinator injects the SwarmCoordinator into the handler.
+func (h *TaskHandler) SetSwarmCoordinator(s *service.SwarmCoordinator) {
+	h.swarm = s
+}
+
 // --- Request/Response types ---
 
 type CreateTaskRequest struct {
@@ -47,6 +53,7 @@ type CreateTaskRequest struct {
 	DueDate      *time.Time `json:"due_date,omitempty"`
 	ChannelID    string     `json:"channel_id,omitempty"`
 	ParentTaskID string     `json:"parent_task_id,omitempty"`
+	DependsOn    []string   `json:"depends_on,omitempty"`
 }
 
 type UpdateTaskRequest struct {
@@ -62,24 +69,26 @@ type ConvertToTaskRequest struct {
 }
 
 type TaskResponse struct {
-	ID               string  `json:"id"`
-	TaskNumber       int     `json:"task_number"`
-	ChannelID        string  `json:"channel_id"`
-	CreatorID        string  `json:"creator_id"`
-	CreatorName      string  `json:"creator_name,omitempty"`
-	Title            string  `json:"title"`
-	Description      string  `json:"description,omitempty"`
-	Status           string  `json:"status"`
-	ClaimerID        string  `json:"claimer_id,omitempty"`
-	ClaimerName      string  `json:"claimer_name,omitempty"`
-	Priority         string  `json:"priority"`
-	DueDate          *string `json:"due_date,omitempty"`
-	MessageID        string  `json:"message_id,omitempty"`
-	ParentTaskID     *string `json:"parent_task_id,omitempty"`
-	SubtaskCount     int     `json:"subtask_count,omitempty"`
-	DoneSubtaskCount int     `json:"done_subtask_count,omitempty"`
-	CreatedAt        string  `json:"created_at"`
-	UpdatedAt        string  `json:"updated_at"`
+	ID               string   `json:"id"`
+	TaskNumber       int      `json:"task_number"`
+	ChannelID        string   `json:"channel_id"`
+	CreatorID        string   `json:"creator_id"`
+	CreatorName      string   `json:"creator_name,omitempty"`
+	Title            string   `json:"title"`
+	Description      string   `json:"description,omitempty"`
+	Status           string   `json:"status"`
+	ClaimerID        string   `json:"claimer_id,omitempty"`
+	ClaimerName      string   `json:"claimer_name,omitempty"`
+	Priority         string   `json:"priority"`
+	DueDate          *string  `json:"due_date,omitempty"`
+	MessageID        string   `json:"message_id,omitempty"`
+	ParentTaskID     *string  `json:"parent_task_id,omitempty"`
+	SubtaskCount     int      `json:"subtask_count,omitempty"`
+	DoneSubtaskCount int      `json:"done_subtask_count,omitempty"`
+	BlockerIDs       []string `json:"blocker_ids,omitempty"`
+	BlockedByCount   int      `json:"blocked_by_count,omitempty"`
+	CreatedAt        string   `json:"created_at"`
+	UpdatedAt        string   `json:"updated_at"`
 }
 
 func toTaskResponse(t *service.Task) TaskResponse {
@@ -99,6 +108,8 @@ func toTaskResponse(t *service.Task) TaskResponse {
 		ParentTaskID:     t.ParentTaskID,
 		SubtaskCount:     t.SubtaskCount,
 		DoneSubtaskCount: t.DoneSubtaskCount,
+		BlockerIDs:       t.BlockerIDs,
+		BlockedByCount:   t.BlockedByCount,
 		CreatedAt:        t.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:        t.UpdatedAt.Format(time.RFC3339),
 	}
@@ -152,6 +163,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Priority:     req.Priority,
 		DueDate:      req.DueDate,
 		ParentTaskID: req.ParentTaskID,
+		DependsOn:    req.DependsOn,
 	}
 
 	task, err := h.svc.CreateTask(r.Context(), channelID, userID, svcReq)
@@ -1252,4 +1264,114 @@ func (h *TaskHandler) DeleteGlobal(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Swarm handlers ---
+
+// DecomposeTask handles POST /api/v1/tasks/{taskID}/decompose
+func (h *TaskHandler) DecomposeTask(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	taskID := chi.URLParam(r, "taskID")
+	if taskID == "" {
+		writeError(w, http.StatusBadRequest, "task ID is required")
+		return
+	}
+	if h.swarm == nil {
+		writeError(w, http.StatusInternalServerError, "swarm coordinator not available")
+		return
+	}
+
+	var req struct {
+		ChannelID string                    `json:"channel_id"`
+		Subtasks  []service.SwarmSubtaskDef `json:"subtasks"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.ChannelID == "" {
+		writeError(w, http.StatusBadRequest, "channel_id is required")
+		return
+	}
+	if len(req.Subtasks) == 0 {
+		writeError(w, http.StatusBadRequest, "subtasks array is required")
+		return
+	}
+
+	created, err := h.swarm.DecomposeTask(r.Context(), taskID, req.ChannelID, userID, req.Subtasks)
+	if err != nil {
+		slog.Error("failed to decompose task", "error", err)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"parent_task_id": taskID,
+		"subtasks":       toTaskResponseList(created),
+	})
+}
+
+// SwarmStatus handles GET /api/v1/tasks/{taskID}/swarm-status
+func (h *TaskHandler) SwarmStatus(w http.ResponseWriter, r *http.Request) {
+	_, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	taskID := chi.URLParam(r, "taskID")
+	if taskID == "" {
+		writeError(w, http.StatusBadRequest, "task ID is required")
+		return
+	}
+	if h.swarm == nil {
+		writeError(w, http.StatusInternalServerError, "swarm coordinator not available")
+		return
+	}
+
+	channelID := r.URL.Query().Get("channel_id")
+	if channelID == "" {
+		writeError(w, http.StatusBadRequest, "channel_id query parameter is required")
+		return
+	}
+
+	status, err := h.swarm.GetSwarmStatus(r.Context(), taskID, channelID)
+	if err != nil {
+		slog.Error("failed to get swarm status", "error", err)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, status)
+}
+
+// ListSwarmClaimable handles GET /api/v1/tasks/swarm-claimable
+func (h *TaskHandler) ListSwarmClaimable(w http.ResponseWriter, r *http.Request) {
+	_, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	if h.swarm == nil {
+		writeError(w, http.StatusInternalServerError, "swarm coordinator not available")
+		return
+	}
+
+	channelID := r.URL.Query().Get("channel_id")
+	if channelID == "" {
+		writeError(w, http.StatusBadRequest, "channel_id query parameter is required")
+		return
+	}
+
+	tasks, err := h.swarm.ListClaimableSwarmTasks(r.Context(), channelID)
+	if err != nil {
+		slog.Error("failed to list claimable swarm tasks", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list claimable swarm tasks")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toTaskResponseList(tasks))
 }

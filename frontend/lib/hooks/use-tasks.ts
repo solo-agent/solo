@@ -34,6 +34,9 @@ interface TaskResponse {
   parent_task_id?: string | null;
   subtask_count?: number;
   done_subtask_count?: number;
+  blocker_ids?: string[];
+  blocked_by_count?: number;
+  blocking_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -59,6 +62,9 @@ function mapTask(resp: TaskResponse): Task {
     subtask_count: resp.subtask_count,
     done_subtask_count: resp.done_subtask_count,
     due_date: resp.due_date || undefined,
+    blocker_ids: resp.blocker_ids,
+    blocked_by_count: resp.blocked_by_count,
+    blocking_count: resp.blocking_count,
     created_at: resp.created_at,
     updated_at: resp.updated_at,
   };
@@ -150,6 +156,8 @@ export function useTasks(filters?: TaskFilters) {
             parent_task_id: (event as { parent_task_id?: string }).parent_task_id ?? null,
             subtask_count: (event as { subtask_count?: number }).subtask_count ?? 0,
             done_subtask_count: (event as { done_subtask_count?: number }).done_subtask_count ?? 0,
+            blocker_ids: (event as { blocker_ids?: string[] }).blocker_ids,
+            blocked_by_count: (event as { blocked_by_count?: number }).blocked_by_count,
             created_at: event.created_at,
             updated_at: event.updated_at,
           }), ...prev];
@@ -174,10 +182,12 @@ export function useTasks(filters?: TaskFilters) {
           if (event.priority !== undefined) updated.priority = event.priority as Task['priority'];
           if (event.due_date !== undefined) updated.due_date = event.due_date || undefined;
           if (event.message_id !== undefined) updated.message_id = event.message_id || undefined;
-          const evt = event as { parent_task_id?: string; subtask_count?: number; done_subtask_count?: number };
+          const evt = event as { parent_task_id?: string; subtask_count?: number; done_subtask_count?: number; blocker_ids?: string[]; blocked_by_count?: number };
           if (evt.parent_task_id !== undefined) updated.parent_task_id = evt.parent_task_id || undefined;
           if (evt.subtask_count !== undefined) updated.subtask_count = evt.subtask_count;
           if (evt.done_subtask_count !== undefined) updated.done_subtask_count = evt.done_subtask_count;
+          if (evt.blocker_ids !== undefined) updated.blocker_ids = evt.blocker_ids;
+          if (evt.blocked_by_count !== undefined) updated.blocked_by_count = evt.blocked_by_count;
           updated.updated_at = event.updated_at;
 
           // If status filter is active and the updated task no longer matches, remove it
@@ -194,11 +204,20 @@ export function useTasks(filters?: TaskFilters) {
         if (channelFilter && event.channel_id !== channelFilter) return;
 
         setTasks((prev) => prev.filter((t) => t.id !== event.id));
+        return;
+      }
+
+      // Step 2: task.unblocked — refresh the task to get updated blocker state
+      if (event.type === 'task.unblocked') {
+        if (channelFilter && event.channel_id !== channelFilter) return;
+        // Refresh the unblocked task
+        loadTasks();
+        return;
       }
     });
 
     return unsub;
-  }, [channelFilter, filters?.status, onEvent]);
+  }, [channelFilter, filters?.status, onEvent, loadTasks]);
 
   const createTask = useCallback(async (input: CreateTaskInput): Promise<Task> => {
     const res = await apiClient.post<TaskResponse>('/api/v1/tasks', {

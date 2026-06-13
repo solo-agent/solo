@@ -153,6 +153,10 @@ func main() {
 			r.Get("/read", h.HandleWorkspaceRead)
 		})
 		r.Get("/skills", h.HandleSkillsList)
+			r.Route("/worktree", func(r chi.Router) {
+				r.Post("/create", h.HandleWorktreeCreate)
+				r.Post("/cleanup", h.HandleWorktreeCleanup)
+			})
 	})
 
 	// SSE requires long-lived connections — no write timeout.
@@ -176,6 +180,8 @@ func main() {
 		}
 	}()
 
+	// Start reminder + watchdog ticker (Step 6).
+	go daemonH.startTicker(context.Background())
 
 	// Register with server on startup
 	if err := registerWithServer(ctx); err != nil {

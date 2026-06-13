@@ -60,14 +60,27 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	daemonHandler := handler.NewDaemonHandler(dm, agentSvc, computerSvc)
 	_ = service.NewAgentRelationshipService(pool)
 	relHandler := handler.NewAgentRelationshipHandler(pool)
-		depHandler := handler.NewTaskDependencyHandler(taskSvc)
-		delHandler := handler.NewAgentDelegationHandler(pool)
+	depHandler := handler.NewTaskDependencyHandler(taskSvc)
+	delHandler := handler.NewAgentDelegationHandler(pool)
 	mentionSvc := service.NewMentionService(pool)
 	taskHandler := handler.NewTaskHandler(pool, hub, agentSvc, taskSvc, mentionSvc)
 	searchHandler := handler.NewSearchHandler(pool)
 	computerHandler := handler.NewComputerHandler(computerSvc, dm, pool)
 	inboxHandler := handler.NewInboxHandler(inboxSvc)
-		onboardingHandler := handler.NewOnboardingHandler(pool, agentSvc)
+	onboardingHandler := handler.NewOnboardingHandler(pool, agentSvc)
+	channelMemoryHandler := handler.NewChannelMemoryHandler(pool)
+	channelBindingHandler := handler.NewChannelBindingHandler(pool)
+
+	// Knowledge, Swarm, Reminder, Watchdog services (Step 4 + Step 6)
+	embedSvc := service.NewEmbeddingService()
+	knowledgeSvc := service.NewKnowledgeService(pool, embedSvc)
+	knowledgeHandler := handler.NewKnowledgeHandler(pool, knowledgeSvc)
+	swarmCoordinator := service.NewSwarmCoordinator(pool, taskSvc, hub)
+	reminderSvc := service.NewReminderService(pool, hub)
+	watchdogSvc := service.NewWatchdogService(pool, hub)
+	reminderHandler := handler.NewReminderHandler(reminderSvc)
+	taskHandler.SetSwarmCoordinator(swarmCoordinator)
+	_ = watchdogSvc
 
 	// Attachment handler
 	uploadDir := os.Getenv("ATTACHMENTS_DIR")
@@ -131,7 +144,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Get("/api/v1/server/info", channelHandler.ServerInfo)
 
 		r.Get("/api/v1/messages/check", messageHandler.Check)
-			r.Post("/api/v1/channels/join", channelHandler.JoinByTarget)
+		r.Post("/api/v1/channels/join", channelHandler.JoinByTarget)
 
 		r.Route("/api/v1/channels", func(r chi.Router) {
 			r.Get("/", channelHandler.List)
@@ -164,6 +177,19 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 						r.Delete("/claim", taskHandler.Unclaim)
 					})
 				})
+
+				// Channel memory routes (Step 2 - shared channel memory)
+				r.Route("/memory", func(r chi.Router) {
+					r.Get("/channel-md", channelMemoryHandler.GetChannelMd)
+					r.Post("/channel-md", channelMemoryHandler.PutChannelMd)
+					r.Get("/decisions", channelMemoryHandler.GetDecisions)
+					r.Post("/decisions", channelMemoryHandler.AppendDecision)
+				})
+
+				// Channel project binding routes (Step 3 - workspace)
+				r.Post("/bind-project", channelBindingHandler.BindProject)
+				r.Get("/binding", channelBindingHandler.GetBinding)
+				r.Delete("/bind-project", channelBindingHandler.UnbindProject)
 
 				// Channel messages routes (with body size limit)
 				r.Route("/messages", func(r chi.Router) {
@@ -206,24 +232,23 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 			})
 		})
 
-			// Agent relationships (collaboration Step 1)
-			r.Route("/api/v1/agent-relationships", func(r chi.Router) {
-				r.Post("/", relHandler.Create)
-				r.Route("/{id}", func(r chi.Router) {
-					r.Patch("/", relHandler.Update)
-					r.Delete("/", relHandler.Delete)
-				})
+		// Agent relationships (collaboration Step 1)
+		r.Route("/api/v1/agent-relationships", func(r chi.Router) {
+			r.Post("/", relHandler.Create)
+			r.Route("/{id}", func(r chi.Router) {
+				r.Patch("/", relHandler.Update)
+				r.Delete("/", relHandler.Delete)
 			})
-			r.Get("/api/v1/agents/{agentID}/relationships", relHandler.ListByAgent)
-			r.Get("/api/v1/channels/{channelID}/relationships", relHandler.ListByChannel)
-
+		})
+		r.Get("/api/v1/agents/{agentID}/relationships", relHandler.ListByAgent)
+		r.Get("/api/v1/channels/{channelID}/relationships", relHandler.ListByChannel)
 
 		// Agent backends metadata (registered backend adapters)
 		r.Get("/api/v1/agent-backends", agentHandler.AgentBackends)
 		r.Get("/api/v1/agent-backends/detect", agentHandler.AgentBackendsDetect)
 
-			// Onboarding wizard
-			r.Post("/api/v1/onboarding/create-lucy", onboardingHandler.CreateLucy)
+		// Onboarding wizard
+		r.Post("/api/v1/onboarding/create-lucy", onboardingHandler.CreateLucy)
 
 		// Agent delegation routes (collaboration Step 1)
 		r.Post("/api/v1/agent-delegations", delHandler.Create)
@@ -234,14 +259,12 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Post("/api/v1/agent-delegations/{id}/complete", delHandler.Complete)
 		r.Post("/api/v1/agent-delegations/{id}/fail", delHandler.Fail)
 
-
 		// Task dependency routes (collaboration Step 1)
 		r.Post("/api/v1/task-dependencies", depHandler.AddDependency)
 		r.Delete("/api/v1/task-dependencies", depHandler.RemoveDependency)
 		r.Get("/api/v1/tasks/{taskID}/blockers", depHandler.ListBlockers)
 		r.Get("/api/v1/tasks/{taskID}/blocked", depHandler.ListBlocked)
 		r.Get("/api/v1/tasks/{taskID}/is-blocked", depHandler.IsBlocked)
-
 
 		// Global tasks routes (all channels)
 		r.Route("/api/v1/tasks", func(r chi.Router) {
@@ -326,6 +349,31 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 
 		// Attachment routes (SOLO-243-B)
 		r.Post("/api/v1/attachments/upload", attachmentHandler.Upload)
+
+		// Knowledge routes (Step 4)
+		r.Route("/api/v1/knowledge", func(r chi.Router) {
+			r.Get("/", knowledgeHandler.List)
+			r.Post("/", knowledgeHandler.Create)
+			r.Get("/search", knowledgeHandler.Search)
+			r.Post("/import-decisions", knowledgeHandler.ImportDecisions)
+			r.Route("/{id}", func(r chi.Router) {
+				r.Get("/", knowledgeHandler.Get)
+				r.Patch("/", knowledgeHandler.Update)
+				r.Delete("/", knowledgeHandler.Delete)
+			})
+		})
+
+		// Reminder routes (Step 6)
+		r.Route("/api/v1/reminders", func(r chi.Router) {
+			r.Get("/", reminderHandler.List)
+			r.Post("/", reminderHandler.Create)
+			r.Delete("/{id}", reminderHandler.Delete)
+		})
+
+		// Swarm routes (Step 6)
+		r.Post("/api/v1/tasks/{taskID}/decompose", taskHandler.DecomposeTask)
+		r.Get("/api/v1/tasks/{taskID}/swarm-status", taskHandler.SwarmStatus)
+		r.Get("/api/v1/tasks/swarm-claimable", taskHandler.ListSwarmClaimable)
 	})
 
 	// WebSocket endpoint (authenticates via ?token query param — browser

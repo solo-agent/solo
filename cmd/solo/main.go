@@ -167,7 +167,9 @@ func handleTask(args []string, baseURL, token string) {
 		handleTaskUnblock(args[1:], baseURL, token)
 	case "blocked":
 		handleTaskBlocked(args[1:], baseURL, token)
-	default:
+		case "split":
+			handleTaskSplit(args[1:], baseURL, token)
+		default:
 		fmt.Fprintf(os.Stderr, "solo: error: unknown task subcommand %q\n", args[0])
 		printUsage()
 		doExit(exitUsage)
@@ -576,6 +578,8 @@ func handleChannel(args []string, baseURL, token string) {
 		handleChannelMembers(args[1:], baseURL, token)
 	case "join":
 		handleChannelJoin(args[1:], baseURL, token)
+		case "memory":
+			handleChannelMemory(args[1:], baseURL, token)
 	default:
 		fmt.Fprintf(os.Stderr, "solo: error: unknown channel subcommand %q\n", args[0])
 		printUsage()
@@ -877,7 +881,7 @@ func handleAgent(args []string, baseURL, token string) {
 
 func handleAgentDelegate(args []string, baseURL, token string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "solo: error: delegate subcommand required (list, accept, reject)")
+		fmt.Fprintln(os.Stderr, "solo: error: delegate subcommand required (list, accept, reject, complete)")
 		doExit(exitUsage)
 	}
 	switch args[0] {
@@ -887,6 +891,8 @@ func handleAgentDelegate(args []string, baseURL, token string) {
 		handleDelegateAccept(args[1:], baseURL, token)
 	case "reject":
 		handleDelegateReject(args[1:], baseURL, token)
+		case "complete":
+			handleDelegateComplete(args[1:], baseURL, token)
 	default:
 		// Default: create a new delegation
 		handleDelegateCreate(args, baseURL, token)
@@ -894,22 +900,38 @@ func handleAgentDelegate(args []string, baseURL, token string) {
 }
 
 func handleDelegateCreate(args []string, baseURL, token string) {
-	var toAgent, taskID, message string
+	var toAgent, taskID, message, channelID string
+	var startIfInactive bool
 	flags := flag.NewFlagSet("agent delegate", flag.ContinueOnError)
 	flags.StringVar(&toAgent, "to", "", "Target agent @name")
 	flags.StringVar(&taskID, "task", "", "Task ID or number")
 	flags.StringVar(&message, "msg", "", "Delegation message")
+	flags.StringVar(&channelID, "c", "", "Channel ID or #name")
+	flags.StringVar(&channelID, "channel", "", "Channel ID or #name")
+	flags.BoolVar(&startIfInactive, "start-if-inactive", false, "Wake target agent if inactive")
 	flags.Parse(args)
 
 	agentID := os.Getenv("SOLO_AGENT_ID")
-	channelID := os.Getenv("SOLO_CHANNEL_ID")
+	if channelID == "" {
+		channelID = os.Getenv("SOLO_CHANNEL_ID")
+	}
 	if agentID == "" || channelID == "" {
-		fmt.Fprintln(os.Stderr, "solo: error: SOLO_AGENT_ID and SOLO_CHANNEL_ID must be set")
+		fmt.Fprintln(os.Stderr, "solo: error: SOLO_AGENT_ID and SOLO_CHANNEL_ID must be set (or use -c flag)")
 		doExit(exitUsage)
 	}
 	if toAgent == "" {
 		fmt.Fprintln(os.Stderr, "solo: error: --to @agent-name is required")
 		doExit(exitUsage)
+	}
+
+	// Resolve channel ID if given as a name.
+	if len(channelID) != 36 || strings.Count(channelID, "-") != 4 {
+		resolved, resolveErr := resolveChannelParam(baseURL, token, channelID)
+		if resolveErr != nil {
+			fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+			doExit(exitBusiness)
+		}
+		channelID = resolved
 	}
 
 	body := map[string]any{
@@ -922,6 +944,9 @@ func handleDelegateCreate(args []string, baseURL, token string) {
 	}
 	if message != "" {
 		body["message"] = message
+	}
+	if startIfInactive {
+		body["start_if_inactive"] = true
 	}
 	reqBody, _ := json.Marshal(body)
 	url := baseURL + "/api/v1/agent-delegations"
@@ -1004,6 +1029,23 @@ func handleDelegateReject(args []string, baseURL, token string) {
 	fmt.Println(string(respBody))
 }
 
+func handleDelegateComplete(args []string, baseURL, token string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "solo: error: delegation ID required")
+		doExit(exitUsage)
+	}
+	url := baseURL + "/api/v1/agent-delegations/" + args[0] + "/complete"
+	statusCode, respBody, err := doHTTP("POST", url, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: complete delegation: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, respBody)
+		doExit(exitBusiness)
+	}
+	fmt.Println(string(respBody))
+}
 
 func handleTaskBlock(args []string, baseURL, token string) {
 	var taskNum int
@@ -1080,6 +1122,179 @@ func handleTaskBlocked(args []string, baseURL, token string) {
 	fmt.Println(string(respBody))
 }
 
+
+// --- task split ---
+
+func handleTaskSplit(args []string, baseURL, token string) {
+	var channelID string
+	var number int
+	var titles string
+	fs := flag.NewFlagSet("task split", flag.ExitOnError)
+	fs.StringVar(&channelID, "c", "", "Channel ID or #name")
+	fs.StringVar(&channelID, "channel", "", "Channel ID or #name")
+	fs.IntVar(&number, "n", 0, "Parent task number")
+	fs.IntVar(&number, "number", 0, "Parent task number")
+	fs.StringVar(&titles, "titles", "", "Comma-separated subtask titles")
+	fs.Parse(args)
+
+	if channelID == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: -c <channel_id> is required")
+		doExit(exitUsage)
+	}
+	if number <= 0 {
+		fmt.Fprintln(os.Stderr, "solo: error: -n <number> must be a positive integer")
+		doExit(exitUsage)
+	}
+	if titles == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: --titles is required (comma-separated)")
+		doExit(exitUsage)
+	}
+
+	resolved, resolveErr := resolveChannelParam(baseURL, token, channelID)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+
+	// Fetch parent task by number to get its UUID
+	parentID, err := resolveTaskNumberToID(baseURL, token, resolved, number)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", err)
+		doExit(exitBusiness)
+	}
+
+	titleList := strings.Split(titles, ",")
+	success := 0
+	for _, t := range titleList {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		reqBody, _ := json.Marshal(map[string]string{
+			"title":          t,
+			"channel_id":     resolved,
+			"parent_task_id": parentID,
+		})
+		url := fmt.Sprintf("%s/api/v1/channels/%s/tasks", baseURL, resolved)
+		statusCode, body, err := doHTTP(http.MethodPost, url, token, reqBody)
+		if err != nil || statusCode >= 400 {
+			errMsg := extractErrorMessage(body)
+			fmt.Fprintf(os.Stderr, "solo: error creating subtask %q: %s\n", t, errMsg)
+		} else {
+			fmt.Printf("Created subtask: %s\n", t)
+			success++
+		}
+	}
+	if success == 0 {
+		doExit(exitBusiness)
+	}
+	doExit(exitOK)
+}
+
+// --- channel memory ---
+
+func handleChannelMemory(args []string, baseURL, token string) {
+	if len(args) < 1 {
+		// Default: read CHANNEL.md
+		handleChannelMemoryRead(args, baseURL, token)
+		return
+	}
+
+	switch args[0] {
+	case "set":
+		handleChannelMemorySet(args[1:], baseURL, token)
+	default:
+		// Treat as subcommand to read (e.g., "solo channel memory -c #general")
+		handleChannelMemoryRead(args, baseURL, token)
+	}
+}
+
+func handleChannelMemoryRead(args []string, baseURL, token string) {
+	var channelID string
+	fs := flag.NewFlagSet("channel memory", flag.ExitOnError)
+	fs.StringVar(&channelID, "c", "", "Channel ID or #name")
+	fs.StringVar(&channelID, "channel", "", "Channel ID or #name")
+	fs.Parse(args)
+
+	if channelID == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: -c <channel_id> is required")
+		doExit(exitUsage)
+	}
+
+	resolved, resolveErr := resolveChannelParam(baseURL, token, channelID)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+
+	url := fmt.Sprintf("%s/api/v1/channels/%s/memory/channel-md", baseURL, resolved)
+	statusCode, body, err := doHTTP(http.MethodGet, url, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+		doExit(exitBusiness)
+	}
+
+	// Parse and pretty-print the content
+	var resp struct {
+		Content string `json:"content"`
+	}
+	if json.Unmarshal(body, &resp) == nil {
+		fmt.Println(resp.Content)
+	} else {
+		fmt.Println(string(body))
+	}
+	doExit(exitOK)
+}
+
+func handleChannelMemorySet(args []string, baseURL, token string) {
+	var channelID, filePath string
+	fs := flag.NewFlagSet("channel memory set", flag.ExitOnError)
+	fs.StringVar(&channelID, "c", "", "Channel ID or #name")
+	fs.StringVar(&channelID, "channel", "", "Channel ID or #name")
+	fs.StringVar(&filePath, "f", "", "Path to markdown file to upload")
+	fs.StringVar(&filePath, "file", "", "Path to markdown file to upload")
+	fs.Parse(args)
+
+	if channelID == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: -c <channel_id> is required")
+		doExit(exitUsage)
+	}
+	if filePath == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: -f <file_path> is required")
+		doExit(exitUsage)
+	}
+
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: cannot read file %q: %v\n", filePath, err)
+		doExit(exitUsage)
+	}
+
+	resolved, resolveErr := resolveChannelParam(baseURL, token, channelID)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+
+	reqBody, _ := json.Marshal(map[string]string{"content": string(content)})
+	url := fmt.Sprintf("%s/api/v1/channels/%s/memory/channel-md", baseURL, resolved)
+	statusCode, body, err := doHTTP(http.MethodPost, url, token, reqBody)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+		doExit(exitBusiness)
+	}
+
+	fmt.Println("CHANNEL.md updated successfully.")
+	doExit(exitOK)
+}
 
 // HTTP helper
 // ---------------------------------------------------------------------------
@@ -1375,8 +1590,14 @@ func printUsage() {
   solo task update   -n <number> -c <channel_id> -s <status>
   solo task create   -c <channel_id> --title <title> [--description <desc>] [--priority <p0-p3>] [--parent <n>]
   solo task unclaim  -n <number> -c <channel_id>
+  solo task split    -n <number> -c <channel_id> --titles <title1,title2,...>
+  solo task block    -n <number> --on <number>
+  solo task unblock  -n <number> --on <number>
+  solo task blocked  -n <number>
   solo channel members -c <channel_id> [--output json]
   solo channel join  --target <#channel-name>
+  solo channel memory [set] -c <channel_id> [-f <file>]
+  solo agent delegate [--to <@agent>] [--task <n>] [--msg <message>]
   solo thread unfollow --target <#channel:shortid>
 
   --target formats: '#channel' | 'dm:@peer' | '#channel:shortid' | 'dm:@peer:shortid'

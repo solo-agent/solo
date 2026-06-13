@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1707,4 +1708,367 @@ func buildFileNode(filePath, basePath string) (workspaceNode, error) {
 	}
 
 	return node, nil
+}
+
+// ── Ticker: reminders + watchdog + knowledge injection ──────────────────────
+
+// startTicker runs the daemon's periodic scan loop every 30 seconds.
+func (h *daemonHandler) startTicker(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	slog.Info("daemon ticker started (reminders, watchdog)")
+
+	for {
+		select {
+		case <-ticker.C:
+			h.checkReminders(ctx)
+			h.checkWatchdog(ctx)
+		case <-ctx.Done():
+			slog.Info("daemon ticker stopped")
+			return
+		}
+	}
+}
+
+// checkReminders queries due reminders and delivers messages.
+func (h *daemonHandler) checkReminders(ctx context.Context) {
+	rows, err := h.pool.Query(ctx,
+		`SELECT id, agent_id, channel_id::text, task_id::text, reminder_type, message,
+		        is_recurring, COALESCE(recurring_rule, '')
+		 FROM reminders
+		 WHERE remind_at <= now() AND is_fired = false
+		 LIMIT 50`,
+	)
+	if err != nil {
+		slog.Warn("ticker: failed to query reminders", "error", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, agentID, reminderType, message string
+		var channelID, taskID *string
+		var isRecurring bool
+		var recurringRule string
+		if err := rows.Scan(&id, &agentID, &channelID, &taskID, &reminderType, &message,
+			&isRecurring, &recurringRule); err != nil {
+			slog.Warn("ticker: failed to scan reminder", "error", err)
+			continue
+		}
+
+		h.deliverReminderMessage(ctx, id, agentID, channelID, taskID, message)
+
+		if isRecurring && recurringRule != "" {
+			nextTime := computeNextCron(recurringRule)
+			_, uErr := h.pool.Exec(ctx,
+				`UPDATE reminders SET remind_at = $1, updated_at = now() WHERE id = $2`,
+				nextTime, id,
+			)
+			if uErr != nil {
+				slog.Warn("ticker: failed to reschedule recurring reminder", "id", id, "error", uErr)
+			}
+		} else {
+			_, uErr := h.pool.Exec(ctx,
+				`UPDATE reminders SET is_fired = true, fired_at = now(), updated_at = now() WHERE id = $1`, id,
+			)
+			if uErr != nil {
+				slog.Warn("ticker: failed to mark reminder fired", "id", id, "error", uErr)
+			}
+		}
+	}
+}
+
+// deliverReminderMessage sends a reminder to the agent's channel.
+func (h *daemonHandler) deliverReminderMessage(ctx context.Context, id, agentID string, channelID, taskID *string, message string) {
+	slog.Info("ticker: reminder fired", "reminder_id", id, "agent_id", agentID, "message", message)
+
+	var targetChannel string
+	if taskID != nil && *taskID != "" {
+		_ = h.pool.QueryRow(ctx,
+			`SELECT channel_id FROM tasks WHERE id = $1`, *taskID,
+		).Scan(&targetChannel)
+	} else if channelID != nil {
+		targetChannel = *channelID
+	}
+
+	if targetChannel != "" && h.serverURL != "" {
+		token, tokErr := h.getOrGenerateToken(ctx, agentID)
+		if tokErr != nil {
+			slog.Warn("ticker: failed to get agent token for reminder", "agent_id", agentID, "error", tokErr)
+			return
+		}
+
+		body, _ := json.Marshal(map[string]string{
+			"content":      fmt.Sprintf("Reminder: %s", message),
+			"content_type": "system",
+		})
+		url := h.serverURL + "/api/v1/channels/" + targetChannel + "/messages"
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		resp, rErr := h.httpClient.Do(req)
+		if rErr != nil {
+			slog.Warn("ticker: failed to send reminder", "channel_id", targetChannel, "error", rErr)
+			return
+		}
+		resp.Body.Close()
+	}
+}
+
+// checkWatchdog queries overdue task watchdogs and applies timeout actions.
+func (h *daemonHandler) checkWatchdog(ctx context.Context) {
+	rows, err := h.pool.Query(ctx,
+		`SELECT tw.task_id, tw.claimer_id, tw.timeout_action, tw.escalate_to::text, tw.deadline
+		 FROM task_watchdog tw
+		 JOIN tasks t ON tw.task_id = t.id
+		 WHERE tw.deadline < now() AND t.status NOT IN ('done', 'closed')`,
+	)
+	if err != nil {
+		slog.Warn("ticker: failed to query watchdog", "error", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var taskID, claimerID, timeoutAction string
+		var escalateTo *string
+		var deadline time.Time
+		if err := rows.Scan(&taskID, &claimerID, &timeoutAction, &escalateTo, &deadline); err != nil {
+			slog.Warn("ticker: failed to scan watchdog", "error", err)
+			continue
+		}
+
+		switch timeoutAction {
+		case "remind":
+			slog.Info("ticker: reminding overdue claimer", "task_id", taskID, "claimer_id", claimerID)
+			msg := fmt.Sprintf("Task %s is overdue (deadline was %s)", taskID, deadline.Format(time.RFC3339))
+			h.deliverReminderMessage(ctx, taskID, claimerID, nil, &taskID, msg)
+			newDeadline := time.Now().Add(24 * time.Hour)
+			h.pool.Exec(ctx, `UPDATE task_watchdog SET deadline = $1 WHERE task_id = $2`, newDeadline, taskID)
+
+		case "escalate":
+			slog.Info("ticker: escalating overdue task", "task_id", taskID, "claimer_id", claimerID)
+			if escalateTo != nil && *escalateTo != "" {
+				msg := fmt.Sprintf("Escalation: Task %s assigned to agent %s is overdue", taskID, claimerID)
+				h.deliverReminderMessage(ctx, taskID, *escalateTo, nil, &taskID, msg)
+			}
+			h.deliverReminderMessage(ctx, taskID, claimerID, nil, &taskID, "Your task has been escalated due to timeout")
+			h.pool.Exec(ctx,
+				`UPDATE task_watchdog SET timeout_action = 'unclaim', deadline = $1 WHERE task_id = $2`,
+				time.Now().Add(12*time.Hour), taskID,
+			)
+
+		case "unclaim":
+			slog.Info("ticker: auto-unclaiming overdue task", "task_id", taskID, "claimer_id", claimerID)
+			h.pool.Exec(ctx,
+				`UPDATE tasks SET claimer_id = NULL, status = 'todo', updated_at = now() WHERE id = $1`, taskID,
+			)
+			h.pool.Exec(ctx, `DELETE FROM task_watchdog WHERE task_id = $1`, taskID)
+		}
+	}
+}
+
+// InjectRelevantKnowledge searches the knowledge base for entries relevant to
+// the given task description and returns formatted knowledge context.
+func (h *daemonHandler) InjectRelevantKnowledge(ctx context.Context, channelID, taskDescription string) string {
+	apiKey := os.Getenv("EMBEDDING_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	}
+	if apiKey == "" {
+		return ""
+	}
+
+	baseURL := os.Getenv("EMBEDDING_BASE_URL")
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
+	}
+	model := os.Getenv("EMBEDDING_MODEL")
+	if model == "" {
+		model = "text-embedding-3-small"
+	}
+
+	reqBody := map[string]interface{}{"model": model, "input": taskDescription}
+	body, _ := json.Marshal(reqBody)
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/embeddings", bytes.NewReader(body))
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		slog.Warn("knowledge injection: embedding API failed", "error", err)
+		return ""
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Data []struct {
+			Embedding []float32 `json:"embedding"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || len(result.Data) == 0 {
+		return ""
+	}
+
+	embedding := result.Data[0].Embedding
+	vecStr := vectorToString(embedding)
+
+	rows, err := h.pool.Query(ctx,
+		`SELECT title, content, 1 - (embedding <=> $1::vector) AS sim
+		 FROM knowledge
+		 WHERE channel_id = $2 AND embedding IS NOT NULL
+		 ORDER BY embedding <=> $1::vector
+		 LIMIT 3`,
+		vecStr, channelID,
+	)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+
+	var sb strings.Builder
+	sb.WriteString("\n## Relevant Knowledge from Channel\n\n")
+	hasResults := false
+	for rows.Next() {
+		var title, content string
+		var sim float64
+		if err := rows.Scan(&title, &content, &sim); err != nil {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("### %s (relevance: %.0f%%)\n%s\n\n", title, sim*100, content))
+		hasResults = true
+	}
+	if !hasResults {
+		return ""
+	}
+	return sb.String()
+}
+
+// computeNextCron calculates the next fire time from a 5-field cron expression.
+func computeNextCron(cronExpr string) time.Time {
+	now := time.Now()
+	fields := strings.Fields(cronExpr)
+	if len(fields) < 2 {
+		return now.Add(24 * time.Hour)
+	}
+
+	hour := 0
+	if h, err := strconv.Atoi(fields[1]); err == nil {
+		hour = h
+	}
+	minute := 0
+	if m, err := strconv.Atoi(fields[0]); err == nil {
+		minute = m
+	}
+
+	next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
+	if !next.After(now) {
+		next = next.Add(24 * time.Hour)
+	}
+	return next
+}
+
+// vectorToString converts a pgvector embedding ([]float32) to a string
+// representation for use in SQL queries. Stub until Step 4 is fully implemented.
+func vectorToString(v []float32) string {
+	if len(v) == 0 {
+		return "[]"
+	}
+	var b strings.Builder
+	b.WriteString("[")
+	for i, f := range v {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(fmt.Sprintf("%f", f))
+	}
+	b.WriteString("]")
+	return b.String()
+}
+
+// ── Channel Memory & Delegation Helpers (Step 2) ──────────────────────────────
+
+// injectChannelContext appends channel memory and pending delegations to the
+// system prompt. Called during task processing to give the agent full channel
+// context including shared CHANNEL.md and any outstanding delegation requests.
+func (h *daemonHandler) injectChannelContext(systemPrompt *string, agentID, channelID string) {
+	if channelID == "" {
+		return
+	}
+
+	// Load channel shared memory (CHANNEL.md).
+	channelMemory := h.loadChannelMemory(channelID)
+	if channelMemory != "" {
+		*systemPrompt += channelMemory
+	}
+
+	// Inject pending delegations.
+	pendingDelegations := h.injectPendingDelegations(context.Background(), agentID, channelID)
+	if pendingDelegations != "" {
+		*systemPrompt += "\n\n## Pending Delegations\n\n" + pendingDelegations
+	}
+}
+
+// loadChannelMemory reads CHANNEL.md for the given channel from the shared
+// memory directory (~/.solo/channels/<id>/memory/CHANNEL.md).
+func (h *daemonHandler) loadChannelMemory(channelID string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	path := filepath.Join(home, ".solo", "channels", channelID, "memory", "CHANNEL.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	content := strings.TrimSpace(string(data))
+	if content == "" {
+		return ""
+	}
+	return fmt.Sprintf("\n## Channel Shared Memory\n\n%s\n", content)
+}
+
+// injectPendingDelegations queries for pending delegations addressed to the
+// given agent in the given channel and returns them as a formatted string.
+// Delegations in "queued" status are transitioned to "delivered".
+func (h *daemonHandler) injectPendingDelegations(ctx context.Context, agentID, channelID string) string {
+	rows, err := h.pool.Query(ctx, `
+		SELECT d.id, a.name, d.message, d.task_id
+		FROM agent_delegations d
+		JOIN agents a ON d.from_agent_id = a.id
+		WHERE d.to_agent_id = $1 AND d.channel_id = $2 AND d.status IN ('queued', 'delivered')
+		ORDER BY d.created_at ASC
+	`, agentID, channelID)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+
+	var sb strings.Builder
+	for rows.Next() {
+		var id, fromName, msg, taskID string
+		if err := rows.Scan(&id, &fromName, &msg, &taskID); err != nil {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf(
+			"[DELEGATION %s] From @%s: %s",
+			id[:8], fromName, msg,
+		))
+		if taskID != "" {
+			sb.WriteString(fmt.Sprintf(" (task: %s)", taskID))
+		}
+		sb.WriteString("\n")
+
+		// Mark as delivered.
+		_, _ = h.pool.Exec(ctx,
+			`UPDATE agent_delegations SET status = 'delivered', updated_at = now() WHERE id = $1`,
+			id,
+		)
+	}
+	return sb.String()
 }

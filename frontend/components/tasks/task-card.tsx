@@ -8,7 +8,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { Calendar, User, ChevronRight } from 'lucide-react';
+import { Calendar, User, ChevronRight, GitBranch, Lock, AlertTriangle } from 'lucide-react';
 import type { Task, TaskStatus, TaskPriority } from '@/lib/types';
 import { t } from '@/lib/i18n';
 
@@ -56,15 +56,22 @@ interface TaskCardProps {
   parentTaskNumber?: number;
   /** Called when the parent badge is clicked */
   onParentClick?: (taskId: string) => void;
+  /** Whether the task has an isolated Git worktree (Step 3) */
+  isIsolated?: boolean;
+  /** Worktree path for display (Step 3) */
+  worktreePath?: string;
 }
 
 // ---- Component ----
 
-export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, onParentClick }: TaskCardProps) {
+export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, onParentClick, isIsolated, worktreePath }: TaskCardProps) {
   const statusConf = STATUS_CONFIG[task.status] || STATUS_CONFIG.todo;
   const priorityConf = PRIORITY_CONFIG[task.priority] || PRIORITY_CONFIG.normal;
   const hasSubtasks = (task.subtask_count ?? 0) > 0;
   const isChild = !!task.parent_task_id;
+  const isBlocked = (task.blocked_by_count ?? 0) > 0;
+  const isBlocking = (task.blocking_count ?? 0) > 0;
+  const blockerCount = task.blocked_by_count ?? 0;
 
   return (
     <div
@@ -85,6 +92,7 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
       className={cn(
         'card-brutal-heavy w-full cursor-pointer text-left',
         statusConf.shadowClass,
+        isBlocked && 'opacity-60 hover:opacity-70',
       )}
     >
       <div className="p-4">
@@ -108,6 +116,55 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
           <p className="mt-1 line-clamp-2 font-body text-sm text-muted-foreground">
             {task.description}
           </p>
+        )}
+
+        {/* Isolated workspace indicator (Step 3) */}
+        {isIsolated && (
+          <div className="mt-1.5">
+            <span
+              className={cn(
+                'inline-flex items-center gap-1 px-1.5 py-0.5',
+                'font-heading text-[10px] font-bold uppercase tracking-wider',
+                'border-2 border-black bg-brutal-warning-light text-black',
+              )}
+              title={worktreePath ? `${t('taskWorktreePath')}: ${worktreePath}` : undefined}
+            >
+              <GitBranch className="h-3 w-3" />
+              {t('taskIsolatedWorkspace')}
+            </span>
+          </div>
+        )}
+
+        {/* Step 2: Blocked dependency badge */}
+        {isBlocked && (
+          <div className="mt-1.5">
+            <span
+              className={cn(
+                'inline-flex items-center gap-1 px-1.5 py-0.5',
+                'font-heading text-[10px] font-bold uppercase tracking-wider',
+                'border-2 border-black bg-brutal-danger-light text-brutal-danger',
+              )}
+            >
+              <Lock className="h-3 w-3" />
+              {t('taskBlockedByCount', { n: blockerCount })}
+            </span>
+          </div>
+        )}
+
+        {/* Step 2: Blocking indicator (this task blocks others) */}
+        {isBlocking && (
+          <div className="mt-1.5">
+            <span
+              className={cn(
+                'inline-flex items-center gap-1 px-1.5 py-0.5',
+                'font-heading text-[10px] font-bold uppercase tracking-wider',
+                'border-2 border-black bg-brutal-warning-light text-black',
+              )}
+            >
+              <AlertTriangle className="h-3 w-3" />
+              {t('taskBlockingBadge', { n: task.blocking_count ?? 0 })}
+            </span>
+          </div>
         )}
 
         {/* Parent badge (child task) */}

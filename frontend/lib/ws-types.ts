@@ -80,6 +80,15 @@ export type WSServerEvent =
   | { type: 'task.created'; id: string; task_number: number; channel_id: string; creator_id: string; title: string; description?: string; status: string; claimer_id?: string; priority?: string; due_date?: string; message_id?: string; parent_task_id?: string; subtask_count?: number; done_subtask_count?: number; created_at: string; updated_at: string }
   | { type: 'task.updated'; id: string; task_number: number; channel_id: string; title: string; description?: string; status: string; claimer_id?: string; claimer_name?: string; priority?: string; due_date?: string; message_id?: string; parent_task_id?: string; subtask_count?: number; done_subtask_count?: number; updated_at: string }
   | { type: 'task.deleted'; id: string; channel_id: string; task_number: number }
+  // ---- Task dependency events (Step 2) ----
+  | { type: 'task.blocked'; blocked_task_id: string; blocker_task_id: string; channel_id: string }
+  | { type: 'task.unblocked'; blocked_task_id: string; channel_id: string }
+  // ---- Relationship events (Step 2 / Step 5) ----
+  | { type: 'relationship_created'; id: string; from_agent_id: string; to_agent_id: string; rel_type: string; channel_id?: string }
+  | { type: 'relationship_deleted'; id: string; from_agent_id: string; to_agent_id: string }
+  | { type: 'relationship_updated'; id: string; from_agent_id: string; to_agent_id: string; rel_type: string; channel_id?: string }
+  // ---- Channel memory events (Step 2) ----
+  | { type: 'memory_updated'; channel_id: string }
   // ---- DM 事件 ----
   | { type: 'dm.message.new'; id: string; dm_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; created_at: string; attachments?: Attachment[]; thread_id?: string }
   | { type: 'dm.updated'; dm_id: string; last_message?: { content: string; sender_id: string; sender_name: string; created_at: string }; last_reply_at?: string; unread_count: number }

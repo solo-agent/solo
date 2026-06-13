@@ -170,6 +170,12 @@ export interface Task {
   subtask_count?: number;
   /** 已完成的子任务数 (父任务，后端聚合) */
   done_subtask_count?: number;
+  /** 阻塞此任务的 task_id 数组 (Step 2 DAG) */
+  blocker_ids?: string[];
+  /** 阻塞此任务的未完成任务数 (后端子查询聚合) */
+  blocked_by_count?: number;
+  /** 此任务阻塞的其他任务数 (用于在 blocker 卡片上显示) */
+  blocking_count?: number;
   due_date?: string;
   created_at: string;
   updated_at: string;
@@ -383,3 +389,181 @@ export interface CreateLucyResponse {
 }
 
 export type WizardStep = 'computer' | 'runtime' | 'create' | 'done';
+
+// ---- Agent Relationship types (Step 2) ----
+
+export type RelationshipType = 'reports_to' | 'delegates_to' | 'collaborates_with' | 'escalates_to';
+
+export interface AgentRelationship {
+  id: string;
+  from_agent_id: string;
+  from_agent_name?: string;
+  from_agent_active?: boolean;
+  to_agent_id: string;
+  to_agent_name?: string;
+  to_agent_active?: boolean;
+  rel_type: RelationshipType;
+  channel_id?: string;
+  channel_name?: string;
+  weight?: number;
+  created_at?: string;
+}
+
+export interface CreateRelationshipInput {
+  from_agent_id: string;
+  to_agent_id: string;
+  rel_type: RelationshipType;
+  channel_id?: string;
+  weight?: number;
+}
+
+// ---- Channel Memory types (Step 2) ----
+
+export interface ChannelMemory {
+  content: string;
+  updated_at?: string;
+}
+
+export interface ChannelDecision {
+  id?: string;
+  content: string;
+  created_at?: string;
+  created_by?: string;
+  created_by_name?: string;
+}
+
+export interface ChannelDecisionsResponse {
+  decisions: ChannelDecision[];
+}
+
+// ---- Channel Binding types (Step 3) ----
+
+export interface ChannelBinding {
+  channel_id: string;
+  repo_url: string;
+  repo_branch: string;
+  bind_path: string;
+  bound_by: string;
+  bound_at: string;
+}
+
+// ---- Knowledge types (Step 4) ----
+
+export interface KnowledgeEntry {
+  id: string;
+  channel_id: string;
+  channel_name?: string;
+  author_agent_id: string;
+  author_name?: string;
+  title: string;
+  content: string;
+  content_preview?: string;
+  tags: string[];
+  source: string;
+  source_ref?: string;
+  view_count: number;
+  created_at: string;
+  updated_at: string;
+  similarity?: number;
+  match_type?: 'semantic' | 'fulltext';
+}
+
+export interface KnowledgeSearchResponse {
+  results: KnowledgeEntry[];
+  total: number;
+}
+
+export interface CreateKnowledgeInput {
+  channel_id: string;
+  title: string;
+  content: string;
+  tags?: string[];
+  source?: string;
+}
+
+// ---- Reminder types (Step 6) ----
+
+export type ReminderType = 'task_deadline' | 'stale_task' | 'periodic_checkin' | 'custom';
+
+export interface Reminder {
+  id: string;
+  agent_id: string;
+  agent_name?: string;
+  channel_id?: string;
+  channel_name?: string;
+  task_id?: string;
+  reminder_type: ReminderType;
+  remind_at: string;
+  message: string;
+  is_recurring: boolean;
+  recurring_rule?: string;
+  is_fired: boolean;
+  fired_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateReminderInput {
+  agent_id: string;
+  channel_id?: string;
+  task_id?: string;
+  reminder_type: ReminderType;
+  remind_at?: string;
+  message: string;
+  is_recurring: boolean;
+  recurring_rule?: string;
+}
+
+// ---- Watchdog types (Step 6) ----
+
+export type WatchdogAction = 'remind' | 'escalate' | 'unclaim';
+
+export interface WatchdogItem {
+  task_id: string;
+  task_number?: number;
+  task_title?: string;
+  channel_id?: string;
+  channel_name?: string;
+  claimer_id: string;
+  claimer_name?: string;
+  claimed_at: string;
+  deadline: string;
+  last_activity: string;
+  timeout_action: WatchdogAction;
+  escalation_level: 'green' | 'yellow' | 'red';
+  hours_since_check?: number;
+  escalate_to?: string;
+  escalate_to_name?: string;
+}
+
+// ---- Swarm types (Step 6) ----
+
+export interface SwarmStatus {
+  parent_task_id: string;
+  parent_task_number?: number;
+  parent_title: string;
+  channel_id: string;
+  total_subtasks: number;
+  completed_subtasks: number;
+  subtasks: SwarmSubtaskStatus[];
+}
+
+export interface SwarmSubtaskStatus {
+  task_id: string;
+  task_number: number;
+  title: string;
+  status: TaskStatus;
+  claimer_name?: string;
+  claimer_id?: string;
+  is_blocked: boolean;
+  blocking_task_numbers?: number[];
+}
+
+// ---- Task isolation types (Step 3) ----
+
+export interface TaskIsolation {
+  task_id: string;
+  worktree_path: string;
+  branch_name: string;
+  isolated_at: string;
+}

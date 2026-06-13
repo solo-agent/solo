@@ -76,24 +76,26 @@ var (
 
 // Task represents a task in a channel.
 type Task struct {
-	ID             string     `json:"id"`
-	TaskNumber     int        `json:"task_number"`
-	ChannelID      string     `json:"channel_id"`
-	CreatorID      string     `json:"creator_id"`
-	CreatorName    string     `json:"creator_name,omitempty"`
-	Title          string     `json:"title"`
-	Description    string     `json:"description,omitempty"`
-	Status         string     `json:"status"`
-	ClaimerID      string     `json:"claimer_id,omitempty"`
-	ClaimerName    string     `json:"claimer_name,omitempty"`
-	Priority       string     `json:"priority"`
-	DueDate        *time.Time `json:"due_date,omitempty"`
-	MessageID      string     `json:"message_id,omitempty"`
-	ParentTaskID   *string    `json:"parent_task_id,omitempty"`
-	SubtaskCount   int        `json:"subtask_count,omitempty"`
-	DoneSubtaskCount int      `json:"done_subtask_count,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID               string     `json:"id"`
+	TaskNumber       int        `json:"task_number"`
+	ChannelID        string     `json:"channel_id"`
+	CreatorID        string     `json:"creator_id"`
+	CreatorName      string     `json:"creator_name,omitempty"`
+	Title            string     `json:"title"`
+	Description      string     `json:"description,omitempty"`
+	Status           string     `json:"status"`
+	ClaimerID        string     `json:"claimer_id,omitempty"`
+	ClaimerName      string     `json:"claimer_name,omitempty"`
+	Priority         string     `json:"priority"`
+	DueDate          *time.Time `json:"due_date,omitempty"`
+	MessageID        string     `json:"message_id,omitempty"`
+	ParentTaskID     *string    `json:"parent_task_id,omitempty"`
+	SubtaskCount     int        `json:"subtask_count,omitempty"`
+	DoneSubtaskCount int        `json:"done_subtask_count,omitempty"`
+	BlockerIDs       []string   `json:"blocker_ids,omitempty"`
+	BlockedByCount   int        `json:"blocked_by_count,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // TaskCreateRequest contains the fields needed to create a task.
@@ -104,6 +106,7 @@ type TaskCreateRequest struct {
 	DueDate       *time.Time `json:"due_date,omitempty"`
 	MessageID     string     `json:"message_id,omitempty"`
 	ParentTaskID  string     `json:"parent_task_id,omitempty"`
+	DependsOn     []string   `json:"depends_on,omitempty"`
 }
 
 // TaskUpdateRequest contains the fields that can be updated on a task.
@@ -243,6 +246,16 @@ func (s *TaskService) CreateTask(ctx context.Context, channelID, creatorID strin
 		ParentTaskID: pti,
 		CreatedAt:    now,
 		UpdatedAt:    now,
+	}
+
+	// Create dependency relationships if DependsOn was specified.
+	if len(req.DependsOn) > 0 {
+		for _, blockerID := range req.DependsOn {
+			_, depErr := s.AddDependency(ctx, blockerID, id)
+			if depErr != nil {
+				slog.Warn("failed to create dependency", "blocked", id, "blocker", blockerID, "error", depErr)
+			}
+		}
 	}
 
 	// Resolve creator name for WS broadcast
@@ -467,12 +480,16 @@ func (s *TaskService) GetTask(ctx context.Context, channelID, taskID, userID str
 		 t.parent_task_id,
 		 (SELECT COUNT(*) FROM tasks WHERE parent_task_id = t.id) AS subtask_count,
 		 (SELECT COUNT(*) FROM tasks WHERE parent_task_id = t.id AND status = 'done') AS done_subtask_count,
+		 (SELECT COUNT(*) FROM task_dependencies td
+		    JOIN tasks t2 ON td.blocker_task_id = t2.id
+		    WHERE td.blocked_task_id = t.id AND t2.status NOT IN ('done','closed')
+		 ) AS blocked_by_count,
 		 t.created_at, t.updated_at
 		 FROM tasks t LEFT JOIN users u_creator ON t.creator_id = u_creator.id LEFT JOIN agents a_creator ON t.creator_id = a_creator.id LEFT JOIN users u_claimer ON t.claimer_id = u_claimer.id LEFT JOIN agents a_claimer ON t.claimer_id = a_claimer.id WHERE t.id = $1 AND t.channel_id = $2`,
 		taskID, channelID,
 	).Scan(&task.ID, &task.TaskNumber, &task.ChannelID, &task.CreatorID, &task.CreatorName, &task.Title, &description,
 		&task.Status, &task.ClaimerID, &task.ClaimerName, &task.Priority, &dueDate, &task.MessageID,
-		&task.ParentTaskID, &task.SubtaskCount, &task.DoneSubtaskCount, &task.CreatedAt, &task.UpdatedAt)
+		&task.ParentTaskID, &task.SubtaskCount, &task.DoneSubtaskCount, &task.BlockedByCount, &task.CreatedAt, &task.UpdatedAt)
 
 	if err != nil {
 		// Try by task_number
