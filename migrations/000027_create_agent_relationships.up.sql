@@ -26,4 +26,4 @@ CREATE UNIQUE INDEX idx_collab_bidirectional
 
 CREATE INDEX idx_rel_from ON agent_relationships(from_agent_id);
 CREATE INDEX idx_rel_to ON agent_relationships(to_agent_id);
-CREATE INDEX idx_rel_channel ON agent_relationships(channel_id) WHERE channel_id IS NOT NULL;
+CREATE INDEX idx_rel_channel_id ON agent_relationships(channel_id) WHERE channel_id IS NOT NULL;

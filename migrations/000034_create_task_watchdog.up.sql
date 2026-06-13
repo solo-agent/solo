@@ -10,4 +10,4 @@ CREATE TABLE task_watchdog (
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_watchdog_deadline ON task_watchdog(deadline) WHERE deadline < now();
+CREATE INDEX idx_watchdog_deadline ON task_watchdog(deadline);
