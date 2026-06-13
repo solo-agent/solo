@@ -101,7 +101,7 @@ func (h *KnowledgeHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Create handles POST /api/v1/knowledge
 func (h *KnowledgeHandler) Create(w http.ResponseWriter, r *http.Request) {
-	userID, ok := requireUserID(r)
+	_, ok := requireUserID(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
 		return
@@ -124,8 +124,12 @@ func (h *KnowledgeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "channel_id is required")
 		return
 	}
+	if req.AuthorAgentID == "" {
+		writeError(w, http.StatusBadRequest, "author_agent_id is required")
+		return
+	}
 
-	entry, err := h.svc.Create(r.Context(), userID, req)
+	entry, err := h.svc.Create(r.Context(), req.AuthorAgentID, req)
 	if err != nil {
 		slog.Error("failed to create knowledge entry", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to create knowledge entry")

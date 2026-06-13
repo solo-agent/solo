@@ -42,7 +42,7 @@ export function ChannelBinding({ channelId, channelName, isAdmin = false }: Chan
     setIsLoading(true);
     setError(null);
     try {
-      const data = await apiClient.get<ChannelBindingType>(`/api/v1/channels/${channelId}/bind`);
+      const data = await apiClient.get<ChannelBindingType>(`/api/v1/channels/${channelId}/binding`);
       setBinding(data);
     } catch (err: unknown) {
       const apiErr = err as { status?: number };
@@ -65,7 +65,7 @@ export function ChannelBinding({ channelId, channelName, isAdmin = false }: Chan
     setIsSubmitting(true);
     try {
       const data = await apiClient.post<ChannelBindingType>(
-        `/api/v1/channels/${channelId}/bind`,
+        `/api/v1/channels/${channelId}/bind-project`,
         { repo_url: repoUrl.trim(), repo_branch: repoBranch || 'main' },
       );
       setBinding(data);
@@ -83,7 +83,7 @@ export function ChannelBinding({ channelId, channelName, isAdmin = false }: Chan
   const handleUnbind = async () => {
     setIsSubmitting(true);
     try {
-      await apiClient.delete(`/api/v1/channels/${channelId}/bind`);
+      await apiClient.delete(`/api/v1/channels/${channelId}/bind-project`);
       setBinding(null);
       setIsUnbindOpen(false);
       showToast(t('channelBindingUnbind'), 'info');

@@ -116,10 +116,12 @@ export function CreateRelationshipModal({
     label: a.name,
   }));
 
-  const channelOptions: SelectOption[] = [
-    { value: '', label: '-- No channel (global) --' },
-    ...channels.map((c) => ({ value: c.id, label: `#${c.name}` })),
-  ];
+  const channelOptions: SelectOption[] = needsChannel
+    ? channels.map((c) => ({ value: c.id, label: `#${c.name}` }))
+    : [
+        { value: '', label: '-- No channel (global) --' },
+        ...channels.map((c) => ({ value: c.id, label: `#${c.name}` })),
+      ];
 
   const canSubmit =
     fromAgentId &&
@@ -127,7 +129,7 @@ export function CreateRelationshipModal({
     fromAgentId !== toAgentId &&
     !isSubmitting &&
     !cycleWarning &&
-    (needsChannel ? true : true); // Channel is optional even for channel-scoped types
+    (needsChannel ? !!channelId : true);
 
   const handleSubmit = async () => {
     if (!canSubmit) return;

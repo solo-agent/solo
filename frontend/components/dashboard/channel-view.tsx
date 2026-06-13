@@ -7,7 +7,7 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import {
   Users, Loader2, ClipboardList, MessageSquare, Eye, Plus, BookOpen,
-  GitBranch, Bell, Shield,
+  GitBranch, Bell, Shield, FileText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
@@ -33,6 +33,7 @@ import { WizardCard } from '@/components/onboarding/wizard-card';
 import { ChannelBinding } from '@/components/channel-binding';
 import { ReminderManager } from '@/components/reminder-manager';
 import { WatchdogPanel } from '@/components/watchdog-panel';
+import { ChannelMemoryPanel } from '@/components/channel-memory-panel';
 import { t } from '@/lib/i18n';
 import type { Channel, Message, Task, TaskStatus } from '@/lib/types';
 
@@ -155,6 +156,7 @@ export function ChannelView({
   const [isChannelBindingOpen, setIsChannelBindingOpen] = useState(false);
   const [isReminderOpen, setIsReminderOpen] = useState(false);
   const [isWatchdogOpen, setIsWatchdogOpen] = useState(false);
+  const [isChannelMemoryOpen, setIsChannelMemoryOpen] = useState(false);
 
   const {
     tasks: channelTasks,
@@ -486,6 +488,19 @@ export function ChannelView({
             >
               <BookOpen className="h-4 w-4" />
             </button>
+            {/* Channel Memory button */}
+            <button
+              type="button"
+              onClick={() => setIsChannelMemoryOpen(true)}
+              className={cn(
+                'flex h-8 w-8 items-center justify-center border-2 border-black shadow-brutal-sm transition-colors',
+                'bg-white hover:bg-brutal-cream',
+              )}
+              aria-label={t('channelMemory')}
+              title={t('channelMemory')}
+            >
+              <FileText className="h-4 w-4" />
+            </button>
             {/* Channel Binding button */}
             <button
               type="button"
@@ -799,6 +814,26 @@ export function ChannelView({
         <div className="max-h-[60vh] overflow-y-auto">
           <WatchdogPanel
             channelId={channel.id}
+          />
+        </div>
+      </Dialog>
+
+      {/* Channel Memory Panel Dialog */}
+      <Dialog open={isChannelMemoryOpen} onOpenChange={setIsChannelMemoryOpen} width="md">
+        <DialogHeader>
+          <DialogTitle>
+            <FileText className="inline h-4 w-4 mr-1.5 -mt-0.5" />
+            {t('channelMemory')}
+            <span className="ml-2 font-mono text-sm font-normal text-muted-foreground">
+              #{channel.name}
+            </span>
+          </DialogTitle>
+          <DialogCloseButton onClick={() => setIsChannelMemoryOpen(false)} />
+        </DialogHeader>
+        <div className="max-h-[60vh] overflow-y-auto">
+          <ChannelMemoryPanel
+            channelId={channel.id}
+            expanded
           />
         </div>
       </Dialog>

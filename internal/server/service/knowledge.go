@@ -38,11 +38,12 @@ type KnowledgeEntry struct {
 
 // CreateKnowledgeRequest is the payload for creating a knowledge entry.
 type CreateKnowledgeRequest struct {
-	ChannelID string   `json:"channel_id"`
-	Title     string   `json:"title"`
-	Content   string   `json:"content"`
-	Tags      []string `json:"tags,omitempty"`
-	Source    string   `json:"source,omitempty"`
+	ChannelID     string   `json:"channel_id"`
+	AuthorAgentID string   `json:"author_agent_id"`
+	Title         string   `json:"title"`
+	Content       string   `json:"content"`
+	Tags          []string `json:"tags,omitempty"`
+	Source        string   `json:"source,omitempty"`
 }
 
 // UpdateKnowledgeRequest is the payload for updating a knowledge entry.
