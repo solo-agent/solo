@@ -18,6 +18,7 @@ import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Decoration } from '@/components/ui/decoration';
 import { BrutalSeparator } from '@/components/ui/brutal-separator';
 import { useComputers } from '@/lib/hooks/use-computers';
+import { useComputerForAgent } from '@/lib/hooks/use-computer-for-agent';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 import type { Agent } from '@/lib/types';
@@ -220,7 +221,13 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
   // v3.3: reverse-lookup the computer that owns this agent so the META
   // block can show "Connected Computer: <name>".
   const { computers } = useComputers();
-  const connectedComputer = computers.find((c) => c.agent_ids?.includes(agentId));
+  // v3.3: reverse-lookup the computer that owns this agent. Two strategies
+  // layered: the computers list already carries agent_ids (fast path), and
+  // a dedicated /computers/{id}/agents probe (covers lists where the
+  // backend hasn't populated agent_ids yet).
+  const fastPath = computers.find((c) => c.agent_ids?.includes(agentId)) ?? null;
+  const { computer: reverseComputer } = useComputerForAgent(fastPath ? null : agentId);
+  const connectedComputer = fastPath ?? reverseComputer;
 
   const loadAgent = useCallback(async () => {
     setIsLoading(true);
@@ -407,12 +414,22 @@ export function AgentProfileTab({ agentId }: AgentProfileTabProps) {
             {connectedComputer ? (
               <Link
                 href="/computers"
-                className="font-mono text-xs text-foreground underline decoration-dotted underline-offset-2 hover:text-brutal-primary transition-colors"
+                className="flex items-center gap-1.5 font-mono text-xs text-foreground underline decoration-dotted underline-offset-2 hover:text-brutal-primary transition-colors"
               >
+                <span
+                  className="inline-block h-2 w-2 flex-shrink-0 border border-black bg-brutal-success"
+                  aria-label="connected"
+                />
                 {connectedComputer.name}
               </Link>
             ) : (
-              <span className="font-mono text-xs italic text-muted-foreground">Not connected</span>
+              <span className="flex items-center gap-1.5 font-mono text-xs italic text-muted-foreground">
+                <span
+                  className="inline-block h-2 w-2 flex-shrink-0 border border-black bg-brutal-muted"
+                  aria-label="not connected"
+                />
+                Not connected
+              </span>
             )}
           </div>
         </div>
