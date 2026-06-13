@@ -12,6 +12,7 @@ import { BookOpen, Loader2, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 import { KnowledgeSearch } from './knowledge-search';
+import { KnowledgeCreate } from './knowledge-create';
 import { Button } from '@/components/ui/button';
 import { apiClient } from '@/lib/api-client';
 import type { KnowledgeEntry } from '@/lib/types';
@@ -22,9 +23,11 @@ interface KnowledgePanelProps {
   onEntryClick?: (entry: KnowledgeEntry) => void;
   /** Compact mode for sidebar usage */
   compact?: boolean;
+  /** Available channels for create form (optional) */
+  channels?: { value: string; label: string }[];
 }
 
-export function KnowledgePanel({ channelId, onEntryClick, compact }: KnowledgePanelProps) {
+export function KnowledgePanel({ channelId, onEntryClick, compact, channels = [] }: KnowledgePanelProps) {
   const [recent, setRecent] = useState<KnowledgeEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +87,11 @@ export function KnowledgePanel({ channelId, onEntryClick, compact }: KnowledgePa
           <BookOpen className="inline h-3.5 w-3.5 mr-1 -mt-0.5" />
           {t('knowledgeChannelPanelTitle')}
         </h3>
+        <KnowledgeCreate
+          channelId={channelId}
+          channels={channels}
+          onCreated={() => fetchRecent()}
+        />
       </div>
 
       {/* Quick search toggle */}

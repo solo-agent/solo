@@ -754,6 +754,7 @@ export function ChannelView({
         <div className="max-h-[60vh] overflow-y-auto">
           <KnowledgePanel
             channelId={channel.id}
+            channels={[{ value: channel.id, label: `#${channel.name}` }]}
             compact
           />
         </div>

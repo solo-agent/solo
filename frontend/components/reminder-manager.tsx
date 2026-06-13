@@ -34,12 +34,14 @@ interface ReminderManagerProps {
   channels?: SelectOption[];
 }
 
-const TYPE_OPTIONS: SelectOption[] = [
-  { value: 'custom', label: 'Custom' },
-  { value: 'periodic_checkin', label: 'Periodic Check-in' },
-  { value: 'task_deadline', label: 'Task Deadline' },
-  { value: 'stale_task', label: 'Stale Task' },
-];
+function getTypeOptions(): SelectOption[] {
+  return [
+    { value: 'custom', label: t('reminderTypeCustom') },
+    { value: 'periodic_checkin', label: t('reminderTypePeriodicCheckin') },
+    { value: 'task_deadline', label: t('reminderTypeTaskDeadline') },
+    { value: 'stale_task', label: t('reminderTypeStaleTask') },
+  ];
+}
 
 const TYPE_ICON: Record<ReminderType, React.ReactNode> = {
   custom: <Bell className="h-3 w-3" />,
@@ -368,7 +370,7 @@ export function ReminderManager({ agentId, channelId, agents = [], channels = []
               {t('reminderType')}
             </label>
             <Select
-              options={TYPE_OPTIONS}
+              options={getTypeOptions()}
               value={formType}
               onChange={(v) => setFormType(v as ReminderType)}
               size="md"
