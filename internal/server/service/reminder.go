@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -262,4 +264,107 @@ func nilStr(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// ── Cron parsing (T6.1.2) ─────────────────────────────────────────────────────
+
+// ParseCron parses a 5-field cron expression (minute hour dom month dow) and
+// returns the next fire time. Returns an error for malformed expressions.
+// Supported field values: *, single numbers, comma-separated lists (1,15,30),
+// ranges (1-5), and steps (*/5).
+func (s *ReminderService) ParseCron(expr string) (time.Time, error) {
+	return ParseCronExpression(expr)
+}
+
+// ParseCronExpression parses a 5-field cron expression and returns the next
+// fire time. This is a package-level function so it can be used without a
+// ReminderService instance (e.g. from the daemon).
+func ParseCronExpression(expr string) (time.Time, error) {
+	fields := strings.Fields(expr)
+	if len(fields) < 5 {
+		return time.Time{}, fmt.Errorf("cron: expected 5 fields, got %d", len(fields))
+	}
+	if len(fields) > 5 {
+		fields = fields[:5]
+	}
+
+	now := time.Now()
+	// Search forward minute by minute (up to 1 year).
+	candidate := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), 0, 0, now.Location())
+	for i := 0; i < 366*24*60; i++ {
+		if cronFieldMatches(fields[0], candidate.Minute(), 0, 59) &&
+			cronFieldMatches(fields[1], candidate.Hour(), 0, 23) &&
+			cronFieldMatches(fields[2], candidate.Day(), 1, 31) &&
+			cronFieldMatches(fields[3], int(candidate.Month()), 1, 12) &&
+			cronFieldMatches(fields[4], int(candidate.Weekday()), 0, 6) {
+			if candidate.After(now) {
+				return candidate, nil
+			}
+		}
+		candidate = candidate.Add(time.Minute)
+	}
+	return time.Time{}, fmt.Errorf("cron: no match found within 1 year for %q", expr)
+}
+
+// cronFieldMatches checks whether val matches the cron field expression f.
+// min/max define the valid range for the field.
+func cronFieldMatches(f string, val, min, max int) bool {
+	if f == "*" {
+		return true
+	}
+	// Handle step values: */N or start/N
+	if strings.Contains(f, "/") {
+		parts := strings.SplitN(f, "/", 2)
+		step, err := strconv.Atoi(parts[1])
+		if err != nil || step <= 0 {
+			return false
+		}
+		rangeStart := min
+		rangeEnd := max
+		if parts[0] != "*" {
+			if dashIdx := strings.Index(parts[0], "-"); dashIdx >= 0 {
+				if s, err := strconv.Atoi(parts[0][:dashIdx]); err == nil {
+					rangeStart = s
+				}
+				if e, err := strconv.Atoi(parts[0][dashIdx+1:]); err == nil {
+					rangeEnd = e
+				}
+			} else {
+				if s, err := strconv.Atoi(parts[0]); err == nil {
+					rangeStart = s
+				}
+			}
+		}
+		for v := rangeStart; v <= rangeEnd; v += step {
+			if v == val {
+				return true
+			}
+		}
+		return false
+	}
+	// Handle lists: 1,15,30
+	if strings.Contains(f, ",") {
+		for _, item := range strings.Split(f, ",") {
+			if cronFieldMatches(strings.TrimSpace(item), val, min, max) {
+				return true
+			}
+		}
+		return false
+	}
+	// Handle ranges: 1-5
+	if strings.Contains(f, "-") {
+		parts := strings.SplitN(f, "-", 2)
+		lo, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+		hi, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if err1 != nil || err2 != nil {
+			return false
+		}
+		return val >= lo && val <= hi
+	}
+	// Single value
+	n, err := strconv.Atoi(f)
+	if err != nil {
+		return false
+	}
+	return n == val
 }

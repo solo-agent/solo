@@ -7,8 +7,8 @@
 
 'use client';
 
-import { useState, useMemo } from 'react';
-import { BookOpen, X, Plus, FileText, Loader2, AlertTriangle } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { BookOpen, X, Plus, FileText, Loader2, AlertTriangle, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
@@ -39,6 +39,10 @@ interface KnowledgeCreateProps {
   open?: boolean;
   /** Called when open state changes */
   onOpenChange?: (open: boolean) => void;
+  /** Existing entry to edit (triggers edit mode) */
+  editEntry?: KnowledgeEntry | null;
+  /** Hide the trigger button (used when embedded in parent modal) */
+  hideTrigger?: boolean;
 }
 
 export function KnowledgeCreate({
@@ -47,10 +51,14 @@ export function KnowledgeCreate({
   onCreated,
   open: controlledOpen,
   onOpenChange,
+  editEntry,
+  hideTrigger,
 }: KnowledgeCreateProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen !== undefined ? controlledOpen : uncontrolledOpen;
   const setOpen = onOpenChange || setUncontrolledOpen;
+
+  const isEdit = !!editEntry;
 
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -60,6 +68,18 @@ export function KnowledgeCreate({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const { showToast } = useToast();
+
+  // Pre-fill form when editEntry changes
+  useEffect(() => {
+    if (editEntry) {
+      setTitle(editEntry.title || '');
+      setContent(editEntry.content || '');
+      setSelectedChannelId(editEntry.channel_id || channelId || '');
+      setTags(editEntry.tags || []);
+      setTagInput('');
+      setValidationErrors([]);
+    }
+  }, [editEntry, channelId]);
 
   // Filter tag suggestions based on what hasn't been added yet
   const availableSuggestions = useMemo(
@@ -98,18 +118,33 @@ export function KnowledgeCreate({
     if (errors.length > 0) return;
     setIsSubmitting(true);
     try {
-      const body: CreateKnowledgeInput = {
-        channel_id: selectedChannelId,
-        title: title.trim(),
-        content: content.trim(),
-        tags: tags.length > 0 ? tags : undefined,
-        source: 'manual',
-      };
-      const entry = await apiClient.post<KnowledgeEntry>('/api/v1/knowledge', body);
-      showToast(t('knowledgeImportSuccess'), 'success');
-      resetForm();
-      setOpen(false);
-      onCreated?.(entry);
+      if (isEdit && editEntry) {
+        // Update existing entry
+        const body: Partial<CreateKnowledgeInput> = {
+          title: title.trim(),
+          content: content.trim(),
+          tags: tags.length > 0 ? tags : undefined,
+        };
+        const entry = await apiClient.patch<KnowledgeEntry>(`/api/v1/knowledge/${editEntry.id}`, body);
+        showToast(t('knowledgeImportSuccess'), 'success');
+        resetForm();
+        setOpen(false);
+        onCreated?.(entry);
+      } else {
+        // Create new entry
+        const body: CreateKnowledgeInput = {
+          channel_id: selectedChannelId,
+          title: title.trim(),
+          content: content.trim(),
+          tags: tags.length > 0 ? tags : undefined,
+          source: 'manual',
+        };
+        const entry = await apiClient.post<KnowledgeEntry>('/api/v1/knowledge', body);
+        showToast(t('knowledgeImportSuccess'), 'success');
+        resetForm();
+        setOpen(false);
+        onCreated?.(entry);
+      }
     } catch {
       showToast(t('knowledgeImportSuccess'), 'error');
     } finally {
@@ -158,30 +193,38 @@ export function KnowledgeCreate({
   };
 
   const handleOpen = () => {
-    resetForm();
+    if (!isEdit) {
+      resetForm();
+    }
     setValidationErrors([]);
     setOpen(true);
   };
 
   return (
     <>
-      {/* Trigger button */}
-      <Button
-        variant="primary"
-        size="sm"
-        onClick={handleOpen}
-        className="text-xs"
-      >
-        <Plus className="h-3 w-3 mr-1" />
-        {t('knowledgeCreateTitle')}
-      </Button>
+      {/* Trigger button (hidden when embedded or in edit mode) */}
+      {!hideTrigger && !isEdit && (
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={handleOpen}
+          className="text-xs"
+        >
+          <Plus className="h-3 w-3 mr-1" />
+          {t('knowledgeCreateTitle')}
+        </Button>
+      )}
 
       {/* Modal */}
       <Dialog open={open} onOpenChange={setOpen} width="lg">
         <DialogHeader>
           <DialogTitle>
-            <BookOpen className="inline h-4 w-4 mr-1.5 -mt-0.5" />
-            {t('knowledgeCreateTitle')}
+            {isEdit ? (
+              <Pencil className="inline h-4 w-4 mr-1.5 -mt-0.5" />
+            ) : (
+              <BookOpen className="inline h-4 w-4 mr-1.5 -mt-0.5" />
+            )}
+            {isEdit ? t('knowledgeEditTitle') : t('knowledgeCreateTitle')}
           </DialogTitle>
           <DialogCloseButton onClick={() => setOpen(false)} />
         </DialogHeader>
@@ -211,6 +254,7 @@ export function KnowledgeCreate({
               placeholder={t('knowledgeChannelPlaceholder')}
               size="md"
               className="w-full"
+              disabled={isEdit}
             />
           </div>
 
@@ -300,19 +344,21 @@ export function KnowledgeCreate({
             )}
           </div>
 
-          {/* Import from decisions */}
-          <div className="pt-1 border-t-2 border-black">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleImportFromDecisions}
-              disabled={!selectedChannelId || isSubmitting}
-              className="text-xs"
-            >
-              <FileText className="h-3 w-3 mr-1" />
-              {t('knowledgeImportFromDecisions')}
-            </Button>
-          </div>
+          {/* Import from decisions (hide in edit mode) */}
+          {!isEdit && (
+            <div className="pt-1 border-t-2 border-black">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleImportFromDecisions}
+                disabled={!selectedChannelId || isSubmitting}
+                className="text-xs"
+              >
+                <FileText className="h-3 w-3 mr-1" />
+                {t('knowledgeImportFromDecisions')}
+              </Button>
+            </div>
+          )}
         </div>
 
         <DialogFooter>
@@ -336,6 +382,8 @@ export function KnowledgeCreate({
                 <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                 {t('submitting')}
               </>
+            ) : isEdit ? (
+              t('save')
             ) : (
               t('create')
             )}

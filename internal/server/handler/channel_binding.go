@@ -95,3 +95,18 @@ func (h *ChannelBindingHandler) UnbindProject(w http.ResponseWriter, r *http.Req
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "unbound"})
 }
+
+// GetWorkspace handles GET /api/v1/channels/{channelID}/workspace (T3.1.4).
+//
+// Returns the file tree for the channel's bound project workspace.
+func (h *ChannelBindingHandler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "channelID")
+
+	tree, err := h.svc.ScanWorkspace(r.Context(), channelID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, tree)
+}

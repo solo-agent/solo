@@ -62,7 +62,9 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	relSvc.SetHub(hub)
 	relHandler := handler.NewAgentRelationshipHandler(pool, relSvc)
 	depHandler := handler.NewTaskDependencyHandler(taskSvc, hub)
-	delHandler := handler.NewAgentDelegationHandler(pool)
+	delSvc := service.NewAgentDelegationService(pool)
+	delSvc.SetHub(hub)
+	delHandler := handler.NewAgentDelegationHandler(delSvc)
 	mentionSvc := service.NewMentionService(pool)
 	taskHandler := handler.NewTaskHandler(pool, hub, agentSvc, taskSvc, mentionSvc)
 	searchHandler := handler.NewSearchHandler(pool)
@@ -195,6 +197,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 				r.Post("/bind-project", channelBindingHandler.BindProject)
 				r.Get("/binding", channelBindingHandler.GetBinding)
 				r.Delete("/bind-project", channelBindingHandler.UnbindProject)
+				r.Get("/workspace", channelBindingHandler.GetWorkspace)
 
 				// Channel messages routes (with body size limit)
 				r.Route("/messages", func(r chi.Router) {
@@ -268,6 +271,9 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Post("/api/v1/agent-delegations/{id}/reject", delHandler.Reject)
 		r.Post("/api/v1/agent-delegations/{id}/complete", delHandler.Complete)
 		r.Post("/api/v1/agent-delegations/{id}/fail", delHandler.Fail)
+
+		// Agent-nested delegation routes (T2.1.6)
+		r.Get("/api/v1/agents/{agentID}/delegations", delHandler.ListByAgent)
 
 		// Task dependency routes (collaboration Step 1)
 		r.Post("/api/v1/task-dependencies", depHandler.AddDependency)

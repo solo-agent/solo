@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/solo-ai/solo/internal/realtime"
 )
 
 // Sentinel errors for delegation state transitions.
@@ -18,6 +22,12 @@ var (
 
 type AgentDelegationService struct {
 	pool *pgxpool.Pool
+	hub  realtime.Broadcaster
+}
+
+// SetHub injects a WebSocket broadcaster for delegation_updated events.
+func (s *AgentDelegationService) SetHub(hub realtime.Broadcaster) {
+	s.hub = hub
 }
 
 type AgentDelegation struct {
@@ -62,12 +72,22 @@ func (s *AgentDelegationService) Create(ctx context.Context, req CreateDelegatio
 
 // Accept transitions a delegation from queued/delivered to started.
 func (s *AgentDelegationService) Accept(ctx context.Context, delegationID, agentID string) (*AgentDelegation, error) {
-	return s.transitionStatus(ctx, delegationID, agentID, "started", []string{"queued", "delivered"})
+	d, err := s.transitionStatus(ctx, delegationID, agentID, "started", []string{"queued", "delivered"})
+	if err != nil {
+		return nil, err
+	}
+	s.broadcastDelegationUpdated(d)
+	return d, nil
 }
 
 // MarkDelivered marks a delegation as delivered (BUG-009).
 func (s *AgentDelegationService) MarkDelivered(ctx context.Context, delegationID, agentID string) (*AgentDelegation, error) {
-	return s.transitionStatus(ctx, delegationID, agentID, "delivered", []string{"queued"})
+	d, err := s.transitionStatus(ctx, delegationID, agentID, "delivered", []string{"queued"})
+	if err != nil {
+		return nil, err
+	}
+	s.broadcastDelegationUpdated(d)
+	return d, nil
 }
 
 // Reject transitions a delegation from queued/delivered to rejected.
@@ -81,17 +101,43 @@ func (s *AgentDelegationService) Reject(ctx context.Context, delegationID, agent
 		return nil, err
 	}
 	d.RejectionReason = &reason
+	s.broadcastDelegationUpdated(d)
 	return d, nil
 }
 
 // MarkComplete marks a delegation as completed.
 func (s *AgentDelegationService) MarkComplete(ctx context.Context, delegationID, agentID string) (*AgentDelegation, error) {
-	return s.transitionStatus(ctx, delegationID, agentID, "completed", []string{"started"})
+	d, err := s.transitionStatus(ctx, delegationID, agentID, "completed", []string{"started"})
+	if err != nil {
+		return nil, err
+	}
+	s.broadcastDelegationUpdated(d)
+	return d, nil
 }
 
 // MarkFailed marks a delegation as failed.
 func (s *AgentDelegationService) MarkFailed(ctx context.Context, delegationID, agentID string) (*AgentDelegation, error) {
-	return s.transitionStatus(ctx, delegationID, agentID, "failed", []string{"queued", "delivered", "started"})
+	d, err := s.transitionStatus(ctx, delegationID, agentID, "failed", []string{"queued", "delivered", "started"})
+	if err != nil {
+		return nil, err
+	}
+	s.broadcastDelegationUpdated(d)
+	return d, nil
+}
+
+// broadcastDelegationUpdated sends a delegation_updated WS event to the
+// delegation's channel so all connected clients see the state change.
+func (s *AgentDelegationService) broadcastDelegationUpdated(d *AgentDelegation) {
+	if s.hub == nil || d == nil {
+		return
+	}
+	payload, err := json.Marshal(d)
+	if err != nil {
+		slog.Warn("delegation: failed to marshal broadcast payload", "delegation_id", d.ID, "error", err)
+		return
+	}
+	envelope := realtime.Envelope("delegation_updated", json.RawMessage(payload))
+	s.hub.BroadcastToChannel(d.ChannelID, envelope)
 }
 
 func (s *AgentDelegationService) transitionStatus(ctx context.Context, id, agentID, newStatus string, allowedFrom []string) (*AgentDelegation, error) {

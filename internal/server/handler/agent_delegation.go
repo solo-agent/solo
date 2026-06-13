@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/solo-ai/solo/internal/server/service"
 )
 
@@ -15,8 +14,8 @@ type AgentDelegationHandler struct {
 	svc *service.AgentDelegationService
 }
 
-func NewAgentDelegationHandler(pool *pgxpool.Pool) *AgentDelegationHandler {
-	return &AgentDelegationHandler{svc: service.NewAgentDelegationService(pool)}
+func NewAgentDelegationHandler(svc *service.AgentDelegationService) *AgentDelegationHandler {
+	return &AgentDelegationHandler{svc: svc}
 }
 
 // agentIDFromRequest returns the agent ID from query param only.

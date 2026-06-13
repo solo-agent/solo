@@ -569,3 +569,23 @@ export interface TaskIsolation {
   branch_name: string;
   isolated_at: string;
 }
+
+// ---- Relationship Graph types (T5.1.4) ----
+// Matches GET /api/v1/relationships/graph response shape
+
+export interface GraphNode {
+  id: string;
+  name: string;
+  status: string;
+}
+
+export interface GraphEdge {
+  from: string;
+  to: string;
+  type: string;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}

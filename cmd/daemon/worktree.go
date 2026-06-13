@@ -174,9 +174,17 @@ func (h *daemonHandler) HandleWorktreeCleanup(w http.ResponseWriter, r *http.Req
 	}
 
 	// Stage and commit changes in the worktree.
-	addCmd := exec.Command("git", "add", ".")
+	// Use -A to capture all changes including deletions, not just
+	// new/modified files relative to the current directory.
+	addCmd := exec.Command("git", "add", "-A")
 	addCmd.Dir = worktreePath
-	addCmd.Run() // best-effort
+	if addOut, addErr := addCmd.CombinedOutput(); addErr != nil {
+		slog.Warn("worktree cleanup: git add failed",
+			"worktree", worktreePath,
+			"error", addErr,
+			"output", string(addOut),
+		)
+	}
 
 	commitCmd := exec.Command("git", "commit", "-m", fmt.Sprintf("solo: task #%d completed", req.TaskNumber))
 	commitCmd.Dir = worktreePath

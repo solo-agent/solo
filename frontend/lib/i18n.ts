@@ -647,6 +647,11 @@ const en = {
   channelBindingBindError: 'Failed to bind repository',
   channelBindingUnbindError: 'Failed to unbind repository',
   channelBindingLoadError: 'Failed to load binding info',
+  channelBindingWorkspaceFiles: 'Workspace Files',
+  channelBindingWorkspaceEmpty: 'No files found. The repository may still be cloning.',
+  channelBindingWorkspaceError: 'Failed to load workspace files.',
+  channelBindingWorkspaceSelectFile: 'Select a file to preview',
+  channelBindingWorkspaceFileTooLarge: 'File too large to preview',
 
   // ── Task Isolation (Step 3) ──
   taskIsolatedWorkspace: 'Isolated Workspace',

@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/solo-ai/solo/pkg/agent"
 	"github.com/solo-ai/solo/internal/auth"
+	"github.com/solo-ai/solo/internal/server/service"
 	"github.com/solo-ai/solo/pkg/llm"
 	"github.com/solo-ai/solo/pkg/skillloader"
 )
@@ -46,6 +46,10 @@ type daemonHandler struct {
 	memoryManager    *agent.MemoryManager
 	sessionManagers  map[string]*agent.AgentSessionManager // v1.4: per-provider persistent sessions
 
+	// T3.2.3: Channel binding service for resolving the best working directory
+	// (worktree > channel repo binding > agent personal workspace).
+	channelBindingSvc *service.ChannelBindingService
+
 	// v1.4: per-agent token store for persistent session token auto-refresh (SOLO-254-B).
 	agentTokens   map[string]*agentTokenState // agentID -> cached token + expiry
 	agentTokensMu sync.RWMutex
@@ -59,13 +63,14 @@ func newDaemonHandler(pool *pgxpool.Pool, tm *taskManager, provider llm.Provider
 		providers: map[string]llm.Provider{
 			"": provider, // default provider key
 		},
-		pool:             pool,
-		serverURL:        serverURL,
-		internalToken:    internalToken,
-		httpClient:       &http.Client{Timeout: 10 * time.Second},
-		workspaceManager: agent.NewWorkspaceManager(""),
-		memoryManager:    agent.NewMemoryManager(""),
-		agentTokens:      make(map[string]*agentTokenState),
+		pool:              pool,
+		serverURL:         serverURL,
+		internalToken:     internalToken,
+		httpClient:        &http.Client{Timeout: 10 * time.Second},
+		workspaceManager:  agent.NewWorkspaceManager(""),
+		memoryManager:     agent.NewMemoryManager(""),
+		channelBindingSvc: service.NewChannelBindingService(pool),
+		agentTokens:       make(map[string]*agentTokenState),
 	}
 }
 
@@ -752,6 +757,17 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		return
 	}
 
+	// T3.2.3: Resolve best working directory for task execution.
+	// Hierarchy: channel repo binding > agent personal workspace.
+	execCWD := ws.WorkDir
+	if h.channelBindingSvc != nil {
+		if cwd := h.channelBindingSvc.ResolveWorkingDirectory(ctx, req.ChannelID, req.AgentID); cwd != "" {
+			if _, statErr := os.Stat(cwd); statErr == nil {
+				execCWD = cwd
+			}
+		}
+	}
+
 	// Load memory content
 	memoryContent, _ := h.memoryManager.Load(req.AgentID)
 
@@ -863,7 +879,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		}
 	}
 	if soloPath != "" {
-		soloDest := filepath.Join(ws.WorkDir, "solo")
+		soloDest := filepath.Join(execCWD, "solo")
 		if copyErr := copyFile(soloPath, soloDest, 0755); copyErr != nil {
 			slog.Warn("task: failed to copy solo binary to workspace", "solo_path", soloPath, "error", copyErr)
 		}
@@ -873,7 +889,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 
 	executeOpts := &agent.ExecuteOptions{
 		SystemPrompt: systemPrompt,
-		WorkspaceDir: ws.WorkDir,
+		WorkspaceDir: execCWD,
 		Model:        req.ModelConfig.Model,
 		Env:          agentEnv,
 		CustomArgs:   agentInfo.CustomArgs,
@@ -2003,25 +2019,13 @@ func (h *daemonHandler) InjectRelevantKnowledge(ctx context.Context, channelID, 
 }
 
 // computeNextCron calculates the next fire time from a 5-field cron expression.
+// Delegates to service.ParseCronExpression for full cron parsing (T6.1.2).
 func computeNextCron(cronExpr string) time.Time {
-	now := time.Now()
-	fields := strings.Fields(cronExpr)
-	if len(fields) < 2 {
-		return now.Add(24 * time.Hour)
-	}
-
-	hour := 0
-	if h, err := strconv.Atoi(fields[1]); err == nil {
-		hour = h
-	}
-	minute := 0
-	if m, err := strconv.Atoi(fields[0]); err == nil {
-		minute = m
-	}
-
-	next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
-	if !next.After(now) {
-		next = next.Add(24 * time.Hour)
+	next, err := service.ParseCronExpression(cronExpr)
+	if err != nil {
+		slog.Warn("ticker: failed to parse cron expression, falling back to +24h",
+			"cron", cronExpr, "error", err)
+		return time.Now().Add(24 * time.Hour)
 	}
 	return next
 }

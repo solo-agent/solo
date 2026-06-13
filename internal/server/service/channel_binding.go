@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -172,4 +173,87 @@ func (s *ChannelBindingService) cloneRepo(channelID, repoURL, branch, bindPath s
 	}
 	slog.Info("channel binding: repo cloned",
 		"channel_id", channelID, "path", bindPath)
+}
+
+const maxScanDepth = 20
+
+// FileNode represents a node in the workspace file tree.
+type FileNode struct {
+	Name     string     `json:"name"`
+	Path     string     `json:"path"`
+	IsDir    bool       `json:"is_dir"`
+	Size     int64      `json:"size,omitempty"`
+	Children []FileNode `json:"children,omitempty"`
+}
+
+// ScanWorkspace walks the workspace directory for a channel's binding
+// and returns the file tree. Returns an error if no binding exists or the
+// workspace has not been cloned yet.
+func (s *ChannelBindingService) ScanWorkspace(ctx context.Context, channelID string) (*FileNode, error) {
+	binding, err := s.GetBinding(ctx, channelID)
+	if err != nil {
+		return nil, fmt.Errorf("no binding for channel %s: %w", channelID, err)
+	}
+
+	bindPath := binding.BindPath
+	info, err := os.Stat(bindPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("workspace not yet cloned: %w", err)
+		}
+		return nil, fmt.Errorf("scan workspace: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("workspace path is not a directory")
+	}
+
+	return s.scanDir(bindPath, 0)
+}
+
+// scanDir recursively builds a FileNode tree for a directory.
+func (s *ChannelBindingService) scanDir(dirPath string, depth int) (*FileNode, error) {
+	if depth > maxScanDepth {
+		return nil, nil
+	}
+
+	node := &FileNode{
+		Name:     filepath.Base(dirPath),
+		Path:     dirPath,
+		IsDir:    true,
+		Children: []FileNode{},
+	}
+
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		fullPath := filepath.Join(dirPath, entry.Name())
+		if entry.IsDir() {
+			child, err := s.scanDir(fullPath, depth+1)
+			if err != nil {
+				continue
+			}
+			if child != nil {
+				node.Children = append(node.Children, *child)
+			}
+		} else {
+			fi, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			node.Children = append(node.Children, FileNode{
+				Name:  fi.Name(),
+				Path:  fullPath,
+				IsDir: false,
+				Size:  fi.Size(),
+			})
+		}
+	}
+
+	return node, nil
 }

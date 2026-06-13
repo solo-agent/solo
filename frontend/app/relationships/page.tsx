@@ -27,7 +27,7 @@ import { Loader2, Plus, Trash2, LayoutGrid, Undo2, Redo2, Download } from 'lucid
 import { NavBar } from '@/components/ui/navbar';
 import { RelationshipNode } from '@/components/relationships/relationship-node';
 import { RelationshipEdge } from '@/components/relationships/relationship-edge';
-import { TypeSelector } from '@/components/relationships/type-selector';
+import { CreateRelationshipModal } from '@/components/relationships/create-relationship-modal';
 import { RelationshipDetailPanel } from '@/components/relationships/relationship-detail-panel';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
@@ -56,12 +56,9 @@ export default function RelationshipsPage() {
   const [relationships, setRelationships] = useState<AgentRelationship[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showSelector, setShowSelector] = useState<{
-    sourceId: string;
-    targetId: string;
-    sourceName: string;
-    targetName: string;
-  } | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [preselectedFrom, setPreselectedFrom] = useState<string | null>(null);
+  const [preselectedTo, setPreselectedTo] = useState<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
   const [detailRel, setDetailRel] = useState<AgentRelationship | null>(null);
   const [detailAgent, setDetailAgent] = useState<Agent | null>(null);
@@ -214,49 +211,27 @@ export default function RelationshipsPage() {
     setRedoStack((prev) => prev.slice(0, -1));
   }, [redoStack, nodes, edges, setNodes, setEdges]);
 
-  // ---- Connect (create relationship) ----
+  // ---- Connect (create relationship via modal) ----
 
   const onConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target) return;
-
-    const sourceAgent = agents.find((a) => a.id === connection.source);
-    const targetAgent = agents.find((a) => a.id === connection.target);
-
-    setShowSelector({
-      sourceId: connection.source,
-      targetId: connection.target,
-      sourceName: sourceAgent?.name || connection.source.slice(0, 8),
-      targetName: targetAgent?.name || connection.target.slice(0, 8),
-    });
-  }, [agents]);
-
-  const handleTypeSelect = useCallback(async (relType: RelationshipType) => {
-    if (!showSelector) return;
     pushUndo();
+    setPreselectedFrom(connection.source);
+    setPreselectedTo(connection.target);
+    setShowCreateModal(true);
+  }, [pushUndo]);
 
-    const input: CreateRelationshipInput = {
-      from_agent_id: showSelector.sourceId,
-      to_agent_id: showSelector.targetId,
-      rel_type: relType,
-    };
-
-    try {
-      const created = await apiClient.post<AgentRelationship>('/api/v1/agent-relationships', input);
-      setEdges((prev) => {
-        if (prev.find((e) => e.id === created.id)) return prev;
-        return [...prev, {
-          id: created.id,
-          source: created.from_agent_id,
-          target: created.to_agent_id,
-          type: 'relationship',
-          data: { relType, channelName: created.channel_name },
-        }];
-      });
-    } catch (err) {
-      console.error('Failed to create relationship:', err);
+  const handleCreateModalClose = useCallback((open: boolean) => {
+    setShowCreateModal(open);
+    if (!open) {
+      setPreselectedFrom(null);
+      setPreselectedTo(null);
     }
-    setShowSelector(null);
-  }, [showSelector, pushUndo, setEdges]);
+  }, []);
+
+  const handleRelationshipCreated = useCallback(() => {
+    loadData();
+  }, [loadData]);
 
   // ---- Edge click → show detail panel ----
 
@@ -323,7 +298,7 @@ export default function RelationshipsPage() {
       }
       if (e.key === 'Escape') {
         setSelectedEdge(null);
-        setShowSelector(null);
+        setShowCreateModal(false);
       }
     };
     window.addEventListener('keydown', handler);
@@ -490,17 +465,16 @@ export default function RelationshipsPage() {
             />
           </ReactFlow>
 
-          {/* Type selector popup */}
-          {showSelector && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/30">
-              <TypeSelector
-                fromName={showSelector.sourceName}
-                toName={showSelector.targetName}
-                onSelect={handleTypeSelect}
-                onCancel={() => setShowSelector(null)}
-              />
-            </div>
-          )}
+          {/* Create relationship modal (T5.2.4) */}
+          <CreateRelationshipModal
+            open={showCreateModal}
+            onOpenChange={handleCreateModalClose}
+            onCreated={handleRelationshipCreated}
+            preselectedFrom={preselectedFrom ?? undefined}
+            preselectedTo={preselectedTo ?? undefined}
+            agents={agents}
+            channels={channels}
+          />
 
           {/* Detail panel */}
           {(detailRel || detailAgent) && (

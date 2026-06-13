@@ -7,19 +7,20 @@
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { BookOpen, Loader2, ChevronRight } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { BookOpen, Loader2, ChevronRight, Tag } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 import { KnowledgeSearch } from './knowledge-search';
 import { KnowledgeCreate } from './knowledge-create';
+import { KnowledgeDetail } from './knowledge-detail';
 import { Button } from '@/components/ui/button';
 import { apiClient } from '@/lib/api-client';
 import type { KnowledgeEntry } from '@/lib/types';
 
 interface KnowledgePanelProps {
   channelId: string;
-  /** Called when a knowledge entry is clicked (for full detail view) */
+  /** Called when a knowledge entry is clicked (for full detail view — if not provided, uses internal modal) */
   onEntryClick?: (entry: KnowledgeEntry) => void;
   /** Compact mode for sidebar usage */
   compact?: boolean;
@@ -32,23 +33,29 @@ export function KnowledgePanel({ channelId, onEntryClick, compact, channels = []
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showSearch, setShowSearch] = useState(false);
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [detailEntry, setDetailEntry] = useState<KnowledgeEntry | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
 
   const fetchRecent = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
+      const params: Record<string, string> = { q: '', channel_id: channelId, top_k: '5' };
+      if (activeTag) params.tags = activeTag;
       const data = await apiClient.get<{ results: KnowledgeEntry[]; total: number }>(
         '/api/v1/knowledge/search',
-        { q: '', channel_id: channelId, top_k: '5' },
+        params,
       );
-      // If empty query returns all recent, use results
       setRecent(data.results || []);
     } catch {
       // Fallback: try list endpoint
       try {
+        const params: Record<string, string> = { channel_id: channelId, limit: '5' };
+        if (activeTag) params.tags = activeTag;
         const data = await apiClient.get<{ results: KnowledgeEntry[] }>(
           '/api/v1/knowledge',
-          { channel_id: channelId, limit: '5' },
+          params,
         );
         setRecent(data.results || []);
       } catch {
@@ -57,11 +64,29 @@ export function KnowledgePanel({ channelId, onEntryClick, compact, channels = []
     } finally {
       setIsLoading(false);
     }
-  }, [channelId]);
+  }, [channelId, activeTag]);
 
   useEffect(() => {
     fetchRecent();
   }, [fetchRecent]);
+
+  // Extract unique tags from all entries
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    recent.forEach((entry) => {
+      entry.tags?.forEach((tag) => tagSet.add(tag));
+    });
+    return Array.from(tagSet).sort();
+  }, [recent]);
+
+  const handleEntryClick = (entry: KnowledgeEntry) => {
+    if (onEntryClick) {
+      onEntryClick(entry);
+    } else {
+      setDetailEntry(entry);
+      setDetailOpen(true);
+    }
+  };
 
   const formatDate = (iso?: string) => {
     if (!iso) return '';
@@ -120,9 +145,41 @@ export function KnowledgePanel({ channelId, onEntryClick, compact, channels = []
       {showSearch && (
         <KnowledgeSearch
           channelId={channelId}
-          onResultClick={onEntryClick}
+          onResultClick={handleEntryClick}
           compact
         />
+      )}
+
+      {/* Tag filter bar (T4.4.1) */}
+      {!showSearch && allTags.length > 0 && (
+        <div className="flex items-center gap-1 flex-wrap">
+          <Tag className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+          {allTags.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => setActiveTag(activeTag === tag ? null : tag)}
+              className={cn(
+                'px-1.5 py-0.5 font-heading text-[10px] font-bold border-2 border-black transition-all duration-100',
+                'active:translate-x-0.5 active:translate-y-0.5',
+                activeTag === tag
+                  ? 'bg-brutal-accent text-white shadow-brutal-sm'
+                  : 'bg-brutal-muted-light hover:bg-brutal-primary-light',
+              )}
+            >
+              {tag}
+            </button>
+          ))}
+          {activeTag && (
+            <button
+              type="button"
+              onClick={() => setActiveTag(null)}
+              className="font-mono text-[10px] text-muted-foreground hover:text-black underline px-1"
+            >
+              {t('clearFilter')}
+            </button>
+          )}
+        </div>
       )}
 
       {/* Recent entries list */}
@@ -159,7 +216,7 @@ export function KnowledgePanel({ channelId, onEntryClick, compact, channels = []
                 <button
                   key={entry.id}
                   type="button"
-                  onClick={() => onEntryClick?.(entry)}
+                  onClick={() => handleEntryClick(entry)}
                   className={cn(
                     'w-full text-left border-2 border-black bg-white p-2 transition-all',
                     'hover:-translate-y-px hover:shadow-brutal-sm',
@@ -184,6 +241,15 @@ export function KnowledgePanel({ channelId, onEntryClick, compact, channels = []
           )}
         </>
       )}
+
+      {/* Detail modal (T4.4.2) */}
+      <KnowledgeDetail
+        entry={detailEntry}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        onMutate={fetchRecent}
+        channels={channels}
+      />
     </div>
   );
 }

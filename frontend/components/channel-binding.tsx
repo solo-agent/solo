@@ -9,17 +9,17 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { GitBranch, FolderOpen, Unlink, Link2, Loader2, ExternalLink } from 'lucide-react';
+import { GitBranch, FolderOpen, Unlink, Link2, Loader2, ExternalLink, ChevronDown, AlertCircle, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { BrutalAlert } from '@/components/ui/brutal-alert';
-import { Select } from '@/components/ui/select';
 import { Dialog, DialogHeader, DialogTitle, DialogCloseButton, DialogFooter } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast';
+import { FileTree } from '@/components/workspace/file-tree';
 import { apiClient } from '@/lib/api-client';
-import type { ChannelBinding as ChannelBindingType } from '@/lib/types';
+import type { ChannelBinding as ChannelBindingType, WorkspaceFileNode } from '@/lib/types';
 
 interface ChannelBindingProps {
   channelId: string;
@@ -37,6 +37,14 @@ export function ChannelBinding({ channelId, channelName, isAdmin = false }: Chan
   const [repoBranch, setRepoBranch] = useState('main');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { showToast } = useToast();
+
+  // Workspace file tree state
+  const [wsTree, setWsTree] = useState<WorkspaceFileNode[]>([]);
+  const [wsLoading, setWsLoading] = useState(false);
+  const [wsError, setWsError] = useState<string | null>(null);
+  const [wsSelectedPath, setWsSelectedPath] = useState<string | null>(null);
+  const [wsExpandedPaths, setWsExpandedPaths] = useState<Set<string>>(new Set());
+  const [wsExpanded, setWsExpanded] = useState(false);
 
   const fetchBinding = useCallback(async () => {
     setIsLoading(true);
@@ -56,9 +64,45 @@ export function ChannelBinding({ channelId, channelName, isAdmin = false }: Chan
     }
   }, [channelId]);
 
+  // ---- API response type for channel workspace ----
+  interface ChannelFileNode {
+    name: string;
+    path: string;
+    is_dir: boolean;
+    size?: number;
+    children?: ChannelFileNode[];
+  }
+
+  function mapToWorkspaceNodes(nodes: ChannelFileNode[] | undefined): WorkspaceFileNode[] {
+    if (!nodes) return [];
+    return nodes.map((n) => ({
+      name: n.name,
+      path: n.path,
+      type: n.is_dir ? 'directory' : 'file',
+      size: n.size,
+      children: mapToWorkspaceNodes(n.children),
+    }));
+  }
+
+  const fetchWorkspace = useCallback(async () => {
+    if (!channelId) return;
+    setWsLoading(true);
+    setWsError(null);
+    try {
+      const root = await apiClient.get<ChannelFileNode>(`/api/v1/channels/${channelId}/workspace`);
+      setWsTree(mapToWorkspaceNodes(root.children));
+    } catch {
+      setWsError(t('channelBindingWorkspaceError'));
+      setWsTree([]);
+    } finally {
+      setWsLoading(false);
+    }
+  }, [channelId]);
+
   useEffect(() => {
     fetchBinding();
-  }, [fetchBinding]);
+    fetchWorkspace();
+  }, [fetchBinding, fetchWorkspace]);
 
   const handleBind = async () => {
     if (!repoUrl.trim()) return;
@@ -72,6 +116,10 @@ export function ChannelBinding({ channelId, channelName, isAdmin = false }: Chan
       setIsBindOpen(false);
       setRepoUrl('');
       setRepoBranch('main');
+      setWsSelectedPath(null);
+      setWsExpandedPaths(new Set());
+      setWsExpanded(false);
+      fetchWorkspace();
       showToast(t('channelBindingBind'), 'success');
     } catch {
       showToast(t('channelBindingBindError'), 'error');
@@ -85,6 +133,10 @@ export function ChannelBinding({ channelId, channelName, isAdmin = false }: Chan
     try {
       await apiClient.delete(`/api/v1/channels/${channelId}/bind-project`);
       setBinding(null);
+      setWsTree([]);
+      setWsSelectedPath(null);
+      setWsExpandedPaths(new Set());
+      setWsExpanded(false);
       setIsUnbindOpen(false);
       showToast(t('channelBindingUnbind'), 'info');
     } catch {
@@ -194,6 +246,85 @@ export function ChannelBinding({ channelId, channelName, isAdmin = false }: Chan
                 <Unlink className="h-3 w-3 mr-1" />
                 {t('channelBindingUnbind')}
               </Button>
+            )}
+          </div>
+
+          {/* Workspace file tree */}
+          <div className="border-t-2 border-black pt-3 mt-3">
+            <button
+              type="button"
+              onClick={() => setWsExpanded((v) => !v)}
+              className="flex w-full items-center gap-1.5 text-left"
+              aria-expanded={wsExpanded}
+            >
+              <ChevronDown
+                className={cn(
+                  'h-3.5 w-3.5 flex-shrink-0 transition-transform',
+                  wsExpanded ? 'rotate-0' : '-rotate-90',
+                )}
+              />
+              <span className="font-heading text-xs font-bold uppercase tracking-wider text-foreground">
+                {t('channelBindingWorkspaceFiles')}
+              </span>
+              <div className="flex-1" />
+              {wsExpanded && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => { e.stopPropagation(); fetchWorkspace(); }}
+                  className="h-7 w-7 p-0"
+                  aria-label={t('retry')}
+                  disabled={wsLoading}
+                >
+                  <RefreshCw className={cn('h-3 w-3', wsLoading && 'animate-spin')} />
+                </Button>
+              )}
+            </button>
+
+            {wsExpanded && (
+              <div className="mt-2 border-2 border-black bg-white min-h-[80px]">
+                {wsLoading ? (
+                  <div className="flex items-center gap-2 p-3">
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    <span className="font-mono text-xs text-muted-foreground">{t('loading')}</span>
+                  </div>
+                ) : wsError ? (
+                  <div className="flex flex-col items-center gap-2 p-4">
+                    <AlertCircle className="h-4 w-4 text-brutal-danger" />
+                    <p className="font-mono text-[10px] text-brutal-danger text-center">{wsError}</p>
+                    <Button variant="outline" size="sm" onClick={fetchWorkspace} className="text-[10px]">
+                      {t('retry')}
+                    </Button>
+                  </div>
+                ) : wsTree.length === 0 ? (
+                  <div className="flex items-center justify-center p-4">
+                    <p className="font-mono text-[10px] text-muted-foreground italic">
+                      {t('channelBindingWorkspaceEmpty')}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="max-h-[320px] overflow-y-auto">
+                    <FileTree
+                      tree={wsTree}
+                      selectedPath={wsSelectedPath}
+                      expandedPaths={wsExpandedPaths}
+                      onSelect={(path) => {
+                        setWsSelectedPath(path);
+                      }}
+                      onToggleExpand={(path) => {
+                        setWsExpandedPaths((prev) => {
+                          const next = new Set(prev);
+                          next.has(path) ? next.delete(path) : next.add(path);
+                          return next;
+                        });
+                      }}
+                      onLoadDirectory={() => {
+                        // full tree is already loaded from ScanWorkspace
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
