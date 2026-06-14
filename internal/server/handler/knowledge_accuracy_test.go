@@ -299,16 +299,25 @@ func TestSearchHandler_AccuracyPipeline(t *testing.T) {
 		}
 	})
 
-	// Validate that the search endpoint rejects requests missing channel_id.
-	t.Run("missing channel_id returns 400", func(t *testing.T) {
+	// channel_id is now optional — missing it triggers cross-channel discovery
+	// (Issue #9). The handler reaches the service layer (which panics on nil
+	// pool) — we recover to confirm validation passed.
+	t.Run("missing channel_id passes validation (cross-channel)", func(t *testing.T) {
 		url := "/api/v1/knowledge/search?q=test"
 		req := httptest.NewRequest("GET", url, nil)
 		req.Header.Set("X-User-ID", "user-1")
 		rr := httptest.NewRecorder()
+
+		defer func() {
+			// Nil-pool panic in service layer is expected — confirms we
+			// reached the service call (i.e. validation passed).
+			_ = recover()
+		}()
 		r.ServeHTTP(rr, req)
 
-		if rr.Code != http.StatusBadRequest {
-			t.Errorf("expected 400 for missing channel_id, got %d", rr.Code)
+		// Handler must not return 400 for missing channel_id (cross-channel search).
+		if rr.Code == http.StatusBadRequest {
+			t.Errorf("expected NOT 400 for missing channel_id, got %d", rr.Code)
 		}
 	})
 

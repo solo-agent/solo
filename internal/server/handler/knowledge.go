@@ -248,10 +248,7 @@ func (h *KnowledgeHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	channelID := r.URL.Query().Get("channel_id")
-	if channelID == "" {
-		writeError(w, http.StatusBadRequest, "channel_id query parameter is required")
-		return
-	}
+	// channel_id is optional — empty value triggers cross-channel discovery.
 	topK, _ := strconv.Atoi(r.URL.Query().Get("top_k"))
 	if topK <= 0 {
 		topK = 5

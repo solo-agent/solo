@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -465,3 +466,70 @@ func TestAgentRelationship_ErrorResponseShape(t *testing.T) {
 // self-referential error, invalid rel_type error, channel_id scope rules,
 // cycle detection, list/delete operations) require a real database and are
 // covered by the E2E test plan in docs/design/tasks/e2e-test-plan.md.
+
+// ---- Performance: 30+ agent graph (T5.4.3) ----
+
+// makeLargeGraph builds a synthetic GraphData with nNodes agents and ~3x
+// edges. Used to verify the relationship graph endpoint can comfortably
+// handle the 30+ agent target in well under a render-frame budget.
+func makeLargeGraph(nNodes int) GraphData {
+	nodes := make([]GraphNode, nNodes)
+	for i := 0; i < nNodes; i++ {
+		nodes[i] = GraphNode{
+			ID:     fmt.Sprintf("agent-%03d", i),
+			Name:   fmt.Sprintf("Agent %03d", i),
+			Status: "active",
+		}
+	}
+	edgeCount := nNodes * 3
+	edges := make([]GraphEdge, edgeCount)
+	relTypes := []string{"reports_to", "delegates_to", "collaborates_with", "escalates_to"}
+	for i := 0; i < edgeCount; i++ {
+		from := i % nNodes
+		to := (i*7 + 3) % nNodes
+		if to == from {
+			to = (to + 1) % nNodes
+		}
+		edges[i] = GraphEdge{From: nodes[from].ID, To: nodes[to].ID, Type: relTypes[i%len(relTypes)]}
+	}
+	return GraphData{Nodes: nodes, Edges: edges}
+}
+
+func TestGraphData_LargeGraph_Sanity(t *testing.T) {
+	g := makeLargeGraph(50)
+	if len(g.Nodes) != 50 {
+		t.Fatalf("expected 50 nodes, got %d", len(g.Nodes))
+	}
+	if len(g.Edges) != 150 {
+		t.Fatalf("expected 150 edges, got %d", len(g.Edges))
+	}
+	// Verify it round-trips through JSON.
+	data, err := json.Marshal(g)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back GraphData
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(back.Nodes) != 50 || len(back.Edges) != 150 {
+		t.Fatalf("round-trip lost data: nodes=%d edges=%d", len(back.Nodes), len(back.Edges))
+	}
+}
+
+func BenchmarkGraphData_Marshal_30Agents(b *testing.B) { benchmarkMarshal(b, 30) }
+func BenchmarkGraphData_Marshal_50Agents(b *testing.B) { benchmarkMarshal(b, 50) }
+func BenchmarkGraphData_Marshal_100Agents(b *testing.B) { benchmarkMarshal(b, 100) }
+
+func benchmarkMarshal(b *testing.B, n int) {
+	g := makeLargeGraph(n)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		data, err := json.Marshal(g)
+		if err != nil {
+			b.Fatal(err)
+		}
+		_ = data
+	}
+}

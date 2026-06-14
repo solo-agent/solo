@@ -1004,7 +1004,7 @@ func TestHandleTaskCreateMissingTitle(t *testing.T) {
 
 func TestHandleMessageSendMissingContent(t *testing.T) {
 	code, _, stderr := captureAndRun(t, func() {
-		handleMessageSend([]string{"-C", "550e8400-e29b-41d4-a716-446655440002"}, "http://localhost", "tok")
+		handleMessageSend([]string{"--target", "#general"}, "http://localhost", "tok")
 	})
 	if code != 2 {
 		t.Errorf("expected exit 2 for missing -c, got %d", code)
@@ -1035,5 +1035,183 @@ func TestHandleChannelMembersMissingChannel(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "-c") {
 		t.Errorf("expected -c error, got %q", stderr)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// agent delegate E2E (T2.1.7)
+// ---------------------------------------------------------------------------
+
+// TestHandleDelegateCreate verifies the CLI sends a POST to
+// /api/v1/agent-delegations with the expected JSON body and exits 0 on 201.
+func TestHandleDelegateCreate(t *testing.T) {
+	var capturedMethod, capturedPath string
+	var capturedBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"id":"del-1","status":"queued"}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("SOLO_AGENT_ID", "550e8400-e29b-41d4-a716-446655440010")
+	t.Setenv("SOLO_CHANNEL_ID", "550e8400-e29b-41d4-a716-446655440020")
+
+	code, stdout, _ := captureAndRun(t, func() {
+		handleDelegateCreate([]string{
+			"--to", "@bob",
+			"--msg", "please review the PR",
+		}, server.URL, "test-token")
+	})
+
+	if code != 0 {
+		t.Errorf("expected exit 0, got %d", code)
+	}
+	if capturedMethod != http.MethodPost {
+		t.Errorf("expected POST, got %s", capturedMethod)
+	}
+	if capturedPath != "/api/v1/agent-delegations" {
+		t.Errorf("expected path /api/v1/agent-delegations, got %s", capturedPath)
+	}
+	if !strings.Contains(stdout, "queued") {
+		t.Errorf("expected stdout to contain 'queued', got %q", stdout)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(capturedBody, &body); err != nil {
+		t.Fatalf("unmarshal body: %v\nraw: %s", err, capturedBody)
+	}
+	if body["to_agent_id"] != "bob" {
+		t.Errorf("expected to_agent_id=bob (without @), got %v", body["to_agent_id"])
+	}
+	if body["from_agent_id"] != "550e8400-e29b-41d4-a716-446655440010" {
+		t.Errorf("from_agent_id mismatch: %v", body["from_agent_id"])
+	}
+	if body["message"] != "please review the PR" {
+		t.Errorf("message mismatch: %v", body["message"])
+	}
+}
+
+func TestHandleDelegateCreateMissingEnv(t *testing.T) {
+	t.Setenv("SOLO_AGENT_ID", "")
+	t.Setenv("SOLO_CHANNEL_ID", "")
+
+	code, _, stderr := captureAndRun(t, func() {
+		handleDelegateCreate([]string{"--to", "@bob"}, "http://localhost", "tok")
+	})
+	if code != 2 {
+		t.Errorf("expected exit 2, got %d", code)
+	}
+	if !strings.Contains(stderr, "SOLO_AGENT_ID") {
+		t.Errorf("expected SOLO_AGENT_ID error, got %q", stderr)
+	}
+}
+
+func TestHandleDelegateList(t *testing.T) {
+	var capturedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[{"id":"del-1","status":"queued"},{"id":"del-2","status":"delivered"}]`))
+	}))
+	defer server.Close()
+
+	t.Setenv("SOLO_AGENT_ID", "550e8400-e29b-41d4-a716-446655440010")
+	code, stdout, _ := captureAndRun(t, func() {
+		handleDelegateList([]string{}, server.URL, "tok")
+	})
+
+	if code != 0 {
+		t.Errorf("expected exit 0, got %d", code)
+	}
+	if capturedPath != "/api/v1/agent-delegations/incoming" {
+		t.Errorf("expected /incoming, got %s", capturedPath)
+	}
+	if !strings.Contains(stdout, "del-1") || !strings.Contains(stdout, "del-2") {
+		t.Errorf("expected both delegation IDs in stdout, got %q", stdout)
+	}
+}
+
+func TestHandleDelegateAccept(t *testing.T) {
+	var capturedMethod, capturedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"del-1","status":"delivered"}`))
+	}))
+	defer server.Close()
+
+	code, _, _ := captureAndRun(t, func() {
+		handleDelegateAccept([]string{"del-1"}, server.URL, "tok")
+	})
+
+	if code != 0 {
+		t.Errorf("expected exit 0, got %d", code)
+	}
+	if capturedMethod != http.MethodPost {
+		t.Errorf("expected POST, got %s", capturedMethod)
+	}
+	if capturedPath != "/api/v1/agent-delegations/del-1/accept" {
+		t.Errorf("unexpected path %s", capturedPath)
+	}
+}
+
+func TestHandleDelegateReject(t *testing.T) {
+	var capturedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	code, _, _ := captureAndRun(t, func() {
+		handleDelegateReject([]string{"del-1"}, server.URL, "tok")
+	})
+
+	if code != 0 {
+		t.Errorf("expected exit 0, got %d", code)
+	}
+	if capturedPath != "/api/v1/agent-delegations/del-1/reject" {
+		t.Errorf("unexpected path %s", capturedPath)
+	}
+}
+
+func TestHandleDelegateComplete(t *testing.T) {
+	var capturedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	code, _, _ := captureAndRun(t, func() {
+		handleDelegateComplete([]string{"del-1"}, server.URL, "tok")
+	})
+
+	if code != 0 {
+		t.Errorf("expected exit 0, got %d", code)
+	}
+	if capturedPath != "/api/v1/agent-delegations/del-1/complete" {
+		t.Errorf("unexpected path %s", capturedPath)
+	}
+}
+
+// TestHandleDelegateAcceptMissingID verifies the CLI exits 2 (usage error) when
+// no delegation ID is provided.
+func TestHandleDelegateAcceptMissingID(t *testing.T) {
+	code, _, stderr := captureAndRun(t, func() {
+		handleDelegateAccept([]string{}, "http://localhost", "tok")
+	})
+	if code != 2 {
+		t.Errorf("expected exit 2, got %d", code)
+	}
+	if !strings.Contains(stderr, "delegation ID") {
+		t.Errorf("expected ID error, got %q", stderr)
 	}
 }

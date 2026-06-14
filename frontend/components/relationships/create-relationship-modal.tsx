@@ -79,9 +79,9 @@ export function CreateRelationshipModal({
     try {
       // Lightweight cycle detection: if the "to" agent already reports to the "from" agent
       // (or any of its ancestors), that would create a cycle.
-      const res = await apiClient.get<{ has_cycle: boolean; path: string[] }>(
+      const res = await apiClient.post<{ has_cycle: boolean; path: string[] }>(
         '/api/v1/agent-relationships/check-cycle',
-        { from_agent_id: fromAgentId, to_agent_id: toAgentId },
+        { from_agent_id: fromAgentId, to_agent_id: toAgentId, rel_type: 'reports_to' },
       );
       if (res.has_cycle) {
         setCycleWarning(

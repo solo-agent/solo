@@ -268,10 +268,34 @@ func nilStr(s string) *string {
 
 // ── Cron parsing (T6.1.2) ─────────────────────────────────────────────────────
 
+// monthNames and dowNames map 3-letter names to numeric values. Sunday is 0
+// for both time.Weekday() and our internal convention.
+var (
+	monthNames = map[string]int{"JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
+		"JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12}
+	dowNames = map[string]int{"SUN": 0, "MON": 1, "TUE": 2, "WED": 3, "THU": 4, "FRI": 5, "SAT": 6}
+)
+
+// normalizeCronField converts 3-letter month/weekday names to integers so the
+// numeric matcher can compare them. Returns the original string if not a name.
+func normalizeCronField(f string, isMonth bool) string {
+	upper := strings.ToUpper(strings.TrimSpace(f))
+	if isMonth {
+		if n, ok := monthNames[upper]; ok {
+			return strconv.Itoa(n)
+		}
+	} else {
+		if n, ok := dowNames[upper]; ok {
+			return strconv.Itoa(n)
+		}
+	}
+	return f
+}
+
 // ParseCron parses a 5-field cron expression (minute hour dom month dow) and
 // returns the next fire time. Returns an error for malformed expressions.
 // Supported field values: *, single numbers, comma-separated lists (1,15,30),
-// ranges (1-5), and steps (*/5).
+// ranges (1-5), steps (*/5), and 3-letter names (JAN-DEC, SUN-SAT).
 func (s *ReminderService) ParseCron(expr string) (time.Time, error) {
 	return ParseCronExpression(expr)
 }
@@ -287,6 +311,9 @@ func ParseCronExpression(expr string) (time.Time, error) {
 	if len(fields) > 5 {
 		fields = fields[:5]
 	}
+	// Normalize month (idx 3) and day-of-week (idx 4) to numeric for matching.
+	fields[3] = normalizeCronField(fields[3], true)
+	fields[4] = normalizeCronField(fields[4], false)
 
 	now := time.Now()
 	// Search forward minute by minute (up to 1 year).
@@ -309,7 +336,7 @@ func ParseCronExpression(expr string) (time.Time, error) {
 // cronFieldMatches checks whether val matches the cron field expression f.
 // min/max define the valid range for the field.
 func cronFieldMatches(f string, val, min, max int) bool {
-	if f == "*" {
+	if f == "*" || f == "?" {
 		return true
 	}
 	// Handle step values: */N or start/N
@@ -321,7 +348,7 @@ func cronFieldMatches(f string, val, min, max int) bool {
 		}
 		rangeStart := min
 		rangeEnd := max
-		if parts[0] != "*" {
+		if parts[0] != "*" && parts[0] != "?" {
 			if dashIdx := strings.Index(parts[0], "-"); dashIdx >= 0 {
 				if s, err := strconv.Atoi(parts[0][:dashIdx]); err == nil {
 					rangeStart = s

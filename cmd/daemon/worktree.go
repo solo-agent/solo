@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/solo-ai/solo/internal/server/service"
 )
 
 // worktreeCreateRequest is the payload for creating an isolated worktree.
@@ -247,6 +250,36 @@ func (h *daemonHandler) HandleWorktreeCleanup(w http.ResponseWriter, r *http.Req
 func agentWorktreeRoot(agentID string) string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".solo", "agents", agentID, "worktrees")
+}
+
+// taskWorktreePath returns the worktree directory for a specific task, or
+// empty string if the task has not been isolated. T3.2.3.
+func taskWorktreePath(agentID string, taskNumber int) string {
+	if agentID == "" || taskNumber <= 0 {
+		return ""
+	}
+	path := filepath.Join(agentWorktreeRoot(agentID), fmt.Sprintf("task-%d", taskNumber))
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	return path
+}
+
+// ResolveCwd returns the best working directory for a task. T3.2.3.
+// Hierarchy: isolated worktree > channel repo binding > default workdir.
+// Returns defaultWorkdir when nothing better applies.
+func ResolveCwd(ctx context.Context, bindingSvc *service.ChannelBindingService, agentID, channelID, defaultWorkdir string, taskNumber int) string {
+	if path := taskWorktreePath(agentID, taskNumber); path != "" {
+		return path
+	}
+	if bindingSvc != nil {
+		if cwd := bindingSvc.ResolveWorkingDirectory(ctx, channelID, agentID); cwd != "" {
+			if _, err := os.Stat(cwd); err == nil {
+				return cwd
+			}
+		}
+	}
+	return defaultWorkdir
 }
 
 // conflictInfo describes a workspace conflict with another agent.

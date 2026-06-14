@@ -244,7 +244,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Route("/api/v1/agent-relationships", func(r chi.Router) {
 			r.Get("/", relHandler.List)
 			r.Post("/", relHandler.Create)
-			r.Get("/check-cycle", relHandler.CheckCycle)
+			r.Post("/check-cycle", relHandler.CheckCycle)
 			r.Route("/{id}", func(r chi.Router) {
 				r.Patch("/", relHandler.Update)
 				r.Delete("/", relHandler.Delete)

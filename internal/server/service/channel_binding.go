@@ -173,6 +173,19 @@ func (s *ChannelBindingService) cloneRepo(channelID, repoURL, branch, bindPath s
 	}
 	slog.Info("channel binding: repo cloned",
 		"channel_id", channelID, "path", bindPath)
+
+	// Fire-and-forget tree scan to surface any clone issues immediately and
+	// warm the FS page cache so the first user-facing GetWorkspace is fast.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if _, err := s.ScanWorkspace(ctx, channelID); err != nil {
+			slog.Warn("channel binding: post-clone scan failed",
+				"channel_id", channelID, "error", err)
+			return
+		}
+		slog.Info("channel binding: post-clone scan completed", "channel_id", channelID)
+	}()
 }
 
 const maxScanDepth = 20

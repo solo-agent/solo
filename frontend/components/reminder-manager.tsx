@@ -467,6 +467,7 @@ export function ReminderManager({ agentId, channelId, agents = [], channels = []
                 type="datetime-local"
                 value={formTriggerAt}
                 onChange={(e) => setFormTriggerAt(e.target.value)}
+                lang="en"
               />
             </div>
           )}

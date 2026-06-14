@@ -99,7 +99,10 @@ func TestKnowledgeHandler_Search_Validation(t *testing.T) {
 	}{
 		{name: "missing auth", query: "test", channelID: "ch-1", auth: "", wantStatus: http.StatusUnauthorized},
 		{name: "missing query", query: "", channelID: "ch-1", auth: "user-1", wantStatus: http.StatusBadRequest},
-		{name: "missing channel_id", query: "test", channelID: "", auth: "user-1", wantStatus: http.StatusBadRequest},
+		// channel_id is optional — missing it triggers cross-channel discovery.
+		// With a nil service pool the handler panics; we recover to confirm
+		// validation passed and the request reached the service layer.
+		{name: "missing channel_id (cross-channel)", query: "test", channelID: "", auth: "user-1", wantStatus: 0},
 	}
 
 	for _, tt := range tests {
@@ -123,7 +126,18 @@ func TestKnowledgeHandler_Search_Validation(t *testing.T) {
 				req.Header.Set("X-User-ID", tt.auth)
 			}
 			rr := httptest.NewRecorder()
-			r.ServeHTTP(rr, req)
+			func() {
+				defer func() { _ = recover() }() // nil-pool panic in service layer is expected
+				r.ServeHTTP(rr, req)
+			}()
+			// For the cross-channel case, the test only verifies the handler
+			// did not return 400 (validation passed) — the panic is OK.
+			if tt.name == "missing channel_id (cross-channel)" {
+				if rr.Code == http.StatusBadRequest {
+					t.Errorf("missing channel_id must NOT return 400 (cross-channel search), got %d", rr.Code)
+				}
+				return
+			}
 			if rr.Code != tt.wantStatus {
 				t.Errorf("expected status %d, got %d", tt.wantStatus, rr.Code)
 			}

@@ -154,20 +154,26 @@ func (s *KnowledgeService) Search(ctx context.Context, channelID, query string, 
 	embedding, embErr := s.embedSvc.GenerateEmbedding(ctx, query)
 	if embErr == nil && embedding != nil {
 		vecStr := vectorToString(embedding)
-		rows, err := s.pool.Query(ctx,
-			`SELECT k.id, k.title, k.content, k.tags, k.source, k.source_ref, k.view_count,
+		// Cross-channel search when channelID is empty.
+		semanticQuery := `SELECT k.id, k.title, k.content, k.tags, k.source, COALESCE(k.source_ref, ''), k.view_count,
 			        k.author_agent_id, COALESCE(a.name, '') AS author_name,
 			        k.created_at, k.updated_at,
 			        1 - (k.embedding <=> $1::vector) AS similarity
 			 FROM knowledge k
 			 LEFT JOIN agents a ON k.author_agent_id = a.id
-			 WHERE k.channel_id = $2
-			   AND k.embedding IS NOT NULL
-			   AND 1 - (k.embedding <=> $1::vector) > 0.7
-			 ORDER BY k.embedding <=> $1::vector
-			 LIMIT $3`,
-			vecStr, channelID, topK,
+			 WHERE k.embedding IS NOT NULL
+			   AND 1 - (k.embedding <=> $1::vector) > 0.7`
+		var (
+			rows pgx.Rows
+			err  error
 		)
+		if channelID != "" {
+			semanticQuery += ` AND k.channel_id = $2 ORDER BY k.embedding <=> $1::vector LIMIT $3`
+			rows, err = s.pool.Query(ctx, semanticQuery, vecStr, channelID, topK)
+		} else {
+			semanticQuery += ` ORDER BY k.embedding <=> $1::vector LIMIT $2`
+			rows, err = s.pool.Query(ctx, semanticQuery, vecStr, topK)
+		}
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {
@@ -193,19 +199,24 @@ func (s *KnowledgeService) Search(ctx context.Context, channelID, query string, 
 	}
 
 	// Full-text search fallback.
-	rows, err := s.pool.Query(ctx,
-		`SELECT k.id, k.title, k.content, k.tags, k.source, k.source_ref, k.view_count,
+	ftsQuery := `SELECT k.id, k.title, k.content, k.tags, k.source, COALESCE(k.source_ref, ''), k.view_count,
 		        k.author_agent_id, COALESCE(a.name, '') AS author_name,
 		        k.created_at, k.updated_at,
 		        ts_rank(to_tsvector('simple', k.title || ' ' || k.content), plainto_tsquery('simple', $1)) AS rank
 		 FROM knowledge k
 		 LEFT JOIN agents a ON k.author_agent_id = a.id
-		 WHERE k.channel_id = $2
-		   AND to_tsvector('simple', k.title || ' ' || k.content) @@ plainto_tsquery('simple', $1)
-		 ORDER BY rank DESC
-		 LIMIT $3`,
-		query, channelID, topK,
+		 WHERE to_tsvector('simple', k.title || ' ' || k.content) @@ plainto_tsquery('simple', $1)`
+	var (
+		rows pgx.Rows
+		err  error
 	)
+	if channelID != "" {
+		ftsQuery += ` AND k.channel_id = $2 ORDER BY rank DESC LIMIT $3`
+		rows, err = s.pool.Query(ctx, ftsQuery, query, channelID, topK)
+	} else {
+		ftsQuery += ` ORDER BY rank DESC LIMIT $2`
+		rows, err = s.pool.Query(ctx, ftsQuery, query, topK)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("fts query: %w", err)
 	}

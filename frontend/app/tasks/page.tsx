@@ -24,6 +24,7 @@ import { TaskBoard } from '@/components/tasks/task-board';
 import type { Task, TaskStatus, Message } from '@/lib/types';
 import { SwarmStatusPanel } from '@/components/swarm/swarm-status';
 import { SwarmDAG } from '@/components/swarm/swarm-dag';
+import { TaskDependenciesSection } from '@/components/tasks/task-dependencies';
 import {
   Dialog,
   DialogHeader,
@@ -503,6 +504,13 @@ function TasksPageContent() {
                       task={threadTask ?? undefined}
                       onClaimTask={handleClaim}
                       onUnclaimTask={handleUnclaim}
+                      dependencies={threadTask && (
+                        <TaskDependenciesSection
+                          task={threadTask}
+                          allTasks={sourceTasks}
+                          onMutated={sourceRefetch}
+                        />
+                      )}
                     />
                   </Suspense>
                 </div>

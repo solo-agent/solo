@@ -48,6 +48,8 @@ interface ThreadPanelProps {
   onUnclaimTask?: (task: Task) => void;
   /** Callback after the thread has been marked as read (P25-08-F) */
   onMarkRead?: () => void;
+  /** Optional dependency management UI (renders between TaskMetaBar and parent message) */
+  dependencies?: React.ReactNode;
 }
 
 // ---- Parent message display ----
@@ -621,6 +623,7 @@ export function ThreadPanel({
   onClaimTask,
   onUnclaimTask,
   onMarkRead,
+  dependencies,
 }: ThreadPanelProps) {
   const {
     messages,
@@ -738,6 +741,9 @@ export function ThreadPanel({
         ) : parentMessage.task_status ? (
           <ParentMessageTaskBar message={parentMessage} />
         ) : null}
+
+        {/* Dependency management (optional, rendered between metadata and message) */}
+        {dependencies}
 
         {/* Parent message */}
         <ParentMessageBlock message={parentMessage} task={task} />

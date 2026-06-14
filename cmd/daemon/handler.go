@@ -758,15 +758,8 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	}
 
 	// T3.2.3: Resolve best working directory for task execution.
-	// Hierarchy: channel repo binding > agent personal workspace.
-	execCWD := ws.WorkDir
-	if h.channelBindingSvc != nil {
-		if cwd := h.channelBindingSvc.ResolveWorkingDirectory(ctx, req.ChannelID, req.AgentID); cwd != "" {
-			if _, statErr := os.Stat(cwd); statErr == nil {
-				execCWD = cwd
-			}
-		}
-	}
+	// Hierarchy: worktree (isolated task) > channel repo binding > agent personal workspace.
+	execCWD := ResolveCwd(ctx, h.channelBindingSvc, req.AgentID, req.ChannelID, ws.WorkDir, 0)
 
 	// Load memory content
 	memoryContent, _ := h.memoryManager.Load(req.AgentID)
