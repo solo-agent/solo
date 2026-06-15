@@ -15,6 +15,7 @@ type AgentRelationshipService struct {
 	pool           *pgxpool.Pool
 	hub            realtime.Broadcaster
 	eventPublisher *RelationshipEventPublisher
+	mdGen          *RelationshipsMDGenerator
 }
 
 // SetHub injects a WebSocket broadcaster for real-time events.
@@ -25,6 +26,11 @@ func (s *AgentRelationshipService) SetHub(hub realtime.Broadcaster) {
 // SetEventPublisher injects the relationship event publisher.
 func (s *AgentRelationshipService) SetEventPublisher(p *RelationshipEventPublisher) {
 	s.eventPublisher = p
+}
+
+// SetMDGenerator injects the relationships MD generator.
+func (s *AgentRelationshipService) SetMDGenerator(g *RelationshipsMDGenerator) {
+	s.mdGen = g
 }
 
 // AgentRelationship represents a single relationship between two agents.
@@ -98,6 +104,10 @@ func (s *AgentRelationshipService) Create(ctx context.Context, req CreateRelatio
 	// Broadcast relationship_created event.
 	if s.eventPublisher != nil {
 		s.eventPublisher.PublishCreated(ctx, rel.ID, rel.FromAgentID, rel.ToAgentID, rel.RelType)
+	}
+	if s.mdGen != nil {
+		_ = s.mdGen.GenerateForAgent(ctx, rel.FromAgentID)
+		_ = s.mdGen.GenerateForAgent(ctx, rel.ToAgentID)
 	}
 
 	return &rel, nil
@@ -228,6 +238,12 @@ func (s *AgentRelationshipService) Delete(ctx context.Context, id string) error 
 	// Broadcast relationship_deleted event.
 	if s.eventPublisher != nil {
 		s.eventPublisher.PublishDeleted(ctx, id, fromAgent, toAgent, relType)
+	}
+	if s.mdGen != nil && fromAgent != "" {
+		_ = s.mdGen.GenerateForAgent(ctx, fromAgent)
+	}
+	if s.mdGen != nil && toAgent != "" {
+		_ = s.mdGen.GenerateForAgent(ctx, toAgent)
 	}
 
 	return nil
