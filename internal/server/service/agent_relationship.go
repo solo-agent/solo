@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -106,8 +107,12 @@ func (s *AgentRelationshipService) Create(ctx context.Context, req CreateRelatio
 		s.eventPublisher.PublishCreated(ctx, rel.ID, rel.FromAgentID, rel.ToAgentID, rel.RelType)
 	}
 	if s.mdGen != nil {
-		_ = s.mdGen.GenerateForAgent(ctx, rel.FromAgentID)
-		_ = s.mdGen.GenerateForAgent(ctx, rel.ToAgentID)
+		if err := s.mdGen.GenerateForAgent(ctx, rel.FromAgentID); err != nil {
+			slog.Warn("regenerate RELATIONSHIPS.md failed", "agent_id", rel.FromAgentID, "err", err)
+		}
+		if err := s.mdGen.GenerateForAgent(ctx, rel.ToAgentID); err != nil {
+			slog.Warn("regenerate RELATIONSHIPS.md failed", "agent_id", rel.ToAgentID, "err", err)
+		}
 	}
 
 	return &rel, nil
@@ -240,10 +245,14 @@ func (s *AgentRelationshipService) Delete(ctx context.Context, id string) error 
 		s.eventPublisher.PublishDeleted(ctx, id, fromAgent, toAgent, relType)
 	}
 	if s.mdGen != nil && fromAgent != "" {
-		_ = s.mdGen.GenerateForAgent(ctx, fromAgent)
+		if err := s.mdGen.GenerateForAgent(ctx, fromAgent); err != nil {
+			slog.Warn("regenerate RELATIONSHIPS.md failed", "agent_id", fromAgent, "err", err)
+		}
 	}
 	if s.mdGen != nil && toAgent != "" {
-		_ = s.mdGen.GenerateForAgent(ctx, toAgent)
+		if err := s.mdGen.GenerateForAgent(ctx, toAgent); err != nil {
+			slog.Warn("regenerate RELATIONSHIPS.md failed", "agent_id", toAgent, "err", err)
+		}
 	}
 
 	return nil
