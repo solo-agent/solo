@@ -591,6 +591,58 @@ func (h *AgentHandler) ListMentionCandidates(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, out)
 }
 
+// ListCollaborators handles GET /api/v1/agents/{agentID}/collaborators
+//
+// Returns the agents that share a `collaborates_with` edge with `agentID`,
+// in either direction (bidirectional). The edge weight is preserved so the
+// UI can sort by recency/strength. Used as a smart-default UI pre-fill for
+// the delegate picker (T1.5).
+func (h *AgentHandler) ListCollaborators(w http.ResponseWriter, r *http.Request) {
+	agentID := chi.URLParam(r, "agentID")
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "agent ID is required")
+		return
+	}
+
+	rows, err := h.pool.Query(r.Context(),
+		`SELECT a.id, a.name, r.weight
+		   FROM agent_relationships r
+		   JOIN agents a
+		     ON a.id = CASE WHEN r.from_agent_id = $1
+		                    THEN r.to_agent_id
+		                    ELSE r.from_agent_id
+		               END
+		  WHERE $1 IN (r.from_agent_id, r.to_agent_id)
+		    AND r.rel_type = 'collaborates_with'
+		  ORDER BY r.weight DESC, a.name ASC`,
+		agentID,
+	)
+	if err != nil {
+		slog.Error("failed to query collaborators", "agent_id", agentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list collaborators")
+		return
+	}
+	defer rows.Close()
+
+	out := make([]MentionCandidate, 0)
+	for rows.Next() {
+		var c MentionCandidate
+		if err := rows.Scan(&c.ID, &c.Name, &c.Weight); err != nil {
+			slog.Error("failed to scan collaborator row", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to list collaborators")
+			return
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Error("collaborators rows error", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list collaborators")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, out)
+}
+
 // --- JSONB helpers ---
 
 // unmarshalStringMap deserializes JSON bytes into a map[string]string.

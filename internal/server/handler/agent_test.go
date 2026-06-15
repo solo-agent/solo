@@ -86,6 +86,12 @@ func setupMentionCandidatesRouter(h *AgentHandler) chi.Router {
 	return r
 }
 
+func setupCollaboratorsRouter(h *AgentHandler) chi.Router {
+	r := chi.NewRouter()
+	r.Get("/api/v1/agents/{agentID}/collaborators", h.ListCollaborators)
+	return r
+}
+
 // TestMentionCandidates_ReturnsAssignsToSortedByWeight verifies that the
 // mention-candidates endpoint returns only assigns_to edges from the given
 // agent, ordered by weight DESC then name ASC. (T1.4.1)
@@ -195,6 +201,91 @@ func TestMentionCandidates_EmptyWhenNoEdges(t *testing.T) {
 	r := setupMentionCandidatesRouter(h)
 
 	req := httptest.NewRequest("GET", "/api/v1/agents/"+loneID+"/mention-candidates", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != 200 {
+		t.Fatalf("expected status 200, got %d", rr.Code)
+	}
+
+	body := rr.Body.String()
+	if body != "[]\n" {
+		t.Errorf("expected empty JSON array body, got %q", body)
+	}
+}
+
+// TestCollaborators_ReturnsBidirectional verifies the collaborators endpoint
+// returns collaborates_with partners regardless of edge direction, ordered
+// by weight DESC then name ASC. (T1.5.1)
+//
+// Setup:
+//   - Alice --collaborates_with (weight 3)--> Bob      (Alice is from)
+//   - Carol --collaborates_with (weight 1)--> Alice    (Alice is to)
+//
+// Querying for Alice must return both Bob and Carol.
+func TestCollaborators_ReturnsBidirectional(t *testing.T) {
+	pool := setupTestPool(t)
+
+	aliceID := createTestAgent(t, pool, "Alice")
+	bobID := createTestAgent(t, pool, "Bob")
+	carolID := createTestAgent(t, pool, "Carol")
+	daveID := createTestAgent(t, pool, "Dave")
+
+	// Alice -> Bob (Alice is from).
+	createTestRelationship(t, pool, aliceID, bobID, "collaborates_with", nil, 3.0)
+	// Carol -> Alice (Alice is to).
+	createTestRelationship(t, pool, carolID, aliceID, "collaborates_with", nil, 1.0)
+	// An unrelated collab edge — must NOT show up when querying for Alice.
+	createTestRelationship(t, pool, bobID, daveID, "collaborates_with", nil, 99.0)
+	// An assigns_to edge touching Alice — must NOT show up (rel_type filter).
+	createTestRelationship(t, pool, aliceID, daveID, "assigns_to", nil, 99.0)
+
+	h := &AgentHandler{pool: pool}
+	r := setupCollaboratorsRouter(h)
+
+	req := httptest.NewRequest("GET", "/api/v1/agents/"+aliceID+"/collaborators", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != 200 {
+		t.Fatalf("expected status 200, got %d (body: %s)", rr.Code, rr.Body.String())
+	}
+
+	var got []MentionCandidate
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v (body: %s)", err, rr.Body.String())
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 collaborators (Bob and Carol), got %d: %+v", len(got), got)
+	}
+
+	// Bob has weight 3 → must be first.
+	if got[0].ID != bobID {
+		t.Errorf("expected Bob first (weight 3), got id=%s (name=%s)", got[0].ID, got[0].Name)
+	}
+	if got[0].Weight != 3.0 {
+		t.Errorf("expected first weight 3.0, got %v", got[0].Weight)
+	}
+	// Carol has weight 1 → must be second.
+	if got[1].ID != carolID {
+		t.Errorf("expected Carol second (weight 1), got id=%s (name=%s)", got[1].ID, got[1].Name)
+	}
+	if got[1].Weight != 1.0 {
+		t.Errorf("expected second weight 1.0, got %v", got[1].Weight)
+	}
+}
+
+// TestCollaborators_EmptyWhenNoEdges verifies an agent with no
+// collaborates_with edges returns an empty list (200 OK, []), not null.
+func TestCollaborators_EmptyWhenNoEdges(t *testing.T) {
+	pool := setupTestPool(t)
+	loneID := createTestAgent(t, pool, "Lone")
+
+	h := &AgentHandler{pool: pool}
+	r := setupCollaboratorsRouter(h)
+
+	req := httptest.NewRequest("GET", "/api/v1/agents/"+loneID+"/collaborators", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 

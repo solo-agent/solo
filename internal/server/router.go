@@ -262,6 +262,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		})
 		r.Get("/api/v1/agents/{agentID}/relationships", relHandler.ListByAgent)
 		r.Get("/api/v1/agents/{agentID}/mention-candidates", agentHandler.ListMentionCandidates)
+		r.Get("/api/v1/agents/{agentID}/collaborators", agentHandler.ListCollaborators)
 		r.Get("/api/v1/channels/{channelID}/relationships", relHandler.ListByChannel)
 
 		// Relationship graph (Step 5 — Visualization)
