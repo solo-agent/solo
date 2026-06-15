@@ -48,6 +48,8 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	taskSvc := service.NewTaskService(pool)
 	mentionValidator := service.NewMentionValidator(pool) // 1.1: server-enforced @mention validation
 	taskSvc.SetMentionValidator(mentionValidator)
+	subtaskNotifier := service.NewSubtaskNotifier(pool, hub) // 1.2: sub-task claim/complete notifications
+	taskSvc.SetSubtaskNotifier(subtaskNotifier)
 	computerSvc := service.NewComputerService(pool)
 	inboxSvc := service.NewInboxService(pool)
 

@@ -132,6 +132,7 @@ type TaskFilter struct {
 type TaskService struct {
 	pool             *pgxpool.Pool
 	mentionValidator *MentionValidator
+	subtaskNotifier  *SubtaskNotifier
 }
 
 // NewTaskService creates a new TaskService.
@@ -142,6 +143,11 @@ func NewTaskService(pool *pgxpool.Pool) *TaskService {
 // SetMentionValidator injects the @mention validator (1.1: server-enforced assigns_to check).
 func (s *TaskService) SetMentionValidator(v *MentionValidator) {
 	s.mentionValidator = v
+}
+
+// SetSubtaskNotifier injects the sub-task claim/complete notifier (1.2).
+func (s *TaskService) SetSubtaskNotifier(n *SubtaskNotifier) {
+	s.subtaskNotifier = n
 }
 
 // CreateTask creates a new task in the channel with per-channel task numbering.
@@ -400,6 +406,13 @@ func (s *TaskService) ClaimTask(ctx context.Context, channelID, taskID, userID s
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit: %w", err)
+	}
+
+	// 1.2: Notify sub-task creator of the claim (only for sub-tasks with reverse assigns_to edge).
+	if s.subtaskNotifier != nil {
+		if err := s.subtaskNotifier.NotifyClaim(ctx, taskID, userID); err != nil {
+			slog.Warn("subtask notify claim failed", "task_id", taskID, "err", err)
+		}
 	}
 
 	// Re-fetch to get ClaimerName from the JOIN with users/agents tables.
@@ -824,7 +837,21 @@ func (s *TaskService) CompleteTaskForAgent(ctx context.Context, taskID string) e
 		`UPDATE tasks SET status = $1, updated_at = now() WHERE id = $2 AND status IN ($3, $4)`,
 		TaskStatusInReview, taskID, TaskStatusInProgress, TaskStatusTodo,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// 1.2: Notify sub-task creator of the completion (only for sub-tasks with reverse assigns_to edge).
+	if s.subtaskNotifier != nil {
+		// Look up the claimer_id to pass to the notifier.
+		var claimerID string
+		if err := s.pool.QueryRow(ctx, `SELECT COALESCE(claimer_id::text, '') FROM tasks WHERE id = $1`, taskID).Scan(&claimerID); err == nil && claimerID != "" {
+			if err := s.subtaskNotifier.NotifyComplete(ctx, taskID, claimerID); err != nil {
+				slog.Warn("subtask notify complete failed", "task_id", taskID, "err", err)
+			}
+		}
+	}
+	return nil
 }
 
 // requireChannelMember checks that the user is a member of the channel and the channel is not archived.
