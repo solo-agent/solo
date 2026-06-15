@@ -4,15 +4,17 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestApplyTemplate_DevTeam_CreatesFiveAgentsAndRelationships(t *testing.T) {
 	pool := setupTestPool(t)
 	seedDevTeamTemplate(t, pool)
+	ownerID := createTemplateTestUser(t, pool)
 
 	svc := NewTemplateService(pool, NewRelationshipsMDGenerator(pool, t.TempDir()))
-	result, err := svc.Apply(context.Background(), "dev-team", "owner-1")
+	result, err := svc.Apply(context.Background(), "dev-team", ownerID)
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -41,4 +43,20 @@ func seedDevTeamTemplate(t *testing.T, pool *pgxpool.Pool) {
 	if err != nil {
 		t.Fatalf("seed template: %v", err)
 	}
+}
+
+func createTemplateTestUser(t *testing.T, pool *pgxpool.Pool) string {
+	t.Helper()
+	suffix := uuid.New().String()[:8]
+	var id string
+	err := pool.QueryRow(context.Background(),
+		`INSERT INTO users (id, display_name, email, password_hash)
+		 VALUES (gen_random_uuid(), $1, $2, 'test-hash')
+		 RETURNING id`,
+		"tmpl-owner-"+suffix, "tmpl-"+suffix+"@example.com",
+	).Scan(&id)
+	if err != nil {
+		t.Fatalf("create template test user: %v", err)
+	}
+	return id
 }
