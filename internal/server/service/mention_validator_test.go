@@ -48,8 +48,8 @@ func createTestAgent(t *testing.T, pool *pgxpool.Pool, name string) string {
 	if err != nil {
 		// Insert a placeholder user.
 		err = pool.QueryRow(ctx,
-			`INSERT INTO users (id, display_name, email)
-			 VALUES (gen_random_uuid(), $1, $2)
+			`INSERT INTO users (id, display_name, email, password_hash)
+			 VALUES (gen_random_uuid(), $1, $2, 'test-hash')
 			 RETURNING id`,
 			"test-owner-"+name, "test-"+name+"@example.com",
 		).Scan(&ownerID)
