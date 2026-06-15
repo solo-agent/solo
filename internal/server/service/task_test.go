@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -149,5 +150,51 @@ func TestTaskCreateRequest_Defaults(t *testing.T) {
 	}
 	if req.Priority != "" {
 		t.Errorf("expected empty priority, got %s", req.Priority)
+	}
+}
+
+// TestCreateSubTask_MentionValidationRequired verifies the server-enforced
+// assigns_to check: when a sub-task is created and its description @-mentions
+// an agent that is NOT in the creator's assigns_to list, CreateTask must
+// reject the request with an error that mentions assigns_to.
+func TestCreateSubTask_MentionValidationRequired(t *testing.T) {
+	pool := setupTestPool(t)
+
+	// Real channel is required so @-mention resolution finds Eve.
+	channelID, _ := createTestChannel(t, pool)
+
+	// Two agents: Alice is the creator, Eve is the mentionee.
+	aliceID := createTestAgent(t, pool, "Alice-MVCreate")
+	eveID := createTestAgent(t, pool, "Eve-MVCreate")
+
+	// Look up Eve's actual stored name (createTestAgent appends a UUID suffix).
+	var eveName string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT name FROM agents WHERE id = $1`, eveID,
+	).Scan(&eveName); err != nil {
+		t.Fatalf("lookup eve name: %v", err)
+	}
+
+	// Both must be channel members for CreateTask + ResolveMentions to work.
+	addChannelMember(t, pool, channelID, aliceID, "agent")
+	addChannelMember(t, pool, channelID, eveID, "agent")
+
+	// Parent task — created directly via SQL so we control the parent_task_id.
+	parentID := createTestTask(t, pool, channelID, aliceID, "T-parent", nil)
+
+	// No assigns_to edge Alice → Eve. Validation must reject the @Eve mention.
+	svc := NewTaskService(pool)
+	svc.SetMentionValidator(NewMentionValidator(pool))
+
+	_, err := svc.CreateTask(context.Background(), channelID, aliceID, TaskCreateRequest{
+		ParentTaskID: parentID,
+		Title:        "T-sub",
+		Description:  "@" + eveName + " please handle this",
+	})
+	if err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+	if !strings.Contains(err.Error(), "assigns_to") {
+		t.Errorf("expected assigns_to error, got: %v", err)
 	}
 }
