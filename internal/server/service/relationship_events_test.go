@@ -50,6 +50,9 @@ func TestRelationshipEvents_PublishUpdated(t *testing.T) {
 	if !strings.Contains(body, "relationship_updated") {
 		t.Errorf("expected relationship_updated in payload, got: %s", body)
 	}
+	if !strings.Contains(body, "rel-2") {
+		t.Errorf("expected rel id in payload, got: %s", body)
+	}
 }
 
 func TestRelationshipEvents_PublishDeleted(t *testing.T) {
@@ -62,5 +65,8 @@ func TestRelationshipEvents_PublishDeleted(t *testing.T) {
 	body := string(hub.broadcasts[0])
 	if !strings.Contains(body, "relationship_deleted") {
 		t.Errorf("expected relationship_deleted in payload, got: %s", body)
+	}
+	if !strings.Contains(body, "rel-3") {
+		t.Errorf("expected rel id in payload, got: %s", body)
 	}
 }

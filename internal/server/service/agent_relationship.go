@@ -205,6 +205,19 @@ func (s *AgentRelationshipService) UpdateWeight(ctx context.Context, id string, 
 
 // Delete removes a relationship by ID.
 func (s *AgentRelationshipService) Delete(ctx context.Context, id string) error {
+	var fromAgent, toAgent, relType string
+	err := s.pool.QueryRow(ctx, `
+		SELECT from_agent_id::text, to_agent_id::text, rel_type
+		  FROM agent_relationships
+		 WHERE id = $1
+	`, id).Scan(&fromAgent, &toAgent, &relType)
+	if err == pgx.ErrNoRows {
+		return fmt.Errorf("relationship not found: %s", id)
+	}
+	if err != nil {
+		return fmt.Errorf("lookup relationship: %w", err)
+	}
+
 	tag, err := s.pool.Exec(ctx, `DELETE FROM agent_relationships WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("delete relationship: %w", err)
@@ -214,7 +227,7 @@ func (s *AgentRelationshipService) Delete(ctx context.Context, id string) error 
 	}
 	// Broadcast relationship_deleted event.
 	if s.eventPublisher != nil {
-		s.eventPublisher.PublishDeleted(ctx, id, "", "", "")
+		s.eventPublisher.PublishDeleted(ctx, id, fromAgent, toAgent, relType)
 	}
 
 	return nil
