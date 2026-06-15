@@ -537,6 +537,60 @@ func (h *AgentHandler) AgentBackendsDetect(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, results)
 }
 
+// MentionCandidate is one entry in the mention-candidates response (T1.4).
+type MentionCandidate struct {
+	ID     string  `json:"id"`
+	Name   string  `json:"name"`
+	Weight float64 `json:"weight"`
+}
+
+// ListMentionCandidates handles GET /api/v1/agents/{agentID}/mention-candidates
+//
+// Returns the agents that `agentID` has assigns_to relationships with, ordered
+// by weight DESC then name ASC. Used as a smart-default UI pre-fill for the
+// @mention picker (T1.4).
+func (h *AgentHandler) ListMentionCandidates(w http.ResponseWriter, r *http.Request) {
+	agentID := chi.URLParam(r, "agentID")
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "agent ID is required")
+		return
+	}
+
+	rows, err := h.pool.Query(r.Context(),
+		`SELECT a.id, a.name, r.weight
+		   FROM agent_relationships r
+		   JOIN agents a ON a.id = r.to_agent_id
+		  WHERE r.from_agent_id = $1
+		    AND r.rel_type = 'assigns_to'
+		  ORDER BY r.weight DESC, a.name ASC`,
+		agentID,
+	)
+	if err != nil {
+		slog.Error("failed to query mention candidates", "agent_id", agentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list mention candidates")
+		return
+	}
+	defer rows.Close()
+
+	out := make([]MentionCandidate, 0)
+	for rows.Next() {
+		var c MentionCandidate
+		if err := rows.Scan(&c.ID, &c.Name, &c.Weight); err != nil {
+			slog.Error("failed to scan mention candidate row", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to list mention candidates")
+			return
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Error("mention candidates rows error", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list mention candidates")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, out)
+}
+
 // --- JSONB helpers ---
 
 // unmarshalStringMap deserializes JSON bytes into a map[string]string.
