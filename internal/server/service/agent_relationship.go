@@ -121,7 +121,7 @@ func (s *AgentRelationshipService) checkReportsToCycle(ctx context.Context, from
 
 		rows, err := s.pool.Query(ctx, `
 			SELECT to_agent_id FROM agent_relationships
-			WHERE from_agent_id = $1 AND rel_type = 'reports_to'
+			WHERE from_agent_id = $1 AND rel_type = 'assigns_to'
 		`, next)
 		if err != nil {
 			return fmt.Errorf("cycle check failed: %w", err)
@@ -291,7 +291,7 @@ func (s *AgentRelationshipService) CheckCycle(ctx context.Context, fromAgentID, 
 
 		rows, err := s.pool.Query(ctx, `
 			SELECT to_agent_id FROM agent_relationships
-			WHERE from_agent_id = $1 AND rel_type = 'reports_to'
+			WHERE from_agent_id = $1 AND rel_type = 'assigns_to'
 		`, next)
 		if err != nil {
 			return false, fmt.Errorf("cycle check failed: %w", err)
