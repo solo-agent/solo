@@ -64,6 +64,8 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	daemonHandler := handler.NewDaemonHandler(dm, agentSvc, computerSvc)
 	relSvc := service.NewAgentRelationshipService(pool)
 	relSvc.SetHub(hub)
+	eventPub := service.NewRelationshipEventPublisher(hub)
+	relSvc.SetEventPublisher(eventPub)
 	relHandler := handler.NewAgentRelationshipHandler(pool, relSvc)
 	depHandler := handler.NewTaskDependencyHandler(taskSvc, hub)
 	delSvc := service.NewAgentDelegationService(pool)

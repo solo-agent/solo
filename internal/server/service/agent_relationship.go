@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -13,13 +12,19 @@ import (
 
 // AgentRelationshipService manages agent-to-agent relationships.
 type AgentRelationshipService struct {
-	pool *pgxpool.Pool
-	hub  realtime.Broadcaster
+	pool           *pgxpool.Pool
+	hub            realtime.Broadcaster
+	eventPublisher *RelationshipEventPublisher
 }
 
 // SetHub injects a WebSocket broadcaster for real-time events.
 func (s *AgentRelationshipService) SetHub(hub realtime.Broadcaster) {
 	s.hub = hub
+}
+
+// SetEventPublisher injects the relationship event publisher.
+func (s *AgentRelationshipService) SetEventPublisher(p *RelationshipEventPublisher) {
+	s.eventPublisher = p
 }
 
 // AgentRelationship represents a single relationship between two agents.
@@ -91,12 +96,8 @@ func (s *AgentRelationshipService) Create(ctx context.Context, req CreateRelatio
 		return nil, fmt.Errorf("create relationship: %w", err)
 	}
 	// Broadcast relationship_created event.
-	if s.hub != nil {
-		payload, _ := json.Marshal(map[string]interface{}{
-			"type":    "relationship_created",
-			"payload": rel,
-		})
-		s.hub.Broadcast(payload)
+	if s.eventPublisher != nil {
+		s.eventPublisher.PublishCreated(ctx, rel.ID, rel.FromAgentID, rel.ToAgentID, rel.RelType)
 	}
 
 	return &rel, nil
@@ -212,12 +213,8 @@ func (s *AgentRelationshipService) Delete(ctx context.Context, id string) error 
 		return fmt.Errorf("relationship not found: %s", id)
 	}
 	// Broadcast relationship_deleted event.
-	if s.hub != nil {
-		payload, _ := json.Marshal(map[string]interface{}{
-			"type":    "relationship_deleted",
-			"payload": map[string]string{"id": id},
-		})
-		s.hub.Broadcast(payload)
+	if s.eventPublisher != nil {
+		s.eventPublisher.PublishDeleted(ctx, id, "", "", "")
 	}
 
 	return nil
