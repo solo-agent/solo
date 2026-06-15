@@ -70,6 +70,8 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	mdGen := service.NewRelationshipsMDGenerator(pool, filepath.Join(homeDir, ".solo", "agents"))
 	relSvc.SetMDGenerator(mdGen)
 	relHandler := handler.NewAgentRelationshipHandler(pool, relSvc)
+	templateSvc := service.NewTemplateService(pool, mdGen)
+	templateHandler := handler.NewTemplateHandler(templateSvc, pool)
 	depHandler := handler.NewTaskDependencyHandler(taskSvc, hub)
 	delSvc := service.NewAgentDelegationService(pool)
 	delSvc.SetHub(hub)
@@ -267,6 +269,10 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 
 		// Relationship graph (Step 5 — Visualization)
 		r.Get("/api/v1/relationships/graph", relHandler.Graph)
+
+		// Template library (1.7)
+		r.Get("/api/v1/templates", templateHandler.List)
+		r.Post("/api/v1/templates/{id}/apply", templateHandler.Apply)
 
 		// Agent backends metadata (registered backend adapters)
 		r.Get("/api/v1/agent-backends", agentHandler.AgentBackends)
