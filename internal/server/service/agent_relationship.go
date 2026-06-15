@@ -72,7 +72,7 @@ func (s *AgentRelationshipService) Create(ctx context.Context, req CreateRelatio
 
 	// Cycle detection for assigns_to.
 	if req.RelType == "assigns_to" {
-		if err := s.checkReportsToCycle(ctx, req.FromAgentID, req.ToAgentID); err != nil {
+		if err := s.checkAssignsToCycle(ctx, req.FromAgentID, req.ToAgentID); err != nil {
 			return nil, err
 		}
 	}
@@ -102,10 +102,10 @@ func (s *AgentRelationshipService) Create(ctx context.Context, req CreateRelatio
 	return &rel, nil
 }
 
-// checkReportsToCycle uses BFS to walk all reports_to chains upward from
+// checkAssignsToCycle uses BFS to walk all assigns_to chains upward from
 // toAgent. If fromAgent appears anywhere in the transitive closure, adding
 // this edge would form a cycle.
-func (s *AgentRelationshipService) checkReportsToCycle(ctx context.Context, fromAgentID, toAgentID string) error {
+func (s *AgentRelationshipService) checkAssignsToCycle(ctx context.Context, fromAgentID, toAgentID string) error {
 	visited := map[string]bool{fromAgentID: true}
 	queue := []string{toAgentID}
 	depth := 0
@@ -139,7 +139,7 @@ func (s *AgentRelationshipService) checkReportsToCycle(ctx context.Context, from
 		queue = append(queue, managers...)
 	}
 	if depth >= 100 {
-		return fmt.Errorf("reports_to chain exceeds maximum depth (100)")
+		return fmt.Errorf("assigns_to chain exceeds maximum depth (100)")
 	}
 	return nil
 }
@@ -309,7 +309,7 @@ func (s *AgentRelationshipService) CheckCycle(ctx context.Context, fromAgentID, 
 		queue = append(queue, managers...)
 	}
 	if depth >= 100 {
-		return false, fmt.Errorf("reports_to chain exceeds maximum depth (100)")
+		return false, fmt.Errorf("assigns_to chain exceeds maximum depth (100)")
 	}
 	return false, nil
 }
