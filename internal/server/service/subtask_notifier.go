@@ -31,6 +31,58 @@ func (s *SubtaskNotifier) NotifyComplete(ctx context.Context, taskID, claimerID 
 	return s.notify(ctx, taskID, claimerID, "complete", "completed")
 }
 
+// NotifyEscalation is called by WatchdogService when a sub-task is overdue.
+// It checks the reverse assigns_to edge (claimer → creator) and broadcasts
+// a watchdog_escalation event to the channel if the edge exists.
+func (s *SubtaskNotifier) NotifyEscalation(ctx context.Context, taskID, claimerID string) error {
+	var creatorID, channelID, title string
+	err := s.pool.QueryRow(ctx, `
+		SELECT t.creator_id, t.channel_id, t.title
+		  FROM tasks t
+		 WHERE t.id = $1
+	`, taskID).Scan(&creatorID, &channelID, &title)
+	if err != nil {
+		return fmt.Errorf("lookup task: %w", err)
+	}
+	if creatorID == claimerID {
+		return nil
+	}
+
+	var hasEdge bool
+	err = s.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM agent_relationships
+			WHERE from_agent_id = $1
+			  AND to_agent_id = $2
+			  AND rel_type = 'assigns_to'
+		)
+	`, claimerID, creatorID).Scan(&hasEdge)
+	if err != nil {
+		return fmt.Errorf("reverse assigns_to check: %w", err)
+	}
+	if !hasEdge {
+		slog.Info("watchdog escalate skipped — no assigns_to edge",
+			"task_id", taskID, "claimer_id", claimerID, "creator_id", creatorID)
+		return nil
+	}
+
+	if s.hub == nil {
+		return nil
+	}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"type": "watchdog_escalation",
+		"payload": map[string]string{
+			"task_id":    taskID,
+			"task_title": title,
+			"claimer_id": claimerID,
+			"creator_id": creatorID,
+			"message":    fmt.Sprintf("Sub-task %s overdue — escalated to @%s", title, creatorID),
+		},
+	})
+	s.hub.BroadcastToChannel(channelID, payload)
+	return nil
+}
+
 func (s *SubtaskNotifier) notify(ctx context.Context, taskID, claimerID, eventType, verb string) error {
 	var creatorID, channelID, title string
 	err := s.pool.QueryRow(ctx, `

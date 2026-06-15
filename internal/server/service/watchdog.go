@@ -339,59 +339,14 @@ func (s *WatchdogService) ScanTimeouts(ctx context.Context) error {
 	return nil
 }
 
-// broadcastCreatorEscalation looks up the task's creator and the
-// claimer→creator assigns_to edge; if present, broadcasts a
-// watchdog_escalation message to the task's channel.
+// broadcastCreatorEscalation delegates to the SubtaskNotifier, which performs
+// the assigns_to edge check and emits the watchdog_escalation event to the
+// task's channel.
 func (s *WatchdogService) broadcastCreatorEscalation(ctx context.Context, taskID, claimerID string) {
-	var creatorID string
-	err := s.pool.QueryRow(ctx, `SELECT creator_id FROM tasks WHERE id = $1`, taskID).Scan(&creatorID)
-	if err != nil {
-		slog.Warn("watchdog: lookup task creator for escalation", "task_id", taskID, "err", err)
+	if s.notifier == nil {
 		return
 	}
-	if creatorID == claimerID {
-		// Self-claimed — no creator notification needed.
-		return
+	if err := s.notifier.NotifyEscalation(ctx, taskID, claimerID); err != nil {
+		slog.Warn("watchdog escalation broadcast failed", "task_id", taskID, "err", err)
 	}
-	var hasEdge bool
-	err = s.pool.QueryRow(ctx, `
-		SELECT EXISTS(
-			SELECT 1 FROM agent_relationships
-			WHERE from_agent_id = $1
-			  AND to_agent_id = $2
-			  AND rel_type = 'assigns_to'
-		)
-	`, claimerID, creatorID).Scan(&hasEdge)
-	if err != nil {
-		slog.Warn("watchdog: reverse assigns_to check", "task_id", taskID, "err", err)
-		return
-	}
-	if !hasEdge {
-		slog.Info("watchdog escalation skipped — no assigns_to edge",
-			"task_id", taskID, "claimer_id", claimerID, "creator_id", creatorID)
-		return
-	}
-	if s.hub == nil {
-		return
-	}
-	var channelID string
-	if err := s.pool.QueryRow(ctx, `SELECT channel_id FROM tasks WHERE id = $1`, taskID).Scan(&channelID); err != nil {
-		slog.Warn("watchdog: lookup task channel for escalation", "task_id", taskID, "err", err)
-		return
-	}
-	payload := jsonEnvelope("watchdog_escalation", map[string]interface{}{
-		"task_id":    taskID,
-		"claimer_id": claimerID,
-		"creator_id": creatorID,
-		"message":    fmt.Sprintf("Sub-task %s overdue — escalated to @%s", taskID, creatorID),
-	})
-	s.hub.BroadcastToChannel(channelID, payload)
-}
-
-// derefStr returns the value of a string pointer, or "" when nil.
-func derefStr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }
