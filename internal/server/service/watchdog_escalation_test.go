@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -36,9 +37,28 @@ func TestWatchdogEscalation_FindsCreatorViaAssignsTo(t *testing.T) {
 	if err := svc.ScanTimeouts(context.Background()); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
-	if len(hub.sentToChannel) == 0 {
-		t.Error("expected escalation notification, got none")
+	foundEscalation := false
+	for _, p := range hub.channelPayloads {
+		if strings.Contains(string(p), "watchdog_escalation") {
+			foundEscalation = true
+			break
+		}
 	}
+	if !foundEscalation {
+		t.Errorf("expected watchdog_escalation notification, got payloads: %s", stringJoinPayloads(hub.channelPayloads))
+	}
+}
+
+// stringJoinPayloads is a small debug helper for test failure messages.
+func stringJoinPayloads(payloads [][]byte) string {
+	out := ""
+	for i, p := range payloads {
+		if i > 0 {
+			out += " | "
+		}
+		out += string(p)
+	}
+	return out
 }
 
 // TestWatchdogEscalation_NoAssignsToEdge verifies that when no assigns_to
@@ -69,7 +89,10 @@ func TestWatchdogEscalation_NoAssignsToEdge(t *testing.T) {
 	if err := svc.ScanTimeouts(context.Background()); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
-	if len(hub.sentToChannel) != 0 {
-		t.Errorf("expected no escalation without assigns_to edge, got %d notifications", len(hub.sentToChannel))
+	// No relationship-aware escalation should fire.
+	for _, p := range hub.channelPayloads {
+		if strings.Contains(string(p), "watchdog_escalation") {
+			t.Errorf("unexpected watchdog_escalation without assigns_to edge: %s", string(p))
+		}
 	}
 }

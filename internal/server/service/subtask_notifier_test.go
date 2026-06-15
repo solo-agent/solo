@@ -51,17 +51,20 @@ func TestSubtaskNotifier_NoEdgeSkips(t *testing.T) {
 
 // fakeHub satisfies realtime.Broadcaster for tests.
 type fakeHub struct {
-	sentToChannel []string
+	sentToChannel     []string
+	channelPayloads   [][]byte
 }
 
 func (f *fakeHub) BroadcastToScope(scopeType, scopeID string, msg []byte) {
 	if scopeType == "channel" {
 		f.sentToChannel = append(f.sentToChannel, scopeID)
+		f.channelPayloads = append(f.channelPayloads, msg)
 	}
 }
 
 func (f *fakeHub) BroadcastToChannel(channelID string, msg []byte) {
 	f.sentToChannel = append(f.sentToChannel, channelID)
+	f.channelPayloads = append(f.channelPayloads, msg)
 }
 
 func (f *fakeHub) SendToUser(userID string, msg []byte) {}

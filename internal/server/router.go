@@ -87,6 +87,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	swarmCoordinator := service.NewSwarmCoordinator(pool, taskSvc, hub)
 	reminderSvc := service.NewReminderService(pool, hub)
 	watchdogSvc := service.NewWatchdogService(pool, hub)
+	watchdogSvc.SetNotifier(subtaskNotifier) // 1.3: reverse-edge escalation to creator
 	reminderHandler := handler.NewReminderHandler(reminderSvc)
 	watchdogHandler := handler.NewWatchdogHandler(watchdogSvc, taskSvc)
 	taskHandler.SetSwarmCoordinator(swarmCoordinator)

@@ -25,13 +25,22 @@ type TaskWatchdog struct {
 
 // WatchdogService monitors claimed tasks for inactivity and escalates.
 type WatchdogService struct {
-	pool *pgxpool.Pool
-	hub  realtime.Broadcaster
+	pool     *pgxpool.Pool
+	hub      realtime.Broadcaster
+	notifier *SubtaskNotifier
 }
 
 // NewWatchdogService creates a new WatchdogService.
 func NewWatchdogService(pool *pgxpool.Pool, hub realtime.Broadcaster) *WatchdogService {
 	return &WatchdogService{pool: pool, hub: hub}
+}
+
+// SetNotifier wires in a SubtaskNotifier used to broadcast relationship-aware
+// escalation messages (e.g. "task overdue, escalated to creator") when a
+// watchdog times out. Optional — when unset, no relationship-aware escalation
+// is performed and only the basic timeout_action path runs.
+func (s *WatchdogService) SetNotifier(n *SubtaskNotifier) {
+	s.notifier = n
 }
 
 // CreateWatchdog creates a watchdog entry for a claimed task. Called after
@@ -301,4 +310,88 @@ func (s *WatchdogService) ListStaleTasks(ctx context.Context, channelID string) 
 		watchdogs = []TaskWatchdog{}
 	}
 	return watchdogs, nil
+}
+
+// ScanTimeouts is the watchdog scheduler entry point. It queries overdue
+// watchdogs and processes each one: applies the configured timeout_action
+// (via HandleOverdueTask), and — for escalation events — also broadcasts a
+// relationship-aware watchdog_escalation notification to the task's channel
+// so the original creator is alerted that their sub-task is overdue.
+//
+// The relationship-aware escalation requires an assigns_to edge from the
+// claimer back to the task's creator; if no such edge exists the basic
+// escalation chain runs unchanged.
+func (s *WatchdogService) ScanTimeouts(ctx context.Context) error {
+	watchdogs, err := s.CheckOverdueTasks(ctx)
+	if err != nil {
+		return err
+	}
+	for _, w := range watchdogs {
+		// Run the configured timeout_action (remind / escalate / unclaim).
+		s.HandleOverdueTask(ctx, w)
+		// Relationship-aware escalation: when a sub-task is overdue and the
+		// claimer has an assigns_to edge back to the creator, broadcast a
+		// watchdog_escalation message so the creator is notified.
+		if w.TimeoutAction == "escalate" && s.notifier != nil {
+			s.broadcastCreatorEscalation(ctx, w.TaskID, w.ClaimerID)
+		}
+	}
+	return nil
+}
+
+// broadcastCreatorEscalation looks up the task's creator and the
+// claimer→creator assigns_to edge; if present, broadcasts a
+// watchdog_escalation message to the task's channel.
+func (s *WatchdogService) broadcastCreatorEscalation(ctx context.Context, taskID, claimerID string) {
+	var creatorID string
+	err := s.pool.QueryRow(ctx, `SELECT creator_id FROM tasks WHERE id = $1`, taskID).Scan(&creatorID)
+	if err != nil {
+		slog.Warn("watchdog: lookup task creator for escalation", "task_id", taskID, "err", err)
+		return
+	}
+	if creatorID == claimerID {
+		// Self-claimed — no creator notification needed.
+		return
+	}
+	var hasEdge bool
+	err = s.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM agent_relationships
+			WHERE from_agent_id = $1
+			  AND to_agent_id = $2
+			  AND rel_type = 'assigns_to'
+		)
+	`, claimerID, creatorID).Scan(&hasEdge)
+	if err != nil {
+		slog.Warn("watchdog: reverse assigns_to check", "task_id", taskID, "err", err)
+		return
+	}
+	if !hasEdge {
+		slog.Info("watchdog escalation skipped — no assigns_to edge",
+			"task_id", taskID, "claimer_id", claimerID, "creator_id", creatorID)
+		return
+	}
+	if s.hub == nil {
+		return
+	}
+	var channelID string
+	if err := s.pool.QueryRow(ctx, `SELECT channel_id FROM tasks WHERE id = $1`, taskID).Scan(&channelID); err != nil {
+		slog.Warn("watchdog: lookup task channel for escalation", "task_id", taskID, "err", err)
+		return
+	}
+	payload := jsonEnvelope("watchdog_escalation", map[string]interface{}{
+		"task_id":    taskID,
+		"claimer_id": claimerID,
+		"creator_id": creatorID,
+		"message":    fmt.Sprintf("Sub-task %s overdue — escalated to @%s", taskID, creatorID),
+	})
+	s.hub.BroadcastToChannel(channelID, payload)
+}
+
+// derefStr returns the value of a string pointer, or "" when nil.
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
