@@ -27,7 +27,7 @@ type TaskWatchdog struct {
 type WatchdogService struct {
 	pool     *pgxpool.Pool
 	hub      realtime.Broadcaster
-	notifier *SubtaskNotifier
+	notifier *AgentNotifier
 }
 
 // NewWatchdogService creates a new WatchdogService.
@@ -35,11 +35,9 @@ func NewWatchdogService(pool *pgxpool.Pool, hub realtime.Broadcaster) *WatchdogS
 	return &WatchdogService{pool: pool, hub: hub}
 }
 
-// SetNotifier wires in a SubtaskNotifier used to broadcast relationship-aware
-// escalation messages (e.g. "task overdue, escalated to creator") when a
-// watchdog times out. Optional — when unset, no relationship-aware escalation
-// is performed and only the basic timeout_action path runs.
-func (s *WatchdogService) SetNotifier(n *SubtaskNotifier) {
+// SetNotifier wires in an AgentNotifier for DM-based escalation messages.
+// Optional — when unset, no escalation notification is sent.
+func (s *WatchdogService) SetNotifier(n *AgentNotifier) {
 	s.notifier = n
 }
 
@@ -339,9 +337,7 @@ func (s *WatchdogService) ScanTimeouts(ctx context.Context) error {
 	return nil
 }
 
-// broadcastCreatorEscalation delegates to the SubtaskNotifier, which performs
-// the assigns_to edge check and emits the watchdog_escalation event to the
-// task's channel.
+// broadcastCreatorEscalation sends a DM system message to the task creator.
 func (s *WatchdogService) broadcastCreatorEscalation(ctx context.Context, taskID, claimerID string) {
 	if s.notifier == nil {
 		return

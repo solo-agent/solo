@@ -130,9 +130,8 @@ type TaskFilter struct {
 
 // TaskService handles task business logic.
 type TaskService struct {
-	pool             *pgxpool.Pool
-	mentionValidator *MentionValidator
-	subtaskNotifier  *SubtaskNotifier
+	pool          *pgxpool.Pool
+	agentNotifier *AgentNotifier
 }
 
 // NewTaskService creates a new TaskService.
@@ -140,14 +139,9 @@ func NewTaskService(pool *pgxpool.Pool) *TaskService {
 	return &TaskService{pool: pool}
 }
 
-// SetMentionValidator injects the @mention validator (1.1: server-enforced assigns_to check).
-func (s *TaskService) SetMentionValidator(v *MentionValidator) {
-	s.mentionValidator = v
-}
-
-// SetSubtaskNotifier injects the sub-task claim/complete notifier (1.2).
-func (s *TaskService) SetSubtaskNotifier(n *SubtaskNotifier) {
-	s.subtaskNotifier = n
+// SetAgentNotifier injects the agent DM notification service.
+func (s *TaskService) SetAgentNotifier(n *AgentNotifier) {
+	s.agentNotifier = n
 }
 
 // CreateTask creates a new task in the channel with per-channel task numbering.
@@ -192,29 +186,6 @@ func (s *TaskService) CreateTask(ctx context.Context, channelID, creatorID strin
 		parentTaskID = parentUUID
 	} else {
 		parentTaskID = nil
-	}
-
-	// 1.1: Server-enforced @mention validation for sub-task creation.
-	// When the task is a sub-task (parent_task_id set) and the description
-	// contains @mentions, every mentioned agent must be in the creator's
-	// assigns_to list. Self-mentions are ignored.
-	if parentTaskID != nil && s.mentionValidator != nil {
-		mentions, err := s.parseMentionsFromDescription(ctx, channelID, req.Description)
-		if err != nil {
-			slog.Warn("parse mentions", "err", err)
-		} else if len(mentions) > 0 {
-			res, err := s.mentionValidator.Validate(ctx, creatorID, mentions)
-			if err != nil {
-				return nil, fmt.Errorf("validate mentions: %w", err)
-			}
-			if !res.AllAllowed {
-				viols := make([]string, 0, len(res.Violations))
-				for _, v := range res.Violations {
-					viols = append(viols, v.MentioneeID)
-				}
-				return nil, fmt.Errorf("mentions not in creator's assigns_to: %v", viols)
-			}
-		}
 	}
 
 	id := uuid.New().String()
@@ -409,8 +380,8 @@ func (s *TaskService) ClaimTask(ctx context.Context, channelID, taskID, userID s
 	}
 
 	// 1.2: Notify sub-task creator of the claim (only for sub-tasks with reverse assigns_to edge).
-	if s.subtaskNotifier != nil {
-		if err := s.subtaskNotifier.NotifyClaim(ctx, taskID, userID); err != nil {
+	if s.agentNotifier != nil {
+		if err := s.agentNotifier.NotifyClaim(ctx, taskID, userID); err != nil {
 			slog.Warn("subtask notify claim failed", "task_id", taskID, "err", err)
 		}
 	}
@@ -842,11 +813,11 @@ func (s *TaskService) CompleteTaskForAgent(ctx context.Context, taskID string) e
 	}
 
 	// 1.2: Notify sub-task creator of the completion (only for sub-tasks with reverse assigns_to edge).
-	if s.subtaskNotifier != nil {
+	if s.agentNotifier != nil {
 		// Look up the claimer_id to pass to the notifier.
 		var claimerID string
 		if err := s.pool.QueryRow(ctx, `SELECT COALESCE(claimer_id::text, '') FROM tasks WHERE id = $1`, taskID).Scan(&claimerID); err == nil && claimerID != "" {
-			if err := s.subtaskNotifier.NotifyComplete(ctx, taskID, claimerID); err != nil {
+			if err := s.agentNotifier.NotifyComplete(ctx, taskID, claimerID); err != nil {
 				slog.Warn("subtask notify complete failed", "task_id", taskID, "err", err)
 			}
 		}
@@ -1150,13 +1121,5 @@ func truncateForTitle(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen]) + "..."
-}
-
-// parseMentionsFromDescription extracts agent IDs @-mentioned in the description,
-// resolved against channel membership.
-func (s *TaskService) parseMentionsFromDescription(ctx context.Context, channelID, content string) ([]string, error) {
-	mentionSvc := NewMentionService(s.pool)
-	ids, _, err := mentionSvc.ResolveMentions(ctx, content, channelID)
-	return ids, err
 }
 

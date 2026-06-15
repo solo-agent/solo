@@ -46,10 +46,8 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 
 	// Initialize services
 	taskSvc := service.NewTaskService(pool)
-	mentionValidator := service.NewMentionValidator(pool) // 1.1: server-enforced @mention validation
-	taskSvc.SetMentionValidator(mentionValidator)
-	subtaskNotifier := service.NewSubtaskNotifier(pool, hub) // 1.2: sub-task claim/complete notifications
-	taskSvc.SetSubtaskNotifier(subtaskNotifier)
+	agentNotifier := service.NewAgentNotifier(pool, hub, agentSvc) // DM notifications + agent wakeup
+	taskSvc.SetAgentNotifier(agentNotifier)
 	computerSvc := service.NewComputerService(pool)
 	inboxSvc := service.NewInboxService(pool)
 
@@ -94,7 +92,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	swarmCoordinator := service.NewSwarmCoordinator(pool, taskSvc, hub)
 	reminderSvc := service.NewReminderService(pool, hub)
 	watchdogSvc := service.NewWatchdogService(pool, hub)
-	watchdogSvc.SetNotifier(subtaskNotifier) // 1.3: reverse-edge escalation to creator
+	watchdogSvc.SetNotifier(agentNotifier)
 	reminderHandler := handler.NewReminderHandler(reminderSvc)
 	watchdogHandler := handler.NewWatchdogHandler(watchdogSvc, taskSvc)
 	taskHandler.SetSwarmCoordinator(swarmCoordinator)
@@ -263,8 +261,6 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 			})
 		})
 		r.Get("/api/v1/agents/{agentID}/relationships", relHandler.ListByAgent)
-		r.Get("/api/v1/agents/{agentID}/mention-candidates", agentHandler.ListMentionCandidates)
-		r.Get("/api/v1/agents/{agentID}/collaborators", agentHandler.ListCollaborators)
 		r.Get("/api/v1/channels/{channelID}/relationships", relHandler.ListByChannel)
 
 		// Relationship graph (Step 5 — Visualization)
