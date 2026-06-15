@@ -130,12 +130,18 @@ type TaskFilter struct {
 
 // TaskService handles task business logic.
 type TaskService struct {
-	pool *pgxpool.Pool
+	pool             *pgxpool.Pool
+	mentionValidator *MentionValidator
 }
 
 // NewTaskService creates a new TaskService.
 func NewTaskService(pool *pgxpool.Pool) *TaskService {
 	return &TaskService{pool: pool}
+}
+
+// SetMentionValidator injects the @mention validator (1.1: server-enforced assigns_to check).
+func (s *TaskService) SetMentionValidator(v *MentionValidator) {
+	s.mentionValidator = v
 }
 
 // CreateTask creates a new task in the channel with per-channel task numbering.
@@ -180,6 +186,29 @@ func (s *TaskService) CreateTask(ctx context.Context, channelID, creatorID strin
 		parentTaskID = parentUUID
 	} else {
 		parentTaskID = nil
+	}
+
+	// 1.1: Server-enforced @mention validation for sub-task creation.
+	// When the task is a sub-task (parent_task_id set) and the description
+	// contains @mentions, every mentioned agent must be in the creator's
+	// assigns_to list. Self-mentions are ignored.
+	if parentTaskID != nil && s.mentionValidator != nil {
+		mentions, err := s.parseMentionsFromDescription(ctx, channelID, req.Description)
+		if err != nil {
+			slog.Warn("parse mentions", "err", err)
+		} else if len(mentions) > 0 {
+			res, err := s.mentionValidator.Validate(ctx, creatorID, mentions)
+			if err != nil {
+				return nil, fmt.Errorf("validate mentions: %w", err)
+			}
+			if !res.AllAllowed {
+				viols := make([]string, 0, len(res.Violations))
+				for _, v := range res.Violations {
+					viols = append(viols, v.MentioneeID)
+				}
+				return nil, fmt.Errorf("mentions not in creator's assigns_to: %v", viols)
+			}
+		}
 	}
 
 	id := uuid.New().String()
@@ -1094,5 +1123,13 @@ func truncateForTitle(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen]) + "..."
+}
+
+// parseMentionsFromDescription extracts agent IDs @-mentioned in the description,
+// resolved against channel membership.
+func (s *TaskService) parseMentionsFromDescription(ctx context.Context, channelID, content string) ([]string, error) {
+	mentionSvc := NewMentionService(s.pool)
+	ids, _, err := mentionSvc.ResolveMentions(ctx, content, channelID)
+	return ids, err
 }
 

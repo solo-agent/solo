@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -34,28 +35,26 @@ func setupTestPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// createTestAgent inserts a test agent and returns its ID. The owner_id
-// references a placeholder user; if no users exist, a placeholder is created.
+// createTestAgent inserts a test agent and returns its ID. A per-test UUID
+// suffix is appended to the name to make the helper idempotent across re-runs
+// (agents have a UNIQUE (owner_id, name) WHERE is_active constraint).
 func createTestAgent(t *testing.T, pool *pgxpool.Pool, name string) string {
 	t.Helper()
 	ctx := context.Background()
+	suffix := uuid.New().String()[:8]
+	uniqueName := name + "-" + suffix
+	ownerName := "test-owner-" + suffix
 
-	// Ensure a placeholder user exists (agents.owner_id is NOT NULL → users).
+	// Insert a placeholder owner user.
 	var ownerID string
 	err := pool.QueryRow(ctx,
-		`SELECT id FROM users WHERE display_name = $1 LIMIT 1`, "test-owner-"+name,
+		`INSERT INTO users (id, display_name, email, password_hash)
+		 VALUES (gen_random_uuid(), $1, $2, 'test-hash')
+		 RETURNING id`,
+		ownerName, "test-"+suffix+"@example.com",
 	).Scan(&ownerID)
 	if err != nil {
-		// Insert a placeholder user.
-		err = pool.QueryRow(ctx,
-			`INSERT INTO users (id, display_name, email, password_hash)
-			 VALUES (gen_random_uuid(), $1, $2, 'test-hash')
-			 RETURNING id`,
-			"test-owner-"+name, "test-"+name+"@example.com",
-		).Scan(&ownerID)
-		if err != nil {
-			t.Fatalf("create placeholder user: %v", err)
-		}
+		t.Fatalf("create placeholder user: %v", err)
 	}
 
 	var id string
@@ -63,10 +62,10 @@ func createTestAgent(t *testing.T, pool *pgxpool.Pool, name string) string {
 		`INSERT INTO agents (id, name, owner_id, model_provider, model_name, system_prompt, is_active)
 		 VALUES (gen_random_uuid(), $1, $2, 'anthropic', 'claude-sonnet-4-5', '', true)
 		 RETURNING id`,
-		name, ownerID,
+		uniqueName, ownerID,
 	).Scan(&id)
 	if err != nil {
-		t.Fatalf("create agent %q: %v", name, err)
+		t.Fatalf("create agent %q: %v", uniqueName, err)
 	}
 	return id
 }
@@ -124,3 +123,4 @@ func TestMentionValidator_OneViolation(t *testing.T) {
 		t.Errorf("expected 1 violation, got %d", len(result.Violations))
 	}
 }
+
