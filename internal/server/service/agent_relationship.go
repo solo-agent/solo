@@ -38,37 +38,31 @@ func NewAgentRelationshipService(pool *pgxpool.Pool) *AgentRelationshipService {
 	return &AgentRelationshipService{pool: pool}
 }
 
-// Valid relationship types.
+// Valid relationship types (post Item 1: 2-type model).
 var ValidRelTypes = map[string]bool{
-	"reports_to":         true,
-	"escalates_to":       true,
-	"delegates_to":       true,
-	"collaborates_with":  true,
+	"assigns_to":        true,
+	"collaborates_with": true,
 }
 
 // Create inserts a new relationship after validating constraints.
-// Returns an error if the relationship would create a cycle (reports_to only).
+// Returns an error if the relationship would create a cycle (assigns_to only).
 func (s *AgentRelationshipService) Create(ctx context.Context, req CreateRelationshipRequest) (*AgentRelationship, error) {
 	if req.FromAgentID == req.ToAgentID {
 		return nil, fmt.Errorf("self-referential relationships are not allowed")
 	}
 
-	// BUG-005: Validate rel_type against known values.
-	if !ValidRelTypes[req.RelType] {
-		return nil, fmt.Errorf("invalid rel_type: %s (must be one of: reports_to, escalates_to, delegates_to, collaborates_with)", req.RelType)
-	}
-
 	// BUG-006: Enforce channel_id scope rules.
-	// reports_to and escalates_to are global — must not have channel_id.
-	// delegates_to and collaborates_with are channel-scoped — must have channel_id.
-	if req.RelType == "reports_to" || req.RelType == "escalates_to" {
-		if req.ChannelID != nil && *req.ChannelID != "" {
-			return nil, fmt.Errorf("rel_type %s must not have a channel_id (global relationship)", req.RelType)
-		}
-	} else {
+	// Post-Item 1: assigns_to is channel-scoped or global; collaborates_with is channel-scoped.
+	// Allow both to be channel-scoped (channel_id optional for assigns_to, required for collaborates_with).
+	switch req.RelType {
+	case "assigns_to":
+		// OK either way — global or channel-scoped.
+	case "collaborates_with":
 		if req.ChannelID == nil || *req.ChannelID == "" {
-			return nil, fmt.Errorf("rel_type %s requires a channel_id", req.RelType)
+			return nil, fmt.Errorf("rel_type collaborates_with requires a channel_id")
 		}
+	default:
+		return nil, fmt.Errorf("invalid rel_type: %s", req.RelType)
 	}
 
 	// BUG-010: Validate weight range.
@@ -76,8 +70,8 @@ func (s *AgentRelationshipService) Create(ctx context.Context, req CreateRelatio
 		return nil, fmt.Errorf("weight must be between 0.0 and 10.0, got %f", req.Weight)
 	}
 
-	// Cycle detection for reports_to.
-	if req.RelType == "reports_to" {
+	// Cycle detection for assigns_to.
+	if req.RelType == "assigns_to" {
 		if err := s.checkReportsToCycle(ctx, req.FromAgentID, req.ToAgentID); err != nil {
 			return nil, err
 		}
@@ -279,8 +273,8 @@ func (s *AgentRelationshipService) List(ctx context.Context, fromAgentID, toAgen
 // CheckCycle checks whether adding a relationship from fromAgent to toAgent
 // with the given rel_type would create a cycle (T1.1.3).
 func (s *AgentRelationshipService) CheckCycle(ctx context.Context, fromAgentID, toAgentID, relType string) (bool, error) {
-	if relType != "reports_to" {
-		return false, nil // only reports_to can create cycles
+	if relType != "assigns_to" {
+		return false, nil // only assigns_to can create cycles
 	}
 	visited := map[string]bool{fromAgentID: true}
 	queue := []string{toAgentID}
