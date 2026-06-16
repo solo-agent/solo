@@ -1857,12 +1857,6 @@ func (h *daemonHandler) injectChannelContext(systemPrompt *string, agentID, chan
 	if channelMemory != "" {
 		*systemPrompt += channelMemory
 	}
-
-	// Inject pending delegations.
-	pendingDelegations := h.injectPendingDelegations(context.Background(), agentID, channelID)
-	if pendingDelegations != "" {
-		*systemPrompt += "\n\n## Pending Delegations\n\n" + pendingDelegations
-	}
 }
 
 // loadChannelMemory reads CHANNEL.md for the given channel from the shared
@@ -1884,42 +1878,3 @@ func (h *daemonHandler) loadChannelMemory(channelID string) string {
 	return fmt.Sprintf("\n## Channel Shared Memory\n\n%s\n", content)
 }
 
-// injectPendingDelegations queries for pending delegations addressed to the
-// given agent in the given channel and returns them as a formatted string.
-// Delegations in "queued" status are transitioned to "delivered".
-func (h *daemonHandler) injectPendingDelegations(ctx context.Context, agentID, channelID string) string {
-	rows, err := h.pool.Query(ctx, `
-		SELECT d.id, a.name, d.message, d.task_id
-		FROM agent_delegations d
-		JOIN agents a ON d.from_agent_id = a.id
-		WHERE d.to_agent_id = $1 AND d.channel_id = $2 AND d.status IN ('queued', 'delivered')
-		ORDER BY d.created_at ASC
-	`, agentID, channelID)
-	if err != nil {
-		return ""
-	}
-	defer rows.Close()
-
-	var sb strings.Builder
-	for rows.Next() {
-		var id, fromName, msg, taskID string
-		if err := rows.Scan(&id, &fromName, &msg, &taskID); err != nil {
-			continue
-		}
-		sb.WriteString(fmt.Sprintf(
-			"[DELEGATION %s] From @%s: %s",
-			id[:8], fromName, msg,
-		))
-		if taskID != "" {
-			sb.WriteString(fmt.Sprintf(" (task: %s)", taskID))
-		}
-		sb.WriteString("\n")
-
-		// Mark as delivered.
-		_, _ = h.pool.Exec(ctx,
-			`UPDATE agent_delegations SET status = 'delivered', updated_at = now() WHERE id = $1`,
-			id,
-		)
-	}
-	return sb.String()
-}
