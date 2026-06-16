@@ -49,10 +49,8 @@ const TYPE_STYLES: Record<RelationshipType, { color: string; bg: string; label: 
 
 const TYPE_FILTER_OPTIONS: SelectOption[] = [
   { value: '', label: 'All Types' },
-  { value: 'reports_to', label: 'Reports To' },
-  { value: 'delegates_to', label: 'Delegates To' },
+  { value: 'assigns_to', label: 'Assigns To' },
   { value: 'collaborates_with', label: 'Collaborates' },
-  { value: 'escalates_to', label: 'Escalates To' },
 ];
 
 // ---- Badge component ----

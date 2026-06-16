@@ -17,10 +17,8 @@ interface RelationshipEdgeData {
 }
 
 const EDGE_COLORS: Record<RelationshipType, { stroke: string; label: string }> = {
-  reports_to:       { stroke: '#4A90D9', label: 'Reports To' },
-  delegates_to:     { stroke: '#7B6CF6', label: 'Delegates To' },
+  assigns_to:        { stroke: '#4A90D9', label: 'Assigns To' },
   collaborates_with: { stroke: '#10B981', label: 'Collaborates' },
-  escalates_to:     { stroke: '#EF4444', label: 'Escalates To' },
 };
 
 function RelationshipEdgeComponent({
@@ -42,7 +40,7 @@ function RelationshipEdgeComponent({
   const edgeData = data as RelationshipEdgeData | undefined;
   const relType = edgeData?.relType || 'collaborates_with';
   const colors = EDGE_COLORS[relType] || EDGE_COLORS.collaborates_with;
-  const isEscalation = relType === 'escalates_to';
+  const isAssignsTo = relType === 'assigns_to';
   const isCollaboration = relType === 'collaborates_with';
 
   // Compute a parallel offset path for escalates_to double line

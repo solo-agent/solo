@@ -27,10 +27,8 @@ const EDGE_COLORS: Record<RelationshipType, { stroke: string; bg: string }> = {
 };
 
 const REL_TYPE_OPTIONS = [
-  { value: 'reports_to', label: 'Reports To' },
-  { value: 'delegates_to', label: 'Delegates To' },
+  { value: 'assigns_to', label: 'Assigns To' },
   { value: 'collaborates_with', label: 'Collaborates With' },
-  { value: 'escalates_to', label: 'Escalates To' },
 ];
 
 // ---- Component ----
@@ -58,7 +56,7 @@ export function RelationshipDetailPanel({
   const router = useRouter();
   const [isEditing, setIsEditing] = useState(false);
   const [editType, setEditType] = useState<RelationshipType>(
-    relationship?.rel_type ?? 'reports_to',
+    relationship?.rel_type ?? 'assigns_to',
   );
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -208,7 +206,7 @@ export function RelationshipDetailPanel({
           <svg width="16" height="8">
             <line x1="0" y1="4" x2="16" y2="4"
               stroke={colors.stroke}
-              strokeWidth={relationship.rel_type === 'escalates_to' ? 3 : 2}
+              strokeWidth={2}
               strokeDasharray={relationship.rel_type === 'collaborates_with' ? '6,3' : 'none'}
             />
           </svg>

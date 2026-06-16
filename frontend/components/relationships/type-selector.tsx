@@ -18,13 +18,11 @@ interface TypeOption {
 }
 
 const TYPE_OPTIONS: TypeOption[] = [
-  { type: 'reports_to',       label: 'reportsTo' as TranslationKey,       stroke: '#4A90D9', dash: '' },
-  { type: 'delegates_to',     label: 'delegatesTo' as TranslationKey,     stroke: '#7B6CF6', dash: '' },
+  { type: 'assigns_to',        label: 'assignsTo' as TranslationKey,        stroke: '#4A90D9', dash: '' },
   { type: 'collaborates_with', label: 'collaboratesWith' as TranslationKey, stroke: '#10B981', dash: '8,4' },
-  { type: 'escalates_to',     label: 'escalatesTo' as TranslationKey,     stroke: '#EF4444', dash: '' },
 ];
 
-const CHANNEL_TYPES: RelationshipType[] = ['delegates_to', 'collaborates_with'];
+const CHANNEL_TYPES: RelationshipType[] = ['collaborates_with'];
 
 interface TypeSelectorProps {
   fromName: string;
@@ -34,7 +32,7 @@ interface TypeSelectorProps {
 }
 
 export function TypeSelector({ fromName, toName, onSelect, onCancel }: TypeSelectorProps) {
-  const [selected, setSelected] = useState<RelationshipType>('reports_to');
+  const [selected, setSelected] = useState<RelationshipType>('assigns_to');
 
   return (
     <div className="border-4 border-black bg-white shadow-brutal-xl p-4 min-w-[280px]">
@@ -80,15 +78,9 @@ export function TypeSelector({ fromName, toName, onSelect, onCancel }: TypeSelec
             <svg width="32" height="12" className="flex-shrink-0">
               <line x1="0" y1="6" x2="32" y2="6"
                 stroke={opt.stroke}
-                strokeWidth={opt.type === 'escalates_to' ? 3 : 2}
+                strokeWidth={2}
                 strokeDasharray={opt.dash || undefined}
               />
-              {opt.type === 'escalates_to' && (
-                <line x1="0" y1="2" x2="32" y2="2"
-                  stroke={opt.stroke}
-                  strokeWidth={2}
-                />
-              )}
             </svg>
             <span className="font-heading text-xs font-bold uppercase tracking-wider">
               {t(opt.label)}

@@ -37,6 +37,7 @@ type relRow struct {
 	ActiveTasks int
 	TotalTasks  int
 	LastActive  string
+	Instruction string
 }
 
 type collabRow struct {
@@ -55,10 +56,20 @@ const relationshipsTpl = `# Agent @{{.AgentName}} — Relationships
 > Read this when you need to know who you're working with.
 
 ## 我委托给 (@assigns_to from me)
-{{range .AssignsTo}}- **@{{.OtherAgent}}** (active: {{.ActiveTasks}}, total: {{.TotalTasks}})
+{{range .AssignsTo}}
+### @{{.OtherAgent}} (active: {{.ActiveTasks}}, total: {{.TotalTasks}})
+{{if .Instruction}}**DELEGATE when:**
+{{.Instruction}}
+{{else}}_(no delegation criteria set)_
+{{end}}
 {{end}}
 ## 委托给我 (@assigns_to to me)
-{{range .AssignedFrom}}- **@{{.OtherAgent}}** (active: {{.ActiveTasks}}, total: {{.TotalTasks}})
+{{range .AssignedFrom}}
+### @{{.OtherAgent}} (active: {{.ActiveTasks}}, total: {{.TotalTasks}})
+{{if .Instruction}}**DELEGATE when:**
+{{.Instruction}}
+{{else}}_(no delegation criteria set)_
+{{end}}
 {{end}}
 ## 我的协作者 (@collaborates_with)
 {{range .Collaborators}}- **@{{.OtherAgent}}** (weight: {{.Weight}})
@@ -95,7 +106,7 @@ func (g *RelationshipsMDGenerator) collect(ctx context.Context, agentID string) 
 	}
 
 	rows, err := g.pool.Query(ctx, `
-		SELECT a.name, 0, 0
+		SELECT a.name, 0, 0, COALESCE(r.instruction, '')
 		  FROM agent_relationships r
 		  JOIN agents a ON a.id = r.to_agent_id
 		 WHERE r.from_agent_id = $1 AND r.rel_type = 'assigns_to'
@@ -105,7 +116,7 @@ func (g *RelationshipsMDGenerator) collect(ctx context.Context, agentID string) 
 	}
 	for rows.Next() {
 		var r relRow
-		if err := rows.Scan(&r.OtherAgent, &r.ActiveTasks, &r.TotalTasks); err != nil {
+		if err := rows.Scan(&r.OtherAgent, &r.ActiveTasks, &r.TotalTasks, &r.Instruction); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -114,7 +125,7 @@ func (g *RelationshipsMDGenerator) collect(ctx context.Context, agentID string) 
 	rows.Close()
 
 	rows, err = g.pool.Query(ctx, `
-		SELECT a.name, 0, 0
+		SELECT a.name, 0, 0, COALESCE(r.instruction, '')
 		  FROM agent_relationships r
 		  JOIN agents a ON a.id = r.from_agent_id
 		 WHERE r.to_agent_id = $1 AND r.rel_type = 'assigns_to'
@@ -124,7 +135,7 @@ func (g *RelationshipsMDGenerator) collect(ctx context.Context, agentID string) 
 	}
 	for rows.Next() {
 		var r relRow
-		if err := rows.Scan(&r.OtherAgent, &r.ActiveTasks, &r.TotalTasks); err != nil {
+		if err := rows.Scan(&r.OtherAgent, &r.ActiveTasks, &r.TotalTasks, &r.Instruction); err != nil {
 			rows.Close()
 			return nil, err
 		}

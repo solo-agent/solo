@@ -394,7 +394,7 @@ export type WizardStep = 'computer' | 'runtime' | 'create' | 'done';
 
 // ---- Agent Relationship types (Step 2) ----
 
-export type RelationshipType = 'reports_to' | 'delegates_to' | 'collaborates_with' | 'escalates_to';
+export type RelationshipType = 'assigns_to' | 'collaborates_with';
 
 export interface AgentRelationship {
   id: string;
@@ -408,6 +408,7 @@ export interface AgentRelationship {
   channel_id?: string;
   channel_name?: string;
   weight?: number;
+  instruction?: string;
   created_at?: string;
 }
 
@@ -417,6 +418,7 @@ export interface CreateRelationshipInput {
   rel_type: RelationshipType;
   channel_id?: string;
   weight?: number;
+  instruction?: string;
 }
 
 // ---- Channel Memory types (Step 2) ----

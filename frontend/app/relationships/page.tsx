@@ -506,10 +506,8 @@ export default function RelationshipsPage() {
             Legend:
           </span>
           {[
-            { type: 'reports_to', color: '#4A90D9', dash: '' },
-            { type: 'delegates_to', color: '#7B6CF6', dash: '' },
+            { type: 'assigns_to', color: '#4A90D9', dash: '' },
             { type: 'collaborates_with', color: '#10B981', dash: '8,4' },
-            { type: 'escalates_to', color: '#EF4444', dash: '' },
           ].map(({ type, color, dash }) => (
             <span key={type} className="flex items-center gap-1.5 font-mono text-[10px]">
               <svg width="24" height="8"><line x1="0" y1="4" x2="24" y2="4" stroke={color} strokeWidth={2} strokeDasharray={dash || undefined} /></svg>

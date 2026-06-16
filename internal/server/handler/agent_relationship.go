@@ -107,23 +107,34 @@ func (h *AgentRelationshipHandler) Update(w http.ResponseWriter, r *http.Request
 	}
 
 	var body struct {
-		Weight *float64 `json:"weight,omitempty"`
+		Weight      *float64 `json:"weight,omitempty"`
+		Instruction *string  `json:"instruction,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if body.Weight == nil {
-		writeError(w, http.StatusBadRequest, "weight is required")
+
+	if body.Weight != nil {
+		rel, err := h.svc.UpdateWeight(r.Context(), id, *body.Weight)
+		if err != nil {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, rel)
+		return
+	}
+	if body.Instruction != nil {
+		rel, err := h.svc.UpdateInstruction(r.Context(), id, *body.Instruction)
+		if err != nil {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, rel)
 		return
 	}
 
-	rel, err := h.svc.UpdateWeight(r.Context(), id, *body.Weight)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, rel)
+	writeError(w, http.StatusBadRequest, "weight or instruction is required")
 }
 
 // Delete handles DELETE /api/v1/agent-relationships/{id}

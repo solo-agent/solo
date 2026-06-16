@@ -87,10 +87,10 @@ func (s *TemplateService) Apply(ctx context.Context, templateID, ownerID string)
 		otherID := nameToID[m.Name]
 		var relID string
 		err := tx.QueryRow(ctx, `
-			INSERT INTO agent_relationships (from_agent_id, to_agent_id, rel_type, weight)
-			VALUES ($1, $2, 'assigns_to', 1.0)
+			INSERT INTO agent_relationships (from_agent_id, to_agent_id, rel_type, weight, instruction)
+			VALUES ($1, $2, 'assigns_to', 1.0, $3)
 			RETURNING id
-		`, leaderID, otherID).Scan(&relID)
+		`, leaderID, otherID, m.Relationship).Scan(&relID)
 		if err != nil {
 			return nil, fmt.Errorf("insert assigns_to: %w", err)
 		}
