@@ -180,9 +180,6 @@ func main() {
 		}
 	}()
 
-	// Start reminder + watchdog ticker (Step 6).
-	go daemonH.startTicker(context.Background())
-
 	// Register with server on startup
 	if err := registerWithServer(ctx); err != nil {
 		slog.Error("failed to register with server", "error", err)

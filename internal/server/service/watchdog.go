@@ -123,19 +123,9 @@ func (s *WatchdogService) HandleOverdueTask(ctx context.Context, w TaskWatchdog)
 			"task_id", w.TaskID,
 			"claimer_id", w.ClaimerID,
 		)
-		if s.hub != nil {
-			s.hub.SendToUser(w.ClaimerID, jsonEnvelope("reminder_fired", map[string]interface{}{
-				"reminder_id": "",
-				"agent_id":    w.ClaimerID,
-				"task_id":     w.TaskID,
-				"message":     fmt.Sprintf("Task %s is overdue (deadline was %s)", w.TaskID, w.Deadline.Format(time.RFC3339)),
-			}))
-			if taskChannelID != "" {
-				s.hub.BroadcastToChannel(taskChannelID, jsonEnvelope("reminder_fired", map[string]interface{}{
-					"task_id":    w.TaskID,
-					"channel_id": taskChannelID,
-					"message":    fmt.Sprintf("Task %s is overdue", w.TaskID),
-				}))
+		if s.notifier != nil {
+			if err := s.notifier.NotifyRemind(ctx, w.TaskID, w.ClaimerID, w.Deadline); err != nil {
+				slog.Warn("watchdog: remind notify failed", "task_id", w.TaskID, "error", err)
 			}
 		}
 

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -93,6 +94,8 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	reminderSvc := service.NewReminderService(pool, hub)
 	watchdogSvc := service.NewWatchdogService(pool, hub)
 	watchdogSvc.SetNotifier(agentNotifier)
+	scheduler := service.NewScheduler(reminderSvc, watchdogSvc, agentNotifier)
+	go scheduler.Start(context.Background())
 	reminderHandler := handler.NewReminderHandler(reminderSvc)
 	watchdogHandler := handler.NewWatchdogHandler(watchdogSvc, taskSvc)
 	taskHandler.SetSwarmCoordinator(swarmCoordinator)

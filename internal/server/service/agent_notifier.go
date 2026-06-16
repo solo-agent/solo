@@ -129,6 +129,16 @@ func (n *AgentNotifier) lookupTaskNotification(ctx context.Context, taskID, acto
 	return &tn, nil
 }
 
+// Notify sends a generic DM system message to an agent's owner-agent DM
+// and triggers the agent immediately.
+func (n *AgentNotifier) Notify(ctx context.Context, agentID string, content string) error {
+	dmID, err := n.ensureAgentDM(ctx, agentID)
+	if err != nil {
+		return fmt.Errorf("ensure DM: %w", err)
+	}
+	return n.sendSystemMessage(ctx, dmID, content)
+}
+
 // sendSystemMessage persists a system message to the DM and broadcasts via WS.
 func (n *AgentNotifier) sendSystemMessage(ctx context.Context, dmID, content string) error {
 	msgID := uuid.New().String()
@@ -229,6 +239,26 @@ func (n *AgentNotifier) NotifyEscalation(ctx context.Context, taskID, claimerID 
 	content := fmt.Sprintf(
 		"⚠️ Task overdue — #%d %s in #%s (claimed by @%s) is overdue and has been escalated to you.\n\n→ Next:\n1. Delegate to another agent with similar skills (check RELATIONSHIPS.md for candidates)\n2. Or check with @%s in #%s for status\n3. If you cannot handle this, inform the user directly",
 		tn.taskNumber, tn.taskTitle, tn.channelName, tn.actorName, tn.actorName, tn.channelName,
+	)
+	return n.sendSystemMessage(ctx, dmID, content)
+}
+
+// NotifyRemind sends a DM system message to the claimer when a task is past
+// deadline with timeout_action=remind. This is a soft nudge, not escalation.
+func (n *AgentNotifier) NotifyRemind(ctx context.Context, taskID, claimerID string, deadline time.Time) error {
+	tn, err := n.lookupTaskNotification(ctx, taskID, claimerID)
+	if err != nil {
+		return err
+	}
+
+	dmID, err := n.ensureAgentDM(ctx, claimerID)
+	if err != nil {
+		return fmt.Errorf("ensure DM: %w", err)
+	}
+
+	content := fmt.Sprintf(
+		"⏰ Task overdue — #%d %s in #%s is past deadline (%s).\n\n→ Next: Check progress and update the task status, or extend the deadline.",
+		tn.taskNumber, tn.taskTitle, tn.channelName, deadline.Format(time.RFC3339),
 	)
 	return n.sendSystemMessage(ctx, dmID, content)
 }
