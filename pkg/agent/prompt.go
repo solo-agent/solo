@@ -67,11 +67,30 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 	// Startup sequence
 	b.WriteString("## Startup sequence\n\n")
 	b.WriteString("1. If this turn already includes a concrete incoming message, first decide whether that message needs a visible acknowledgment, blocker question, or ownership signal. If it does, send it early with `solo message send` before deep context gathering.\n")
-	b.WriteString("2. Read MEMORY.md (in your cwd) and then only the additional memory/files you need to handle the current turn well.\n")
-	b.WriteString("3. If there is no concrete incoming message to handle, stop and wait. New messages may be delivered to you automatically while your process stays alive.\n")
-	b.WriteString("4. When you receive a message, process it and reply with `solo message send`.\n")
-	b.WriteString("5. **Complete ALL your work before stopping.** If a task requires multi-step work (research, code changes, testing), finish everything, report results, then stop. New messages arrive automatically — you do not need to poll or wait for them.\n\n")
+	b.WriteString("2. Read RELATIONSHIPS.md to check your colleagues and their delegation criteria.\n")
+b.WriteString("3. Read MEMORY.md (in your cwd) and then only the additional memory/files you need to handle the current turn well.\n")
+	b.WriteString("4. If there is no concrete incoming message to handle, stop and wait. New messages may be delivered to you automatically while your process stays alive.\n")
+	b.WriteString("5. When you receive a message, process it and reply with `solo message send`.\n")
+	b.WriteString("6. **Complete ALL your work before stopping.** If a task requires multi-step work (research, code changes, testing), finish everything, report results, then stop. New messages arrive automatically — you do not need to poll or wait for them.\n\n")
 	b.WriteString("**Claude runtime note:** While you are busy, Solo batches inbox-count notifications instead of injecting message content. Use `solo message check` at natural breakpoints to pull the pending messages before side-effect actions that depend on current context.\n\n")
+
+	// Agent Relationships — placed before Messaging so agent knows
+	// its colleagues before reading task/channel context.
+	b.WriteString("## Agent Relationships — CHECK BEFORE ACTING\n\n")
+	b.WriteString("Before starting any task, check your colleagues and their delegation criteria:\n\n")
+	if agent.WorkspacePath != "" {
+		fmt.Fprintf(&b, "```bash\ncat %s/RELATIONSHIPS.md\n```\n\n", agent.WorkspacePath)
+	} else if agent.AgentID != "" {
+		fmt.Fprintf(&b, "```bash\ncat ~/.solo/agents/%s/workspace/RELATIONSHIPS.md\n```\n\n", agent.AgentID)
+	} else {
+		b.WriteString("```bash\ncat ~/.solo/agents/<your-agent-id>/workspace/RELATIONSHIPS.md\n```\n\n")
+	}
+	b.WriteString("RELATIONSHIPS.md is auto-generated and updates when relationships change. ")
+	b.WriteString("Re-read it before processing any task — your colleagues or their ")
+	b.WriteString("delegation criteria may have changed since your last turn.\n\n")
+	b.WriteString("If RELATIONSHIPS.md says \"None\" for all sections, work independently. ")
+	b.WriteString("If it lists colleagues with delegation criteria, delegate to them ")
+	b.WriteString("via @mention when their criteria match — do NOT attempt work that belongs to a colleague.\n\n")
 
 	// Messaging
 	b.WriteString("## Messaging\n\n")
@@ -355,19 +374,6 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 		b.WriteString("## Initial role\n\n")
 		b.WriteString(agent.SystemPrompt)
 		b.WriteString("\n\n")
-	}
-
-	// Agent Relationships — delegation and collaboration criteria.
-	b.WriteString("## Agent Relationships — CHECK BEFORE ACTING\n\n")
-	b.WriteString("CRITICAL: Before you start ANY task, read RELATIONSHIPS.md to scan your colleagues ")
-	b.WriteString("and their delegation criteria. If a colleague is better suited, delegate to them ")
-	b.WriteString("via @mention — do NOT attempt work that belongs to a colleague.\n\n")
-	if agent.WorkspacePath != "" {
-		fmt.Fprintf(&b, "```bash\ncat %s/RELATIONSHIPS.md\n```\n\n", agent.WorkspacePath)
-	} else if agent.AgentID != "" {
-		fmt.Fprintf(&b, "```bash\ncat ~/.solo/agents/%s/workspace/RELATIONSHIPS.md\n```\n\n", agent.AgentID)
-	} else {
-		b.WriteString("```bash\ncat ~/.solo/agents/<your-agent-id>/workspace/RELATIONSHIPS.md\n```\n\n")
 	}
 
 	return strings.TrimSpace(b.String())
