@@ -41,10 +41,8 @@ import { relativeTime } from '@/lib/utils/time';
 // ---- Relationship type visual config ----
 
 const TYPE_STYLES: Record<RelationshipType, { color: string; bg: string; label: string }> = {
-  reports_to: { color: '#4A90D9', bg: 'bg-[#4A90D9]', label: 'Reports To' },
-  delegates_to: { color: '#7B6CF6', bg: 'bg-[#7B6CF6]', label: 'Delegates To' },
+  assigns_to:        { color: '#4A90D9', bg: 'bg-[#4A90D9]', label: 'Assigns To' },
   collaborates_with: { color: '#10B981', bg: 'bg-[#10B981]', label: 'Collaborates' },
-  escalates_to: { color: '#EF4444', bg: 'bg-[#EF4444]', label: 'Escalates To' },
 };
 
 const TYPE_FILTER_OPTIONS: SelectOption[] = [

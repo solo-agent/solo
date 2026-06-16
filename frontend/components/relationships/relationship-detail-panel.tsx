@@ -20,10 +20,8 @@ import type { RelationshipType, Agent, AgentRelationship } from '@/lib/types';
 // ---- Edge style config ----
 
 const EDGE_COLORS: Record<RelationshipType, { stroke: string; bg: string }> = {
-  reports_to:       { stroke: '#4A90D9', bg: '#E8F0FD' },
-  delegates_to:     { stroke: '#7B6CF6', bg: '#EEECFF' },
+  assigns_to:        { stroke: '#4A90D9', bg: '#E8F0FD' },
   collaborates_with: { stroke: '#10B981', bg: '#E6F7F0' },
-  escalates_to:     { stroke: '#EF4444', bg: '#FDE8E8' },
 };
 
 const REL_TYPE_OPTIONS = [
@@ -58,6 +56,8 @@ export function RelationshipDetailPanel({
   const [editType, setEditType] = useState<RelationshipType>(
     relationship?.rel_type ?? 'assigns_to',
   );
+  const [isEditingInstruction, setIsEditingInstruction] = useState(false);
+  const [editInstruction, setEditInstruction] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -81,6 +81,23 @@ export function RelationshipDetailPanel({
       setIsSaving(false);
     }
   }, [relationship, editType, onUpdate]);
+
+  const handleSaveInstruction = useCallback(async () => {
+    if (!relationship) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await apiClient.patch(`/api/v1/agent-relationships/${relationship.id}`, {
+        instruction: editInstruction,
+      });
+      setIsEditingInstruction(false);
+      onUpdate();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to update instruction');
+    } finally {
+      setIsSaving(false);
+    }
+  }, [relationship, editInstruction, onUpdate]);
 
   // ---- Delete handler ----
 
@@ -252,6 +269,74 @@ export function RelationshipDetailPanel({
               </span>
             )}
           </div>
+        </div>
+
+        {/* Instruction */}
+        <div className="p-3 border-2 border-black bg-white">
+          <div className="flex items-center justify-between mb-2">
+            <div className="font-heading text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+              {relationship.rel_type === 'assigns_to' ? 'Delegation Criteria' : 'Collaboration Criteria'}
+            </div>
+            {!isEditingInstruction ? (
+              <button
+                type="button"
+                onClick={() => { setIsEditingInstruction(true); setEditInstruction(relationship.instruction || ''); }}
+                className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground hover:text-black"
+              >
+                <Edit3 className="h-3 w-3" />
+                {t('edit')}
+              </button>
+            ) : null}
+          </div>
+
+          {isEditingInstruction ? (
+            <div className="space-y-2">
+              <textarea
+                value={editInstruction}
+                onChange={(e) => setEditInstruction(e.target.value)}
+                placeholder={relationship.rel_type === 'assigns_to'
+                  ? 'Delegate coding tasks with: clear requirement description...\n\nReport back with: implementation status, files changed...'
+                  : 'Coordinate on: API contract sync, shared component design...\n\nKeep in sync: interface definitions, breaking changes...'
+                }
+                className="w-full min-h-[80px] px-3 py-2 border-2 border-black font-mono text-xs resize-y bg-white"
+                rows={4}
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSaveInstruction}
+                  disabled={isSaving}
+                  className="flex items-center gap-1 px-3 py-1.5 border-2 border-black bg-brutal-success text-black font-heading text-[10px] font-bold uppercase tracking-wider hover:bg-brutal-success-light disabled:opacity-50"
+                >
+                  {isSaving ? (
+                    <span>{t('saving')}</span>
+                  ) : (
+                    <>
+                      <Check className="h-3 w-3" />
+                      {t('save')}
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingInstruction(false)}
+                  className="flex items-center gap-1 px-3 py-1.5 border-2 border-black bg-white font-heading text-[10px] font-bold uppercase tracking-wider hover:bg-brutal-muted-light"
+                >
+                  {t('cancel')}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="font-mono text-[11px] text-black whitespace-pre-wrap leading-relaxed">
+              {relationship.instruction || (
+                <span className="text-muted-foreground italic">
+                  {relationship.rel_type === 'assigns_to'
+                    ? 'No delegation criteria set.'
+                    : 'No collaboration criteria set.'}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Type edit (in-place) */}

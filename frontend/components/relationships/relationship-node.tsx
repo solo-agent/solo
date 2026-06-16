@@ -8,7 +8,6 @@
 
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { useRouter } from 'next/navigation';
 
 export interface AgentNodeData {
   agentId: string;
@@ -17,7 +16,6 @@ export interface AgentNodeData {
 }
 
 function RelationshipNodeComponent({ data }: NodeProps) {
-  const router = useRouter();
   const agentData = data as unknown as AgentNodeData;
   const initial = agentData.agentName?.[0]?.toUpperCase() || '?';
   const isActive = agentData.isActive ?? false;
@@ -31,18 +29,6 @@ function RelationshipNodeComponent({ data }: NodeProps) {
 
       <div
         className="px-4 py-3 border-4 border-black bg-white shadow-brutal min-w-[140px] cursor-pointer hover:-translate-y-0.5 hover:shadow-brutal-lg transition-transform duration-100"
-        onClick={(e) => {
-          e.stopPropagation();
-          router.push(`/workspace?agent=${agentData.agentId}`);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.stopPropagation();
-            router.push(`/workspace?agent=${agentData.agentId}`);
-          }
-        }}
-        role="button"
-        tabIndex={0}
       >
         <div className="flex items-center gap-2.5">
           {/* Avatar circle */}

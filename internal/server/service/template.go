@@ -31,6 +31,7 @@ type templateMember struct {
 	Description  string `json:"description"`
 	Instructions string `json:"instructions"`
 	Relationship string `json:"relationship"`
+	Collaboration string `json:"collaboration,omitempty"`
 }
 
 // Apply creates agents and relationships for the given template in a transaction.
@@ -96,6 +97,38 @@ func (s *TemplateService) Apply(ctx context.Context, templateID, ownerID string)
 			return nil, fmt.Errorf("insert assigns_to: %w", err)
 		}
 		createdRels = append(createdRels, relID)
+	}
+
+	// Create collaborates_with edges between non-leader members that have collaboration defined.
+	nonLeaders := make([]templateMember, 0)
+	for _, m := range members {
+		if m.Name != leaderName {
+			nonLeaders = append(nonLeaders, m)
+		}
+	}
+	for i := 0; i < len(nonLeaders); i++ {
+		for j := i + 1; j < len(nonLeaders); j++ {
+			a, b := nonLeaders[i], nonLeaders[j]
+			instruction := ""
+			if a.Collaboration != "" {
+				instruction = a.Collaboration
+			} else if b.Collaboration != "" {
+				instruction = b.Collaboration
+			}
+			if instruction == "" {
+				continue
+			}
+			var relID string
+			err := tx.QueryRow(ctx, `
+				INSERT INTO agent_relationships (from_agent_id, to_agent_id, rel_type, weight, instruction)
+				VALUES ($1, $2, 'collaborates_with', 1.0, $3)
+				RETURNING id
+			`, nameToID[a.Name], nameToID[b.Name], instruction).Scan(&relID)
+			if err != nil {
+				return nil, fmt.Errorf("insert collaborates_with: %w", err)
+			}
+			createdRels = append(createdRels, relID)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
