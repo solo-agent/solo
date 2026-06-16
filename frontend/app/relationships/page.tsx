@@ -14,7 +14,6 @@ import {
   Background,
   Controls,
   MiniMap,
-  addEdge,
   useNodesState,
   useEdgesState,
   type Connection,
@@ -23,20 +22,16 @@ import {
   type NodeMouseHandler,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Loader2, Plus, Trash2, LayoutGrid, Undo2, Redo2, Download, Layers } from 'lucide-react';
+import { Loader2, Plus, Trash2, LayoutGrid, Undo2, Redo2, Download } from 'lucide-react';
 import { NavBar } from '@/components/ui/navbar';
 import { RelationshipNode } from '@/components/relationships/relationship-node';
 import { RelationshipEdge } from '@/components/relationships/relationship-edge';
 import { CreateRelationshipModal } from '@/components/relationships/create-relationship-modal';
 import { RelationshipDetailPanel } from '@/components/relationships/relationship-detail-panel';
-import { Dialog, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { apiClient, ApiError } from '@/lib/api-client';
-import { useAuth } from '@/lib/auth-context';
 import { useWebSocket } from '@/lib/ws-context';
-import { useChannels } from '@/lib/hooks/use-channels';
 import { t } from '@/lib/i18n';
-import { listTemplates, applyTemplate, type Template } from '@/lib/templates-api';
-import type { Agent, AgentRelationship, RelationshipType, CreateRelationshipInput } from '@/lib/types';
+import type { Agent, AgentRelationship, RelationshipType } from '@/lib/types';
 import { useAgents } from '@/lib/hooks/use-agents';
 
 // ---- Node/Edge types ----
@@ -55,8 +50,6 @@ interface UndoEntry {
 
 export default function RelationshipsPage() {
   const { agents, isLoading: agentsLoading } = useAgents();
-  const { channels } = useChannels();
-  const { user } = useAuth();
   const [relationships, setRelationships] = useState<AgentRelationship[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -86,36 +79,6 @@ export default function RelationshipsPage() {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
-
-  // ---- Template state ----
-  const [showTemplateModal, setShowTemplateModal] = useState(false);
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [templatesLoading, setTemplatesLoading] = useState(false);
-  const [applyingTemplate, setApplyingTemplate] = useState<string | null>(null);
-  const [templateError, setTemplateError] = useState<string | null>(null);
-
-  const loadTemplates = useCallback(async () => {
-    setTemplatesLoading(true);
-    try {
-      setTemplates(await listTemplates());
-    } catch { /* noop */ }
-    finally { setTemplatesLoading(false); }
-  }, []);
-
-  const handleApplyTemplate = useCallback(async (templateId: string) => {
-    setApplyingTemplate(templateId);
-    setTemplateError(null);
-    try {
-      if (!user?.id) { setTemplateError('Not authenticated'); return; }
-      await applyTemplate(templateId, user.id);
-      setShowTemplateModal(false);
-      loadData();
-    } catch (err) {
-      setTemplateError(err instanceof Error ? err.message : 'Failed to apply template');
-    } finally {
-      setApplyingTemplate(null);
-    }
-  }, [loadData, user]);
 
   // ---- Position persistence ----
 
@@ -476,18 +439,6 @@ export default function RelationshipsPage() {
 
           <div className="w-px h-6 bg-black/20" />
 
-          {/* Templates */}
-          <button
-            type="button"
-            onClick={() => { setShowTemplateModal(true); loadTemplates(); }}
-            className="flex items-center gap-1.5 h-8 px-3 border-2 border-black bg-white hover:bg-brutal-accent-light font-heading text-xs font-bold uppercase tracking-wider"
-          >
-            <Layers className="h-3.5 w-3.5" />
-            Templates
-          </button>
-
-          <div className="w-px h-6 bg-black/20" />
-
           {/* Auto layout */}
           <button
             type="button"
@@ -571,67 +522,6 @@ export default function RelationshipsPage() {
             preselectedTo={preselectedTo ?? undefined}
             agents={agents}
           />
-
-          {/* Template browser modal */}
-          <Dialog open={showTemplateModal} onOpenChange={setShowTemplateModal} width="lg">
-            <DialogHeader>
-              <DialogTitle className="font-heading text-base font-black uppercase tracking-wider">
-                Team Templates
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
-              {templatesLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                </div>
-              ) : templates.length === 0 ? (
-                <p className="font-mono text-sm text-muted-foreground text-center py-4">No templates available.</p>
-              ) : (
-                <>
-                  {/* Group by category */}
-                  {(() => {
-                    const cats = [...new Set(templates.map((t) => t.category))];
-                    return cats.map((cat) => (
-                      <div key={cat}>
-                        <h3 className="font-heading text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 border-b-2 border-black pb-1">
-                          {cat}
-                        </h3>
-                        <div className="space-y-2">
-                          {templates.filter((t) => t.category === cat).map((tmpl) => (
-                            <div
-                              key={tmpl.id}
-                              className="flex items-start gap-3 p-3 border-2 border-black bg-white"
-                            >
-                              <span className="text-2xl flex-shrink-0">{tmpl.icon}</span>
-                              <div className="flex-1 min-w-0">
-                                <div className="font-heading text-sm font-bold text-black">{tmpl.name}</div>
-                                <p className="font-sans text-xs text-muted-foreground mt-0.5">{tmpl.description}</p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => handleApplyTemplate(tmpl.id)}
-                                disabled={applyingTemplate === tmpl.id}
-                                className="flex-shrink-0 px-3 py-1.5 border-2 border-black bg-brutal-success text-black font-heading text-[10px] font-bold uppercase tracking-wider hover:bg-brutal-success-light disabled:opacity-50"
-                              >
-                                {applyingTemplate === tmpl.id ? (
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                ) : (
-                                  'Apply'
-                                )}
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ));
-                  })()}
-                </>
-              )}
-              {templateError && (
-                <p className="font-mono text-xs text-brutal-danger">{templateError}</p>
-              )}
-            </div>
-          </Dialog>
 
           {/* Detail panel */}
           {(detailRel || detailAgent) && (

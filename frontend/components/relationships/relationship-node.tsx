@@ -1,13 +1,14 @@
 // ============================================================================
 // RelationshipNode — custom ReactFlow node for agent relationship editor
-// - Shows agent avatar initial, name, online status
+// - Shows agent pixel avatar, name, online status
 // - 4 handles (top/bottom/left/right) for connection
-// - Click → navigate to agent detail
+// - Click handled by parent via onNodeClick
 // - Neubrutalist styling: 4px border, hard shadow, no radius
 // ============================================================================
 
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { PixelAvatar } from '@/components/ui/pixel-avatar';
 
 export interface AgentNodeData {
   agentId: string;
@@ -17,7 +18,6 @@ export interface AgentNodeData {
 
 function RelationshipNodeComponent({ data }: NodeProps) {
   const agentData = data as unknown as AgentNodeData;
-  const initial = agentData.agentName?.[0]?.toUpperCase() || '?';
   const isActive = agentData.isActive ?? false;
 
   return (
@@ -31,13 +31,7 @@ function RelationshipNodeComponent({ data }: NodeProps) {
         className="px-4 py-3 border-4 border-black bg-white shadow-brutal min-w-[140px] cursor-pointer hover:-translate-y-0.5 hover:shadow-brutal-lg transition-transform duration-100"
       >
         <div className="flex items-center gap-2.5">
-          {/* Avatar circle */}
-          <div className={[
-            'flex-shrink-0 w-9 h-9 border-2 border-black flex items-center justify-center font-heading text-sm font-black',
-            isActive ? 'bg-brutal-success text-black' : 'bg-brutal-muted text-black',
-          ].join(' ')}>
-            {initial}
-          </div>
+          <PixelAvatar agentId={agentData.agentId} size="sm" />
           <div className="min-w-0">
             <div className="font-heading text-sm font-bold text-black truncate">
               {agentData.agentName}

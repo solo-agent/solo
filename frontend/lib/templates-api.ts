@@ -34,9 +34,10 @@ export async function listTemplates(): Promise<Template[]> {
 export async function applyTemplate(
   id: string,
   ownerId: string,
+  modelProvider?: string,
 ): Promise<ApplyTemplateResult> {
   return apiClient.post<ApplyTemplateResult>(
     `/api/v1/templates/${id}/apply`,
-    { owner_id: ownerId },
+    { owner_id: ownerId, model_provider: modelProvider || '' },
   );
 }

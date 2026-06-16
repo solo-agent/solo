@@ -1,10 +1,8 @@
 // ============================================================================
 // TeamsLeftColumn — the 220px-wide left navigation column on /teams.
 // - Section header style is unified across pages: chevron + UPPERCASE name
-//   + plain count (no badge). Decorative icons are dropped — the chevron
-//   acts as the visual marker.
-// - Graph has no children: no chevron. To preserve a leading marker it
-//   keeps the Network icon; click just emits onSelectGraph (no toggle).
+//   + plain count (no badge).
+// - Relationships: click navigates to /relationships page.
 // - Agents / Humans have children: header click toggles expand/collapse.
 // - Section item click (agent or human row) emits onSelectAgent / onSelectHuman.
 // - Selected item gets the brutalist yellow selection style.
@@ -13,14 +11,15 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { ChevronDown, Network, Plus } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ChevronDown, GitBranch, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 import { TeamsAgentItem } from './teams-agent-item';
 import { TeamsHumanItem } from './teams-human-item';
 import type { Agent } from '@/lib/types';
 
-export type TeamsSelectionKind = 'graph' | 'agent' | 'human';
+export type TeamsSelectionKind = 'agent' | 'human';
 
 export interface TeamsSelection {
   kind: TeamsSelectionKind;
@@ -31,13 +30,12 @@ interface TeamsLeftColumnProps {
   agents: Agent[];
   humans: Array<{ id: string; display_name: string; avatar_url?: string | null }>;
   selection: TeamsSelection | null;
-  onSelectGraph: () => void;
   onSelectAgent: (agentId: string) => void;
   onSelectHuman: (userId: string) => void;
   onCreateAgent?: () => void;
 }
 
-type SectionKey = 'graph' | 'agents' | 'humans';
+type SectionKey = 'agents' | 'humans';
 
 const SECTION_HEADER =
   'flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider font-heading';
@@ -47,13 +45,11 @@ export function TeamsLeftColumn({
   agents,
   humans,
   selection,
-  onSelectGraph,
   onSelectAgent,
   onSelectHuman,
   onCreateAgent,
 }: TeamsLeftColumnProps) {
-  // Default: Agents + Humans expanded. Graph has no children, so its expand
-  // state is irrelevant and not tracked.
+  const router = useRouter();
   const [expanded, setExpanded] = useState<Set<SectionKey>>(
     () => new Set<SectionKey>(['agents', 'humans']),
   );
@@ -72,28 +68,25 @@ export function TeamsLeftColumn({
 
   return (
     <div className="flex h-full flex-col overflow-hidden border-r-2 border-black bg-brutal-cream">
-      {/* Page label — matches Sidebar / Tasks / Computers top label style */}
+      {/* Page label */}
       <div className="flex items-center h-14 border-b-2 border-black bg-brutal-cream px-4">
         <span className="font-heading text-lg font-bold">Teams</span>
       </div>
 
       {/* Sections */}
       <div className="flex-1 overflow-y-auto pt-0 pb-2">
-        {/* Graph — no children, so no ChevronDown; keep Network as the
-            leading marker; click selects the view */}
+        {/* Relationships — navigates to /relationships */}
         <button
           type="button"
-          onClick={onSelectGraph}
+          onClick={() => router.push('/relationships')}
           className={cn(
             SECTION_HEADER,
-            selection?.kind === 'graph'
-              ? 'bg-brutal-primary text-black border-black shadow-brutal-sm'
-              : 'text-muted-foreground',
+            'text-muted-foreground hover:bg-brutal-primary-light',
           )}
-          aria-label={t('enterGraphView')}
+          aria-label="View relationships"
         >
-          <Network className="h-3.5 w-3.5" aria-hidden="true" />
-          <span>Graph</span>
+          <GitBranch className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>Relationships</span>
           <span className={SECTION_COUNT}>{agents.length}</span>
         </button>
 
@@ -116,15 +109,18 @@ export function TeamsLeftColumn({
             <span>Agents</span>
             <span className={SECTION_COUNT}>{agents.length}</span>
           </button>
-          {onCreateAgent && (
-            <button
-              onClick={onCreateAgent}
-              className="mr-2 flex h-5 w-5 items-center justify-center border-2 border-transparent text-sidebar-muted-foreground group-hover:border-black group-hover:text-black hover:bg-brutal-primary/40 active:bg-brutal-primary active:text-black active:ring-2 active:ring-black transition-all cursor-pointer"
-              aria-label={t('teamsCreateAgent')}
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </button>
-          )}
+          <div className="flex items-center gap-0.5 mr-1">
+            {onCreateAgent && (
+              <button
+                onClick={onCreateAgent}
+                className="flex h-5 w-5 items-center justify-center border-2 border-transparent text-sidebar-muted-foreground group-hover:border-black group-hover:text-black hover:bg-brutal-primary/40 active:bg-brutal-primary active:text-black active:ring-2 active:ring-black transition-all cursor-pointer"
+                aria-label={t('teamsCreateAgent')}
+                title="Create Agent"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         </div>
         {isAgentsExpanded && (
           <div>

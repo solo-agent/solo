@@ -14,7 +14,7 @@ func TestApplyTemplate_DevTeam_CreatesFiveAgentsAndRelationships(t *testing.T) {
 	ownerID := createTemplateTestUser(t, pool)
 
 	svc := NewTemplateService(pool, NewRelationshipsMDGenerator(pool, t.TempDir()))
-	result, err := svc.Apply(context.Background(), "dev-team", ownerID)
+	result, err := svc.Apply(context.Background(), "dev-team", ownerID, "anthropic")
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}

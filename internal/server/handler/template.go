@@ -54,13 +54,14 @@ func (h *TemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *TemplateHandler) Apply(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var body struct {
-		OwnerID string `json:"owner_id"`
+		OwnerID       string `json:"owner_id"`
+		ModelProvider string `json:"model_provider,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "bad json")
 		return
 	}
-	result, err := h.svc.Apply(r.Context(), id, body.OwnerID)
+	result, err := h.svc.Apply(r.Context(), id, body.OwnerID, body.ModelProvider)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

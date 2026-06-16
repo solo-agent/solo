@@ -180,10 +180,10 @@ export function RelationshipDetailPanel({
           {/* Go to workspace */}
           <button
             type="button"
-            onClick={() => router.push(`/workspace?agent=${agent.id}`)}
+            onClick={() => router.push(`/teams?agent=${agent.id}&tab=profile`)}
             className="w-full btn-brutal-sm bg-brutal-primary px-4 py-2 font-heading text-xs font-bold uppercase tracking-wider"
           >
-            View Workspace
+            View Profile
           </button>
         </div>
       </div>

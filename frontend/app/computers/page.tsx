@@ -12,7 +12,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Monitor,
   Plus,
@@ -101,6 +101,7 @@ function AgentStatusDot({ status }: { status: string }) {
 }
 
 export default function ComputersPage() {
+  const router = useRouter();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { computers, isLoading, error, updateComputer, deleteComputer, refetch } = useComputers();
   const { createAgent } = useAgents();
@@ -145,30 +146,42 @@ export default function ComputersPage() {
   const deleteTargetName =
     deleteTargetId ? computers.find((c) => c.id === deleteTargetId)?.name : null;
 
-  // Selected computer (driven by ComputersLeftColumn)
+  // Selected computer (driven by ComputersLeftColumn + URL)
+  const searchParams = useSearchParams();
   const [selectedComputerId, setSelectedComputerId] = useState<string | null>(null);
   const selectedComputer = useMemo(
     () => (selectedComputerId ? computers.find((c) => c.id === selectedComputerId) : undefined),
     [computers, selectedComputerId],
   );
 
-  // Auto-select and expand the first computer on initial load
-  const [autoSelected, setAutoSelected] = useState(false);
+  // Initialize from URL param on load.
+  const [urlInitialized, setUrlInitialized] = useState(false);
   useEffect(() => {
-    if (!autoSelected && !isLoading && computers.length > 0 && !selectedComputerId) {
+    if (urlInitialized || isLoading || computers.length === 0) return;
+    const idParam = searchParams.get('id');
+    if (idParam && computers.some((c) => c.id === idParam)) {
+      setSelectedComputerId(idParam);
+      setExpandedId(idParam);
+    } else {
       const firstId = computers[0].id;
       setSelectedComputerId(firstId);
       setExpandedId(firstId);
-      setAutoSelected(true);
+      router.replace(`/computers?id=${firstId}`, { scroll: false });
     }
-  }, [autoSelected, isLoading, computers, selectedComputerId]);
+    setUrlInitialized(true);
+  }, [urlInitialized, isLoading, computers, searchParams, router]);
 
   // Left-column click: re-click clears selection; switching resets edit/expand
   const handleComputerClick = useCallback((id: string) => {
-    setSelectedComputerId((prev) => (prev === id ? null : id));
+    if (selectedComputerId === id) {
+      setSelectedComputerId(null);
+    } else {
+      setSelectedComputerId(id);
+      router.replace(`/computers?id=${id}`, { scroll: false });
+    }
     setEditingId(null);
     setExpandedId(null);
-  }, []);
+  }, [selectedComputerId, router]);
 
   // Focus edit input when editing starts
   useEffect(() => {
@@ -672,7 +685,7 @@ function ConnectedAgents({ computerId, onCreateAgent }: { computerId: string | n
               <button
                 type="button"
                 className="flex w-full items-center gap-3 border-2 border-black bg-brutal-cream p-2.5 text-left transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal"
-                onClick={() => router.push('/teams')}
+                onClick={() => router.push(`/teams?agent=${agent.id}&tab=profile`)}
               >
                 <PixelAvatar agentId={agent.id} size="sm" />
                 <div className="flex-1 min-w-0">
