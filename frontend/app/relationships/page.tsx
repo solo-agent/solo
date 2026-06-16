@@ -22,6 +22,7 @@ import {
   type NodeMouseHandler,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import dagre from 'dagre';
 import { Loader2, Plus, Trash2, LayoutGrid, Undo2, Redo2, Download } from 'lucide-react';
 import { NavBar } from '@/components/ui/navbar';
 import { RelationshipNode } from '@/components/relationships/relationship-node';
@@ -101,15 +102,38 @@ export default function RelationshipsPage() {
 
   // ---- Build initial nodes/edges ----
 
+  // ---- Build initial nodes/edges ----
+
   const initialNodes: Node[] = useMemo(() => {
     const saved = loadPositions();
+    // Build set of occupied positions from saved data (for existing agents).
+    const occupied = new Set(
+      Object.values(saved).map((p) => `${Math.round(p.x)},${Math.round(p.y)}`),
+    );
+
+    const findFreePos = (i: number) => {
+      const COLS = 4;
+      const CELL_W = 220;
+      const CELL_H = 160;
+      let attempts = 0;
+      while (attempts < 100) {
+        const col = attempts < COLS ? attempts % COLS : (i + attempts) % COLS;
+        const row = Math.floor((i + attempts) / COLS);
+        const x = col * CELL_W + 100;
+        const y = row * CELL_H + 80;
+        if (!occupied.has(`${x},${y}`)) {
+          occupied.add(`${x},${y}`);
+          return { x, y };
+        }
+        attempts++;
+      }
+      return { x: (i % COLS) * CELL_W + 100, y: Math.floor(i / COLS) * CELL_H + 80 };
+    };
+
     return agents.map((a, i) => ({
       id: a.id,
       type: 'agentNode',
-      position: saved[a.id] || {
-        x: (i % 4) * 220 + 100,
-        y: Math.floor(i / 4) * 160 + 80,
-      },
+      position: saved[a.id] || findFreePos(i),
       data: {
         agentId: a.id,
         agentName: a.name,
@@ -122,11 +146,15 @@ export default function RelationshipsPage() {
     const map = new Map<string, AgentRelationship>();
     const edges = relationships.map((r) => {
       map.set(r.id, r);
+      const isCollab = r.rel_type === 'collaborates_with';
       return {
         id: r.id,
         source: r.from_agent_id,
         target: r.to_agent_id,
         type: 'relationship',
+        // Collaboration is bidirectional: pin it to side handles so the line
+        // stays horizontal between same-rank peers instead of arcing top/bottom.
+        ...(isCollab ? { sourceHandle: 'right', targetHandle: 'left' } : {}),
         data: {
           relType: r.rel_type,
           channelName: r.channel_name,
@@ -140,9 +168,15 @@ export default function RelationshipsPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
-  // Sync when data reloads
+  // Sync when data reloads — keep existing node positions, only add new / remove deleted.
   useEffect(() => {
-    setNodes(initialNodes);
+    setNodes((prev) => {
+      const existingPos = new Map(prev.map((n) => [n.id, n.position]));
+      return initialNodes.map((n) => ({
+        ...n,
+        position: existingPos.get(n.id) || n.position,
+      }));
+    });
     setEdges(initialEdges);
   }, [initialNodes, initialEdges, setNodes, setEdges]);
 
@@ -171,11 +205,13 @@ export default function RelationshipsPage() {
             channel_id: event.channel_id,
           };
           edgeToRelationshipMap.current.set(event.id, newRel);
+          const isCollab = event.rel_type === 'collaborates_with';
           return [...prev, {
             id: event.id,
             source: event.from_agent_id,
             target: event.to_agent_id,
             type: 'relationship',
+            ...(isCollab ? { sourceHandle: 'right', targetHandle: 'left' } : {}),
             data: { relType: event.rel_type as RelationshipType, channelName: (event as { channel_name?: string }).channel_name },
           }];
         });
@@ -359,21 +395,94 @@ export default function RelationshipsPage() {
   }, []);
 
   // ---- Auto layout ----
+  // Dagre-based layered layout, TB direction.
+  // - assigns_to: directional edges that define the rank hierarchy
+  //   (parent on top, child below).
+  // - collaborates_with: same-rank constraint, implemented via a compound
+  //   graph. Every collab pair gets wrapped in a shared parent cluster
+  //   with rank: 'same', which forces dagre to keep them on one row.
+  // - assigns_to wins when both relationships exist on the same pair.
 
   const autoLayout = useCallback(() => {
     pushUndo();
+    try { localStorage.removeItem(POS_STORAGE_KEY); } catch { /* noop */ }
     setNodes((prev) => {
-      const next = prev.map((n, i) => ({
-        ...n,
-        position: {
-          x: (i % 4) * 220 + 100,
-          y: Math.floor(i / 4) * 160 + 80,
-        },
-      }));
+      const NODE_W = 180;
+      const NODE_H = 100;
+      const g = new dagre.graphlib.Graph({ compound: true });
+      g.setGraph({ rankdir: 'TB', nodesep: 100, ranksep: 140, marginx: 80, marginy: 80 });
+      g.setDefaultEdgeLabel(() => ({}));
+
+      for (const n of prev) {
+        g.setNode(n.id, { width: NODE_W, height: NODE_H });
+      }
+
+      const pairKey = (a: string, b: string) => a < b ? `${a}|${b}` : `${b}|${a}`;
+      const assignsPairs = new Set<string>();
+      for (const e of edges) {
+        if (!g.hasNode(e.source) || !g.hasNode(e.target)) continue;
+        if (e.data?.relType === 'assigns_to') {
+          assignsPairs.add(pairKey(e.source, e.target));
+        }
+      }
+
+      // Union-find over collaborates_with pairs so a chain (A↔B, B↔C)
+      // collapses into one same-rank cluster.
+      const parent = new Map<string, string>();
+      const find = (x: string): string => {
+        const p = parent.get(x);
+        if (!p || p === x) { parent.set(x, x); return x; }
+        const r = find(p); parent.set(x, r); return r;
+      };
+      const union = (a: string, b: string) => { parent.set(find(a), find(b)); };
+
+      for (const e of edges) {
+        if (!g.hasNode(e.source) || !g.hasNode(e.target)) continue;
+        if (e.data?.relType !== 'collaborates_with') continue;
+        if (assignsPairs.has(pairKey(e.source, e.target))) continue;
+        union(e.source, e.target);
+      }
+
+      // Build clusters: collab roots with > 1 member become same-rank parents.
+      const clusters = new Map<string, string[]>();
+      for (const n of prev) {
+        const root = find(n.id);
+        if (!clusters.has(root)) clusters.set(root, []);
+        clusters.get(root)!.push(n.id);
+      }
+      let clusterIdx = 0;
+      for (const [, members] of clusters) {
+        if (members.length < 2) continue;
+        const clusterId = `__collab_cluster_${clusterIdx++}`;
+        g.setNode(clusterId, {});
+        for (const m of members) g.setParent(m, clusterId);
+      }
+
+      // Add edges. assigns_to defines ranks; collaborates_with is purely
+      // visual once the cluster does the same-rank work.
+      for (const e of edges) {
+        if (!g.hasNode(e.source) || !g.hasNode(e.target)) continue;
+        const relType = e.data?.relType;
+        if (relType === 'assigns_to') {
+          g.setEdge(e.source, e.target, { minlen: 1, weight: 2 });
+        }
+        // collaborates_with: no dagre edge needed — the cluster handles rank.
+      }
+
+      dagre.layout(g);
+
+      const next = prev.map((n) => {
+        const pos = g.node(n.id);
+        if (!pos) return n;
+        return {
+          ...n,
+          position: { x: pos.x - NODE_W / 2, y: pos.y - NODE_H / 2 },
+        };
+      });
       savePositions(next);
       return next;
     });
-  }, [pushUndo, setNodes, savePositions]);
+  }, [pushUndo, setNodes, savePositions, edges]);
 
   // ---- Loading ----
 

@@ -22,10 +22,10 @@ function RelationshipNodeComponent({ data }: NodeProps) {
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="!w-3 !h-3 !border-2 !border-black !bg-white" />
-      <Handle type="source" position={Position.Bottom} className="!w-3 !h-3 !border-2 !border-black !bg-white" />
-      <Handle type="target" position={Position.Left} className="!w-3 !h-3 !border-2 !border-black !bg-white" />
-      <Handle type="source" position={Position.Right} className="!w-3 !h-3 !border-2 !border-black !bg-white" />
+      <Handle id="top" type="target" position={Position.Top} className="!w-3 !h-3 !border-2 !border-black !bg-white" />
+      <Handle id="bottom" type="source" position={Position.Bottom} className="!w-3 !h-3 !border-2 !border-black !bg-white" />
+      <Handle id="left" type="target" position={Position.Left} className="!w-3 !h-3 !border-2 !border-black !bg-white" />
+      <Handle id="right" type="source" position={Position.Right} className="!w-3 !h-3 !border-2 !border-black !bg-white" />
 
       <div
         className="px-4 py-3 border-4 border-black bg-white shadow-brutal min-w-[140px] cursor-pointer hover:-translate-y-0.5 hover:shadow-brutal-lg transition-transform duration-100"
