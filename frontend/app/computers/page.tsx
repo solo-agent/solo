@@ -500,7 +500,10 @@ function ComputerCard({
       <div
         className={cn(
           'overflow-hidden transition-all duration-300 ease-in-out',
-          isExpanded ? 'max-h-[1200px] opacity-100' : 'max-h-0 opacity-0',
+          // max-h is a known constraint for height transitions; pick a value
+          // large enough to hold long agent lists + runtime lists without
+          // clipping. 9+ agents already pushed past the old 1200px ceiling.
+          isExpanded ? 'max-h-[4000px] opacity-100' : 'max-h-0 opacity-0',
         )}
       >
         <div className="border-t-2 border-black px-6 pb-6 pt-4 space-y-6">

@@ -13,6 +13,7 @@ import { useState, useCallback } from 'react';
 import { X, Trash2, Edit3, Check, AlertTriangle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { Select } from '@/components/ui/select';
+import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { t } from '@/lib/i18n';
 import type { RelationshipType, Agent, AgentRelationship } from '@/lib/types';
@@ -120,7 +121,7 @@ export function RelationshipDetailPanel({
   if (agent) {
     const isActive = agent.isActive ?? (agent.is_active ?? false);
     return (
-      <div className="fixed right-0 top-0 h-full w-80 border-l-4 border-black bg-white shadow-brutal-2xl z-40 flex flex-col animate-slide-in-from-right">
+      <div className="fixed right-0 top-14 h-[calc(100%-3.5rem)] w-80 border-l-4 border-black bg-white shadow-brutal-2xl z-40 flex flex-col animate-slide-in-from-right">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b-2 border-black bg-brutal-cream">
           <h3 className="font-heading text-sm font-black uppercase tracking-wider">
@@ -140,12 +141,7 @@ export function RelationshipDetailPanel({
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Agent name badge */}
           <div className="flex items-center gap-3 p-3 border-2 border-black bg-brutal-cream">
-            <div className={[
-              'flex-shrink-0 w-10 h-10 border-2 border-black flex items-center justify-center font-heading text-lg font-black',
-              isActive ? 'bg-brutal-success text-black' : 'bg-brutal-muted text-black',
-            ].join(' ')}>
-              {agent.name[0]?.toUpperCase() || '?'}
-            </div>
+            <PixelAvatar agentId={agent.id} avatarUrl={agent.avatar_url} size="md" />
             <div className="min-w-0">
               <div className="font-heading text-sm font-bold text-black truncate">
                 {agent.name}
@@ -172,9 +168,9 @@ export function RelationshipDetailPanel({
 
           <div className="p-3 border-2 border-black bg-white">
             <div className="font-heading text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
-              Model
+              Runtime_Type
             </div>
-            <p className="font-mono text-xs text-black">{agent.model_name || 'Not configured'}</p>
+            <p className="font-mono text-xs text-black">{agent.model_provider || 'Not configured'}</p>
           </div>
 
           {/* Go to workspace */}
@@ -197,7 +193,7 @@ export function RelationshipDetailPanel({
   const colors = EDGE_COLORS[relationship.rel_type] || EDGE_COLORS.collaborates_with;
 
   return (
-    <div className="fixed right-0 top-0 h-full w-80 border-l-4 border-black bg-white shadow-brutal-2xl z-40 flex flex-col animate-slide-in-from-right">
+    <div className="fixed right-0 top-14 h-[calc(100%-3.5rem)] w-80 border-l-4 border-black bg-white shadow-brutal-2xl z-40 flex flex-col animate-slide-in-from-right">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b-2 border-black bg-brutal-cream">
         <h3 className="font-heading text-sm font-black uppercase tracking-wider">

@@ -73,20 +73,25 @@ export default function TeamsPage() {
   const searchParams = useSearchParams();
   const initializedRef = useRef(false);
 
-  // Initialize selection from URL params on load.
+  // React to URL param changes (including from other pages).
   useEffect(() => {
-    if (initializedRef.current || agents.length === 0) return;
+    if (agents.length === 0) return;
     const agentId = searchParams.get('agent');
     const tab = searchParams.get('tab') as AgentTab | null;
     if (agentId && agents.some((a) => a.id === agentId)) {
       setSelection({ kind: 'agent', id: agentId });
       if (tab === 'profile' || tab === 'workspace') setAgentTab(tab);
-    } else {
-      // Default: first agent
+      if (!initializedRef.current) {
+        initializedRef.current = true;
+      }
+      return;
+    }
+    // Default to first agent only on initial load.
+    if (!initializedRef.current) {
       setSelection({ kind: 'agent', id: agents[0].id });
       router.replace(`/teams?agent=${agents[0].id}&tab=profile`, { scroll: false });
+      initializedRef.current = true;
     }
-    initializedRef.current = true;
   }, [agents, searchParams, router]);
 
   // Auth guard
@@ -95,15 +100,6 @@ export default function TeamsPage() {
       router.push('/auth/login');
     }
   }, [authLoading, isAuthenticated, router]);
-
-  // Auto-select first agent (fallback when agents load after init or URLs change).
-  useEffect(() => {
-    if (!initializedRef.current && agents.length > 0) return;
-    if (selection === null && agents.length > 0) {
-      setSelection({ kind: 'agent', id: agents[0].id });
-      router.replace(`/teams?agent=${agents[0].id}&tab=profile`, { scroll: false });
-    }
-  }, [agents, selection, router]);
 
   // Reset tab when switching agents
   useEffect(() => {
