@@ -401,7 +401,7 @@ func (h *Hub) handleMessageSend(client *Client, payload MessageSendPayload) {
 
 	_, err = h.pool.Exec(context.Background(),
 		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, mentioned_agent_ids, attachment_ids, created_at, updated_at)
-		 VALUES ($1, $2, 'user', $3, $4, $5::uuid[], $6::uuid[], $7, $7)`,
+		 VALUES (\$1, \$2, \$3, \$4, \$5, \$6::uuid[], \$7::uuid[], \$8, \$8)`,
 		messageID, payload.ChannelID, senderType, client.userID, payload.Content, formatUUIDArray(mentionedAgentIDs), formatUUIDArray(attachmentIDs), now,
 	)
 	if err != nil {
@@ -629,7 +629,7 @@ func (h *Hub) handleThreadReply(client *Client, payload ThreadReplyPayload) {
 
 	_, err = tx.Exec(context.Background(),
 		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, thread_id, mentioned_agent_ids, attachment_ids, created_at, updated_at)
-		 VALUES ($1, $2, 'user', $3, $4, $5, $6::uuid[], $7::uuid[], $8, $8)`,
+		 VALUES (\$1, \$2, \$3, \$4, \$5, \$6, \$7::uuid[], \$8::uuid[], \$9, \$9)`,
 		messageID, payload.ChannelID, senderType, client.userID, payload.Content, payload.ThreadID, formatUUIDArray(mentionedAgentIDs), formatUUIDArray(attachmentIDs), now,
 	)
 	if err != nil {
