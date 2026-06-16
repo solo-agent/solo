@@ -13,7 +13,7 @@ import { t } from '@/lib/i18n';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
-import type { Task, CreateTaskInput, UpdateTaskInput, TaskStatus } from '@/lib/types';
+import type { Task, TaskStatus } from '@/lib/types';
 
 // ---- Backend response shapes (匹配 Phase 1 Claim API) ----
 
@@ -139,7 +139,7 @@ export function useTasks(filters?: TaskFilters) {
         if (filters?.status && event.status !== filters.status) return;
 
         setTasks((prev) => {
-          // Avoid duplicates (task was already added by local createTask)
+          // Avoid duplicates from WS race
           if (prev.find((t) => t.id === event.id)) return prev;
           return [mapTask({
             id: event.id,
@@ -235,34 +235,9 @@ export function useTasks(filters?: TaskFilters) {
     return unsub;
   }, [channelFilter, filters?.status, onEvent, loadTasks]);
 
-  const createTask = useCallback(async (input: CreateTaskInput): Promise<Task> => {
-    const res = await apiClient.post<TaskResponse>('/api/v1/tasks', {
-      channel_id: input.channel_id,
-      title: input.title,
-      description: input.description || '',
-      priority: input.priority || 'normal',
-      assignee_id: input.assignee_id,
-      assignee_type: input.assignee_type,
-      due_date: input.due_date,
-    });
-    const task = mapTask(res);
-    setTasks((prev) => {
-      // Avoid duplicate — WS task.created may have already added this task
-      if (prev.find((t) => t.id === task.id)) return prev;
-      return [task, ...prev];
-    });
-    return task;
-  }, []);
-
-  const updateTask = useCallback(async (channelId: string, taskId: string, input: UpdateTaskInput): Promise<Task> => {
+  const updateTask = useCallback(async (channelId: string, taskId: string, input: { status?: TaskStatus }): Promise<Task> => {
     const res = await apiClient.patch<TaskResponse>(`/api/v1/channels/${channelId}/tasks/${taskId}`, {
-      title: input.title,
-      description: input.description,
       status: input.status,
-      priority: input.priority,
-      assignee_id: input.assignee_id,
-      assignee_type: input.assignee_type,
-      due_date: input.due_date,
     });
     const updated = mapTask(res);
     setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
@@ -317,7 +292,6 @@ export function useTasks(filters?: TaskFilters) {
     tasks,
     isLoading,
     error,
-    createTask,
     updateTask,
     deleteTask,
     claimTask,
@@ -481,34 +455,10 @@ export function useDMTasks(dmId: string | null) {
     return unsub;
   }, [dmId, dmOnEvent]);
 
-  const createTask = useCallback(async (input: CreateTaskInput & { dm_id: string }): Promise<Task> => {
-    const res = await apiClient.post<DMTaskResponse>(`/api/v1/dm/${input.dm_id}/tasks`, {
-      title: input.title,
-      description: input.description || '',
-      priority: input.priority || 'normal',
-      assignee_id: input.assignee_id,
-      assignee_type: input.assignee_type,
-      due_date: input.due_date,
-    });
-    const task = mapDMTask(res);
-    setTasks((prev) => {
-      // Avoid duplicate — WS task.created may have already added this task
-      if (prev.find((t) => t.id === task.id)) return prev;
-      return [task, ...prev];
-    });
-    return task;
-  }, []);
-
-  const updateTask = useCallback(async (id: string, input: UpdateTaskInput): Promise<Task> => {
+  const updateTask = useCallback(async (id: string, input: { status?: TaskStatus }): Promise<Task> => {
     // DM tasks go through the global endpoint since they exist in a DM scope
     const res = await apiClient.patch<TaskResponse>(`/api/v1/tasks/${id}`, {
-      title: input.title,
-      description: input.description,
       status: input.status,
-      priority: input.priority,
-      assignee_id: input.assignee_id,
-      assignee_type: input.assignee_type,
-      due_date: input.due_date,
     });
     const updated = mapTask(res);
     setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
@@ -556,7 +506,6 @@ export function useDMTasks(dmId: string | null) {
     tasks,
     isLoading,
     error,
-    createTask,
     updateTask,
     claimTask,
     unclaimTask,
@@ -565,57 +514,3 @@ export function useDMTasks(dmId: string | null) {
   } as const;
 }
 
-// ---- Single task hook ----
-
-export function useTask(id: string) {
-  const [task, setTask] = useState<Task | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const mountedRef = useRef(true);
-
-  const loadTask = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await apiClient.get<TaskResponse>(`/api/v1/tasks/${id}`);
-      if (mountedRef.current) setTask(mapTask(res));
-    } catch (err) {
-      if (err instanceof ApiError) {
-        setError(err.status === 404 ? `${t('taskNotFound')}` : err.message);
-      } else {
-        setError(`${t('taskDetailLoadError')}`);
-      }
-    } finally {
-      if (mountedRef.current) setIsLoading(false);
-    }
-  }, [id]);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    if (id) loadTask();
-    return () => { mountedRef.current = false; };
-  }, [id, loadTask]);
-
-  const updateTask = useCallback(async (input: UpdateTaskInput): Promise<Task> => {
-    const res = await apiClient.patch<TaskResponse>(`/api/v1/tasks/${id}`, {
-      title: input.title,
-      description: input.description,
-      status: input.status,
-      priority: input.priority,
-      assignee_id: input.assignee_id,
-      assignee_type: input.assignee_type,
-      due_date: input.due_date,
-    });
-    const updated = mapTask(res);
-    setTask(updated);
-    return updated;
-  }, [id]);
-
-  return {
-    task,
-    isLoading,
-    error,
-    updateTask,
-    refetch: loadTask,
-  } as const;
-}

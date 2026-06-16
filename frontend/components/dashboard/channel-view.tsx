@@ -340,7 +340,7 @@ export function ChannelView({
         sender_type: 'user',
         task_number: task.task_number,
         task_status: task.status,
-        task_claimer_name: task.claimer_name || task.assignee_name,
+        task_claimer_name: task.claimer_name,
       });
       onThreadChange?.(task.message_id);
     },

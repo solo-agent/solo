@@ -148,10 +148,6 @@ export interface Task {
   task_number?: number;
   /** @deprecated 使用 claimer_id 替代 (Phase 1 认领制改造) */
   assignee_id?: string;
-  /** @deprecated 使用 claimer_name 替代 */
-  assignee_name?: string;
-  /** @deprecated 使用 claimer_type 替代 */
-  assignee_type?: 'user' | 'agent';
   /** 认领人 ID (认领制) */
   claimer_id?: string;
   /** 认领人名称 */
@@ -181,30 +177,6 @@ export interface Task {
   due_date?: string;
   created_at: string;
   updated_at: string;
-}
-
-export interface CreateTaskInput {
-  channel_id: string;
-  title: string;
-  description?: string;
-  priority?: TaskPriority;
-  assignee_id?: string;
-  assignee_type?: 'user' | 'agent';
-  due_date?: string;
-}
-
-export interface UpdateTaskInput {
-  title?: string;
-  description?: string;
-  status?: TaskStatus;
-  priority?: TaskPriority;
-  assignee_id?: string;
-  assignee_type?: 'user' | 'agent';
-  /** 认领人 ID (认领制) */
-  claimer_id?: string;
-  /** 认领人名称 */
-  claimer_name?: string;
-  due_date?: string;
 }
 
 // ---- DM types ----

@@ -201,7 +201,6 @@ function TaskCard({
 
   const claimerDisplay =
     task.claimer_name ||
-    task.assignee_name ||
     (task.claimer_id ? task.claimer_id.slice(0, 8) : null);
 
   const lastActivity = task.updated_at || task.created_at;

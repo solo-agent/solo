@@ -125,7 +125,7 @@ function TasksPageContent() {
       if (!filterDmId && filterChannelId && t.channel_id !== filterChannelId) return false;
       if (filterAssignee) {
         const claimerVal = t.claimer_id || t.assignee_id || '';
-        const claimerName = (t.claimer_name || t.assignee_name || '').toLowerCase();
+        const claimerName = (t.claimer_name || '').toLowerCase();
         const filterVal = filterAssignee.toLowerCase();
         if (claimerVal !== filterAssignee && !claimerName.includes(filterVal)) return false;
       }
@@ -143,7 +143,7 @@ function TasksPageContent() {
     const seen = new Map<string, { id: string; name: string }>();
     for (const t of sourceTasks) {
       const id = t.claimer_id || t.assignee_id;
-      const name = t.claimer_name || t.assignee_name || (id ? id.slice(0, 8) : '');
+      const name = t.claimer_name || (id ? id.slice(0, 8) : '');
       if (id && !seen.has(id)) seen.set(id, { id, name });
     }
     return Array.from(seen.values());
@@ -233,7 +233,7 @@ function TasksPageContent() {
       sender_type: 'user',
       task_number: task.task_number,
       task_status: task.status,
-      task_claimer_name: task.claimer_name || task.assignee_name,
+      task_claimer_name: task.claimer_name,
     });
     setThreadTask(task);
   }, []);
@@ -555,7 +555,7 @@ function TasksPageContent() {
                     sender_type: 'user',
                     task_number: sub.task_number,
                     task_status: sub.status,
-                    task_claimer_name: sub.claimer_name || sub.assignee_name,
+                    task_claimer_name: sub.claimer_name,
                   });
                   setThreadTask(sub);
                 }
