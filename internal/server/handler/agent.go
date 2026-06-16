@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/solo-ai/solo/internal/server/service"
 	"github.com/solo-ai/solo/internal/server/workspace"
 	"github.com/solo-ai/solo/pkg/agent"
 )
@@ -26,12 +27,13 @@ const (
 // AgentHandler handles agent-related HTTP requests.
 type AgentHandler struct {
 	pool          *pgxpool.Pool
-	workspaceRoot string             // base path for agent workspaces, defaults to ~/.solo/agents
-	proxy         workspace.Proxy    // optional proxy for workspace requests (nil = local FS only)
+	workspaceRoot string                              // base path for agent workspaces, defaults to ~/.solo/agents
+	proxy         workspace.Proxy                     // optional proxy for workspace requests (nil = local FS only)
+	mdGen         *service.RelationshipsMDGenerator   // optional — generates empty RELATIONSHIPS.md on create
 }
 
 // NewAgentHandler creates a new AgentHandler.
-func NewAgentHandler(pool *pgxpool.Pool, proxy workspace.Proxy) *AgentHandler {
+func NewAgentHandler(pool *pgxpool.Pool, proxy workspace.Proxy, mdGen *service.RelationshipsMDGenerator) *AgentHandler {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
@@ -40,7 +42,7 @@ func NewAgentHandler(pool *pgxpool.Pool, proxy workspace.Proxy) *AgentHandler {
 	if proxy == nil {
 		slog.Warn("agent handler: no workspace proxy configured, falling back to local filesystem only")
 	}
-	return &AgentHandler{pool: pool, workspaceRoot: workspaceRoot, proxy: proxy}
+	return &AgentHandler{pool: pool, workspaceRoot: workspaceRoot, proxy: proxy, mdGen: mdGen}
 }
 
 // --- Request/Response types ---
@@ -165,6 +167,13 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("agent created", "agent_id", agentID, "name", name, "owner_id", userID)
+
+	// Generate an empty RELATIONSHIPS.md so the file exists when the agent reads it.
+	if h.mdGen != nil {
+		if err := h.mdGen.GenerateForAgent(r.Context(), agentID); err != nil {
+			slog.Warn("failed to generate initial RELATIONSHIPS.md", "agent_id", agentID, "error", err)
+		}
+	}
 
 	// Auto-join the user's #all-{name} channel so @mentions work immediately.
 	var allID string

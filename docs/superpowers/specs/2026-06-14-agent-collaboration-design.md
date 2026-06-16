@@ -1,7 +1,7 @@
 # Agent 协作 — 事项 1 深度设计
 
-> 版本: 2.0（实施后更新）
-> 日期: 2026-06-14（设计）/ 2026-06-16（实施后修订）
+> 版本: 2.1（实施后更新）
+> 日期: 2026-06-14（设计）/ 2026-06-16（实施后修订 v2.0）/ 2026-06-16（实施后修订 v2.1）
 > 状态: 已实施，文档反映实际代码
 > 范围: 仅事项 1(Agent 关系→行为接线)
 > 后续: 事项 2-5 单独设计,本文末尾列待办
@@ -14,7 +14,7 @@
 
 Solo 已通过 6 步路线图实现 Agent 协作基础:
 - `agent_relationships` 表(原 4 类:`reports_to` / `delegates_to` / `collaborates_with` / `escalates_to`)
-- `task_dependencies` 表 + `parent_task_id`(sub-task)
+- `task_dependencies` 表 + `parent_task_id`(task)
 - `agent_delegations` 表 + 状态机
 
 **但是运行时行为接线不全**:`escalates_to` 是唯一接通的关系,其余 3 类仅停留在 DB + 图谱层。
@@ -23,7 +23,7 @@ Solo 已通过 6 步路线图实现 Agent 协作基础:
 
 把 Agent 关系从"声明式数据"升级为"行为驱动图谱":
 - 2 类关系(精简自原 4 类):`assigns_to` + `collaborates_with`
-- 5 个保留子功能:**sub-task 通知、Watchdog 升级、事件总线、Template 库、动态 MD 文档**
+- 5 个保留子功能:**task 通知、Watchdog 升级、事件总线、Template 库、动态 MD 文档**
 - **关系是 task 行为模式,不是认知 hint**——不直接写进 prompt,通过 `RELATIONSHIPS.md` 动态文档作为信息出口
 
 ### 1.3 实施后变更
@@ -33,7 +33,7 @@ Solo 已通过 6 步路线图实现 Agent 协作基础:
 | 子功能 | 设计 | 实施结果 |
 |--------|------|---------|
 | `assigns_to` mention 校验 | server 强制拦截 | **删除** — 失去灵活性 |
-| `assigns_to` sub-task 通知 | 频道 WS 广播 | **改为 DM 系统消息** — `AgentNotifier.NotifyClaim/Complete`，落库 + `thread_id=NULL` + `TriggerAgentResponse` |
+| `assigns_to` task 通知 | 频道 WS 广播 | **改为 DM 系统消息** — `AgentNotifier.NotifyClaim/Complete`，落库 + `thread_id=NULL` + `TriggerAgentResponse` |
 | `assigns_to` Watchdog 升级 | 频道 WS 广播 | **改为 DM 系统消息** — `AgentNotifier.NotifyEscalation/NotifyRemind`，新增 server 统一调度器替代 daemon ticker |
 | `assigns_to` smart default | UI 预填 | **删除** — 将重新设计 |
 | `collaborates_with` smart default | 协作者排序 | **删除** — 将重新设计 |
@@ -56,7 +56,7 @@ Solo 已通过 6 步路线图实现 Agent 协作基础:
 
 | 关系 | UI | 含义 | 行为接线 |
 |------|-----|------|---------|
-| `assigns_to(A, B)` | 单箭头 A→B | A 经常创建 sub-task @mention B,或 B 经常 claim A 的 sub-task | DM 系统消息通知 A + 事件总线更新 RELATIONSHIPS.md |
+| `assigns_to(A, B)` | 单箭头 A→B | A 经常创建 task @mention B,或 B 经常 claim A 的 task | DM 系统消息通知 A + 事件总线更新 RELATIONSHIPS.md |
 | `collaborates_with(A, B)` | 双箭头 A↔B | A 和 B 经常互相 mention,经常 claim 同一类 task | 事件总线更新 RELATIONSHIPS.md |
 
 ### 2.2 关系 ≠ 认知 hint
@@ -71,10 +71,10 @@ Solo 已通过 6 步路线图实现 Agent 协作基础:
 ### 2.3 Solo 任务模型:claim + mention
 
 - Solo migration 000013 把 `assignee` 替换为 `claimer`
-- 委托 = A 创建 sub-task + 描述里 @mention B,B 自己 claim
+- 委托 = A 创建 task + 描述里 @mention B,B 自己 claim
 - **没有"assign to"字段**,只有"谁 claim 了"
 
-### 2.4 消息通知架构（实施后新增）
+### 2.4 消息通知架构
 
 所有 agent 通知统一走 DM 系统消息模式：
 
@@ -88,15 +88,37 @@ AgentNotifier.NotifyXxx
 
 `thread_id=NULL` 确保消息能被 `getRecentMessages` 查询到（该 SQL 过滤 `WHERE thread_id IS NULL`）。
 
+### 2.5 System Prompt 软注入
+
+关系信息不走 system prompt 直接注入，而是在 prompt 模板（`pkg/agent/prompt.go:BuildSystemPrompt`）末尾添加 `## Agent Relationships — CHECK BEFORE ACTING` 节，告诉 agent 读 RELATIONSHIPS.md：
+
+```
+## Agent Relationships — CHECK BEFORE ACTING
+
+CRITICAL: Before you start ANY task, read RELATIONSHIPS.md to scan your colleagues
+and their delegation criteria. If a colleague is better suited, delegate to them
+via task @mention — do NOT attempt work that belongs to a colleague.
+
+cat ~/.solo/agents/<id>/workspace/RELATIONSHIPS.md
+```
+
+借鉴 alook 的 `CRITICAL: CHECK BEFORE ACTING` + `do NOT attempt work that belongs to a colleague` 模式，但同事列表在文件里而非 prompt 正文——保持"轻 push 重 pull"。
+
+### 2.6 关系全局化
+
+`assigns_to` 和 `collaborates_with` 都是全局关系，不需要 `channel_id`。agent 对 agent 的关系是组织/协作层面的，不随频道变化。
+
+Migration 000039 修复了 `collaborates_with` 唯一索引（去掉 channel_id）。
+
 ---
 
 ## 3. 保留的子功能设计
 
-### 3.1 `assigns_to` sub-task 通知（AgentNotifier DM）
+### 3.1 `assigns_to` task 通知（AgentNotifier DM）
 
-**功能**: sub-task 被 B claim 或完成,通过 DM 系统消息通知 A(sub-task 创建者)。
+**功能**: task 被 B claim 或完成,通过 DM 系统消息通知 A(task 创建者)。
 
-**不校验 `assigns_to` 边** —— 所有 sub-task creator 都会收到通知。关系边仅用于信息展示（RELATIONSHIPS.md），不作为硬约束。
+**不校验 `assigns_to` 边** —— 所有 task creator 都会收到通知。关系边仅用于信息展示（RELATIONSHIPS.md），不作为硬约束。
 
 **行为**:
 - B claim T5.1 → `task.go:ClaimTask` → `agentNotifier.NotifyClaim(ctx, taskID, claimerID=B)`
@@ -125,7 +147,7 @@ B claim T5.1
 
 ### 3.2 `assigns_to` Watchdog 升级（AgentNotifier DM + Server Scheduler）
 
-**功能**: sub-task 超时,Watchdog 通过 DM 通知相关 agent。
+**功能**: task 超时,Watchdog 通过 DM 通知相关 agent。
 
 **行为**:
 - server `scheduler.Start()` 每 30s:
@@ -191,49 +213,93 @@ internal/server/service/agent_relationship.go:Create/Delete
 **新表**:`agent_templates` (migration 000036)
 
 **Solo 内置模板**:
-- `dev-team`(PM / TPM / FE / BE / QA) —— leader 到所有 member 建 `assigns_to`
+- `dev-team`(PM / TPM / FE / BE / QA)
 - `product-team`(PM / Designer / Researcher)
 - `research-team`(Researcher / Analyst / Writer)
 - `marketing-team`(Marketer / Writer / Designer)
 - `customer-support-team`(CS Lead / CS Agent / Escalation Lead)
 
+**模板 member 结构**:
+```json
+{
+  "role": "engineer",
+  "name": "FE",
+  "description": "Frontend engineer — React/TypeScript UIs",
+  "instructions": "You are a frontend engineer...",
+  "relationship": "Delegate UI tasks with: design specs or wireframes...\n\nReport back with: implementation status, files changed..."
+}
+```
+
+- `instructions` → `agents.system_prompt`（纯角色定义，不包括 hint）
+- `description` → `agents.description`（一行短描，RELATIONSHIPS.md 里显示）
+- `relationship` → `agent_relationships.instruction`（委托契约：`Delegate X with: ... / Report back with: ...`）
+
 **关键代码路径**:
 ```
 POST /api/v1/templates/{id}/apply
   → template.go:Apply
-    → INSERT agents
-    → INSERT agent_relationships (leader→member, assigns_to, weight=1.0)
+    → INSERT agents (name, description, system_prompt)
+    → INSERT agent_relationships (leader→member, assigns_to, weight=1.0, instruction=member.Relationship)
     → mdGen.GenerateForAgent(each agentID)
 ```
 
 ### 3.5 `RELATIONSHIPS.md` 动态生成文档
 
-**功能**: server 在关系变更时,自动生成/更新 `~/.solo/agents/<id>/workspace/RELATIONSHIPS.md`。
+**功能**: server 在关系变更时,自动生成/更新 `~/.solo/agents/<id>/workspace/RELATIONSHIPS.md`。Agent 创建时生成空白文件兜底。
 
 **生成时机**:
 - 关系 CRUD 事件
+- Agent 创建（生成空白文件）
 - task claim/complete 事件
-- ~~5 分钟定时刷新~~（未实施）
 
 **文档结构**:
 ```markdown
-# Agent @Bob — Relationships
+# Agent @PM — Relationships
 
-## 我委托给 (@assigns_to from me)
-- @Carol (active: 1, total: 12)
+> Auto-generated by Solo. Last updated: 2026-06-16
+> Read this before starting any task to check your colleagues and delegation criteria.
 
-## 委托给我 (@assigns_to to me)
-- @PM (active: 0, total: 3)
+## Delegates to (@assigns_to from me)
 
-## 我的协作者 (@collaborates_with)
-- @Eve (weight: 5)
+### @TPM (active: 0, total: 0)
+Technical PM — breaks epics into tasks, unblocks engineers
+**DELEGATE when:**
+Delegate coordination tasks with: epic breakdown, dependency graph, timeline constraints...
 
-## 最近活动
-- 2026-06-14 09:00 — @Carol claim T5.1
+Report back with: task assignments, blocker status, timeline updates...
+
+### @FE (active: 0, total: 0)
+Frontend engineer — React/TypeScript UIs
+**DELEGATE when:**
+Delegate UI tasks with: design specs or wireframes...
+
+Report back with: implementation status, files changed, component test results...
+
+## Delegated to me (@assigns_to to me)
+### @CSLead (active: 1, total: 5)
+Customer support lead
+**DELEGATE when:**
+Delegate support escalations with: full case history...
+
+## Collaborators (@collaborates_with)
+### @Eve (weight: 5)
+Product designer — UI/UX, interaction design
+**COLLABORATES when:**
+Coordinate on: API contract sync, shared component design, integration testing.
+
+## Recent Activity (rolling 30 days)
+- 2026-06-16 10:00 — @TPM claimed T5.1
 ```
 
+**关键设计**:
+- `agents.description` 作为同事角色短描（类似 alook 的 description），不是 `system_prompt`
+- `assigns_to` → `DELEGATE when:`，`collaborates_with` → `COLLABORATES when:`
+- 空 instruction → `_(no delegation criteria set)_`
+- 全英文——agent 是英文模型
+- 每个 agent 只有自己的视角（不需要 alook 的 `resolveInstruction`）
+
 **Agent 使用方式**:
-- prompt 留 hint: `Read ~/.solo/agents/<id>/workspace/RELATIONSHIPS.md for current relationships.`
+- `BuildSystemPrompt` 末尾提示 `cat RELATIONSHIPS.md`
 - agent 主动 Read / cat / grep 引用
 
 ---
@@ -298,7 +364,10 @@ CREATE TABLE agent_templates (...);
 |------|------|
 | `internal/server/service/agent_notifier.go` | DM 系统消息通知服务（NotifyClaim/Complete/Escalation/Remind/Notify） |
 | `internal/server/service/scheduler.go` | 统一 server 侧定时调度器（reminder + watchdog） |
-| `docs/desc/message-types.md` | 消息类型全景文档（56 种消息） |
+| `migrations/000038_add_relationship_instruction.up.sql` | agent_relationships 加 instruction TEXT 列 |
+| `migrations/000039_make_relationships_global.up.sql` | 关系全局化，collaborates_with 索引去 channel_id |
+| `docs/desc/message-types.md` | 消息类型全景文档 |
+| `pkg/agent/prompt.go` (修改) | BuildSystemPrompt 末尾加 ## Agent Relationships — CHECK BEFORE ACTING |
 
 ---
 
@@ -312,7 +381,9 @@ CREATE TABLE agent_templates (...);
 | `frontend/components/teams/mention-candidates.tsx` | smart default 删除 |
 | `frontend/components/teams/collaborator-suggestions.tsx` | smart default 删除 |
 | `frontend/lib/agents-api.ts` | smart default API 删除 |
-| Daemon 侧 `startTicker`/`checkReminders`/`checkWatchdog`/`deliverReminderMessage`/`verifyEscalationRelationship`/`computeNextCron` | 合并到 server scheduler |
+| Daemon ticker 相关代码 | 合并到 server scheduler |
+| 前端 4-type RelationshipType | 替换为 2-type（assigns_to/collaborates_with） |
+| 前端 channel 选择器 | 关系全局化 |
 
 ---
 
@@ -351,7 +422,19 @@ scheduler.Start()
           └── unclaim → UPDATE tasks
 ```
 
-### 8.3 事件总线 (Relationship Events)
+### 8.3 Prompt 注入 (BuildSystemPrompt)
+
+```
+pkg/agent/prompt.go:BuildSystemPrompt()
+  → ... (identity, memory, tasks, mentions, workspace)
+  → ## Initial role (agent.SystemPrompt)
+  → ## Agent Relationships — CHECK BEFORE ACTING
+    CRITICAL: read RELATIONSHIPS.md, delegate to colleagues when criteria match,
+    do NOT attempt work that belongs to a colleague.
+    cat ~/.solo/agents/<id>/workspace/RELATIONSHIPS.md
+```
+
+### 8.4 事件总线 (Relationship Events)
 
 ```
 agent_relationship.go:Create/Delete

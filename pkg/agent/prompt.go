@@ -357,6 +357,19 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 		b.WriteString("\n\n")
 	}
 
+	// Agent Relationships — delegation and collaboration criteria.
+	b.WriteString("## Agent Relationships — CHECK BEFORE ACTING\n\n")
+	b.WriteString("CRITICAL: Before you start ANY task, read RELATIONSHIPS.md to scan your colleagues ")
+	b.WriteString("and their delegation criteria. If a colleague is better suited, delegate to them ")
+	b.WriteString("via @mention — do NOT attempt work that belongs to a colleague.\n\n")
+	if agent.WorkspacePath != "" {
+		fmt.Fprintf(&b, "```bash\ncat %s/RELATIONSHIPS.md\n```\n\n", agent.WorkspacePath)
+	} else if agent.AgentID != "" {
+		fmt.Fprintf(&b, "```bash\ncat ~/.solo/agents/%s/workspace/RELATIONSHIPS.md\n```\n\n", agent.AgentID)
+	} else {
+		b.WriteString("```bash\ncat ~/.solo/agents/<your-agent-id>/workspace/RELATIONSHIPS.md\n```\n\n")
+	}
+
 	return strings.TrimSpace(b.String())
 }
 

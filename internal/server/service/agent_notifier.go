@@ -13,7 +13,7 @@ import (
 	"github.com/solo-ai/solo/internal/realtime"
 )
 
-// AgentNotifier sends DM system messages to agents for sub-task lifecycle events.
+// AgentNotifier sends DM system messages to agents for task lifecycle events.
 // Messages are persisted to the messages table (sender_type='system', thread_id=NULL)
 // so they enter the agent's JSONL context via getRecentMessages.
 // After persisting, it triggers the agent via TriggerAgentResponse so the notification
@@ -177,7 +177,7 @@ func (n *AgentNotifier) sendSystemMessage(ctx context.Context, dmID, content str
 	return nil
 }
 
-// NotifyClaim sends a DM system message when a sub-task is claimed.
+// NotifyClaim sends a DM system message when a task is claimed.
 func (n *AgentNotifier) NotifyClaim(ctx context.Context, taskID, claimerID string) error {
 	tn, err := n.lookupTaskNotification(ctx, taskID, claimerID)
 	if err != nil {
@@ -199,7 +199,7 @@ func (n *AgentNotifier) NotifyClaim(ctx context.Context, taskID, claimerID strin
 	return n.sendSystemMessage(ctx, dmID, content)
 }
 
-// NotifyComplete sends a DM system message when a sub-task is completed.
+// NotifyComplete sends a DM system message when a task is completed.
 func (n *AgentNotifier) NotifyComplete(ctx context.Context, taskID, claimerID string) error {
 	tn, err := n.lookupTaskNotification(ctx, taskID, claimerID)
 	if err != nil {
@@ -221,7 +221,7 @@ func (n *AgentNotifier) NotifyComplete(ctx context.Context, taskID, claimerID st
 	return n.sendSystemMessage(ctx, dmID, content)
 }
 
-// NotifyEscalation sends a DM system message when a sub-task is overdue.
+// NotifyEscalation sends a DM system message when a task is overdue.
 func (n *AgentNotifier) NotifyEscalation(ctx context.Context, taskID, claimerID string) error {
 	tn, err := n.lookupTaskNotification(ctx, taskID, claimerID)
 	if err != nil {

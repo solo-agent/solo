@@ -28,6 +28,7 @@ type ApplyResult struct {
 type templateMember struct {
 	Role         string `json:"role"`
 	Name         string `json:"name"`
+	Description  string `json:"description"`
 	Instructions string `json:"instructions"`
 	Relationship string `json:"relationship"`
 }
@@ -56,10 +57,10 @@ func (s *TemplateService) Apply(ctx context.Context, templateID, ownerID string)
 	for _, m := range members {
 		var newID string
 		err := tx.QueryRow(ctx, `
-			INSERT INTO agents (name, owner_id, model_provider, model_name, system_prompt, is_active)
-			VALUES ($1, $2, 'anthropic', 'claude-sonnet-4-5', $3, true)
+			INSERT INTO agents (name, description, owner_id, model_provider, model_name, system_prompt, is_active)
+			VALUES ($1, $2, $3, 'anthropic', 'claude-sonnet-4-5', $4, true)
 			RETURNING id
-		`, m.Name, ownerID, m.Instructions).Scan(&newID)
+		`, m.Name, m.Description, ownerID, m.Instructions).Scan(&newID)
 		if err != nil {
 			return nil, fmt.Errorf("insert agent %s: %w", m.Name, err)
 		}
