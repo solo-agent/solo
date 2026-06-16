@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/solo-ai/solo/internal/realtime"
@@ -80,7 +81,18 @@ func (s *AgentService) TriggerAgentGreeting(ctx context.Context, channelID, agen
 		AgentID:   ag.ID,
 		ChannelID: channelID,
 		Messages: []agent.Message{
-			{Role: agent.RoleUser, Content: greetingContent, SenderID: ""},
+			{
+				Role: agent.RoleUser,
+				Content: fmt.Sprintf(
+					"[target=#%s msg=%s time=%s type=system] @%s:\n%s",
+					channelName,
+					uuid.New().String()[:8],
+					time.Now().UTC().Format(time.RFC3339),
+					ag.Name,
+					greetingContent,
+				),
+				SenderID: "",
+			},
 		},
 		SystemPrompt: ag.SystemPrompt,
 		ModelConfig: agent.ModelConfig{

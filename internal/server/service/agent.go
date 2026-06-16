@@ -897,10 +897,15 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 			if len(threadShortID) > 8 {
 				threadShortID = threadShortID[:8]
 			}
-			systemHeader := fmt.Sprintf("[System: You were added to a new thread via @mention. Reply in this thread.]\n"+
-				"target: %s:%s\n"+
-				"read thread: solo message read --target '%s:%s'",
-				threadTargetPrefix, threadShortID, threadTargetPrefix, threadShortID)
+			systemHeader := fmt.Sprintf(
+				"[target=%s:%s msg=%s time=%s type=system]\n"+
+					"You were @mentioned in a new thread. Reply here using the target above.\n"+
+					"Read thread history: solo message read --target '%s:%s'",
+				threadTargetPrefix, threadShortID,
+				uuid.New().String()[:8],
+				time.Now().UTC().Format(time.RFC3339),
+				threadTargetPrefix, threadShortID,
+			)
 			contextMsgs = append([]agent.Message{{
 				Role:     agent.RoleSystem,
 				Content:  systemHeader,
@@ -1362,7 +1367,7 @@ func (s *AgentService) getRecentMessages(ctx context.Context, channelID string, 
 			role = agent.RoleAssistant
 		}
 
-		// [target=#channel msg=shortid time=isotime type=human|agent] @sender: content
+		// [target=#channel msg=shortid time=isotime type=user|agent|system] @sender: content
 		content := fmt.Sprintf("New message received:\n\n[target=%s msg=%s time=%s type=%s] @%s: %s",
 			msgTarget, shortID, row.createdAt, row.senderType, senderName, row.content)
 
