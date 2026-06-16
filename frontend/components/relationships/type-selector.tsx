@@ -22,8 +22,6 @@ const TYPE_OPTIONS: TypeOption[] = [
   { type: 'collaborates_with', label: 'collaboratesWith' as TranslationKey, stroke: '#10B981', dash: '8,4' },
 ];
 
-const CHANNEL_TYPES: RelationshipType[] = ['collaborates_with'];
-
 interface TypeSelectorProps {
   fromName: string;
   toName: string;

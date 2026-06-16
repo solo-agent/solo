@@ -14,12 +14,7 @@ import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui
 import { Select, type SelectOption } from '@/components/ui/select';
 import { apiClient } from '@/lib/api-client';
 import { t } from '@/lib/i18n';
-import type { RelationshipType, Agent, Channel } from '@/lib/types';
-
-// ---- Channel-scoped types ----
-
-const CHANNEL_SCOPED_TYPES: RelationshipType[] = ['collaborates_with'];
-const ASSIGNS_TO_TYPE: RelationshipType = 'assigns_to';
+import type { RelationshipType, Agent } from '@/lib/types';
 
 const TYPE_OPTIONS: { type: RelationshipType; labelKey: string; color: string; dash: string }[] = [
   { type: 'assigns_to', labelKey: 'assignsTo', color: '#4A90D9', dash: '' },
@@ -36,7 +31,6 @@ interface CreateRelationshipModalProps {
   preselectedFrom?: string;
   preselectedTo?: string;
   agents: Agent[];
-  channels: Channel[];
 }
 
 export function CreateRelationshipModal({
@@ -46,12 +40,10 @@ export function CreateRelationshipModal({
   preselectedFrom,
   preselectedTo,
   agents,
-  channels,
 }: CreateRelationshipModalProps) {
   const [fromAgentId, setFromAgentId] = useState(preselectedFrom ?? '');
   const [toAgentId, setToAgentId] = useState(preselectedTo ?? '');
   const [relType, setRelType] = useState<RelationshipType>('assigns_to');
-  const [channelId, setChannelId] = useState('');
   const [instruction, setInstruction] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +55,6 @@ export function CreateRelationshipModal({
       setFromAgentId(preselectedFrom ?? '');
       setToAgentId(preselectedTo ?? '');
       setRelType('assigns_to');
-      setChannelId('');
       setInstruction('');
       setError(null);
       setCycleWarning(null);
@@ -100,8 +91,6 @@ export function CreateRelationshipModal({
     checkCycle();
   }, [checkCycle]);
 
-  const needsChannel = CHANNEL_SCOPED_TYPES.includes(relType);
-
   // Build agent select options
   const agentOptions: SelectOption[] = agents
     .filter((a) => a.id !== fromAgentId) // Can't select self as target
@@ -116,20 +105,12 @@ export function CreateRelationshipModal({
     label: a.name,
   }));
 
-  const channelOptions: SelectOption[] = needsChannel
-    ? channels.map((c) => ({ value: c.id, label: `#${c.name}` }))
-    : [
-        { value: '', label: '-- No channel (global) --' },
-        ...channels.map((c) => ({ value: c.id, label: `#${c.name}` })),
-      ];
-
   const canSubmit =
     fromAgentId &&
     toAgentId &&
     fromAgentId !== toAgentId &&
     !isSubmitting &&
-    !cycleWarning &&
-    (needsChannel ? !!channelId : true);
+    !cycleWarning;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -140,9 +121,8 @@ export function CreateRelationshipModal({
         from_agent_id: fromAgentId,
         to_agent_id: toAgentId,
         rel_type: relType,
-        channel_id: needsChannel && channelId ? channelId : undefined,
       };
-      if (relType === 'assigns_to' && instruction.trim()) {
+      if (instruction.trim()) {
         body.instruction = instruction.trim();
       }
       await apiClient.post('/api/v1/agent-relationships', body);
@@ -231,54 +211,25 @@ export function CreateRelationshipModal({
           </div>
         </div>
 
-        {/* Channel selector (shown for channel-scoped types) */}
-        {needsChannel && (
-          <div>
-            <label className="block font-heading text-xs font-bold uppercase tracking-wider mb-1.5">
-              {t('relationshipEditorChannel')}
-            </label>
-            <Select
-              options={channelOptions}
-              value={channelId}
-              onChange={setChannelId}
-              placeholder={t('relationshipEditorChannelPlaceholder')}
-              size="md"
-              className="w-full"
-            />
-            <p className="mt-1 font-mono text-[10px] text-muted-foreground">
-              Collaborations are channel-scoped. Select a channel to scope this relationship.
-            </p>
-          </div>
-        )}
-
-        {/* Instruction (shown for assigns_to) */}
-        {relType === 'assigns_to' && (
-          <div>
-            <label className="block font-heading text-xs font-bold uppercase tracking-wider mb-1.5">
-              Delegation Criteria
-            </label>
-            <textarea
-              value={instruction}
-              onChange={(e) => setInstruction(e.target.value)}
-              placeholder={`Delegate coding tasks with: clear requirement description, acceptance criteria, relevant file paths, existing patterns to follow.\n\nReport back with: implementation status, files changed, acceptance criteria checklist (pass/fail each), test results, and self-review concerns.`}
-              className="w-full min-h-[100px] px-3 py-2 border-2 border-black font-mono text-xs resize-y bg-white"
-              rows={4}
-            />
-            <p className="mt-1 font-mono text-[10px] text-muted-foreground">
-              Tells the agent when to delegate to this colleague and what to include. Appears in RELATIONSHIPS.md as &quot;DELEGATE when&quot;.
-            </p>
-          </div>
-        )}
-
-        {/* Warning for global types */}
-        {relType === 'assigns_to' && !channelId && (
-          <div className="flex items-start gap-2 px-3 py-2 border-2 border-black bg-brutal-info-light">
-            <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5 text-brutal-info" />
-            <p className="font-mono text-[10px] text-black">
-              Assigns-to relationships without a channel are global and apply across all channels.
-            </p>
-          </div>
-        )}
+        {/* Instruction */}
+        <div>
+          <label className="block font-heading text-xs font-bold uppercase tracking-wider mb-1.5">
+            {relType === 'assigns_to' ? 'Delegation Criteria' : 'Collaboration Criteria'}
+          </label>
+          <textarea
+            value={instruction}
+            onChange={(e) => setInstruction(e.target.value)}
+            placeholder={relType === 'assigns_to'
+              ? `Delegate coding tasks with: clear requirement description, acceptance criteria, relevant file paths, existing patterns to follow.\n\nReport back with: implementation status, files changed, acceptance criteria checklist (pass/fail each), test results, and self-review concerns.`
+              : `Coordinate on: API contract sync, shared component design, integration testing.\n\nKeep in sync: interface definitions, breaking changes, deployment order.`
+            }
+            className="w-full min-h-[100px] px-3 py-2 border-2 border-black font-mono text-xs resize-y bg-white"
+            rows={4}
+          />
+          <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+            Appears in RELATIONSHIPS.md as &quot;{relType === 'assigns_to' ? 'DELEGATE when' : 'COLLABORATES when'}&quot;.
+          </p>
+        </div>
 
         {/* Cycle warning */}
         {cycleWarning && (

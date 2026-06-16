@@ -41,8 +41,9 @@ type relRow struct {
 }
 
 type collabRow struct {
-	OtherAgent string
-	Weight     float64
+	OtherAgent  string
+	Weight      float64
+	Instruction string
 }
 
 type activityRow struct {
@@ -72,7 +73,12 @@ const relationshipsTpl = `# Agent @{{.AgentName}} — Relationships
 {{end}}
 {{end}}
 ## 我的协作者 (@collaborates_with)
-{{range .Collaborators}}- **@{{.OtherAgent}}** (weight: {{.Weight}})
+{{range .Collaborators}}
+### @{{.OtherAgent}} (weight: {{.Weight}})
+{{if .Instruction}}**COLLABORATES when:**
+{{.Instruction}}
+{{else}}_(no collaboration criteria set)_
+{{end}}
 {{end}}
 ## 最近活动 (滚动 30 天)
 {{range .RecentActivity}}- {{.At}} — {{.Action}}
@@ -144,7 +150,7 @@ func (g *RelationshipsMDGenerator) collect(ctx context.Context, agentID string) 
 	rows.Close()
 
 	rows, err = g.pool.Query(ctx, `
-		SELECT a.name, r.weight
+		SELECT a.name, r.weight, COALESCE(r.instruction, '')
 		  FROM agent_relationships r
 		  JOIN agents a ON a.id = CASE WHEN r.from_agent_id = $1 THEN r.to_agent_id ELSE r.from_agent_id END
 		 WHERE $1 IN (r.from_agent_id, r.to_agent_id)
@@ -155,7 +161,7 @@ func (g *RelationshipsMDGenerator) collect(ctx context.Context, agentID string) 
 	}
 	for rows.Next() {
 		var r collabRow
-		if err := rows.Scan(&r.OtherAgent, &r.Weight); err != nil {
+		if err := rows.Scan(&r.OtherAgent, &r.Weight, &r.Instruction); err != nil {
 			rows.Close()
 			return nil, err
 		}

@@ -473,7 +473,6 @@ export default function RelationshipsPage() {
             preselectedFrom={preselectedFrom ?? undefined}
             preselectedTo={preselectedTo ?? undefined}
             agents={agents}
-            channels={channels}
           />
 
           {/* Detail panel */}

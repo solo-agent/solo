@@ -468,7 +468,6 @@ export default function RelationshipsManagePage() {
           refetch();
         }}
         agents={agents}
-        channels={channels}
       />
 
       {/* ---- Delete confirm dialog ---- */}

@@ -64,17 +64,8 @@ func (s *AgentRelationshipService) Create(ctx context.Context, req CreateRelatio
 		return nil, fmt.Errorf("self-referential relationships are not allowed")
 	}
 
-	// BUG-006: Enforce channel_id scope rules.
-	// Post-Item 1: assigns_to is channel-scoped or global; collaborates_with is channel-scoped.
-	// Allow both to be channel-scoped (channel_id optional for assigns_to, required for collaborates_with).
-	switch req.RelType {
-	case "assigns_to":
-		// OK either way — global or channel-scoped.
-	case "collaborates_with":
-		if req.ChannelID == nil || *req.ChannelID == "" {
-			return nil, fmt.Errorf("rel_type collaborates_with requires a channel_id")
-		}
-	default:
+	// Both assigns_to and collaborates_with are global — no channel_id required.
+	if _, ok := ValidRelTypes[req.RelType]; !ok {
 		return nil, fmt.Errorf("invalid rel_type: %s", req.RelType)
 	}
 

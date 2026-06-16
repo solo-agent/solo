@@ -3,7 +3,7 @@
 // - reports_to: solid blue, arrow
 // - delegates_to: solid purple, arrow
 // - collaborates_with: dashed green, bidirectional (no arrow)
-// - escalates_to: double red line, arrow, pulse dot
+// - assigns_to: double line, arrow
 // - Click edge → show detail panel for editing/deleting
 // ============================================================================
 
@@ -43,9 +43,9 @@ function RelationshipEdgeComponent({
   const isAssignsTo = relType === 'assigns_to';
   const isCollaboration = relType === 'collaborates_with';
 
-  // Compute a parallel offset path for escalates_to double line
+  // Compute a parallel offset path for assigns_to double line
   let edgePath2 = '';
-  if (isEscalation) {
+  if (isAssignsTo) {
     // Offset: shift perpendicular by 3px
     const dx = targetX - sourceX;
     const dy = targetY - sourceY;
@@ -68,14 +68,14 @@ function RelationshipEdgeComponent({
         path={edgePath}
         style={{
           stroke: colors.stroke,
-          strokeWidth: isEscalation ? 2.5 : 2,
+          strokeWidth: isAssignsTo ? 2.5 : 2,
           strokeDasharray: isCollaboration ? '8,4' : 'none',
         }}
         markerEnd={isCollaboration ? undefined : markerEnd}
       />
 
-      {/* Escalation double line */}
-      {isEscalation && edgePath2 && (
+      {/* Assigns_to double line */}
+      {isAssignsTo && edgePath2 && (
         <BaseEdge
           id={`${id}-parallel`}
           path={edgePath2}
@@ -95,7 +95,7 @@ function RelationshipEdgeComponent({
           path={edgePath}
           style={{
             stroke: colors.stroke,
-            strokeWidth: isEscalation ? 6 : 4,
+            strokeWidth: isAssignsTo ? 6 : 4,
             strokeDasharray: isCollaboration ? '8,4' : 'none',
             opacity: 0.3,
           }}
