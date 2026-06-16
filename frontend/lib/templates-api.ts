@@ -14,6 +14,7 @@ export interface Template {
   description: string;
   category: string;
   icon: string;
+  member_count: number;
 }
 
 export interface ApplyTemplateResult {

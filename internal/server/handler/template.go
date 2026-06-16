@@ -22,7 +22,7 @@ func NewTemplateHandler(svc *service.TemplateService, pool *pgxpool.Pool) *Templ
 // List handles GET /api/v1/templates
 func (h *TemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.pool.Query(r.Context(), `
-		SELECT id, name, description, category, icon
+		SELECT id, name, description, category, icon, jsonb_array_length(members)
 		  FROM agent_templates
 		 ORDER BY name ASC
 	`)
@@ -37,11 +37,12 @@ func (h *TemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 		Description string `json:"description"`
 		Category    string `json:"category"`
 		Icon        string `json:"icon"`
+		MemberCount int    `json:"member_count"`
 	}
 	out := []tmpl{}
 	for rows.Next() {
 		var t tmpl
-		if err := rows.Scan(&t.ID, &t.Name, &t.Description, &t.Category, &t.Icon); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Description, &t.Category, &t.Icon, &t.MemberCount); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}

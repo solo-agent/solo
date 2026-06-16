@@ -423,7 +423,12 @@ export default function TeamsPage() {
                         >
                           <span className="text-2xl flex-shrink-0">{tmpl.icon}</span>
                           <div className="flex-1 min-w-0">
-                            <div className="font-heading text-sm font-bold text-black">{tmpl.name}</div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-heading text-sm font-bold text-black">{tmpl.name}</span>
+                              <span className="inline-flex items-center justify-center h-5 min-w-[1.25rem] px-1 border-2 border-black bg-brutal-cream font-mono text-[10px] font-bold text-black tabular-nums leading-none">
+                                {tmpl.member_count}
+                              </span>
+                            </div>
                             <p className="font-sans text-xs text-muted-foreground mt-0.5">{tmpl.description}</p>
                           </div>
                           <button
