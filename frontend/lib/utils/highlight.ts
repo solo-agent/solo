@@ -35,7 +35,7 @@ function longestValidPrefix(name: string, valid: Set<string>): string | null {
 
 export function highlightSpecials(text: string, validNames: string[]): string {
   const valid = new Set(validNames);
-  const parts = text.split(/(```[\s\S]*?```)/g);
+  const parts = text.split(/(```[\s\S]*?```|``[^`\n]+``|`[^`\n]+`)/g);
   return parts
     .map((part, i) => {
       if (i % 2 === 1) return part;
