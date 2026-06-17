@@ -110,6 +110,20 @@ export default function TeamsPage() {
     }
   }, [selectedAgent, isDMLoading, createOrGetDM, router, showToast]);
 
+  // Triggered after the agent profile finishes a delete. The profile
+  // already optimistically removes the agent from its local copy; we
+  // refetch the canonical list (powers the sidebar) and clear the
+  // selection if the deleted agent was the currently-open one.
+  const handleAgentDeleted = useCallback(
+    (deletedId: string) => {
+      void refetchAgents();
+      if (selection?.kind === 'agent' && selection.id === deletedId) {
+        setSelection(null);
+      }
+    },
+    [refetchAgents, selection],
+  );
+
   const handleCreateAgent = useCallback(async (values: AgentFormValues) => {
     if (isCreating) return;
     setIsCreating(true);
@@ -229,7 +243,10 @@ export default function TeamsPage() {
             />
             <div className={agentTab === 'profile' ? 'flex-1 overflow-y-auto p-6' : 'flex-1 overflow-hidden'}>
               {agentTab === 'profile' ? (
-                <TeamsAgentProfile agentId={selectedAgent.id} />
+                <TeamsAgentProfile
+                  agentId={selectedAgent.id}
+                  onAgentDeleted={handleAgentDeleted}
+                />
               ) : (
                 <TeamsAgentWorkspace agentId={selectedAgent.id} />
               )}

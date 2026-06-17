@@ -19,6 +19,7 @@ import { AgentProfileTab } from '@/components/agents/agent-profile-tab';
 import { AgentRuntimeTab } from '@/components/agents/agent-runtime-tab';
 import { AgentSkillsTab } from '@/components/agents/agent-skills-tab';
 import { BrutalSeparator } from '@/components/ui/brutal-separator';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogHeader,
@@ -33,9 +34,15 @@ import { t } from '@/lib/i18n';
 
 interface TeamsAgentProfileProps {
   agentId: string;
+  /**
+   * Called after the delete API returns success. The parent owns the
+   * canonical agent list (sidebar) and should refetch + clear its
+   * selection so the deleted agent disappears without a manual refresh.
+   */
+  onAgentDeleted?: (deletedId: string) => void;
 }
 
-export function TeamsAgentProfile({ agentId }: TeamsAgentProfileProps) {
+export function TeamsAgentProfile({ agentId, onAgentDeleted }: TeamsAgentProfileProps) {
   const router = useRouter();
   const { agents, deleteAgent } = useAgents();
   const { showToast } = useToast();
@@ -49,6 +56,7 @@ export function TeamsAgentProfile({ agentId }: TeamsAgentProfileProps) {
     try {
       await deleteAgent(agentId);
       showToast(t('agentDeleteSuccess'), 'success');
+      onAgentDeleted?.(agentId);
       const remaining = agents.filter((a) => a.id !== agentId);
       if (remaining.length > 0) {
         router.replace(`/teams?agent=${remaining[0].id}&tab=profile`, { scroll: false });
@@ -61,7 +69,7 @@ export function TeamsAgentProfile({ agentId }: TeamsAgentProfileProps) {
       setDeleting(false);
       setConfirmOpen(false);
     }
-  }, [agentId, agents, deleteAgent, router, showToast]);
+  }, [agentId, agents, deleteAgent, onAgentDeleted, router, showToast]);
 
   return (
     <div className="space-y-6">
@@ -74,14 +82,14 @@ export function TeamsAgentProfile({ agentId }: TeamsAgentProfileProps) {
       {/* Danger zone — delete agent (soft delete: retains DM history) */}
       <BrutalSeparator />
       <div className="flex justify-end pt-2">
-        <button
+        <Button
           type="button"
+          variant="danger"
           onClick={() => setConfirmOpen(true)}
-          className="btn-brutal btn-brutal-sm bg-brutal-danger text-white hover:bg-brutal-danger"
         >
-          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+          <Trash2 className="mr-2 h-4 w-4" />
           {t('agentDeleteButton')}
-        </button>
+        </Button>
       </div>
 
       <Dialog open={confirmOpen} onOpenChange={(open) => !deleting && setConfirmOpen(open)}>
@@ -93,22 +101,24 @@ export function TeamsAgentProfile({ agentId }: TeamsAgentProfileProps) {
           {t('agentDeleteDesc', { name: agentName })}
         </DialogDescription>
         <DialogFooter>
-          <button
+          <Button
             type="button"
+            variant="outline"
             onClick={() => setConfirmOpen(false)}
             disabled={deleting}
-            className="btn-brutal btn-brutal-sm"
+            className="min-w-[100px]"
           >
             {t('cancel')}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="danger"
             onClick={handleConfirmDelete}
             disabled={deleting}
-            className="btn-brutal btn-brutal-sm bg-brutal-danger text-white"
+            className="min-w-[100px]"
           >
             {deleting ? t('deleting') : t('delete')}
-          </button>
+          </Button>
         </DialogFooter>
       </Dialog>
     </div>
