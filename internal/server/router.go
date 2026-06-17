@@ -69,6 +69,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	eventPub := service.NewRelationshipEventPublisher(hub)
 	relSvc.SetEventPublisher(eventPub)
 	relSvc.SetMDGenerator(mdGen)
+	agentHandler.SetRelationshipEventPublisher(eventPub)
 	relHandler := handler.NewAgentRelationshipHandler(pool, relSvc)
 	templateSvc := service.NewTemplateService(pool, mdGen)
 	templateHandler := handler.NewTemplateHandler(templateSvc, pool)

@@ -50,7 +50,7 @@ interface UndoEntry {
 // ---- Page ----
 
 export default function RelationshipsPage() {
-  const { agents, isLoading: agentsLoading } = useAgents();
+  const { agents, isLoading: agentsLoading, refetch: refetchAgents } = useAgents();
   const [relationships, setRelationships] = useState<AgentRelationship[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -242,6 +242,47 @@ export default function RelationshipsPage() {
         edgeToRelationshipMap.current.delete(event.id);
         // Close detail panel if showing this relationship
         setDetailRel((prev) => prev?.id === event.id ? null : prev);
+      }
+
+      // agent_deleted — server cascaded the agent's relationships and
+      // dropped the agent row's active flag. Drop every edge / node that
+      // referenced it locally so the graph doesn't show ghost nodes, then
+      // refetch agents to keep the agents list in sync.
+      if (event.type === 'agent_deleted') {
+        const removedIds = new Set(event.deleted_relationship_ids ?? []);
+        setEdges((prev) => {
+          const toDrop = new Set<string>();
+          for (const e of prev) {
+            if (e.source === event.agent_id || e.target === event.agent_id) {
+              toDrop.add(e.id);
+            } else if (removedIds.has(e.id)) {
+              toDrop.add(e.id);
+            }
+          }
+          for (const id of toDrop) {
+            edgeToRelationshipMap.current.delete(id);
+          }
+          return prev.filter((e) => !toDrop.has(e.id));
+        });
+        setNodes((prev) => prev.filter((n) => n.id !== event.agent_id));
+        setRelationships((prev) =>
+          prev
+            .filter((r) =>
+              r.from_agent_id !== event.agent_id &&
+              r.to_agent_id !== event.agent_id,
+            )
+            .filter((r) => !removedIds.has(r.id)),
+        );
+        // Close any detail panel showing data about the deleted agent.
+        setDetailRel((prev) =>
+          prev && (prev.from_agent_id === event.agent_id || prev.to_agent_id === event.agent_id)
+            ? null
+            : prev,
+        );
+        setDetailAgent((prev) => (prev?.id === event.agent_id ? null : prev));
+        // useAgents doesn't subscribe to WS; trigger a refetch so the
+        // nodes list rebuilt from `agents` matches the server's view.
+        void refetchAgents();
       }
     });
     return unsub;

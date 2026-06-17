@@ -33,7 +33,14 @@ type AgentHandler struct {
 	workspaceRoot string             // base path for agent workspaces, defaults to ~/.solo/agents
 	proxy         workspace.Proxy    // optional proxy for workspace requests (nil = local FS only)
 	mdGen         *service.RelationshipsMDGenerator   // optional — generates empty RELATIONSHIPS.md on create
+	relEventPub   *service.RelationshipEventPublisher // optional — broadcasts agent_deleted after cascade
 	httpClient    *http.Client       // for daemon cleanup callbacks
+}
+
+// SetRelationshipEventPublisher injects the publisher used to broadcast
+// agent_deleted after a soft-delete cascades its relationships.
+func (h *AgentHandler) SetRelationshipEventPublisher(p *service.RelationshipEventPublisher) {
+	h.relEventPub = p
 }
 
 // NewAgentHandler creates a new AgentHandler.
@@ -507,13 +514,77 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cascade-delete the agent's relationships (both directions). FK CASCADE
+	// would do this on a hard delete, but soft-delete keeps the agent row,
+	// so we clean up the edges manually. We capture the deleted IDs and the
+	// "other" agent IDs so we can (a) regenerate their RELATIONSHIPS.md and
+	// (b) tell frontends which relationships to drop from local state.
+	relRows, err := tx.Query(r.Context(), `
+		DELETE FROM agent_relationships
+		WHERE from_agent_id = $1 OR to_agent_id = $1
+		RETURNING id::text, from_agent_id::text, to_agent_id::text
+	`, agentID)
+	if err != nil {
+		slog.Error("failed to cascade-delete agent relationships", "agent_id", agentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete agent")
+		return
+	}
+	defer relRows.Close()
+	var (
+		deletedRelIDs []string
+		affectedAgents = map[string]struct{}{}
+	)
+	for relRows.Next() {
+		var id, fromA, toA string
+		if scanErr := relRows.Scan(&id, &fromA, &toA); scanErr != nil {
+			// Roll back the whole soft-delete (including agent is_active=false,
+			// channel_members DELETE, computers array_remove) rather than
+			// committing with partial relationship data — the cascade is part
+			// of the soft-delete's atomic contract.
+			slog.Error("scan deleted relationship", "agent_id", agentID, "error", scanErr)
+			writeError(w, http.StatusInternalServerError, "failed to delete agent")
+			return
+		}
+		deletedRelIDs = append(deletedRelIDs, id)
+		other := fromA
+		if other == agentID {
+			other = toA
+		}
+		affectedAgents[other] = struct{}{}
+	}
+	if rowsErr := relRows.Err(); rowsErr != nil {
+		slog.Error("iterate deleted relationships", "agent_id", agentID, "error", rowsErr)
+		writeError(w, http.StatusInternalServerError, "failed to delete agent")
+		return
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		slog.Error("failed to commit transaction", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to delete agent")
 		return
 	}
 
-	slog.Info("agent deactivated", "agent_id", agentID, "user_id", userID)
+	slog.Info("agent deactivated",
+		"agent_id", agentID, "user_id", userID,
+		"cascade_rels_deleted", len(deletedRelIDs),
+		"cascade_affected_agents", len(affectedAgents))
+
+	// Regenerate RELATIONSHIPS.md for every agent that had an edge with this
+	// one — their MD previously listed the now-deleted agent. Use a detached
+	// context so the request returning doesn't cancel the regen.
+	if h.mdGen != nil {
+		for other := range affectedAgents {
+			if err := h.mdGen.GenerateForAgent(context.Background(), other); err != nil {
+				slog.Warn("regenerate RELATIONSHIPS.md failed", "agent_id", other, "err", err)
+			}
+		}
+	}
+
+	// Broadcast agent_deleted so frontends prune their relationship graph
+	// and any cached relationship objects that referenced this agent.
+	if h.relEventPub != nil {
+		h.relEventPub.PublishAgentDeleted(context.Background(), agentID, deletedRelIDs)
+	}
 
 	// Async daemon cleanup (best-effort, daemon may be offline).
 	// Use a detached context so the request returning doesn't cancel it.

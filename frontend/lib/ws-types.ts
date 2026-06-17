@@ -87,6 +87,10 @@ export type WSServerEvent =
   | { type: 'relationship_created'; id: string; from_agent_id: string; to_agent_id: string; rel_type: string; channel_id?: string }
   | { type: 'relationship_deleted'; id: string; from_agent_id: string; to_agent_id: string }
   | { type: 'relationship_updated'; id: string; from_agent_id: string; to_agent_id: string; rel_type: string; channel_id?: string }
+  // ---- Agent deletion event (cascade) — soft-delete an agent, server
+  // cascades its agent_relationships and broadcasts this so frontends can
+  // prune local graph / list state without a refetch.
+  | { type: 'agent_deleted'; agent_id: string; deleted_relationship_ids?: string[] }
   // ---- Channel memory events (Step 2) ----
   | { type: 'memory_updated'; channel_id: string }
   // ---- DM 事件 ----

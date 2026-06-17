@@ -151,6 +151,27 @@ export function useRelationships(filters?: RelationshipFilters) {
       // relationship_deleted
       if (event.type === 'relationship_deleted') {
         setRelationships((prev) => prev.filter((r) => r.id !== event.id));
+        return;
+      }
+
+      // agent_deleted — server cascaded the agent's relationships. Drop
+      // every local relationship involving the deleted agent, regardless of
+      // whether its ID appears in deleted_relationship_ids (defense in
+      // depth: if a relationship was added between the cascade DELETE and
+      // our handler, we'd otherwise leak it).
+      if (event.type === 'agent_deleted') {
+        const removedIds = new Set(event.deleted_relationship_ids ?? []);
+        setRelationships((prev) =>
+          prev
+            .filter((r) =>
+              r.from_agent_id !== event.agent_id &&
+              r.to_agent_id !== event.agent_id,
+            )
+            // Also drop any explicit ID list the server told us about, even
+            // if the agents somehow changed underneath us.
+            .filter((r) => !removedIds.has(r.id)),
+        );
+        return;
       }
     });
     return unsub;
