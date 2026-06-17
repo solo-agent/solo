@@ -87,7 +87,8 @@ type MessageResponse struct {
 	CreatedAt         string           `json:"created_at"`
 	ReplyCount        int      `json:"reply_count,omitempty"`
 	TaskStatus        string   `json:"task_status,omitempty"`
-	TaskClaimerName   string   `json:"task_claimer_name,omitempty"`
+	TaskClaimerName      string `json:"task_claimer_name,omitempty"`
+	TaskClaimerDeleted   bool   `json:"task_claimer_deleted"`
 	HasUnreadThread   bool     `json:"has_unread_thread,omitempty"`
 }
 
@@ -538,6 +539,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		                 COALESCE(tasks.task_number, 0) AS task_number,
 		                 COALESCE(tasks.status, '') AS task_status,
 		                 COALESCE(u_claimer.display_name, a_claimer.name, '') AS task_claimer_name,
+		                 (NOT COALESCE(a_claimer.is_active, true)) AS task_claimer_deleted,
 		                 CASE WHEN t.id IS NOT NULL AND (t.last_reply_at > tr.last_read_at OR tr.last_read_at IS NULL) THEN true ELSE false END AS has_unread_thread
 	          FROM messages m
 	          LEFT JOIN users u ON m.sender_type = 'user' AND m.sender_id = u.id
@@ -573,7 +575,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		var createdAt time.Time
 		err := rows.Scan(&msg.ID, &msg.ChannelID, &msg.SenderType, &msg.SenderID,
 			&msg.SenderName, &msg.SenderActive, &msg.Content, &msg.ContentType, &msg.AttachmentIDs, &createdAt,
-			&msg.ReplyCount, &msg.TaskNumber, &msg.TaskStatus, &msg.TaskClaimerName, &msg.HasUnreadThread)
+			&msg.ReplyCount, &msg.TaskNumber, &msg.TaskStatus, &msg.TaskClaimerName, &msg.TaskClaimerDeleted, &msg.HasUnreadThread)
 		if err != nil {
 			slog.Error("failed to scan message row", "error", err)
 			continue

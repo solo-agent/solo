@@ -143,6 +143,11 @@ type PersistentBackend interface {
 	// Close terminates the persistent session. It closes stdin, waits for
 	// the subprocess to exit, and cleans up resources.
 	Close(ps *PersistentSession) error
+
+	// ForceClose immediately kills the underlying subprocess without waiting
+	// for graceful exit. Used for hard cleanup paths (e.g. agent deletion)
+	// where we don't care about in-flight turns.
+	ForceClose(ps *PersistentSession) error
 }
 
 // PersistentSession represents a multi-turn agent subprocess session.

@@ -53,6 +53,8 @@ pkg/agent/.solo/
 *.png
 frontend/e2e/screenshots/
 frontend/.audit-shots/
+# Exception: brand/logo assets under assets/ are NOT screenshots, they're README references.
+!assets/**/*.png
 
 # Docs — design/research/version docs are working documents, not production artifacts
 docs/

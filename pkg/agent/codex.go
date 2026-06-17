@@ -178,6 +178,15 @@ func (b *CodexBackend) Close(ps *PersistentSession) error {
 	return state.runner.close()
 }
 
+// ForceClose immediately kills the Codex subprocess without graceful exit.
+func (b *CodexBackend) ForceClose(ps *PersistentSession) error {
+	state, ok := ps.state.(*codexPersistentState)
+	if !ok || state == nil {
+		return fmt.Errorf("codex: invalid session state")
+	}
+	return state.runner.forceClose()
+}
+
 // ── Blocked args ──
 
 // codexBlockedArgs are flags hardcoded by the backend that must not be

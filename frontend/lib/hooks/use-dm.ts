@@ -49,6 +49,7 @@ interface DMMessageResponse {
   task_title?: string;
   task_status?: string;
   task_claimer_name?: string;
+  task_claimer_deleted?: boolean;
   reply_count?: number;
   /** SOLO-249-F: attachments on the message */
   attachments?: Attachment[];
@@ -98,6 +99,7 @@ function mapDMMessageResponse(resp: DMMessageResponse): Message {
     task_title: resp.task_title,
     task_status: resp.task_status,
     task_claimer_name: resp.task_claimer_name,
+    task_claimer_deleted: resp.task_claimer_deleted,
     reply_count: resp.reply_count ?? 0,
     attachments: resp.attachments,
   };
@@ -116,6 +118,7 @@ function flatDMToMessage(event: {
   task_title?: string;
   task_status?: string;
   task_claimer_name?: string;
+  task_claimer_deleted?: boolean;
   attachments?: Attachment[];
 }): Message {
   return {
@@ -131,6 +134,7 @@ function flatDMToMessage(event: {
     task_title: event.task_title,
     task_status: event.task_status,
     task_claimer_name: event.task_claimer_name,
+    task_claimer_deleted: event.task_claimer_deleted,
     attachments: event.attachments,
   };
 }
@@ -149,6 +153,7 @@ function flatToMessage(event: {
   task_title?: string;
   task_status?: string;
   task_claimer_name?: string;
+  task_claimer_deleted?: boolean;
   attachments?: Attachment[];
 }): Message {
   return {
@@ -166,6 +171,7 @@ function flatToMessage(event: {
     task_title: event.task_title,
     task_status: event.task_status,
     task_claimer_name: event.task_claimer_name,
+    task_claimer_deleted: event.task_claimer_deleted,
     attachments: event.attachments,
   };
 }
@@ -432,6 +438,7 @@ export function useDM(dmId: string | null = null) {
                     task_title: event.task_title ?? m.task_title,
                     task_status: event.task_status ?? m.task_status,
                     task_claimer_name: event.task_claimer_name ?? m.task_claimer_name,
+                    task_claimer_deleted: event.task_claimer_deleted ?? m.task_claimer_deleted,
                     reply_count: event.reply_count ?? m.reply_count,
                   }
                 : m,
@@ -459,6 +466,7 @@ export function useDM(dmId: string | null = null) {
                     task_title: event.title ?? m.task_title,
                     task_status: event.status ?? m.task_status,
                     task_claimer_name: event.claimer_name ?? m.task_claimer_name,
+                    task_claimer_deleted: event.claimer_deleted ?? m.task_claimer_deleted,
                   }
                 : m,
             ),
@@ -651,6 +659,7 @@ export function useDM(dmId: string | null = null) {
                   task_number: taskResp.task_number as number | undefined,
                   task_status: taskResp.status as string | undefined,
                   task_claimer_name: taskResp.claimer_name as string | undefined,
+                  task_claimer_deleted: taskResp.claimer_deleted as boolean | undefined,
                 };
               }
               if (m.id === realMessageId) {
@@ -659,6 +668,7 @@ export function useDM(dmId: string | null = null) {
                   task_number: taskResp.task_number as number | undefined,
                   task_status: taskResp.status as string | undefined,
                   task_claimer_name: taskResp.claimer_name as string | undefined,
+                  task_claimer_deleted: taskResp.claimer_deleted as boolean | undefined,
                 };
               }
               return m;

@@ -675,6 +675,15 @@ func (b *KiroBackend) Close(ps *PersistentSession) error {
 	return state.runner.close()
 }
 
+// ForceClose immediately kills the Kiro subprocess without graceful exit.
+func (b *KiroBackend) ForceClose(ps *PersistentSession) error {
+	state, ok := ps.state.(*kiroPersistentState)
+	if !ok || state == nil {
+		return fmt.Errorf("kiro: invalid session state")
+	}
+	return state.runner.forceClose()
+}
+
 // kiroTitleExtras maps Kiro's ACP-server tool labels to the canonical
 // snake_case identifiers the UI expects. Kiro inherits Kimi's mapping
 // and adds two todo variants ("todo list" / "todo_list") plus an

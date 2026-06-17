@@ -667,6 +667,15 @@ func (b *KimiBackend) Close(ps *PersistentSession) error {
 	return state.runner.close()
 }
 
+// ForceClose immediately kills the Kimi subprocess without graceful exit.
+func (b *KimiBackend) ForceClose(ps *PersistentSession) error {
+	state, ok := ps.state.(*kimiPersistentState)
+	if !ok || state == nil {
+		return fmt.Errorf("kimi: invalid session state")
+	}
+	return state.runner.forceClose()
+}
+
 // kimiTitleExtras maps Kimi's ACP-server tool labels to the canonical
 // snake_case identifiers the UI expects. Entries are matched case-
 // insensitively against the (trimmed, colon-stripped) title by

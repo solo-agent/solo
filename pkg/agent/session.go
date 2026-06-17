@@ -204,6 +204,28 @@ func (m *AgentSessionManager) CloseSession(agentID string) error {
 	return nil
 }
 
+// ForceCloseSession immediately kills the agent's subprocess without graceful
+// exit. Used by hard cleanup paths (agent deletion) where in-flight turns
+// can be discarded.
+func (m *AgentSessionManager) ForceCloseSession(agentID string) error {
+	m.mu.Lock()
+	entry, exists := m.sessions[agentID]
+	if exists {
+		delete(m.sessions, agentID)
+	}
+	m.mu.Unlock()
+
+	if !exists {
+		return nil
+	}
+
+	m.logger.Warn("session: force-closing", "agent_id", agentID)
+	if !entry.asleep && entry.Session != nil {
+		return m.backend.ForceClose(entry.Session)
+	}
+	return nil
+}
+
 // CloseAll terminates all sessions.
 func (m *AgentSessionManager) CloseAll() {
 	m.mu.Lock()

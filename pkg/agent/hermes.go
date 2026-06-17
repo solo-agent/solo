@@ -680,3 +680,12 @@ func (b *HermesBackend) Close(ps *PersistentSession) error {
 	}
 	return state.runner.close()
 }
+
+// ForceClose immediately kills the Hermes subprocess without graceful exit.
+func (b *HermesBackend) ForceClose(ps *PersistentSession) error {
+	state, ok := ps.state.(*hermesPersistentState)
+	if !ok || state == nil {
+		return fmt.Errorf("hermes: invalid session state")
+	}
+	return state.runner.forceClose()
+}

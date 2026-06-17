@@ -11,6 +11,10 @@ node_modules/
 # debug
 npm-debug.log*
 
+# pnpm (project uses npm)
+pnpm-lock.yaml
+pnpm-workspace.yaml
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

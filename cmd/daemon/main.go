@@ -157,6 +157,7 @@ func main() {
 				r.Post("/create", h.HandleWorktreeCreate)
 				r.Post("/cleanup", h.HandleWorktreeCleanup)
 			})
+		r.Post("/agents/{agentID}/cleanup", h.CleanupAgent) // server-initiated hard cleanup
 	})
 
 	// SSE requires long-lived connections — no write timeout.

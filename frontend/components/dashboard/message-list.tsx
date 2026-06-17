@@ -420,7 +420,7 @@ const MessageItem = memo(function MessageItem({
           {isTaskMessage && headerConfig && (
             <span className={cn('badge-brutal', headerConfig.badgeClass)}>
               {message.task_claimer_name ? (
-                <>@{message.task_claimer_name}</>
+                <>@{message.task_claimer_name}{message.task_claimer_deleted ? ' (Deleted)' : ''}</>
               ) : (
                 t('unclaimed')
               )}

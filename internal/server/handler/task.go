@@ -85,6 +85,7 @@ type TaskResponse struct {
 	Status           string   `json:"status"`
 	ClaimerID        string   `json:"claimer_id,omitempty"`
 	ClaimerName      string   `json:"claimer_name,omitempty"`
+	ClaimerDeleted   bool     `json:"claimer_deleted"`
 	Priority         string   `json:"priority"`
 	DueDate          *string  `json:"due_date,omitempty"`
 	MessageID        string   `json:"message_id,omitempty"`
@@ -109,6 +110,7 @@ func toTaskResponse(t *service.Task) TaskResponse {
 		Status:           t.Status,
 		ClaimerID:        t.ClaimerID,
 		ClaimerName:      t.ClaimerName,
+		ClaimerDeleted:   t.ClaimerDeleted,
 		Priority:         t.Priority,
 		MessageID:        t.MessageID,
 		ParentTaskID:     t.ParentTaskID,
@@ -987,7 +989,7 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 		msgUpdated := ws.Envelope(ws.EventMessageUpdated, ws.MessageUpdatedPayload{
 			ID: msgID, ChannelID: task.ChannelID,
 			TaskNumber: task.TaskNumber, TaskStatus: task.Status,
-			TaskClaimerName: task.ClaimerName,
+			TaskClaimerName: task.ClaimerName, TaskClaimerDeleted: task.ClaimerDeleted,
 		})
 		h.hub.BroadcastToChannel(task.ChannelID, msgUpdated)
 	}

@@ -511,7 +511,7 @@ function ParentMessageTaskBar({ message }: { message: Message }) {
         <span className="font-mono text-xs text-muted-foreground">&middot;</span>
         {claimerName ? (
           <span className="font-heading text-xs font-bold text-foreground">
-            @{claimerName}
+            @{claimerName}{message.task_claimer_deleted ? ' (Deleted)' : ''}
           </span>
         ) : (
           <span className="font-heading text-xs text-muted-foreground">
@@ -542,6 +542,7 @@ function TaskMetaBar({
   const claimerDisplay =
     task.claimer_name ||
     (task.claimer_id ? task.claimer_id.slice(0, 8) : '');
+  const claimerDeletedSuffix = task.claimer_deleted ? ' (Deleted)' : '';
 
   return (
     <div className="border-b-2 border-black bg-brutal-cream px-6 py-3">
@@ -575,7 +576,7 @@ function TaskMetaBar({
                 {(claimerDisplay || '?').charAt(0).toUpperCase()}
               </span>
               <span className="font-heading text-xs font-bold text-foreground">
-                @{claimerDisplay}
+                @{claimerDisplay}{claimerDeletedSuffix}
               </span>
             </span>
             {onUnclaim && (

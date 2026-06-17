@@ -152,6 +152,7 @@ type MessageNewPayload struct {
 		TaskNumber  int    `json:"task_number,omitempty"`
 		TaskStatus  string `json:"task_status,omitempty"`
 		TaskClaimerName string `json:"task_claimer_name,omitempty"`
+		TaskClaimerDeleted bool `json:"task_claimer_deleted"`
 }
 
 // AgentStreamTokenPayload is broadcast on message.agent_typing for streaming tokens.
@@ -293,6 +294,7 @@ type MessageUpdatedPayload struct {
 		TaskNumber  int    `json:"task_number,omitempty"`
 		TaskStatus  string `json:"task_status,omitempty"`
 		TaskClaimerName string `json:"task_claimer_name,omitempty"`
+		TaskClaimerDeleted bool `json:"task_claimer_deleted"`
 		ReplyCount     int    `json:"reply_count,omitempty"`
 }
 

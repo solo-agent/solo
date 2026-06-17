@@ -493,6 +493,7 @@ func (h *DMHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
                  COALESCE(t.task_number, 0) AS task_number,
                  COALESCE(t.status, '') AS task_status,
                  COALESCE(u_claimer.display_name, a_claimer.name, '') as task_claimer_name,
+                 (NOT COALESCE(a_claimer.is_active, true)) AS task_claimer_deleted,
                  COALESCE(th.reply_count, 0) AS reply_count,
                  m.created_at
 	          FROM messages m
@@ -528,7 +529,7 @@ func (h *DMHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 		var createdAt time.Time
 		err := rows.Scan(&msg.ID, &msg.ChannelID, &msg.SenderType, &msg.SenderID,
 			&msg.SenderName, &msg.SenderActive, &msg.Content, &msg.ContentType, &msg.AttachmentIDs,
-&msg.TaskNumber, &msg.TaskStatus, &msg.TaskClaimerName, &msg.ReplyCount, &createdAt)
+&msg.TaskNumber, &msg.TaskStatus, &msg.TaskClaimerName, &msg.TaskClaimerDeleted, &msg.ReplyCount, &createdAt)
 		if err != nil {
 			slog.Error("failed to scan message row", "error", err)
 			continue

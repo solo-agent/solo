@@ -483,6 +483,11 @@ const en = {
   agentProfileCreatedBy: 'Created by',
   agentProfileMeta: 'Meta',
   agentProfileInfo: 'Info',
+  agentDeleteButton: 'Delete Agent',
+  agentDeleteTitle: 'Delete Agent',
+  agentDeleteDesc: 'Delete "{name}"? DM history will be retained with a DELETED indicator. This action cannot be undone.',
+  agentDeleteSuccess: 'Agent deleted',
+  agentDeleteError: 'Failed to delete agent',
 
   // ── Agent Skills Tab ──
   agentSkillCatalog: 'Skill Catalog',

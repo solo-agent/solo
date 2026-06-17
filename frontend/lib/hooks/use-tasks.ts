@@ -27,6 +27,7 @@ interface TaskResponse {
   status: string;
   claimer_id: string;
   claimer_name?: string;
+  claimer_deleted?: boolean;
   creator_name?: string;
   priority: string;
   due_date: string | null;
@@ -55,6 +56,7 @@ function mapTask(resp: TaskResponse): Task {
     task_number: resp.task_number || undefined,
     claimer_id: resp.claimer_id || undefined,
     claimer_name: resp.claimer_name || undefined,
+    claimer_deleted: resp.claimer_deleted,
     creator_id: resp.creator_id,
     creator_name: resp.creator_name || undefined,
     message_id: resp.message_id || undefined,
@@ -152,6 +154,7 @@ export function useTasks(filters?: TaskFilters) {
             status: event.status,
             claimer_id: event.claimer_id ?? '',
             claimer_name: (event as { claimer_name?: string }).claimer_name || undefined,
+            claimer_deleted: (event as { claimer_deleted?: boolean }).claimer_deleted,
             priority: event.priority ?? 'normal',
             due_date: event.due_date ?? null,
             message_id: event.message_id ?? '',
@@ -181,6 +184,7 @@ export function useTasks(filters?: TaskFilters) {
           updated.task_number = event.task_number;
           if (event.claimer_id !== undefined) updated.claimer_id = event.claimer_id || undefined;
           if (event.claimer_name !== undefined) updated.claimer_name = event.claimer_name;
+          if (event.claimer_deleted !== undefined) updated.claimer_deleted = event.claimer_deleted;
           if (event.priority !== undefined) updated.priority = event.priority as Task['priority'];
           if (event.due_date !== undefined) updated.due_date = event.due_date || undefined;
           if (event.message_id !== undefined) updated.message_id = event.message_id || undefined;
@@ -318,6 +322,7 @@ interface DMTaskResponse {
   status: string;
   claimer_id: string;
   claimer_name?: string;
+  claimer_deleted?: boolean;
   creator_name?: string;
   priority: string;
   due_date: string | null;
@@ -337,6 +342,7 @@ function mapDMTask(resp: DMTaskResponse): Task {
     task_number: resp.task_number || undefined,
     claimer_id: resp.claimer_id || undefined,
     claimer_name: resp.claimer_name || undefined,
+    claimer_deleted: resp.claimer_deleted,
     creator_id: resp.creator_id,
     creator_name: resp.creator_name || undefined,
     message_id: resp.message_id || undefined,
@@ -410,6 +416,7 @@ export function useDMTasks(dmId: string | null) {
             status: event.status,
             claimer_id: event.claimer_id ?? '',
             claimer_name: (event as { claimer_name?: string }).claimer_name || undefined,
+            claimer_deleted: (event as { claimer_deleted?: boolean }).claimer_deleted,
             priority: event.priority ?? 'normal',
             due_date: event.due_date ?? '',
             message_id: event.message_id ?? '',
@@ -438,6 +445,7 @@ export function useDMTasks(dmId: string | null) {
           updated.task_number = event.task_number;
           if (event.claimer_id !== undefined) updated.claimer_id = event.claimer_id || undefined;
           if (event.claimer_name !== undefined) updated.claimer_name = event.claimer_name;
+          if (event.claimer_deleted !== undefined) updated.claimer_deleted = event.claimer_deleted;
           if (event.priority !== undefined) updated.priority = event.priority as Task['priority'];
           if (event.due_date !== undefined) updated.due_date = event.due_date || undefined;
           if (event.message_id !== undefined) updated.message_id = event.message_id || undefined;

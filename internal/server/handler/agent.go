@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/solo-ai/solo/internal/server/service"
@@ -27,9 +30,10 @@ const (
 // AgentHandler handles agent-related HTTP requests.
 type AgentHandler struct {
 	pool          *pgxpool.Pool
-	workspaceRoot string                              // base path for agent workspaces, defaults to ~/.solo/agents
-	proxy         workspace.Proxy                     // optional proxy for workspace requests (nil = local FS only)
+	workspaceRoot string             // base path for agent workspaces, defaults to ~/.solo/agents
+	proxy         workspace.Proxy    // optional proxy for workspace requests (nil = local FS only)
 	mdGen         *service.RelationshipsMDGenerator   // optional — generates empty RELATIONSHIPS.md on create
+	httpClient    *http.Client       // for daemon cleanup callbacks
 }
 
 // NewAgentHandler creates a new AgentHandler.
@@ -42,7 +46,13 @@ func NewAgentHandler(pool *pgxpool.Pool, proxy workspace.Proxy, mdGen *service.R
 	if proxy == nil {
 		slog.Warn("agent handler: no workspace proxy configured, falling back to local filesystem only")
 	}
-	return &AgentHandler{pool: pool, workspaceRoot: workspaceRoot, proxy: proxy, mdGen: mdGen}
+	return &AgentHandler{
+		pool:          pool,
+		workspaceRoot: workspaceRoot,
+		proxy:         proxy,
+		mdGen:         mdGen,
+		httpClient:    &http.Client{Timeout: 10 * time.Second},
+	}
 }
 
 // --- Request/Response types ---
@@ -408,7 +418,11 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 
-// Delete handles DELETE /api/v1/agents/{id} (soft delete: sets is_active=false)
+// Delete handles DELETE /api/v1/agents/{id} (soft delete: sets is_active=false).
+// Side-effects (cascaded, not atomic with the soft-delete tx):
+//   - Remove agent from any computer's connected agent_ids array.
+//   - Ask the daemon to kill the agent's session, drop its workspace, and
+//     delete its memory file (best-effort, async; daemon may be offline).
 func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
@@ -462,6 +476,37 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Disconnect from any computer that had this agent in its connected list.
+	// Tasks.claimer_id is intentionally NOT cleared — soft-deleted agents stay
+	// as the claimer (displayed with a "Deleted" marker) so historical
+	// ownership of in-flight tasks is preserved.
+	//
+	// Capture the daemon URL before array_remove strips this agent from
+	// agent_ids — once we leave the transaction, no computer row references
+	// this agent, and we need the URL to tell the daemon to drop the session,
+	// workspace, and memory.
+	var daemonURL string
+	err = tx.QueryRow(r.Context(),
+		`SELECT COALESCE(daemon_url, '') FROM computers WHERE $1::uuid = ANY(agent_ids) LIMIT 1`,
+		agentID,
+	).Scan(&daemonURL)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Error("failed to look up daemon for agent", "agent_id", agentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete agent")
+		return
+	}
+
+	_, err = tx.Exec(r.Context(),
+		`UPDATE computers SET agent_ids = array_remove(agent_ids, $1::uuid), updated_at = now()
+		 WHERE $1::uuid = ANY(agent_ids)`,
+		agentID,
+	)
+	if err != nil {
+		slog.Error("failed to disconnect agent from computers", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete agent")
+		return
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		slog.Error("failed to commit transaction", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to delete agent")
@@ -469,7 +514,46 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("agent deactivated", "agent_id", agentID, "user_id", userID)
+
+	// Async daemon cleanup (best-effort, daemon may be offline).
+	// Use a detached context so the request returning doesn't cancel it.
+	go h.notifyDaemonCleanup(agentID, daemonURL)
+
 	writeJSON(w, http.StatusOK, map[string]string{"message": "agent deleted"})
+}
+
+// notifyDaemonCleanup asks the given daemon to drop the agent's session,
+// workspace, and memory. daemonURL is captured inside the Delete transaction
+// before array_remove strips the agent from computers.agent_ids — querying
+// afterwards would always return no rows.
+//
+// Best-effort: errors are logged, never surfaced to the user — the soft-delete
+// already succeeded.
+func (h *AgentHandler) notifyDaemonCleanup(agentID, daemonURL string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if daemonURL == "" {
+		return
+	}
+
+	url := strings.TrimRight(daemonURL, "/") + "/internal/daemon/agents/" + agentID + "/cleanup"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		slog.Warn("cleanup: build request failed", "url", url, "error", err)
+		return
+	}
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		slog.Warn("cleanup: daemon call failed", "url", url, "error", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		slog.Warn("cleanup: daemon returned non-2xx", "url", url, "status", resp.StatusCode)
+		return
+	}
+	slog.Info("cleanup: daemon notified", "agent_id", agentID, "url", url)
 }
 
 // AgentSkills handles GET /api/v1/agents/{agentID}/skills — proxies to daemon.

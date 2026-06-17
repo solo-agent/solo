@@ -47,7 +47,7 @@ export type WSServerEvent =
   | { type: 'error'; code: string; message: string }
   // ---- 消息事件 ----
   | { type: 'message.new'; id: string; channel_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; thread_id?: string; created_at: string; attachments?: Attachment[] }
-  | { type: 'message.updated'; id: string; channel_id: string; content: string; sender_type?: string; sender_id?: string; updated_at: string; task_number?: number; task_title?: string; task_status?: string; task_claimer_name?: string; reply_count?: number }
+  | { type: 'message.updated'; id: string; channel_id: string; content: string; sender_type?: string; sender_id?: string; updated_at: string; task_number?: number; task_title?: string; task_status?: string; task_claimer_name?: string; task_claimer_deleted?: boolean; reply_count?: number }
   | { type: 'message.deleted'; channel_id: string; message_id: string }
   // ---- 线程事件 ----
   // thread.message.new: 后端 ThreadMessageNewPayload 为 {message:{...}, thread:{...}} 嵌套结构
@@ -78,7 +78,7 @@ export type WSServerEvent =
   | { type: 'message.agent_typing'; id: string; channel_id: string; thread_id?: string; sender_id: string; sender_name?: string; content: string; created_at: string }
   // ---- 任务事件 (SOLO-122-B) ----
   | { type: 'task.created'; id: string; task_number: number; channel_id: string; creator_id: string; title: string; description?: string; status: string; claimer_id?: string; priority?: string; due_date?: string; message_id?: string; parent_task_id?: string; subtask_count?: number; done_subtask_count?: number; created_at: string; updated_at: string }
-  | { type: 'task.updated'; id: string; task_number: number; channel_id: string; title: string; description?: string; status: string; claimer_id?: string; claimer_name?: string; priority?: string; due_date?: string; message_id?: string; parent_task_id?: string; subtask_count?: number; done_subtask_count?: number; updated_at: string }
+  | { type: 'task.updated'; id: string; task_number: number; channel_id: string; title: string; description?: string; status: string; claimer_id?: string; claimer_name?: string; claimer_deleted?: boolean; priority?: string; due_date?: string; message_id?: string; parent_task_id?: string; subtask_count?: number; done_subtask_count?: number; updated_at: string }
   | { type: 'task.deleted'; id: string; channel_id: string; task_number: number }
   // ---- Task dependency events (Step 2) ----
   | { type: 'task.blocked'; blocked_task_id: string; blocker_task_id: string; channel_id: string }

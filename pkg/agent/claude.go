@@ -651,6 +651,25 @@ func (b *ClaudeBackend) Close(ps *PersistentSession) error {
 	return nil
 }
 
+// ForceClose immediately kills the Claude subprocess without graceful exit.
+func (b *ClaudeBackend) ForceClose(ps *PersistentSession) error {
+	state, ok := ps.state.(*claudePersistentState)
+	if !ok || state == nil {
+		return fmt.Errorf("claude: invalid session state")
+	}
+	b.logger.Warn("claude: force-closing persistent session", "session_id", state.sessionID)
+	state.cancel()
+	if state.cmd != nil && state.cmd.Process != nil {
+		_ = state.cmd.Process.Kill()
+	}
+	select {
+	case <-state.done:
+	case <-time.After(2 * time.Second):
+		b.logger.Error("claude: force-kill did not reap process within 2s", "session_id", state.sessionID)
+	}
+	return nil
+}
+
 // ── Stream loop ──
 
 func (b *ClaudeBackend) streamLoop(

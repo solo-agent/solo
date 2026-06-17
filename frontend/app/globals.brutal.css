@@ -386,6 +386,13 @@
   background: var(--color-brutal-primary);
 }
 
+/* Danger variant (coral red, white text). Uses `background` shorthand so it
+   wins against the base .btn-brutal `background: #fff` reset. */
+.btn-brutal-danger {
+  background: var(--color-brutal-danger);
+  color: var(--color-brutal-white);
+}
+
 /* Small variant: same translate rhythm as base, just smaller shadow. */
 .btn-brutal-sm {
   box-shadow: 3px 3px 0 0 var(--color-brutal-shadow);

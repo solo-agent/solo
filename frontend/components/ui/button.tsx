@@ -18,7 +18,7 @@ const buttonVariants = cva(
         // Primary CTA (yellow call-to-action)
         primary: "btn-brutal-primary",
         // Dangerous action (destructive intent; white text on coral red)
-        danger: "bg-brutal-danger text-white",
+        danger: "btn-brutal-danger",
         // Outlined: white fill, 2px black border (already on the base)
         outline: "bg-brutal-white text-brutal-black",
         // Ghost: transparent until hover, then yellow tint

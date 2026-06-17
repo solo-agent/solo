@@ -426,6 +426,15 @@ func (b *OpenClawBackend) Close(ps *PersistentSession) error {
 	return state.runner.close()
 }
 
+// ForceClose immediately kills the OpenClaw subprocess without graceful exit.
+func (b *OpenClawBackend) ForceClose(ps *PersistentSession) error {
+	state, ok := ps.state.(*openclawPersistentState)
+	if !ok || state == nil {
+		return fmt.Errorf("openclaw: invalid session state")
+	}
+	return state.runner.forceClose()
+}
+
 // ── Helpers ──
 
 // minOpenclawAcpVersion is the minimum openclaw version known to support

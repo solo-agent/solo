@@ -379,3 +379,12 @@ func (b *OpenCodeBackend) Close(ps *PersistentSession) error {
 	}
 	return state.runner.close()
 }
+
+// ForceClose immediately kills the OpenCode subprocess without graceful exit.
+func (b *OpenCodeBackend) ForceClose(ps *PersistentSession) error {
+	state, ok := ps.state.(*opencodePersistentState)
+	if !ok || state == nil {
+		return fmt.Errorf("opencode: invalid session state")
+	}
+	return state.runner.forceClose()
+}

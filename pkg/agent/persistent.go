@@ -55,6 +55,23 @@ func (r *persistentRunner) close() error {
 	return nil
 }
 
+// forceClose immediately kills the persistent subprocess without waiting
+// for graceful exit. Used by hard cleanup paths (agent deletion) where
+// in-flight turns can be discarded.
+func (r *persistentRunner) forceClose() error {
+	r.logger.Warn("persistent: force-closing session")
+	r.cancel()
+	if r.cmd != nil && r.cmd.Process != nil {
+		_ = r.cmd.Process.Kill()
+	}
+	select {
+	case <-r.done:
+	case <-time.After(2 * time.Second):
+		r.logger.Error("persistent: force-kill did not reap process within 2s")
+	}
+	return nil
+}
+
 // startPersistent creates a new persistent subprocess for the given CLI.
 // It uses buildEnvAt to inject the workspace directory into PATH, aligning
 // with ClaudeBackend.Start's behaviour. extraEnv carries backend-specific
