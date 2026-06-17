@@ -207,6 +207,20 @@ func (s *AgentRelationshipService) UpdateWeight(ctx context.Context, id string, 
 	if err != nil {
 		return nil, fmt.Errorf("update relationship: %w", err)
 	}
+	// Broadcast relationship_updated so frontends stay in sync.
+	if s.eventPublisher != nil {
+		s.eventPublisher.PublishUpdated(ctx, rel.ID, rel.FromAgentID, rel.ToAgentID, rel.RelType)
+	}
+	// Weight only renders in the template for collaborates_with, but
+	// regenerate for both endpoints — cheap and keeps the two paths symmetric.
+	if s.mdGen != nil {
+		if err := s.mdGen.GenerateForAgent(ctx, rel.FromAgentID); err != nil {
+			slog.Warn("regenerate RELATIONSHIPS.md failed", "agent_id", rel.FromAgentID, "err", err)
+		}
+		if err := s.mdGen.GenerateForAgent(ctx, rel.ToAgentID); err != nil {
+			slog.Warn("regenerate RELATIONSHIPS.md failed", "agent_id", rel.ToAgentID, "err", err)
+		}
+	}
 	return &rel, nil
 }
 
