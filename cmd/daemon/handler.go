@@ -1878,3 +1878,48 @@ func (h *daemonHandler) loadChannelMemory(channelID string) string {
 	return fmt.Sprintf("\n## Channel Shared Memory\n\n%s\n", content)
 }
 
+// ── Agent cleanup (hard-delete side effects) ────────────────────────────────
+//
+// CleanupAgent handles POST /internal/daemon/agents/{agentID}/cleanup.
+// Called by the server after an agent is soft-deleted to release local
+// resources: kills any running session subprocess, deletes the workspace
+// directory, and deletes the memory file. Idempotent — missing resources
+// are not errors.
+
+// CleanupAgent handles POST /internal/daemon/agents/{agentID}/cleanup.
+func (h *daemonHandler) CleanupAgent(w http.ResponseWriter, r *http.Request) {
+	agentID := chi.URLParam(r, "agentID")
+	if agentID == "" {
+		http.Error(w, "agent_id is required", http.StatusBadRequest)
+		return
+	}
+
+	slog.Info("daemon: cleanup agent requested", "agent_id", agentID)
+
+	// 1. Force-close any active session across all provider session managers.
+	for provider, sm := range h.sessionManagers {
+		if err := sm.ForceCloseSession(agentID); err != nil {
+			slog.Warn("daemon: force-close session failed",
+				"agent_id", agentID, "provider", provider, "error", err)
+		}
+	}
+
+	// 2. Delete workspace directory (idempotent — missing dir is not error).
+	if h.workspaceManager != nil {
+		if err := h.workspaceManager.Cleanup(agentID); err != nil {
+			slog.Warn("daemon: workspace cleanup failed",
+				"agent_id", agentID, "error", err)
+		}
+	}
+
+	// 3. Delete memory file (idempotent).
+	if h.memoryManager != nil {
+		if err := h.memoryManager.Delete(agentID); err != nil {
+			slog.Warn("daemon: memory delete failed",
+				"agent_id", agentID, "error", err)
+		}
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
