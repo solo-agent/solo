@@ -19,7 +19,7 @@
     "clsx": "^2.1.1",
     "dagre": "^0.8.5",
     "dompurify": "^3.4.8",
-    "lucide-react": "^0.468.0",
+    "lucide-react": "^1.21.0",
     "next": "^16.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
