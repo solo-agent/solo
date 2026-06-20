@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -149,5 +150,26 @@ func TestTaskCreateRequest_Defaults(t *testing.T) {
 	}
 	if req.Priority != "" {
 		t.Errorf("expected empty priority, got %s", req.Priority)
+	}
+}
+
+func TestBuildListAllUserTasksQuery_IncludesHierarchyFields(t *testing.T) {
+	query, args := buildListAllUserTasksQuery("user-1", "channel-1", TaskStatusInProgress, "agent-1", "creator-1")
+
+	for _, want := range []string{
+		"COALESCE(t.parent_task_id::text, '')",
+		"subtask_count",
+		"done_subtask_count",
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("expected query to include %q\nquery: %s", want, query)
+		}
+	}
+
+	if len(args) != 5 {
+		t.Fatalf("expected 5 query args, got %d", len(args))
+	}
+	if args[0] != "user-1" || args[1] != "channel-1" || args[2] != TaskStatusInProgress || args[3] != "agent-1" || args[4] != "creator-1" {
+		t.Fatalf("unexpected args: %#v", args)
 	}
 }

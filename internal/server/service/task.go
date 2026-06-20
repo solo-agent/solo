@@ -432,7 +432,7 @@ func (s *TaskService) SubmitTask(ctx context.Context, channelID, taskID, userID 
 	if task.Status != TaskStatusInProgress {
 		return nil, ErrTaskNotSubmittable
 	}
-	return s.setTaskStatus(ctx, channelID, taskID, userID, TaskStatusInReview)
+	return s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusInReview)
 }
 
 func (s *TaskService) AcceptTask(ctx context.Context, channelID, taskID, userID string) (*Task, error) {
@@ -446,7 +446,7 @@ func (s *TaskService) AcceptTask(ctx context.Context, channelID, taskID, userID 
 	if task.Status != TaskStatusInReview {
 		return nil, ErrTaskNotReviewable
 	}
-	return s.setTaskStatus(ctx, channelID, taskID, userID, TaskStatusDone)
+	return s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusDone)
 }
 
 func (s *TaskService) RejectTask(ctx context.Context, channelID, taskID, userID string) (*Task, error) {
@@ -460,7 +460,7 @@ func (s *TaskService) RejectTask(ctx context.Context, channelID, taskID, userID 
 	if task.Status != TaskStatusInReview {
 		return nil, ErrTaskNotReviewable
 	}
-	return s.setTaskStatus(ctx, channelID, taskID, userID, TaskStatusInProgress)
+	return s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusInProgress)
 }
 
 func (s *TaskService) setTaskStatus(ctx context.Context, channelID, taskID, userID, status string) (*Task, error) {
@@ -934,8 +934,42 @@ func (s *TaskService) GetTaskGlobal(ctx context.Context, taskID, userID string) 
 
 // ListAllUserTasks returns all tasks across channels the user is a member of.
 func (s *TaskService) ListAllUserTasks(ctx context.Context, userID string, channelID string, status string, claimerID string, creatorID string) ([]Task, error) {
+	query, args := buildListAllUserTasksQuery(userID, channelID, status, claimerID, creatorID)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tasks []Task
+	for rows.Next() {
+		var t Task
+		var dueDate *time.Time
+		var parentTaskID string
+		err := rows.Scan(&t.ID, &t.TaskNumber, &t.ChannelID, &t.CreatorID, &t.CreatorName, &t.Title, &t.Description,
+			&t.Status, &t.ClaimerID, &t.Priority, &dueDate, &t.MessageID, &parentTaskID,
+			&t.SubtaskCount, &t.DoneSubtaskCount, &t.CreatedAt, &t.UpdatedAt, &t.ClaimerName, &t.ClaimerDeleted)
+		if err != nil {
+			return nil, err
+		}
+		if dueDate != nil {
+			t.DueDate = dueDate
+		}
+		if parentTaskID != "" {
+			t.ParentTaskID = &parentTaskID
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
+func buildListAllUserTasksQuery(userID string, channelID string, status string, claimerID string, creatorID string) (string, []interface{}) {
 	query := `SELECT t.id, t.task_number, t.channel_id, t.creator_id, COALESCE(u_creator.display_name, a_creator.name, '') as creator_name, t.title, COALESCE(t.description, ''),
-		t.status, COALESCE(t.claimer_id::text, ''), t.priority, t.due_date, COALESCE(t.message_id::text, ''), t.created_at, t.updated_at,
+		t.status, COALESCE(t.claimer_id::text, ''), t.priority, t.due_date, COALESCE(t.message_id::text, ''), COALESCE(t.parent_task_id::text, ''),
+		(SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id) AS subtask_count,
+		(SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.status = 'done') AS done_subtask_count,
+		t.created_at, t.updated_at,
 		COALESCE(u_claimer.display_name, a_claimer.name, '') AS claimer_name,
 		(NOT COALESCE(a_claimer.is_active, true)) AS claimer_deleted
 		FROM tasks t
@@ -971,27 +1005,7 @@ func (s *TaskService) ListAllUserTasks(ctx context.Context, userID string, chann
 	}
 	query += " ORDER BY t.created_at DESC LIMIT 100"
 
-	rows, err := s.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var tasks []Task
-	for rows.Next() {
-		var t Task
-		var dueDate *time.Time
-		err := rows.Scan(&t.ID, &t.TaskNumber, &t.ChannelID, &t.CreatorID, &t.CreatorName, &t.Title, &t.Description,
-			&t.Status, &t.ClaimerID, &t.Priority, &dueDate, &t.MessageID, &t.CreatedAt, &t.UpdatedAt, &t.ClaimerName, &t.ClaimerDeleted)
-		if err != nil {
-			return nil, err
-		}
-		if dueDate != nil {
-			t.DueDate = dueDate
-		}
-		tasks = append(tasks, t)
-	}
-	return tasks, rows.Err()
+	return query, args
 }
 
 // isPgUniqueViolation checks if an error is a PostgreSQL unique constraint violation.
