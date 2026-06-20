@@ -81,6 +81,19 @@ export interface Agent {
 /** v1.4: runtime type is dynamic, driven by backend registry (claude, codex, opencode, etc.) */
 export type AgentModelProvider = string;
 
+export type RelationshipType = 'assigns_to' | 'collaborates_with';
+
+export interface AgentRelationship {
+  id: string;
+  from_agent_id: string;
+  to_agent_id: string;
+  rel_type: RelationshipType;
+  weight: number;
+  instruction: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CreateAgentInput {
   name: string;
   description?: string;

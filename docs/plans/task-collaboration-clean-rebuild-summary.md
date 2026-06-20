@@ -9,7 +9,7 @@ Base: `master` at `901e2d7`
 Compared with `master`:
 
 ```text
-34 files changed, 2139 insertions(+), 261 deletions(-)
+38 files changed, 2743 insertions(+), 261 deletions(-)
 ```
 
 By commit:
@@ -21,7 +21,8 @@ By commit:
 | `741be2f` | Add task submit/accept/reject lifecycle | 8 files, +374/-107 |
 | `b233169` | Fold subtasks under parent task cards | 2 files, +59/-5 |
 | `35d463d` | Route wakes to mentioned agents or coordinator | 2 files, +207/-136 |
-| latest | Restore team templates and workspace relationship docs | 15 files, +785/-13 |
+| `9c5ebc0` | Restore team templates and workspace relationship docs | 15 files, +785/-13 |
+| latest | Add slim relationship graph editor | 5 files, +608/-4 |
 
 Note: the final wake-routing commit includes `gofmt` cleanup in `internal/server/service/agent.go`, so the raw line count is larger than the semantic change.
 
@@ -46,6 +47,18 @@ Note: the final wake-routing commit includes `gofmt` cleanup in `internal/server
   - relationship/template changes generate `RELATIONSHIPS.md` in the agent workspace
 
 The agent prompt tells agents to read `RELATIONSHIPS.md` before deciding whether to coordinate, delegate, claim, or collaborate. There is no second direct `TaskContext` relationship injection path.
+
+### Relationship graph UI
+
+- Added `/relationships` as a slim relationship graph editor.
+- Added left-nav entry for Relationships.
+- The graph supports:
+  - auto layout from `assigns_to`
+  - drag nodes and persist positions in localStorage
+  - create relationships
+  - edit relationship instruction
+  - delete relationships
+- It intentionally avoids new graph dependencies (`@xyflow/react`, `dagre`) and uses a small local SVG/absolute-node implementation.
 
 ### Team templates
 
@@ -120,7 +133,11 @@ The agent prompt tells agents to read `RELATIONSHIPS.md` before deciding whether
 - No task dependency migration/table.
 - No `solo task block`, `unblock`, or `blocked`.
 - No dependency popover or block DAG UI.
-- No relationship graph UI.
+- No old full relationship graph editor.
+- No relationship MiniMap.
+- No relationship WebSocket live-sync.
+- No separate `/relationships/manage` table page.
+- No relationship SVG export or undo/redo.
 - No relationship event publisher.
 - No old full `RELATIONSHIPS.md` report with recent activity/task-count sections.
 - No channel-scoped relationship model.
@@ -139,7 +156,7 @@ Unchanged. We kept baseline verification as its own commit.
 
 Changed after audit: templates were restored after the initial clean rebuild missed them.
 
-Reason: the user explicitly asked to keep templates and their UI. The final version includes template backend/API, seed migration, `/teams` UI entry, and workspace `RELATIONSHIPS.md` generation. It intentionally avoids a second direct prompt-injection path for the same relationship data.
+Reason: the user explicitly asked to keep templates and their UI. The final version includes template backend/API, seed migration, `/teams` UI entry, workspace `RELATIONSHIPS.md` generation, and a slim `/relationships` graph editor. It intentionally avoids a second direct prompt-injection path for the same relationship data.
 
 ### PR2
 
@@ -165,6 +182,7 @@ Reason: we kept the architecture smaller. The coordinator is the agent with no p
 - `solo task update -s` still exists for compatibility, but the agent prompt no longer teaches it as the lifecycle path.
 - Relationship routing assumes `assigns_to` means `leader assigns_to worker`.
 - Relationships write a lean `RELATIONSHIPS.md`; runtime sees relationships by reading that workspace file, plus server wake routing uses the same relationship graph.
+- `/relationships` keeps Auto Layout and drag position persistence, but does not include MiniMap, WebSocket live-sync, SVG export, undo/redo, or the old manager table page.
 - Wake routing now reduces fan-out. This is intended, but it means a channel with no relationships will pick one stable fallback agent instead of all agents.
 - Subtasks are folded only when parent and child are both present in the loaded task list.
 
@@ -174,6 +192,8 @@ Reason: we kept the architecture smaller. The coordinator is the agent with no p
 |---|---|
 | Keep colleague relationships | Kept |
 | Keep templates and template UI | Restored after audit |
+| Keep relationship graph Auto Layout | Kept in slim `/relationships` editor |
+| Keep relationship graph drag position persistence | Kept via localStorage |
 | Keep only useful relationship types | Kept: `assigns_to`, `collaborates_with` |
 | Remove block/unblock | Removed / not ported |
 | Keep task parent/child DAG UI | Kept as folded subtasks under parent cards |
