@@ -179,6 +179,7 @@ function StatusBadge({
 
 interface TaskCardProps {
   task: Task;
+  childTasks?: Task[];
   onClick: (task: Task) => void;
   onStatusChange: (task: Task, newStatus: TaskStatus) => void;
   parentTaskNumber?: number;
@@ -187,16 +188,18 @@ interface TaskCardProps {
 
 function TaskCard({
   task,
+  childTasks = [],
   onClick,
   onStatusChange,
   parentTaskNumber,
   onParentClick,
 }: TaskCardProps) {
+  const [subtasksOpen, setSubtasksOpen] = useState(false);
   const statusConf = STATUS_COLUMN_CONFIG[task.status];
   const taskNum = task.task_number ? `#${task.task_number}` : null;
   const isClaimed = !!task.claimer_id;
   const isTerminal = task.status === 'done' || task.status === 'closed';
-  const hasSubtasks = (task.subtask_count ?? 0) > 0;
+  const hasSubtasks = childTasks.length > 0 || (task.subtask_count ?? 0) > 0;
   const isChild = !!task.parent_task_id;
 
   const claimerDisplay =
@@ -335,7 +338,19 @@ function TaskCard({
         {/* Subtask progress bar (parent task) */}
         {hasSubtasks && (
           <div className="mt-2 pt-2 border-t-2 border-brutal-muted">
-            <div className="flex items-center gap-1.5 text-[10px]">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSubtasksOpen((v) => !v);
+              }}
+              className="flex w-full items-center gap-1.5 text-left text-[10px]"
+            >
+              {subtasksOpen ? (
+                <ChevronDown className="h-3 w-3 flex-shrink-0" />
+              ) : (
+                <ChevronRight className="h-3 w-3 flex-shrink-0" />
+              )}
               <span className="text-muted-foreground">{t('subTaskLabel')}</span>
               <span className="font-bold">{task.done_subtask_count ?? 0}/{task.subtask_count}</span>
               <div className="flex-1 h-1 border border-brutal-muted bg-muted">
@@ -344,7 +359,33 @@ function TaskCard({
                   style={{ width: `${Math.min(((task.done_subtask_count ?? 0) / (task.subtask_count ?? 1)) * 100, 100)}%` }}
                 />
               </div>
-            </div>
+            </button>
+
+            {subtasksOpen && childTasks.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                {childTasks.map((child) => (
+                  <button
+                    key={child.id}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onClick(child);
+                    }}
+                    className="w-full border-2 border-black bg-white px-2 py-1.5 text-left shadow-brutal-sm transition-transform hover:-translate-y-0.5"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className={cn('h-2 w-2 flex-shrink-0 border border-black', STATUS_COLUMN_CONFIG[child.status].bgClass)} />
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        {child.task_number ? `#${child.task_number}` : t('subTask')}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate font-body text-[11px] font-bold text-foreground">
+                        {child.title}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -391,6 +432,7 @@ interface TaskColumnProps {
   onStatusChange: (task: Task, newStatus: TaskStatus) => void;
   parentTaskMap?: Map<string, number>;
   onParentClick?: (taskId: string) => void;
+  childrenByParent?: Map<string, Task[]>;
 }
 
 // ---- Component ----
@@ -403,6 +445,7 @@ export function TaskColumn({
   onStatusChange,
   parentTaskMap,
   onParentClick,
+  childrenByParent,
 }: TaskColumnProps) {
   const label = COLUMN_HEADERS[status];
   const count = tasks.length;
@@ -435,6 +478,7 @@ export function TaskColumn({
           <TaskCard
             key={task.id}
             task={task}
+            childTasks={childrenByParent?.get(task.id)}
             onClick={onTaskClick}
             onStatusChange={onStatusChange}
             parentTaskNumber={task.parent_task_id ? parentTaskMap?.get(task.parent_task_id) : undefined}
