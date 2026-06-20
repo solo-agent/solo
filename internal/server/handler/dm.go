@@ -1413,6 +1413,10 @@ func (h *DMHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "task not found")
 		case err == service.ErrTaskNotChannelMember:
 			writeError(w, http.StatusForbidden, "not a DM participant")
+		case err == service.ErrTaskNotCreator:
+			writeError(w, http.StatusForbidden, "you are not the creator of this task")
+		case err == service.ErrTaskHumanOnly:
+			writeError(w, http.StatusForbidden, err.Error())
 		case err == service.ErrTaskInvalidStatus || err == service.ErrTaskInvalidTransition:
 			writeError(w, http.StatusBadRequest, err.Error())
 		default:

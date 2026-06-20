@@ -487,7 +487,7 @@ function ComputerCard({
       <div
         className={cn(
           'overflow-hidden transition-all duration-300 ease-in-out',
-          isExpanded ? 'max-h-[1200px] opacity-100' : 'max-h-0 opacity-0',
+          isExpanded ? 'max-h-[4000px] opacity-100' : 'max-h-0 opacity-0',
         )}
       >
         <div className="border-t-2 border-black px-6 pb-6 pt-4 space-y-6">

@@ -115,13 +115,6 @@ const en = {
   messagePlaceholder: 'Type a message... (Enter to send, Shift+Enter for new line)',
   taskMessagePlaceholder: 'Task description (optional)... (Enter to create, Shift+Enter for new line)',
 
-  // ── Teams Graph ──
-  noAgentsForGraph: 'No agents yet. Create agents to view the organization graph.',
-  graphScrollHint: 'Scroll horizontally for more · Click group card to expand agent list',
-  expandGroup: '{action} {group} group',
-  expand: 'Expand',
-  collapse: 'Collapse',
-
   // ── Teams Workspace ──
   agentWorkspaceNoFiles: 'Agent workspace has no files yet',
   agentWorkspaceHint: 'Files will appear here after running agent tasks',
@@ -130,7 +123,6 @@ const en = {
   // ── Teams Items ──
   viewAgentDetail: 'View {name} details',
   viewUserDetail: 'View {name} details',
-  enterGraphView: 'Enter Graph view',
 
   // ── Teams Sidebar ──
   expandOrCollapseAgents: 'Expand or collapse Agents',
@@ -505,6 +497,8 @@ const en = {
   agentRuntimeModelConfig: 'Model Config',
   agentRuntimeEnvVars: 'Environment Variables',
   agentRuntimeConfig: 'Runtime Config',
+  agentRuntimeNotConfigured: 'Not configured',
+  agentRuntimeDefault: 'Default',
   agentRuntimeNoEnvVars: 'No environment variables configured',
   agentRuntimeSave: 'Save',
   agentRuntimeSaving: 'Saving...',
@@ -539,6 +533,29 @@ const en = {
   agentDetailPanel: 'Agent detail panel',
   agentDetailPanelClose: 'Close agent detail panel',
   agentDetailTitle: 'Agent Detail',
+
+  // ── Relationship Editor ──
+  assignsTo: 'Assigns To',
+  collaboratesWith: 'Collaborates With',
+  relationshipEditor: 'Relationship Editor',
+  relationshipEditorLoading: 'Loading editor...',
+  relationshipEditorEmpty: 'Drag agents onto the canvas to start building the relationship graph.',
+  relationshipEditorCreateRelationship: 'Create Relationship',
+  relationshipEditorSelectType: 'Select relationship type',
+  relationshipEditorDelete: 'Delete relationship',
+  relationshipEditorDeleteConfirm: 'Remove this relationship?',
+  relationshipEditorDeleteEdge: 'Remove',
+  relationshipEditorEdgeDetail: 'Relationship detail',
+  relationshipEditorFrom: 'From',
+  relationshipEditorTo: 'To',
+  relationshipEditorType: 'Type',
+  relationshipEditorChannel: 'Channel *',
+  relationshipEditorChannelPlaceholder: 'Select channel...',
+  relationshipEditorAutoLayout: 'Auto Layout',
+  relationshipEditorUndo: 'Undo',
+  relationshipEditorRedo: 'Redo',
+  relationshipEditorNodeUnconnected: 'Unconnected',
+  relationshipEditorDragHint: 'Drag from node handle to create relationship',
 
   // ── Workspace ──
   workspaceExpandAgents: 'Expand or collapse agents',

@@ -8,6 +8,10 @@ import (
 	"testing"
 )
 
+func testMemoryPath(basePath, agentID string) string {
+	return filepath.Join(basePath, agentID, "workspace", "MEMORY.md")
+}
+
 func TestLoad_NonExistent(t *testing.T) {
 	basePath := t.TempDir()
 	mm := NewMemoryManager(basePath)
@@ -44,7 +48,7 @@ func TestAppend_NewFile(t *testing.T) {
 	}
 
 	// Verify the file was created.
-	memoryPath := filepath.Join(basePath, "agent-1", "MEMORY.md")
+	memoryPath := testMemoryPath(basePath, "agent-1")
 	if _, err := os.Stat(memoryPath); os.IsNotExist(err) {
 		t.Fatal("MEMORY.md was not created")
 	}
@@ -108,7 +112,7 @@ func TestAppend_EmptyEntry(t *testing.T) {
 	}
 
 	// File should not exist since we appended nothing.
-	memoryPath := filepath.Join(basePath, "agent-1", "MEMORY.md")
+	memoryPath := testMemoryPath(basePath, "agent-1")
 	if _, err := os.Stat(memoryPath); !os.IsNotExist(err) {
 		t.Error("MEMORY.md should not exist after empty append")
 	}
@@ -214,7 +218,7 @@ func TestSummarize_Empty(t *testing.T) {
 		t.Fatalf("Summarize with empty summary should not error: %v", err)
 	}
 
-	memoryPath := filepath.Join(basePath, "agent-1", "MEMORY.md")
+	memoryPath := testMemoryPath(basePath, "agent-1")
 	if _, err := os.Stat(memoryPath); !os.IsNotExist(err) {
 		t.Error("MEMORY.md should not exist after empty summarize")
 	}
@@ -243,7 +247,7 @@ func TestDelete(t *testing.T) {
 	}
 
 	// Verify it exists.
-	memoryPath := filepath.Join(basePath, "agent-1", "MEMORY.md")
+	memoryPath := testMemoryPath(basePath, "agent-1")
 	if _, err := os.Stat(memoryPath); os.IsNotExist(err) {
 		t.Fatal("MEMORY.md should exist before delete")
 	}
@@ -371,7 +375,7 @@ func TestLoadReturnsContent(t *testing.T) {
 	mm := NewMemoryManager(basePath)
 
 	// Directly write a memory file.
-	memoryPath := filepath.Join(basePath, "agent-1", "MEMORY.md")
+	memoryPath := testMemoryPath(basePath, "agent-1")
 	_ = os.MkdirAll(filepath.Dir(memoryPath), 0o755)
 	_ = os.WriteFile(memoryPath, []byte("Some memory content"), 0o644)
 

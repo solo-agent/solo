@@ -14,8 +14,10 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@hookform/resolvers": "^3.9.0",
     "@shikijs/rehype": "^4.2.0",
+    "@xyflow/react": "^12.11.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dagre": "^0.8.5",
     "dompurify": "^3.4.8",
     "lucide-react": "^0.468.0",
     "next": "^16.0.0",
@@ -32,6 +34,7 @@
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4.0.0",
+    "@types/dagre": "^0.7.54",
     "@types/dompurify": "^3.0.5",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",

@@ -423,6 +423,35 @@ func TestHandleTaskUpdate(t *testing.T) {
 	}
 }
 
+func TestHandleTaskLifecycleSubmit(t *testing.T) {
+	var capturedMethod, capturedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"1","status":"in_review"}`))
+	}))
+	defer server.Close()
+
+	code, stdout, _ := captureAndRun(t, func() {
+		handleTaskLifecycle([]string{"-n", "1", "-c", "550e8400-e29b-41d4-a716-446655440001"}, server.URL, "test-token", "submit")
+	})
+
+	if code != 0 {
+		t.Errorf("expected exit 0, got %d", code)
+	}
+	if capturedMethod != http.MethodPost {
+		t.Errorf("expected POST, got %s", capturedMethod)
+	}
+	if capturedPath != "/api/v1/channels/550e8400-e29b-41d4-a716-446655440001/tasks/1/submit" {
+		t.Errorf("unexpected path: %s", capturedPath)
+	}
+	if !strings.Contains(stdout, "in_review") {
+		t.Errorf("expected stdout to contain in_review, got %q", stdout)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // task create tests
 // ---------------------------------------------------------------------------
@@ -1004,7 +1033,7 @@ func TestHandleTaskCreateMissingTitle(t *testing.T) {
 
 func TestHandleMessageSendMissingContent(t *testing.T) {
 	code, _, stderr := captureAndRun(t, func() {
-		handleMessageSend([]string{"-C", "550e8400-e29b-41d4-a716-446655440002"}, "http://localhost", "tok")
+		handleMessageSend([]string{"--target", "#550e8400-e29b-41d4-a716-446655440002"}, "http://localhost", "tok")
 	})
 	if code != 2 {
 		t.Errorf("expected exit 2 for missing -c, got %d", code)

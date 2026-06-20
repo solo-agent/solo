@@ -14,6 +14,7 @@ func init() {
 
 	// ── claude — Claude Code CLI via stream-json ──────────────────────
 	r.Register(claudeMeta("claude", "Claude Code"), claudeFactory)
+	r.Register(claudeMeta("local", "Local Claude Code"), claudeFactory)
 
 	// ── codex — Codex CLI via JSON-RPC ───────────────────────────────
 	r.Register(AdapterMeta{

@@ -7,6 +7,7 @@ import {
   Hash,
   ClipboardList,
   Users,
+  GitBranch,
   Monitor,
   FolderOpen,
 } from 'lucide-react';
@@ -18,6 +19,7 @@ const NAV_ITEMS = [
   { href: '/dashboard', icon: Hash, label: t('navChannels') },
   { href: '/tasks', icon: ClipboardList, label: t('navTasks') },
   { href: '/teams', icon: Users, label: t('navTeams') },
+  { href: '/relationships', icon: GitBranch, label: 'Relationships' },
   { href: '/computers', icon: Monitor, label: t('navComputers') },
   { href: '/workspace', icon: FolderOpen, label: 'Workspace' },
 ] as const;

@@ -45,7 +45,11 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	r.Get("/readyz", readinessHandler(pool, dm))
 
 	// Initialize services
+	workspaceRoot := defaultAgentWorkspaceRoot()
+	relationshipMD := service.NewRelationshipsMDGenerator(pool, workspaceRoot)
 	taskSvc := service.NewTaskService(pool)
+	relationshipSvc := service.NewAgentRelationshipService(pool, relationshipMD)
+	templateSvc := service.NewTemplateService(pool, relationshipMD)
 	computerSvc := service.NewComputerService(pool)
 	inboxSvc := service.NewInboxService(pool)
 
@@ -60,10 +64,12 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	daemonHandler := handler.NewDaemonHandler(dm, agentSvc, computerSvc)
 	mentionSvc := service.NewMentionService(pool)
 	taskHandler := handler.NewTaskHandler(pool, hub, agentSvc, taskSvc, mentionSvc)
+	relationshipHandler := handler.NewAgentRelationshipHandler(relationshipSvc)
+	templateHandler := handler.NewTemplateHandler(templateSvc)
 	searchHandler := handler.NewSearchHandler(pool)
 	computerHandler := handler.NewComputerHandler(computerSvc, dm, pool)
 	inboxHandler := handler.NewInboxHandler(inboxSvc)
-		onboardingHandler := handler.NewOnboardingHandler(pool, agentSvc)
+	onboardingHandler := handler.NewOnboardingHandler(pool, agentSvc)
 
 	// Attachment handler
 	uploadDir := os.Getenv("ATTACHMENTS_DIR")
@@ -127,7 +133,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Get("/api/v1/server/info", channelHandler.ServerInfo)
 
 		r.Get("/api/v1/messages/check", messageHandler.Check)
-			r.Post("/api/v1/channels/join", channelHandler.JoinByTarget)
+		r.Post("/api/v1/channels/join", channelHandler.JoinByTarget)
 
 		r.Route("/api/v1/channels", func(r chi.Router) {
 			r.Get("/", channelHandler.List)
@@ -158,6 +164,9 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 						// Claim / Unclaim (Phase 1)
 						r.Post("/claim", taskHandler.Claim)
 						r.Delete("/claim", taskHandler.Unclaim)
+						r.Post("/submit", taskHandler.Submit)
+						r.Post("/accept", taskHandler.Accept)
+						r.Post("/reject", taskHandler.Reject)
 					})
 				})
 
@@ -199,15 +208,32 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 
 				// Agent skill catalog (proxied to daemon).
 				r.Get("/skills", agentHandler.AgentSkills)
+
+				r.Get("/relationships", relationshipHandler.ListByAgent)
 			})
+		})
+
+		r.Route("/api/v1/agent-relationships", func(r chi.Router) {
+			r.Get("/", relationshipHandler.List)
+			r.Post("/", relationshipHandler.Create)
+
+			r.Route("/{relationshipID}", func(r chi.Router) {
+				r.Patch("/", relationshipHandler.Update)
+				r.Delete("/", relationshipHandler.Delete)
+			})
+		})
+
+		r.Route("/api/v1/templates", func(r chi.Router) {
+			r.Get("/", templateHandler.List)
+			r.Post("/{templateID}/apply", templateHandler.Apply)
 		})
 
 		// Agent backends metadata (registered backend adapters)
 		r.Get("/api/v1/agent-backends", agentHandler.AgentBackends)
 		r.Get("/api/v1/agent-backends/detect", agentHandler.AgentBackendsDetect)
 
-			// Onboarding wizard
-			r.Post("/api/v1/onboarding/create-lucy", onboardingHandler.CreateLucy)
+		// Onboarding wizard
+		r.Post("/api/v1/onboarding/create-lucy", onboardingHandler.CreateLucy)
 
 		// Global tasks routes (all channels)
 		r.Route("/api/v1/tasks", func(r chi.Router) {
@@ -300,6 +326,14 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	r.Get("/api/v1/ws", hub.ServeWS)
 
 	return r
+}
+
+func defaultAgentWorkspaceRoot() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", "agents")
+	}
+	return filepath.Join(home, ".solo", "agents")
 }
 
 // livenessHandler responds 200 OK to indicate the server process is alive.

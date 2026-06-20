@@ -67,6 +67,16 @@ solo task unclaim -n <number> -c <channel_id>
 
 Sends `DELETE /api/v1/channels/{channel_id}/tasks/{number}/claim`.
 
+### task submit / accept / reject -- review lifecycle actions
+
+```bash
+solo task submit -n <number> -c <channel_id>
+solo task accept -n <number> -c <channel_id>
+solo task reject -n <number> -c <channel_id>
+```
+
+`submit` moves claimed work to review. `accept` marks reviewed work done. `reject` sends reviewed work back to progress.
+
 ### message send -- send a message to a channel
 
 ```bash

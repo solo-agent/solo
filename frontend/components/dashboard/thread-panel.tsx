@@ -729,22 +729,22 @@ export function ThreadPanel({
 
       {/* Content area */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Task metadata bar: prefer full Task object, fallback to message fields */}
-        {task ? (
-          <TaskMetaBar
-            task={task}
-            onClaim={onClaimTask}
-            onUnclaim={onUnclaimTask}
-          />
-        ) : parentMessage.task_status ? (
-          <ParentMessageTaskBar message={parentMessage} />
-        ) : null}
-
-        {/* Parent message */}
-        <ParentMessageBlock message={parentMessage} task={task} />
-
-        {/* Reply list */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto">
+          {/* Task metadata bar: prefer full Task object, fallback to message fields */}
+          {task ? (
+            <TaskMetaBar
+              task={task}
+              onClaim={onClaimTask}
+              onUnclaim={onUnclaimTask}
+            />
+          ) : parentMessage.task_status ? (
+            <ParentMessageTaskBar message={parentMessage} />
+          ) : null}
+
+          {/* Parent message */}
+          <ParentMessageBlock message={parentMessage} task={task} />
+
+          {/* Reply list */}
           {(() => {
             if (isLoading) {
               return <ThreadSkeleton />;

@@ -47,7 +47,9 @@ export function TaskBoard({
   onRefetch,
 }: TaskBoardProps) {
   // Group tasks by status
-  const tasksByStatus = useMemo(() => {
+  const { tasksByStatus, childrenByParent } = useMemo(() => {
+    const taskById = new Map(tasks.map((task) => [task.id, task]));
+    const children = new Map<string, Task[]>();
     const map: Record<TaskStatus, Task[]> = {
       todo: [],
       in_progress: [],
@@ -56,10 +58,16 @@ export function TaskBoard({
       closed: [],
     };
     for (const task of tasks) {
+      if (task.parent_task_id && taskById.has(task.parent_task_id)) {
+        const siblings = children.get(task.parent_task_id) ?? [];
+        siblings.push(task);
+        children.set(task.parent_task_id, siblings);
+        continue;
+      }
       const status = map[task.status] ? task.status : 'todo';
       map[status].push(task);
     }
-    return map;
+    return { tasksByStatus: map, childrenByParent: children };
   }, [tasks]);
 
   // Build parent task number lookup map (id -> task_number)
@@ -125,6 +133,7 @@ export function TaskBoard({
             onStatusChange={onStatusChange}
             parentTaskMap={parentTaskMap}
             onParentClick={handleParentClick}
+            childrenByParent={childrenByParent}
           />
         ))}
       </div>
@@ -141,6 +150,7 @@ export function TaskBoard({
             onStatusChange={onStatusChange}
             parentTaskMap={parentTaskMap}
             onParentClick={handleParentClick}
+            childrenByParent={childrenByParent}
           />
         ))}
       </div>

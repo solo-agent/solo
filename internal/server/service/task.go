@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"time"
@@ -72,39 +72,43 @@ var (
 	ErrTaskInTerminalState   = errors.New("task is in a terminal state and cannot be claimed")
 	ErrTaskNotClaimable      = errors.New("task status does not allow claiming")
 	ErrTaskNotClaimer        = errors.New("you are not the claimer of this task")
+	ErrTaskNotCreator        = errors.New("you are not the creator of this task")
+	ErrTaskHumanOnly         = errors.New("this task action is human-only")
+	ErrTaskNotSubmittable    = errors.New("task is not ready to submit")
+	ErrTaskNotReviewable     = errors.New("task is not in review")
 )
 
 // Task represents a task in a channel.
 type Task struct {
-	ID             string     `json:"id"`
-	TaskNumber     int        `json:"task_number"`
-	ChannelID      string     `json:"channel_id"`
-	CreatorID      string     `json:"creator_id"`
-	CreatorName    string     `json:"creator_name,omitempty"`
-	Title          string     `json:"title"`
-	Description    string     `json:"description,omitempty"`
-	Status         string     `json:"status"`
-	ClaimerID      string     `json:"claimer_id,omitempty"`
-	ClaimerName    string     `json:"claimer_name,omitempty"`
-	ClaimerDeleted bool       `json:"claimer_deleted"`
-	Priority       string     `json:"priority"`
-	DueDate        *time.Time `json:"due_date,omitempty"`
-	MessageID      string     `json:"message_id,omitempty"`
-	ParentTaskID   *string    `json:"parent_task_id,omitempty"`
-	SubtaskCount   int        `json:"subtask_count,omitempty"`
-	DoneSubtaskCount int      `json:"done_subtask_count,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID               string     `json:"id"`
+	TaskNumber       int        `json:"task_number"`
+	ChannelID        string     `json:"channel_id"`
+	CreatorID        string     `json:"creator_id"`
+	CreatorName      string     `json:"creator_name,omitempty"`
+	Title            string     `json:"title"`
+	Description      string     `json:"description,omitempty"`
+	Status           string     `json:"status"`
+	ClaimerID        string     `json:"claimer_id,omitempty"`
+	ClaimerName      string     `json:"claimer_name,omitempty"`
+	ClaimerDeleted   bool       `json:"claimer_deleted"`
+	Priority         string     `json:"priority"`
+	DueDate          *time.Time `json:"due_date,omitempty"`
+	MessageID        string     `json:"message_id,omitempty"`
+	ParentTaskID     *string    `json:"parent_task_id,omitempty"`
+	SubtaskCount     int        `json:"subtask_count,omitempty"`
+	DoneSubtaskCount int        `json:"done_subtask_count,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // TaskCreateRequest contains the fields needed to create a task.
 type TaskCreateRequest struct {
-	Title         string     `json:"title"`
-	Description   string     `json:"description,omitempty"`
-	Priority      string     `json:"priority,omitempty"`
-	DueDate       *time.Time `json:"due_date,omitempty"`
-	MessageID     string     `json:"message_id,omitempty"`
-	ParentTaskID  string     `json:"parent_task_id,omitempty"`
+	Title        string     `json:"title"`
+	Description  string     `json:"description,omitempty"`
+	Priority     string     `json:"priority,omitempty"`
+	DueDate      *time.Time `json:"due_date,omitempty"`
+	MessageID    string     `json:"message_id,omitempty"`
+	ParentTaskID string     `json:"parent_task_id,omitempty"`
 }
 
 // TaskUpdateRequest contains the fields that can be updated on a task.
@@ -417,6 +421,65 @@ func (s *TaskService) UnclaimTask(ctx context.Context, channelID, taskID, userID
 	return refetched, nil
 }
 
+func (s *TaskService) SubmitTask(ctx context.Context, channelID, taskID, userID string) (*Task, error) {
+	task, err := s.GetTask(ctx, channelID, taskID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if task.ClaimerID != userID {
+		return nil, ErrTaskNotClaimer
+	}
+	if task.Status != TaskStatusInProgress {
+		return nil, ErrTaskNotSubmittable
+	}
+	return s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusInReview)
+}
+
+func (s *TaskService) AcceptTask(ctx context.Context, channelID, taskID, userID string) (*Task, error) {
+	task, err := s.GetTask(ctx, channelID, taskID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if task.CreatorID != userID {
+		return nil, ErrTaskNotCreator
+	}
+	if task.Status != TaskStatusInReview {
+		return nil, ErrTaskNotReviewable
+	}
+	return s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusDone)
+}
+
+func (s *TaskService) RejectTask(ctx context.Context, channelID, taskID, userID string) (*Task, error) {
+	task, err := s.GetTask(ctx, channelID, taskID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if task.CreatorID != userID {
+		return nil, ErrTaskNotCreator
+	}
+	if task.Status != TaskStatusInReview {
+		return nil, ErrTaskNotReviewable
+	}
+	return s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusInProgress)
+}
+
+func (s *TaskService) setTaskStatus(ctx context.Context, channelID, taskID, userID, status string) (*Task, error) {
+	if err := s.requireChannelMember(ctx, channelID, userID); err != nil {
+		return nil, err
+	}
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE tasks SET status = $1, updated_at = now() WHERE id = $2 AND channel_id = $3`,
+		status, taskID, channelID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrTaskNotFound
+	}
+	return s.GetTask(ctx, channelID, taskID, userID)
+}
+
 // ConvertMessageToTask creates a task from an existing message (asTask).
 // The message content becomes the task title, and the task is linked via message_id.
 func (s *TaskService) ConvertMessageToTask(ctx context.Context, channelID, messageID, userID string) (*Task, error) {
@@ -609,6 +672,9 @@ func (s *TaskService) UpdateTask(ctx context.Context, channelID, taskID, userID 
 		if err := validateStatusTransition(currentTask.Status, *req.Status); err != nil {
 			return nil, err
 		}
+		if err := s.validateStatusActor(ctx, currentTask, userID, *req.Status); err != nil {
+			return nil, err
+		}
 	}
 
 	// Build dynamic update
@@ -680,6 +746,30 @@ func (s *TaskService) UpdateTask(ctx context.Context, channelID, taskID, userID 
 	)
 
 	return updatedTask, nil
+}
+
+func (s *TaskService) validateStatusActor(ctx context.Context, task *Task, userID, newStatus string) error {
+	isClose := newStatus == TaskStatusClosed
+	isReopen := task.Status == TaskStatusClosed && newStatus != TaskStatusClosed
+	if isClose || isReopen {
+		isAgent, err := s.isAgentActor(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if isAgent {
+			return ErrTaskHumanOnly
+		}
+	}
+	if newStatus == TaskStatusDone && task.CreatorID != userID {
+		return ErrTaskNotCreator
+	}
+	return nil
+}
+
+func (s *TaskService) isAgentActor(ctx context.Context, userID string) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agents WHERE id = $1)`, userID).Scan(&exists)
+	return exists, err
 }
 
 // DeleteTask deletes a task.
@@ -844,8 +934,42 @@ func (s *TaskService) GetTaskGlobal(ctx context.Context, taskID, userID string) 
 
 // ListAllUserTasks returns all tasks across channels the user is a member of.
 func (s *TaskService) ListAllUserTasks(ctx context.Context, userID string, channelID string, status string, claimerID string, creatorID string) ([]Task, error) {
+	query, args := buildListAllUserTasksQuery(userID, channelID, status, claimerID, creatorID)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tasks []Task
+	for rows.Next() {
+		var t Task
+		var dueDate *time.Time
+		var parentTaskID string
+		err := rows.Scan(&t.ID, &t.TaskNumber, &t.ChannelID, &t.CreatorID, &t.CreatorName, &t.Title, &t.Description,
+			&t.Status, &t.ClaimerID, &t.Priority, &dueDate, &t.MessageID, &parentTaskID,
+			&t.SubtaskCount, &t.DoneSubtaskCount, &t.CreatedAt, &t.UpdatedAt, &t.ClaimerName, &t.ClaimerDeleted)
+		if err != nil {
+			return nil, err
+		}
+		if dueDate != nil {
+			t.DueDate = dueDate
+		}
+		if parentTaskID != "" {
+			t.ParentTaskID = &parentTaskID
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
+func buildListAllUserTasksQuery(userID string, channelID string, status string, claimerID string, creatorID string) (string, []interface{}) {
 	query := `SELECT t.id, t.task_number, t.channel_id, t.creator_id, COALESCE(u_creator.display_name, a_creator.name, '') as creator_name, t.title, COALESCE(t.description, ''),
-		t.status, COALESCE(t.claimer_id::text, ''), t.priority, t.due_date, COALESCE(t.message_id::text, ''), t.created_at, t.updated_at,
+		t.status, COALESCE(t.claimer_id::text, ''), t.priority, t.due_date, COALESCE(t.message_id::text, ''), COALESCE(t.parent_task_id::text, ''),
+		(SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id) AS subtask_count,
+		(SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.status = 'done') AS done_subtask_count,
+		t.created_at, t.updated_at,
 		COALESCE(u_claimer.display_name, a_claimer.name, '') AS claimer_name,
 		(NOT COALESCE(a_claimer.is_active, true)) AS claimer_deleted
 		FROM tasks t
@@ -881,27 +1005,7 @@ func (s *TaskService) ListAllUserTasks(ctx context.Context, userID string, chann
 	}
 	query += " ORDER BY t.created_at DESC LIMIT 100"
 
-	rows, err := s.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var tasks []Task
-	for rows.Next() {
-		var t Task
-		var dueDate *time.Time
-		err := rows.Scan(&t.ID, &t.TaskNumber, &t.ChannelID, &t.CreatorID, &t.CreatorName, &t.Title, &t.Description,
-			&t.Status, &t.ClaimerID, &t.Priority, &dueDate, &t.MessageID, &t.CreatedAt, &t.UpdatedAt, &t.ClaimerName, &t.ClaimerDeleted)
-		if err != nil {
-			return nil, err
-		}
-		if dueDate != nil {
-			t.DueDate = dueDate
-		}
-		tasks = append(tasks, t)
-	}
-	return tasks, rows.Err()
+	return query, args
 }
 
 // isPgUniqueViolation checks if an error is a PostgreSQL unique constraint violation.
@@ -918,4 +1022,3 @@ func truncateForTitle(s string, maxLen int) string {
 	}
 	return string(runes[:maxLen]) + "..."
 }
-

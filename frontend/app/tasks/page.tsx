@@ -28,6 +28,20 @@ const ThreadPanel = lazy(() =>
 );
 
 export default function TasksPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center bg-brutal-cream">
+          <Spinner size="md" />
+        </div>
+      }
+    >
+      <TasksPageContent />
+    </Suspense>
+  );
+}
+
+function TasksPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isAuthenticated, isLoading: authLoading } = useAuth();

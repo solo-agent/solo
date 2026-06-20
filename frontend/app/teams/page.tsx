@@ -1,6 +1,6 @@
 // ============================================================================
 // /teams — Teams page (v2)
-// Left column: Graph / Agents / Humans sections, each collapsible.
+// Left column: Agents / Humans sections, each collapsible.
 // Right panel: detail view for the selected section or item.
 // - No AppFrame: this page owns its layout (no global Inbox/Channels sidebar).
 // - Selection: 'graph' | 'agent' | 'human' | null. Defaults to first agent.
@@ -10,7 +10,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertCircle, RefreshCw, Plus, MessageSquare, User, FolderOpen } from 'lucide-react';
+import { AlertCircle, RefreshCw, Plus, MessageSquare, User, FolderOpen, Layers, Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { t } from '@/lib/i18n';
 import { useAgents } from '@/lib/hooks/use-agents';
@@ -20,6 +20,7 @@ import { useToast } from '@/components/ui/toast';
 import { NavBar } from '@/components/ui/navbar';
 import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
+import { Select } from '@/components/ui/select';
 import { TabBar } from '@/components/ui/tab-bar';
 import type { TabBarTab } from '@/components/ui/tab-bar';
 import {
@@ -31,12 +32,13 @@ import {
 import { BrutalAlert } from '@/components/ui/brutal-alert';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { TeamsLeftColumn, type TeamsSelection } from '@/components/teams/teams-left-column';
-import { TeamsGraphView } from '@/components/teams/teams-graph-view';
 import { TeamsAgentProfile } from '@/components/teams/teams-agent-profile';
 import { TeamsAgentWorkspace } from '@/components/teams/teams-agent-workspace';
 import { TeamsHumanProfile } from '@/components/teams/teams-human-profile';
 import { AgentForm, type AgentFormValues } from '@/components/agents/agent-form';
-import type { Agent } from '@/lib/types';
+import { listTemplates, applyTemplate, type Template } from '@/lib/templates-api';
+import { useCliDetection } from '@/lib/hooks/use-cli-detection';
+import type { Agent, AgentBackendDetectItem } from '@/lib/types';
 
 type AgentTab = 'profile' | 'workspace';
 
@@ -52,12 +54,20 @@ export default function TeamsPage() {
   const { user, isLoading: userLoading, error: userError, refetch: refetchUser } = useUser();
   const { createOrGetDM } = useDM();
   const { showToast } = useToast();
+  const { results: detection, isLoading: detectionLoading } = useCliDetection();
 
   const [selection, setSelection] = useState<TeamsSelection | null>(null);
   const [agentTab, setAgentTab] = useState<AgentTab>('profile');
   const [isDMLoading, setIsDMLoading] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [showChoiceDialog, setShowChoiceDialog] = useState(false);
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [applyingTemplate, setApplyingTemplate] = useState<string | null>(null);
+  const [templateError, setTemplateError] = useState<string | null>(null);
+  const [selectedModelProvider, setSelectedModelProvider] = useState('');
 
   // Auth guard
   useEffect(() => {
@@ -88,9 +98,46 @@ export default function TeamsPage() {
     setSelection({ kind: 'human', id: userId });
   }, []);
 
-  const handleSelectGraph = useCallback(() => {
-    setSelection({ kind: 'graph' });
+  const loadTemplates = useCallback(async () => {
+    setTemplatesLoading(true);
+    setTemplateError(null);
+    try {
+      setTemplates(await listTemplates());
+    } catch (err) {
+      setTemplateError(err instanceof Error ? err.message : 'Failed to load templates');
+    } finally {
+      setTemplatesLoading(false);
+    }
   }, []);
+
+  const handleOpenTemplates = useCallback(() => {
+    setShowChoiceDialog(false);
+    setShowTemplateModal(true);
+    void loadTemplates();
+    if (!selectedModelProvider) {
+      const available = (Object.values(detection) as AgentBackendDetectItem[]).find((rt) => rt.available);
+      if (available) setSelectedModelProvider(available.type);
+    }
+  }, [detection, loadTemplates, selectedModelProvider]);
+
+  const handleApplyTemplate = useCallback(async (templateID: string) => {
+    if (!selectedModelProvider) {
+      setTemplateError('Please select a runtime');
+      return;
+    }
+    setApplyingTemplate(templateID);
+    setTemplateError(null);
+    try {
+      await applyTemplate(templateID, selectedModelProvider);
+      await refetchAgents();
+      setShowTemplateModal(false);
+      showToast('Team created from template', 'success');
+    } catch (err) {
+      setTemplateError(err instanceof Error ? err.message : 'Failed to apply template');
+    } finally {
+      setApplyingTemplate(null);
+    }
+  }, [refetchAgents, selectedModelProvider, showToast]);
 
   const selectedAgent: Agent | undefined =
     selection?.kind === 'agent'
@@ -169,10 +216,9 @@ export default function TeamsPage() {
           agents={agents}
           humans={humans}
           selection={selection}
-          onSelectGraph={handleSelectGraph}
           onSelectAgent={handleSelectAgent}
           onSelectHuman={handleSelectHuman}
-          onCreateAgent={() => setIsCreateModalOpen(true)}
+          onCreateAgent={() => setShowChoiceDialog(true)}
         />
       </div>
 
@@ -203,11 +249,6 @@ export default function TeamsPage() {
               {t('retry')}
             </Button>
           </div>
-        )}
-
-        {/* Graph view */}
-        {selection?.kind === 'graph' && (
-          <TeamsGraphView agents={agents} onSelectAgent={handleSelectAgent} />
         )}
 
         {/* Human card */}
@@ -270,6 +311,40 @@ export default function TeamsPage() {
         )}
       </main>
 
+      <Dialog open={showChoiceDialog} onOpenChange={setShowChoiceDialog} width="sm">
+        <DialogHeader>
+          <DialogTitle>Create Agent</DialogTitle>
+          <DialogCloseButton onClick={() => setShowChoiceDialog(false)} />
+        </DialogHeader>
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={() => {
+              setShowChoiceDialog(false);
+              setIsCreateModalOpen(true);
+            }}
+            className="w-full flex items-center gap-3 p-4 border-2 border-black bg-white hover:bg-brutal-primary-light text-left"
+          >
+            <Plus className="h-5 w-5 flex-shrink-0" />
+            <div>
+              <div className="font-heading text-sm font-bold">Single Agent</div>
+              <p className="font-sans text-xs text-muted-foreground mt-0.5">Create one agent with custom name, role, and runtime.</p>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenTemplates}
+            className="w-full flex items-center gap-3 p-4 border-2 border-black bg-white hover:bg-brutal-accent-light text-left"
+          >
+            <Layers className="h-5 w-5 flex-shrink-0" />
+            <div>
+              <div className="font-heading text-sm font-bold">From Template</div>
+              <p className="font-sans text-xs text-muted-foreground mt-0.5">Create a team of agents with preset roles and relationships.</p>
+            </div>
+          </button>
+        </div>
+      </Dialog>
+
       {/* Create Agent Modal */}
       <Dialog
         open={isCreateModalOpen}
@@ -287,6 +362,79 @@ export default function TeamsPage() {
           isSubmitting={isCreating}
           submitLabel={t('teamsCreateAgent')}
         />
+      </Dialog>
+
+      <Dialog open={showTemplateModal} onOpenChange={setShowTemplateModal} width="lg">
+        <DialogHeader>
+          <DialogTitle>Create from Template</DialogTitle>
+          <DialogCloseButton onClick={() => setShowTemplateModal(false)} />
+        </DialogHeader>
+        <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+          <div>
+            <label className="block font-heading text-xs font-bold uppercase tracking-wider mb-1.5">
+              Runtime <span className="text-brutal-danger">*</span>
+            </label>
+            {detectionLoading ? (
+              <p className="font-mono text-xs text-muted-foreground">Detecting runtimes...</p>
+            ) : (
+              <Select
+                value={selectedModelProvider}
+                onChange={setSelectedModelProvider}
+                options={(Object.values(detection) as AgentBackendDetectItem[]).map((rt) => ({
+                  value: rt.type,
+                  label: `${rt.available ? '●' : '○'} ${rt.display_name}${rt.version ? ` (${rt.version})` : ''}`,
+                  disabled: !rt.available,
+                }))}
+                placeholder="Select runtime..."
+                size="md"
+                className="w-full"
+              />
+            )}
+          </div>
+
+          {templatesLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : templates.length === 0 ? (
+            <p className="font-mono text-sm text-muted-foreground text-center py-4">No templates available.</p>
+          ) : (
+            [...new Set(templates.map((tmpl) => tmpl.category))].map((category) => (
+              <div key={category}>
+                <h3 className="font-heading text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 border-b-2 border-black pb-1">
+                  {category}
+                </h3>
+                <div className="space-y-2">
+                  {templates.filter((tmpl) => tmpl.category === category).map((tmpl) => (
+                    <div key={tmpl.id} className="flex items-start gap-3 p-3 border-2 border-black bg-white">
+                      <span className="text-2xl flex-shrink-0">{tmpl.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-heading text-sm font-bold text-black">{tmpl.name}</span>
+                          <span className="inline-flex items-center justify-center h-5 min-w-[1.25rem] px-1 border-2 border-black bg-brutal-cream font-mono text-[10px] font-bold text-black">
+                            {tmpl.member_count}
+                          </span>
+                        </div>
+                        <p className="font-sans text-xs text-muted-foreground mt-0.5">{tmpl.description}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyTemplate(tmpl.id)}
+                        disabled={applyingTemplate === tmpl.id}
+                        className="flex-shrink-0 px-3 py-1.5 border-2 border-black bg-brutal-success text-black font-heading text-[10px] font-bold uppercase tracking-wider hover:bg-brutal-success-light disabled:opacity-50"
+                      >
+                        {applyingTemplate === tmpl.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Apply'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+          {templateError && (
+            <p className="font-mono text-xs text-brutal-danger">{templateError}</p>
+          )}
+        </div>
       </Dialog>
     </div>
   );

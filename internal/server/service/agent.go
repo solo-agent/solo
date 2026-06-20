@@ -18,8 +18,8 @@ import (
 
 // Default agent auto-response settings.
 const (
-	defaultContextMessageCount = 1  // v1.3: — deliver only the triggering message
-	defaultDebounceDuration   = 2 * time.Second
+	defaultContextMessageCount = 1 // v1.3: — deliver only the triggering message
+	defaultDebounceDuration    = 2 * time.Second
 )
 
 // maxAgentChainDepth limits the depth of agent-to-agent trigger chains
@@ -27,16 +27,16 @@ const (
 // B triggered C; C cannot trigger another agent because depth == 3.
 const maxAgentChainDepth = 3
 
-	// cascadeProtection detects runaway dispatch loops per channel.
-	const cascadeWindow = 10 * time.Second
-	const cascadeThreshold = 20
-	const cascadeCooldown = 60 * time.Second
+// cascadeProtection detects runaway dispatch loops per channel.
+const cascadeWindow = 10 * time.Second
+const cascadeThreshold = 20
+const cascadeCooldown = 60 * time.Second
 
-	type cascadeCount struct {
-		count         int
-		windowStart   time.Time
-		cooldownUntil time.Time
-	}
+type cascadeCount struct {
+	count         int
+	windowStart   time.Time
+	cooldownUntil time.Time
+}
 
 // AgentService handles agent lifecycle, auto-response triggering, and status management.
 type AgentService struct {
@@ -47,8 +47,8 @@ type AgentService struct {
 	// debounceMap tracks the last trigger time per (channelID, agentID) pair
 	// to prevent rapid re-triggering.
 	debounceMap sync.Map
-		// cascadeMap tracks dispatch velocity per channel for loop detection.
-		cascadeMap sync.Map
+	// cascadeMap tracks dispatch velocity per channel for loop detection.
+	cascadeMap sync.Map
 
 	// httpClient for daemon communication
 	httpClient *http.Client
@@ -117,8 +117,8 @@ func (s *AgentService) updateThreadDebounce(channelID, threadID, agentID string)
 //
 // mentionedAgentIDs: if non-empty, only the mentioned agents are triggered.
 // If empty but hasMentions is true, @patterns existed but none resolved — suppress
-// all agent responses. If empty and hasMentions is false, trigger all active
-// agents (auto-response).
+// all agent responses. If empty and hasMentions is false, trigger the channel
+// coordinator (or the first active agent as fallback).
 //
 // Called after a message is persisted and broadcast.
 func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, messageID, senderType, senderID string, mentionedAgentIDs []string, hasMentions bool, agentChain []string) {
@@ -142,12 +142,7 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 	// This tells each agent WHO was mentioned, enabling "if it's for someone else, stay out."
 	mentionedNames := s.resolveMentionedNames(ctx, mentionedAgentIDs)
 
-	// v1.3: ALL agents receive ALL messages. No filtering by @mention.
-	// Each agent decides autonomously whether to participate based on the
-	// CRITICAL RULES in the system prompt (aligned with the model).
-	// The mentionedNames list provides context — agents know if they were
-	// the target or if the message was for someone else.
-	targetAgents := agents
+	targetAgents := s.routeChannelTargets(ctx, agents, mentionedAgentIDs, hasMentions)
 
 	if len(targetAgents) == 0 {
 		return
@@ -188,7 +183,6 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 		newChain := append([]string(nil), agentChain...)
 		newChain = append(newChain, ag.ID)
 
-
 		// Select a daemon that supports this agent's model provider
 		daemon := s.dm.SelectDaemon("llm")
 		if daemon == nil {
@@ -212,17 +206,96 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 			Messages:     contextMessages,
 			SystemPrompt: ag.SystemPrompt,
 			ModelConfig: agent.ModelConfig{
-				Provider:    ag.ModelProvider,
-				Model:       ag.ModelName,
+				Provider: ag.ModelProvider,
+				Model:    ag.ModelName,
 			},
 			TaskContext:    taskContext,
-				AgentChain:     newChain,
-				MentionedNames: mentionedNames,
+			AgentChain:     newChain,
+			MentionedNames: mentionedNames,
 		}
 
 		// Dispatch via streaming SSE and handle events
 		go s.handleStreamingAgentTask(context.Background(), daemon, taskReq, ag)
 	}
+}
+
+func (s *AgentService) routeChannelTargets(ctx context.Context, agents []agentChannelInfo, mentionedAgentIDs []string, hasMentions bool) []agentChannelInfo {
+	if len(mentionedAgentIDs) > 0 {
+		return filterAgentsByID(agents, mentionedAgentIDs)
+	}
+	if hasMentions {
+		return nil
+	}
+	return s.chooseCoordinator(ctx, agents)
+}
+
+func filterAgentsByID(agents []agentChannelInfo, ids []string) []agentChannelInfo {
+	idSet := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		idSet[id] = true
+	}
+	out := make([]agentChannelInfo, 0, len(ids))
+	for _, ag := range agents {
+		if idSet[ag.ID] {
+			out = append(out, ag)
+		}
+	}
+	return out
+}
+
+type relationshipEdge struct {
+	from string
+	to   string
+}
+
+func (s *AgentService) chooseCoordinator(ctx context.Context, agents []agentChannelInfo) []agentChannelInfo {
+	if len(agents) <= 1 {
+		return agents
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT from_agent_id::text, to_agent_id::text
+		  FROM agent_relationships
+		 WHERE rel_type = 'assigns_to'
+	`)
+	if err == nil {
+		defer rows.Close()
+		edges := []relationshipEdge{}
+		for rows.Next() {
+			var fromID, toID string
+			if scanErr := rows.Scan(&fromID, &toID); scanErr != nil {
+				continue
+			}
+			edges = append(edges, relationshipEdge{from: fromID, to: toID})
+		}
+		if chosen := chooseCoordinatorFromEdges(agents, edges); len(chosen) > 0 {
+			return chosen
+		}
+	}
+
+	return agents[:1]
+}
+
+func chooseCoordinatorFromEdges(agents []agentChannelInfo, edges []relationshipEdge) []agentChannelInfo {
+	if len(agents) <= 1 {
+		return agents
+	}
+	ids := make(map[string]bool, len(agents))
+	for _, ag := range agents {
+		ids[ag.ID] = true
+	}
+	hasParent := map[string]bool{}
+	for _, edge := range edges {
+		if ids[edge.from] && ids[edge.to] {
+			hasParent[edge.to] = true
+		}
+	}
+	for _, ag := range agents {
+		if !hasParent[ag.ID] {
+			return []agentChannelInfo{ag}
+		}
+	}
+	return agents[:1]
 }
 
 // --- Broadcast dispatch helpers ---
@@ -237,7 +310,6 @@ func (s *AgentService) broadcastAgentThinking(threadID, channelID, agentID, agen
 	}
 }
 
-
 func (s *AgentService) broadcastAgentError(threadID, channelID, agentID, agentName, errMsg string) {
 	if threadID != "" {
 		s.broadcastThreadError(threadID, channelID, agentID, agentName, errMsg)
@@ -245,7 +317,6 @@ func (s *AgentService) broadcastAgentError(threadID, channelID, agentID, agentNa
 		s.broadcastError(channelID, agentID, agentName, errMsg)
 	}
 }
-
 
 // handleStreamingAgentTask dispatches a task to a daemon via SSE streaming
 // and forwards events to WebSocket subscribers.
@@ -347,9 +418,8 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 			}
 			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
 				s.broadcastAgentThinking(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, data.Thought)
-			s.broadcastAgentChunk(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "thinking", data.Thought, nil)
+				s.broadcastAgentChunk(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "thinking", data.Thought, nil)
 			}
-
 
 		case "text":
 			var data struct {
@@ -388,8 +458,8 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 			}
 			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
 				s.broadcastAgentChunk(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "tool_result", data.Output, map[string]interface{}{
-					"name":   data.ToolName,
-					"output": data.Output,
+					"name":    data.ToolName,
+					"output":  data.Output,
 					"call_id": data.CallID,
 				})
 			}
@@ -496,7 +566,6 @@ func (s *AgentService) broadcastThinking(channelID, agentID, agentName, thought 
 	s.hub.BroadcastToChannel(channelID, realtime.Envelope("agent.thinking", payload))
 }
 
-
 func (s *AgentService) broadcastError(channelID, agentID, agentName, errMsg string) {
 	payload := map[string]interface{}{
 		"channel_id": channelID,
@@ -506,7 +575,6 @@ func (s *AgentService) broadcastError(channelID, agentID, agentName, errMsg stri
 	}
 	s.hub.BroadcastToChannel(channelID, realtime.Envelope("agent.error", payload))
 }
-
 
 func (s *AgentService) broadcastTaskClaimed(task *Task, channelID string) {
 	if task == nil || s.hub == nil {
@@ -558,7 +626,6 @@ func (s *AgentService) broadcastTaskClaimed(task *Task, channelID string) {
 	)
 }
 
-
 // parseAndExecuteTaskClaims scans the agent's accumulated output text for
 // inline task claim directives and executes them. It returns the list of
 // task numbers that were successfully claimed.
@@ -571,7 +638,6 @@ func (s *AgentService) broadcastTaskClaimed(task *Task, channelID string) {
 //   - On success: broadcasts task.updated + message.updated to the channel
 //   - On already-claimed (409): logs and continues silently
 //   - On not-found: logs and continues
-
 
 func (s *AgentService) broadcastThreadThinking(threadID, channelID, agentID, agentName, thought string) {
 	payload := map[string]interface{}{
@@ -588,7 +654,6 @@ func (s *AgentService) broadcastThreadThinking(threadID, channelID, agentID, age
 	s.hub.BroadcastToScope(realtime.ScopeThread, threadID, envelope)
 }
 
-
 func (s *AgentService) broadcastThreadError(threadID, channelID, agentID, agentName, errMsg string) {
 	payload := map[string]interface{}{
 		"channel_id": channelID,
@@ -603,7 +668,6 @@ func (s *AgentService) broadcastThreadError(threadID, channelID, agentID, agentN
 	})
 	s.hub.BroadcastToScope(realtime.ScopeThread, threadID, envelope)
 }
-
 
 // broadcastThreadMessage broadcasts final message to thread scope plus
 // thread.reply notification to channel subscribers.
@@ -690,7 +754,6 @@ func (s *AgentService) broadcastAgentChunk(threadID, channelID, agentID, agentNa
 		s.hub.BroadcastToChannel(channelID, envelope)
 	}
 }
-
 
 func (s *AgentService) HandleTaskComplete(ctx context.Context, req *TaskCompleteRequest) error {
 	// Remove from pending task tracking
@@ -808,27 +871,17 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 		// No @mentions — prefer agents that have already replied in this thread.
 		threadAgentIDs, _ := s.getThreadParticipantAgents(ctx, threadID)
 		if len(threadAgentIDs) > 0 {
-			threadAgentSet := make(map[string]bool, len(threadAgentIDs))
-			for _, id := range threadAgentIDs {
-				threadAgentSet[id] = true
-			}
-			for _, ag := range agents {
-				if threadAgentSet[ag.ID] {
-					targetAgents = append(targetAgents, ag)
-				}
-			}
+			targetAgents = s.chooseCoordinator(ctx, filterAgentsByID(agents, threadAgentIDs))
 		}
 		// Fallback: if nobody has replied in this thread yet, trigger the
 		// agent whose message was replied to (the root message sender).
 		if len(targetAgents) == 0 {
 			if rootSenderID := s.getThreadRootAgentSender(ctx, threadID); rootSenderID != "" {
-				for _, ag := range agents {
-					if ag.ID == rootSenderID {
-						targetAgents = append(targetAgents, ag)
-						break
-					}
-				}
+				targetAgents = filterAgentsByID(agents, []string{rootSenderID})
 			}
+		}
+		if len(targetAgents) == 0 {
+			targetAgents = s.chooseCoordinator(ctx, agents)
 		}
 	}
 
@@ -849,7 +902,9 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 	_ = s.pool.QueryRow(ctx, `SELECT c.name, c.type FROM channels c
 		JOIN threads t ON t.channel_id = c.id WHERE t.id = $1`, threadID,
 	).Scan(&threadChannelName, &threadChannelType)
-	if threadChannelName == "" { slog.Warn("thread trigger: failed to resolve channel name", "thread_id", threadID) }
+	if threadChannelName == "" {
+		slog.Warn("thread trigger: failed to resolve channel name", "thread_id", threadID)
+	}
 
 	contextMsgs := make([]agent.Message, len(threadMsgs))
 	for i, tm := range threadMsgs {
@@ -880,30 +935,30 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 		}
 	}
 	// Prepend a system header when the agent is @mentioned into a new thread.
-		if len(mentionedAgentIDs) > 0 {
-			threadTargetPrefix := "#" + threadChannelName
-			if threadChannelType == "dm" {
-				threadTargetPrefix = "dm:@" + threadChannelName
-			}
-			threadShortID := threadID
-			if len(threadShortID) > 8 {
-				threadShortID = threadShortID[:8]
-			}
-			systemHeader := fmt.Sprintf("[System: You were added to a new thread via @mention. Reply in this thread.]\n"+
-				"target: %s:%s\n"+
-				"read thread: solo message read --target '%s:%s'",
-				threadTargetPrefix, threadShortID, threadTargetPrefix, threadShortID)
-			contextMsgs = append([]agent.Message{{
-				Role:     agent.RoleSystem,
-				Content:  systemHeader,
-				SenderID: "system",
-			}}, contextMsgs...)
+	if len(mentionedAgentIDs) > 0 {
+		threadTargetPrefix := "#" + threadChannelName
+		if threadChannelType == "dm" {
+			threadTargetPrefix = "dm:@" + threadChannelName
 		}
+		threadShortID := threadID
+		if len(threadShortID) > 8 {
+			threadShortID = threadShortID[:8]
+		}
+		systemHeader := fmt.Sprintf("[System: You were added to a new thread via @mention. Reply in this thread.]\n"+
+			"target: %s:%s\n"+
+			"read thread: solo message read --target '%s:%s'",
+			threadTargetPrefix, threadShortID, threadTargetPrefix, threadShortID)
+		contextMsgs = append([]agent.Message{{
+			Role:     agent.RoleSystem,
+			Content:  systemHeader,
+			SenderID: "system",
+		}}, contextMsgs...)
+	}
 	// Query for open tasks in the channel to provide task context to agents
 	taskContext := s.getChannelOpenTasksSummary(ctx, channelID)
 
-		// Resolve @mentioned agent names for context awareness.
-		threadMentionedNames := s.resolveMentionedNames(ctx, mentionedAgentIDs)
+	// Resolve @mentioned agent names for context awareness.
+	threadMentionedNames := s.resolveMentionedNames(ctx, mentionedAgentIDs)
 
 	for _, ag := range targetAgents {
 		// Use thread-scoped debounce so thread follow-ups are not blocked
@@ -914,20 +969,19 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 		}
 		s.updateThreadDebounce(channelID, threadID, ag.ID)
 
-			// SOLO-228-B: Validate agent trigger chain to prevent infinite loops.
-			if agentChain != nil {
-				if len(agentChain) >= maxAgentChainDepth {
-					slog.Debug("agent chain depth limit reached (thread)", "agent_id", ag.ID, "channel_id", channelID, "thread_id", threadID, "depth", len(agentChain))
-					continue
-				}
-				if containsStr(agentChain, ag.ID) {
-					slog.Debug("agent already in trigger chain (thread), skipping", "agent_id", ag.ID, "channel_id", channelID, "thread_id", threadID)
-					continue
-				}
+		// SOLO-228-B: Validate agent trigger chain to prevent infinite loops.
+		if agentChain != nil {
+			if len(agentChain) >= maxAgentChainDepth {
+				slog.Debug("agent chain depth limit reached (thread)", "agent_id", ag.ID, "channel_id", channelID, "thread_id", threadID, "depth", len(agentChain))
+				continue
 			}
-			newChain := append([]string(nil), agentChain...)
-			newChain = append(newChain, ag.ID)
-
+			if containsStr(agentChain, ag.ID) {
+				slog.Debug("agent already in trigger chain (thread), skipping", "agent_id", ag.ID, "channel_id", channelID, "thread_id", threadID)
+				continue
+			}
+		}
+		newChain := append([]string(nil), agentChain...)
+		newChain = append(newChain, ag.ID)
 
 		daemon := s.dm.SelectDaemon("llm")
 		if daemon == nil {
@@ -943,12 +997,12 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 			Messages:     contextMsgs,
 			SystemPrompt: ag.SystemPrompt,
 			ModelConfig: agent.ModelConfig{
-				Provider:    ag.ModelProvider,
-				Model:       ag.ModelName,
+				Provider: ag.ModelProvider,
+				Model:    ag.ModelName,
 			},
 			TaskContext:    taskContext,
-				AgentChain:     newChain,
-				MentionedNames: threadMentionedNames,
+			AgentChain:     newChain,
+			MentionedNames: threadMentionedNames,
 		}
 
 		// Use streaming for thread as well
@@ -978,30 +1032,22 @@ func (s *AgentService) CloseClaimWindow(taskID string) {
 // If mentionedAgentIDs is non-empty, only the @mentioned agents are triggered
 // immediately and a 30-second priority claim window is opened. After the window
 // expires, remaining agents are triggered if the task is still unclaimed.
-// Without @mentions, all agents are triggered at once (existing behavior).
+// Without @mentions, the channel coordinator is triggered.
 func (s *AgentService) TriggerAllAgentsForTask(ctx context.Context, channelID, taskID string, taskNumber int, taskTitle string, mentionedAgentIDs []string, agentChain []string) {
 	agents, err := s.getChannelActiveAgents(ctx, channelID)
 	if err != nil || len(agents) == 0 {
 		return
 	}
 
-	// If @mentions found, still trigger all agents immediately and autonomously.
-	// Each agent receives the task context and decides whether to claim via /claim #N.
-	// The mention set and claim window are preserved for priority notification.
 	if len(mentionedAgentIDs) > 0 {
-		// Open the claim priority window for mentioned agents
 		s.claimWindow.OpenWindow(taskID, mentionedAgentIDs)
-
-		// Trigger ALL agents immediately — not just @mentioned ones.
-		// In v1.3, every agent evaluates autonomously and decides whether to claim.
-		for _, ag := range agents {
+		for _, ag := range filterAgentsByID(agents, mentionedAgentIDs) {
 			go s.TriggerAgentForTask(ctx, channelID, taskID, ag.ID, taskNumber, taskTitle, "", agentChain, mentionedAgentIDs)
 		}
 		return
 	}
 
-	// No @mentions — trigger all agents (existing behavior)
-	for _, ag := range agents {
+	for _, ag := range s.chooseCoordinator(ctx, agents) {
 		go s.TriggerAgentForTask(ctx, channelID, taskID, ag.ID, taskNumber, taskTitle, "", agentChain, mentionedAgentIDs)
 	}
 }
@@ -1100,23 +1146,21 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 		slog.Warn("no available daemon for task agent trigger", "agent_id", ag.ID, "task_id", taskID)
 		return
 
-
 	}
 
-		// SOLO-228-B: Validate agent trigger chain for task dispatching.
-		if agentChain != nil {
-			if len(agentChain) >= maxAgentChainDepth {
-				slog.Debug("agent chain depth limit reached (task)", "agent_id", agentID, "channel_id", channelID, "depth", len(agentChain))
-				return
-			}
-			if containsStr(agentChain, agentID) {
-				slog.Debug("agent already in trigger chain (task), skipping", "agent_id", agentID, "channel_id", channelID)
-				return
-			}
+	// SOLO-228-B: Validate agent trigger chain for task dispatching.
+	if agentChain != nil {
+		if len(agentChain) >= maxAgentChainDepth {
+			slog.Debug("agent chain depth limit reached (task)", "agent_id", agentID, "channel_id", channelID, "depth", len(agentChain))
+			return
 		}
-		newChain := append([]string(nil), agentChain...)
-		newChain = append(newChain, agentID)
-
+		if containsStr(agentChain, agentID) {
+			slog.Debug("agent already in trigger chain (task), skipping", "agent_id", agentID, "channel_id", channelID)
+			return
+		}
+	}
+	newChain := append([]string(nil), agentChain...)
+	newChain = append(newChain, agentID)
 
 	// deliver the task as a regular channel message with
 	// [task #N status=todo] suffix, preserving the original sender and content.
@@ -1174,8 +1218,8 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 		Messages:     contextMsgs,
 		SystemPrompt: ag.SystemPrompt,
 		ModelConfig: agent.ModelConfig{
-			Provider:    ag.ModelProvider,
-			Model:       ag.ModelName,
+			Provider: ag.ModelProvider,
+			Model:    ag.ModelName,
 		},
 		// v1.3: No OriginTaskID — agents complete tasks via /done #N directives.
 	}
@@ -1187,10 +1231,10 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 		"thread_id", threadID,
 	)
 
-		// v1.3: Agent decides whether to claim autonomously after reading task context.
+	// v1.3: Agent decides whether to claim autonomously after reading task context.
 	// The daemon task request includes task context. The agent evaluates the task,
 	// and if it decides to claim, outputs /claim #N which is parsed by
-		go s.handleStreamingAgentTask(context.Background(), daemon, taskReq, ag)
+	go s.handleStreamingAgentTask(context.Background(), daemon, taskReq, ag)
 }
 
 // agentChannelInfo holds agent data needed for triggering.
@@ -1211,7 +1255,8 @@ func (s *AgentService) getChannelActiveAgents(ctx context.Context, channelID str
 		 JOIN agents a ON a.id = cm.member_id
 		 WHERE cm.channel_id = $1
 		   AND cm.member_type = 'agent'
-		   AND a.is_active = true`,
+		   AND a.is_active = true
+		 ORDER BY cm.joined_at ASC, a.created_at ASC, a.id ASC`,
 		channelID,
 	)
 	if err != nil {
@@ -1438,7 +1483,6 @@ func nullableStr(s string) *string {
 	return &s
 }
 
-
 func (s *AgentService) getChannelOpenTasksSummary(ctx context.Context, channelID string) string {
 	rows, err := s.pool.Query(ctx,
 		`SELECT task_number, title, priority
@@ -1481,19 +1525,20 @@ func (s *AgentService) getChannelOpenTasksSummary(ctx context.Context, channelID
 
 // daemonTaskRequest is the format for tasks sent from server to daemon.
 type daemonTaskRequest struct {
-	TaskID       string            `json:"task_id"`
-	AgentID      string            `json:"agent_id"`
-	ChannelID    string            `json:"channel_id"`
-	ThreadID     string            `json:"thread_id,omitempty"`
-	Messages     []agent.Message   `json:"messages"`
-	SystemPrompt string            `json:"system_prompt"`
-	ModelConfig  agent.ModelConfig `json:"model_config"`
-	OriginTaskID string            `json:"origin_task_id,omitempty"` // SOLO-123-B: task ID for status update
-	TaskContext  string            `json:"task_context,omitempty"`   // SOLO-221-B: summary of pending tasks in channel
-	AgentChain   []string          `json:"agent_chain,omitempty"`    // SOLO-228-B: agent trigger chain for loop prevention
-	MentionedNames  []string        `json:"mentioned_names,omitempty"` // v1.3: names of @mentioned agents for context awareness
-	InitialGreeting string          `json:"initial_greeting,omitempty"` // greeting message to prepend as system context
+	TaskID          string            `json:"task_id"`
+	AgentID         string            `json:"agent_id"`
+	ChannelID       string            `json:"channel_id"`
+	ThreadID        string            `json:"thread_id,omitempty"`
+	Messages        []agent.Message   `json:"messages"`
+	SystemPrompt    string            `json:"system_prompt"`
+	ModelConfig     agent.ModelConfig `json:"model_config"`
+	OriginTaskID    string            `json:"origin_task_id,omitempty"`   // SOLO-123-B: task ID for status update
+	TaskContext     string            `json:"task_context,omitempty"`     // SOLO-221-B: summary of pending tasks in channel
+	AgentChain      []string          `json:"agent_chain,omitempty"`      // SOLO-228-B: agent trigger chain for loop prevention
+	MentionedNames  []string          `json:"mentioned_names,omitempty"`  // v1.3: names of @mentioned agents for context awareness
+	InitialGreeting string            `json:"initial_greeting,omitempty"` // greeting message to prepend as system context
 }
+
 // containsStr returns true if the slice s contains value v.
 func containsStr(s []string, v string) bool {
 	for _, x := range s {
@@ -1507,7 +1552,6 @@ func containsStr(s []string, v string) bool {
 // isNotParticipating detects "not for me" / "not participating" messages
 // that agents output despite being told to output NOTHING. These should be
 // suppressed so they don't clutter the channel/thread.
-
 
 // inCascadeCooldown returns true if the channel is in cascade cooldown.
 func (s *AgentService) inCascadeCooldown(channelID string) bool {

@@ -102,6 +102,7 @@ function flatToMessage(event: {
   task_title?: string;
   task_status?: string;
   task_claimer_name?: string;
+  task_claimer_deleted?: boolean;
   has_unread_thread?: boolean;
   created_at: string;
   attachments?: Attachment[];

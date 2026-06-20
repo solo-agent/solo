@@ -80,6 +80,11 @@ export type WSServerEvent =
   | { type: 'task.created'; id: string; task_number: number; channel_id: string; creator_id: string; title: string; description?: string; status: string; claimer_id?: string; priority?: string; due_date?: string; message_id?: string; parent_task_id?: string; subtask_count?: number; done_subtask_count?: number; created_at: string; updated_at: string }
   | { type: 'task.updated'; id: string; task_number: number; channel_id: string; title: string; description?: string; status: string; claimer_id?: string; claimer_name?: string; claimer_deleted?: boolean; priority?: string; due_date?: string; message_id?: string; parent_task_id?: string; subtask_count?: number; done_subtask_count?: number; updated_at: string }
   | { type: 'task.deleted'; id: string; channel_id: string; task_number: number }
+  // ---- Relationship events ----
+  | { type: 'relationship_created'; id: string; from_agent_id: string; to_agent_id: string; rel_type: string; channel_id?: string; channel_name?: string }
+  | { type: 'relationship_updated'; id: string; from_agent_id: string; to_agent_id: string; rel_type: string; channel_id?: string; channel_name?: string }
+  | { type: 'relationship_deleted'; id: string; from_agent_id: string; to_agent_id: string }
+  | { type: 'agent_deleted'; agent_id: string; deleted_relationship_ids?: string[] }
   // ---- DM 事件 ----
   | { type: 'dm.message.new'; id: string; dm_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; created_at: string; attachments?: Attachment[]; thread_id?: string }
   | { type: 'dm.updated'; dm_id: string; last_message?: { content: string; sender_id: string; sender_name: string; created_at: string }; last_reply_at?: string; unread_count: number }

@@ -3,17 +3,17 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
-	"fmt"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/solo-ai/solo/internal/realtime"
 	"github.com/solo-ai/solo/internal/i18n"
+	"github.com/solo-ai/solo/internal/realtime"
 	"github.com/solo-ai/solo/internal/server/service"
 	"github.com/solo-ai/solo/internal/server/ws"
 )
@@ -117,6 +117,31 @@ func toTaskResponseList(tasks []service.Task) []TaskResponse {
 		resp[i] = toTaskResponse(&t)
 	}
 	return resp
+}
+
+func (h *TaskHandler) writeTaskUpdate(w http.ResponseWriter, task *service.Task) {
+	writeJSON(w, http.StatusOK, toTaskResponse(task))
+
+	var dueDateStr string
+	if task.DueDate != nil {
+		dueDateStr = task.DueDate.Format(time.RFC3339)
+	}
+	ws.BroadcastTaskUpdated(h.hub, ws.TaskUpdatedPayload{
+		ID:               task.ID,
+		TaskNumber:       task.TaskNumber,
+		ChannelID:        task.ChannelID,
+		Title:            task.Title,
+		Description:      task.Description,
+		Status:           task.Status,
+		ClaimerID:        task.ClaimerID,
+		ClaimerName:      task.ClaimerName,
+		Priority:         task.Priority,
+		DueDate:          dueDateStr,
+		MessageID:        task.MessageID,
+		UpdatedAt:        task.UpdatedAt.Format(time.RFC3339),
+		SubtaskCount:     task.SubtaskCount,
+		DoneSubtaskCount: task.DoneSubtaskCount,
+	})
 }
 
 // --- Channel-scoped handlers ---
@@ -238,7 +263,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Broadcast message.updated so the frontend TaskBadge shows task metadata
 	if task.MessageID != "" {
-		}
+	}
 
 	h.broadcastSystemMessageWithID(task.ChannelID, threadID, task.TaskNumber, task.Title, i18n.Active.SysTaskCreated, msgID, now, true)
 
@@ -360,6 +385,10 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "task not found")
 		case err == service.ErrTaskNotChannelMember:
 			writeError(w, http.StatusForbidden, "not a channel member")
+		case err == service.ErrTaskNotCreator:
+			writeError(w, http.StatusForbidden, "you are not the creator of this task")
+		case err == service.ErrTaskHumanOnly:
+			writeError(w, http.StatusForbidden, err.Error())
 		case err == service.ErrTaskInvalidStatus || err == service.ErrTaskInvalidTransition:
 			writeError(w, http.StatusBadRequest, err.Error())
 		default:
@@ -378,18 +407,18 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 		dueDateStr = task.DueDate.Format(time.RFC3339)
 	}
 	ws.BroadcastTaskUpdated(h.hub, ws.TaskUpdatedPayload{
-		ID:          task.ID,
-		TaskNumber:  task.TaskNumber,
-		ChannelID:   task.ChannelID,
-		Title:       task.Title,
-		Description: task.Description,
-		Status:      task.Status,
-		ClaimerID:   task.ClaimerID,
-		ClaimerName: task.ClaimerName,
-		Priority:    task.Priority,
-		DueDate:     dueDateStr,
-		MessageID:   task.MessageID,
-		UpdatedAt:   task.UpdatedAt.Format(time.RFC3339),
+		ID:               task.ID,
+		TaskNumber:       task.TaskNumber,
+		ChannelID:        task.ChannelID,
+		Title:            task.Title,
+		Description:      task.Description,
+		Status:           task.Status,
+		ClaimerID:        task.ClaimerID,
+		ClaimerName:      task.ClaimerName,
+		Priority:         task.Priority,
+		DueDate:          dueDateStr,
+		MessageID:        task.MessageID,
+		UpdatedAt:        task.UpdatedAt.Format(time.RFC3339),
 		SubtaskCount:     task.SubtaskCount,
 		DoneSubtaskCount: task.DoneSubtaskCount,
 	})
@@ -495,7 +524,10 @@ func (h *TaskHandler) Claim(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve task_number to UUID
 	t, err := h.svc.GetTask(r.Context(), channelID, taskID, userID)
-	if err != nil { writeError(w, http.StatusNotFound, "task not found"); return }
+	if err != nil {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
 
 	// Check @mention priority claim window (P25-04-B)
 	if h.agentSvc != nil {
@@ -541,18 +573,18 @@ func (h *TaskHandler) Claim(w http.ResponseWriter, r *http.Request) {
 		dueDateStr = task.DueDate.Format(time.RFC3339)
 	}
 	ws.BroadcastTaskUpdated(h.hub, ws.TaskUpdatedPayload{
-		ID:          task.ID,
-		TaskNumber:  task.TaskNumber,
-		ChannelID:   task.ChannelID,
-		Title:       task.Title,
-		Description: task.Description,
-		Status:      task.Status,
-		ClaimerID:   task.ClaimerID,
-		ClaimerName: task.ClaimerName,
-		Priority:    task.Priority,
-		DueDate:     dueDateStr,
-		MessageID:   task.MessageID,
-		UpdatedAt:   task.UpdatedAt.Format(time.RFC3339),
+		ID:               task.ID,
+		TaskNumber:       task.TaskNumber,
+		ChannelID:        task.ChannelID,
+		Title:            task.Title,
+		Description:      task.Description,
+		Status:           task.Status,
+		ClaimerID:        task.ClaimerID,
+		ClaimerName:      task.ClaimerName,
+		Priority:         task.Priority,
+		DueDate:          dueDateStr,
+		MessageID:        task.MessageID,
+		UpdatedAt:        task.UpdatedAt.Format(time.RFC3339),
 		SubtaskCount:     task.SubtaskCount,
 		DoneSubtaskCount: task.DoneSubtaskCount,
 	})
@@ -624,7 +656,10 @@ func (h *TaskHandler) Unclaim(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve task_number to UUID
 	t, err := h.svc.GetTask(r.Context(), channelID, taskID, userID)
-	if err != nil { writeError(w, http.StatusNotFound, "task not found"); return }
+	if err != nil {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
 
 	task, err := h.svc.UnclaimTask(r.Context(), channelID, t.ID, userID)
 	if err != nil {
@@ -701,6 +736,58 @@ func (h *TaskHandler) Unclaim(w http.ResponseWriter, r *http.Request) {
 		}
 		h.hub.BroadcastToThread(threadID, ws.Envelope(ws.EventThreadMessageNew, threadMsgPayload))
 	}
+}
+
+func (h *TaskHandler) Submit(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleAction(w, r, h.svc.SubmitTask)
+}
+
+func (h *TaskHandler) Accept(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleAction(w, r, h.svc.AcceptTask)
+}
+
+func (h *TaskHandler) Reject(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleAction(w, r, h.svc.RejectTask)
+}
+
+func (h *TaskHandler) lifecycleAction(
+	w http.ResponseWriter,
+	r *http.Request,
+	action func(context.Context, string, string, string) (*service.Task, error),
+) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	channelID := chi.URLParam(r, "channelID")
+	taskID := chi.URLParam(r, "taskID")
+	if channelID == "" || taskID == "" {
+		writeError(w, http.StatusBadRequest, "channel ID and task ID are required")
+		return
+	}
+
+	task, err := action(r.Context(), channelID, taskID, userID)
+	if err != nil {
+		switch {
+		case err == service.ErrTaskNotFound:
+			writeError(w, http.StatusNotFound, "task not found")
+		case err == service.ErrTaskNotChannelMember:
+			writeError(w, http.StatusForbidden, "not a channel member")
+		case err == service.ErrTaskNotClaimer:
+			writeError(w, http.StatusForbidden, "you are not the claimer of this task")
+		case err == service.ErrTaskNotCreator:
+			writeError(w, http.StatusForbidden, "you are not the creator of this task")
+		case err == service.ErrTaskNotSubmittable || err == service.ErrTaskNotReviewable:
+			writeError(w, http.StatusConflict, err.Error())
+		default:
+			slog.Error("failed task lifecycle action", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to update task")
+		}
+		return
+	}
+
+	h.writeTaskUpdate(w, task)
 }
 
 // --- asTask — Convert message to task ---
@@ -896,8 +983,6 @@ func (h *TaskHandler) broadcastSystemMessageWithID(channelID, threadID string, t
 		)
 	}
 }
-
-
 
 func formatSystemMessage(taskNumber int, title, action string) string {
 	return fmt.Sprintf("📋 Task #%d %s: %s", taskNumber, action, title)
@@ -1155,6 +1240,10 @@ func (h *TaskHandler) UpdateGlobal(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "task not found")
 		case err == service.ErrTaskNotChannelMember:
 			writeError(w, http.StatusForbidden, "not a channel member")
+		case err == service.ErrTaskNotCreator:
+			writeError(w, http.StatusForbidden, "you are not the creator of this task")
+		case err == service.ErrTaskHumanOnly:
+			writeError(w, http.StatusForbidden, err.Error())
 		case err == service.ErrTaskInvalidStatus || err == service.ErrTaskInvalidTransition:
 			writeError(w, http.StatusBadRequest, err.Error())
 		default:
@@ -1173,18 +1262,18 @@ func (h *TaskHandler) UpdateGlobal(w http.ResponseWriter, r *http.Request) {
 		dueDateStr = updated.DueDate.Format(time.RFC3339)
 	}
 	ws.BroadcastTaskUpdated(h.hub, ws.TaskUpdatedPayload{
-		ID:          updated.ID,
-		TaskNumber:  updated.TaskNumber,
-		ChannelID:   updated.ChannelID,
-		Title:       updated.Title,
-		Description: updated.Description,
-		Status:      updated.Status,
-		ClaimerID:   updated.ClaimerID,
-		ClaimerName: updated.ClaimerName,
-		Priority:    updated.Priority,
-		DueDate:     dueDateStr,
-		MessageID:   updated.MessageID,
-		UpdatedAt:   updated.UpdatedAt.Format(time.RFC3339),
+		ID:               updated.ID,
+		TaskNumber:       updated.TaskNumber,
+		ChannelID:        updated.ChannelID,
+		Title:            updated.Title,
+		Description:      updated.Description,
+		Status:           updated.Status,
+		ClaimerID:        updated.ClaimerID,
+		ClaimerName:      updated.ClaimerName,
+		Priority:         updated.Priority,
+		DueDate:          dueDateStr,
+		MessageID:        updated.MessageID,
+		UpdatedAt:        updated.UpdatedAt.Format(time.RFC3339),
 		SubtaskCount:     updated.SubtaskCount,
 		DoneSubtaskCount: updated.DoneSubtaskCount,
 	})

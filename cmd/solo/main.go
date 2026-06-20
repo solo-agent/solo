@@ -11,6 +11,9 @@
 //	solo task update   -n <number> -c <channel_id> -s <status>
 //	solo task create   -c <channel_id> --title <title> [--description <desc>] [--priority <p0-p3>] [--parent <n>]
 //	solo task unclaim  -n <number> -c <channel_id>
+//	solo task submit   -n <number> -c <channel_id>
+//	solo task accept   -n <number> -c <channel_id>
+//	solo task reject   -n <number> -c <channel_id>
 //	solo channel members -c <channel_id> [--output json]
 //	solo channel join  --target <#channel-name>
 //	solo thread unfollow --target <#channel:shortid>
@@ -104,12 +107,13 @@ func runCLI(args []string) int {
 // task
 // ---------------------------------------------------------------------------
 
-
 // proxyRequest calls the daemon proxy instead of the server API directly.
 // This keeps local thinking separate from channel communication.
 func proxyRequest(action, channelID, content, threadID, token string, taskNumber int, status string) (int, []byte, error) {
 	daemonURL := os.Getenv("SOLO_DAEMON_URL")
-	if daemonURL == "" { daemonURL = "http://127.0.0.1:8081" }
+	if daemonURL == "" {
+		daemonURL = "http://127.0.0.1:8081"
+	}
 	agentID := os.Getenv("SOLO_AGENT_ID")
 	if agentID == "" {
 		return 0, nil, fmt.Errorf("SOLO_AGENT_ID not set")
@@ -117,10 +121,18 @@ func proxyRequest(action, channelID, content, threadID, token string, taskNumber
 	body := map[string]interface{}{
 		"agent_id": agentID, "action": action, "channel_id": channelID,
 	}
-	if content != "" { body["content"] = content }
-	if threadID != "" { body["thread_id"] = threadID }
-	if taskNumber > 0 { body["task_number"] = taskNumber }
-	if status != "" { body["status"] = status }
+	if content != "" {
+		body["content"] = content
+	}
+	if threadID != "" {
+		body["thread_id"] = threadID
+	}
+	if taskNumber > 0 {
+		body["task_number"] = taskNumber
+	}
+	if status != "" {
+		body["status"] = status
+	}
 	// For task_claim with -m, the message_id is passed in the content field.
 	// Forward it as task_id so the proxy can construct the correct URL path.
 	// Only when -n is NOT also specified (taskNumber <= 0) — -n takes priority.
@@ -130,20 +142,23 @@ func proxyRequest(action, channelID, content, threadID, token string, taskNumber
 	reqBody, _ := json.Marshal(body)
 	url := daemonURL + "/internal/daemon/proxy"
 	req, err := http.NewRequest("POST", url, bytes.NewReader(reqBody))
-	if err != nil { return 0, nil, err }
+	if err != nil {
+		return 0, nil, err
+	}
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
-	if err != nil { return 0, nil, err }
+	if err != nil {
+		return 0, nil, err
+	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, respBody, nil
 }
 
-
 func handleTask(args []string, baseURL, token string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "solo: error: task subcommand required (list, claim, update, create, unclaim)")
+		fmt.Fprintln(os.Stderr, "solo: error: task subcommand required (list, claim, update, create, unclaim, submit, accept, reject)")
 		printUsage()
 		doExit(exitUsage)
 	}
@@ -159,6 +174,8 @@ func handleTask(args []string, baseURL, token string) {
 		handleTaskCreate(args[1:], baseURL, token)
 	case "unclaim":
 		handleTaskUnclaim(args[1:], baseURL, token)
+	case "submit", "accept", "reject":
+		handleTaskLifecycle(args[1:], baseURL, token, args[0])
 	default:
 		fmt.Fprintf(os.Stderr, "solo: error: unknown task subcommand %q\n", args[0])
 		printUsage()
@@ -387,7 +404,7 @@ func handleTaskCreate(args []string, baseURL, token string) {
 		}
 	}
 
-channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
+	channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
 	if resolveErr != nil {
 		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
 		doExit(exitBusiness)
@@ -464,6 +481,45 @@ func handleTaskUnclaim(args []string, baseURL, token string) {
 		doExit(exitUsage)
 	}
 
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+
+	fmt.Println(string(body))
+	doExit(exitOK)
+}
+
+func handleTaskLifecycle(args []string, baseURL, token, action string) {
+	var channel string
+	var number int
+	fs := flag.NewFlagSet("task "+action, flag.ExitOnError)
+	fs.StringVar(&channel, "c", "", "Channel ID or #name (required)")
+	fs.StringVar(&channel, "channel", "", "Channel ID or #name (required)")
+	fs.IntVar(&number, "n", 0, "Task number (required)")
+	fs.IntVar(&number, "number", 0, "Task number (required)")
+	fs.Parse(args)
+
+	if channel == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: -c <channel_id> is required")
+		doExit(exitUsage)
+	}
+	if number <= 0 {
+		fmt.Fprintln(os.Stderr, "solo: error: -n <number> must be a positive integer")
+		doExit(exitUsage)
+	}
+
+	channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+
+	url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d/%s", baseURL, channelID, number, action)
+	statusCode, body, err := doHTTP(http.MethodPost, url, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
 	if statusCode >= 400 {
 		handleNonProxyHTTPError(statusCode, body)
 	}
@@ -762,15 +818,23 @@ func handleMessageRead(args []string, baseURL, token string) {
 			channelBase = "/api/v1/dm"
 		}
 		url := fmt.Sprintf("%s%s/%s/messages/%s/thread?limit=%d", baseURL, channelBase, channelID, threadMsgID, limit)
-		if before != "" { url += "&before=" + before }
-		if after != "" { url += "&after=" + after }
+		if before != "" {
+			url += "&before=" + before
+		}
+		if after != "" {
+			url += "&after=" + after
+		}
 		statusCode, body, err := doHTTP(http.MethodGet, url, token, nil)
-		if err != nil { fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err); doExit(exitUsage) }
-		if statusCode >= 400 { handleNonProxyHTTPError(statusCode, body) }
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+			doExit(exitUsage)
+		}
+		if statusCode >= 400 {
+			handleNonProxyHTTPError(statusCode, body)
+		}
 		fmt.Println(string(body))
 		doExit(exitOK)
 	}
-
 
 	channelBase := "/api/v1/channels"
 	if isDM {
@@ -927,14 +991,25 @@ func resolveTarget(baseURL, token, target string) (channelID, threadMsgID string
 func resolveChannelName(baseURL, token, name string) (string, error) {
 	url := fmt.Sprintf("%s/api/v1/server/info", baseURL)
 	_, body, err := doHTTP(http.MethodGet, url, token, nil)
-	if err != nil { return "", err }
-	var resp struct {
-		Channels []struct{ ID string `json:"id"`; Name string `json:"name"` }
-		Agents   []struct{ ID, Name, Handle string }
-		Humans   []struct{ ID, Name, Handle string }
+	if err != nil {
+		return "", err
 	}
-	if json.Unmarshal(body, &resp) != nil { return "", fmt.Errorf("parse server info") }
-	for _, ch := range resp.Channels { if ch.Name == name { return ch.ID, nil } }
+	var resp struct {
+		Channels []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		Agents []struct{ ID, Name, Handle string }
+		Humans []struct{ ID, Name, Handle string }
+	}
+	if json.Unmarshal(body, &resp) != nil {
+		return "", fmt.Errorf("parse server info")
+	}
+	for _, ch := range resp.Channels {
+		if ch.Name == name {
+			return ch.ID, nil
+		}
+	}
 	return "", fmt.Errorf("channel %q not found", name)
 }
 
@@ -1141,6 +1216,9 @@ func printUsage() {
   solo task update   -n <number> -c <channel_id> -s <status>
   solo task create   -c <channel_id> --title <title> [--description <desc>] [--priority <p0-p3>] [--parent <n>]
   solo task unclaim  -n <number> -c <channel_id>
+  solo task submit   -n <number> -c <channel_id>
+  solo task accept   -n <number> -c <channel_id>
+  solo task reject   -n <number> -c <channel_id>
   solo channel members -c <channel_id> [--output json]
   solo channel join  --target <#channel-name>
   solo thread unfollow --target <#channel:shortid>
