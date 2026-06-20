@@ -86,7 +86,7 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 		b.WriteString("```bash\ncat ~/.solo/agents/<your-agent-id>/workspace/RELATIONSHIPS.md\n```\n\n")
 	}
 	b.WriteString("RELATIONSHIPS.md is auto-generated and updates when relationships change. Re-read it before processing any task — your colleagues or their delegation criteria may have changed since your last turn.\n\n")
-	b.WriteString("If RELATIONSHIPS.md says \"None\" for all sections, work independently. If it lists colleagues with delegation criteria, delegate to them via @mention when their criteria match — do NOT attempt work that belongs to a colleague.\n\n")
+	b.WriteString("If RELATIONSHIPS.md lists colleagues with delegation criteria, delegate to them via @mention when their criteria match — do NOT attempt work that belongs to a colleague.\n\n")
 
 	// Messaging
 	b.WriteString("## Messaging\n\n")

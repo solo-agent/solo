@@ -60,6 +60,7 @@ func TestBuildSystemPrompt_RelationshipsBeforeMessaging(t *testing.T) {
 	assertHas(t, p, "Agent Relationships — CHECK BEFORE ACTING")
 	assertHas(t, p, "cat /tmp/bot-workspace/RELATIONSHIPS.md")
 	assertHas(t, p, "Re-read it before processing any task")
+	assertNotHas(t, p, "work independently")
 
 	relationships := strings.Index(p, "## Agent Relationships")
 	messaging := strings.Index(p, "## Messaging")
@@ -262,5 +263,12 @@ func assertHas(t *testing.T, s, substr string) {
 	t.Helper()
 	if !strings.Contains(s, substr) {
 		t.Errorf("expected %q", substr)
+	}
+}
+
+func assertNotHas(t *testing.T, s, substr string) {
+	t.Helper()
+	if strings.Contains(s, substr) {
+		t.Errorf("did not expect %q", substr)
 	}
 }
