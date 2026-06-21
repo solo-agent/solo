@@ -8,11 +8,12 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, AlertCircle, FolderOpen, FileText, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2 } from 'lucide-react';
+import { RefreshCw, AlertCircle, FolderOpen, FileText, Maximize2, Minimize2 } from 'lucide-react';
 import { useWorkspaceFiles } from '@/lib/hooks/use-workspace-files';
 import { FileTree } from '@/components/workspace/file-tree';
 import { FilePreview } from '@/components/workspace/file-preview';
 import { Skeleton } from '@/components/ui/skeleton';
+import { iconActionClass } from '@/components/ui/button';
 import { t } from '@/lib/i18n';
 import type { WorkspaceFileNode } from '@/lib/types';
 
@@ -36,7 +37,6 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
   const [isContentLoading, setIsContentLoading] = useState(false);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [filePaneWidth, setFilePaneWidth] = useState(160);
-  const [isFilePaneCollapsed, setIsFilePaneCollapsed] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Initial load: trigger the hook to fetch the root directory
@@ -151,9 +151,6 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
       {/* Path bar */}
       <div className="flex items-center justify-between border-b-4 border-black bg-white px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="border-2 border-black bg-brutal-primary px-2 py-0.5 font-heading text-[10px] font-black uppercase tracking-wider shadow-brutal-sm">
-            Workspace
-          </span>
           <div className="flex min-w-0 items-center gap-2 border-2 border-black bg-brutal-cream px-2 py-1 font-mono text-[11px] text-muted-foreground">
             <FolderOpen className="h-3.5 w-3.5 flex-shrink-0" />
             <span className="truncate">
@@ -165,18 +162,18 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
           <button
             type="button"
             onClick={() => setIsFullscreen((fullscreen) => !fullscreen)}
-            className="btn-brutal btn-brutal-xs"
+            className={iconActionClass()}
             aria-label={isFullscreen ? 'Exit fullscreen workspace' : 'Fullscreen workspace'}
           >
-            {isFullscreen ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+            {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
           </button>
           <button
             type="button"
             onClick={() => loadTree()}
-            className="btn-brutal btn-brutal-xs"
+            className={iconActionClass()}
             aria-label={t('workspaceRefreshTree')}
           >
-            <RefreshCw className="h-3 w-3" />
+            <RefreshCw className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
@@ -185,70 +182,48 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
       <div className="flex flex-1 overflow-hidden">
         <div
           className="relative h-full flex-shrink-0 overflow-hidden border-r-4 border-black bg-brutal-cream"
-          style={{ width: isFilePaneCollapsed ? 34 : filePaneWidth }}
+          style={{ width: filePaneWidth }}
         >
-          <div className="flex items-center border-b-4 border-black bg-white px-3 py-2">
-            {!isFilePaneCollapsed && (
-              <span className="border-2 border-black bg-white px-1.5 py-0.5 font-heading text-[10px] font-black uppercase tracking-wider text-black">
-                Files
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={() => setIsFilePaneCollapsed((collapsed) => !collapsed)}
-              className="ml-auto flex h-6 w-6 items-center justify-center border-2 border-transparent bg-white text-muted-foreground transition-all hover:border-black hover:bg-brutal-primary-light hover:text-black active:translate-x-0.5 active:translate-y-0.5"
-              aria-label={isFilePaneCollapsed ? 'Expand files' : 'Collapse files'}
-            >
-              {isFilePaneCollapsed ? <PanelLeftOpen className="h-3 w-3" /> : <PanelLeftClose className="h-3 w-3" />}
-            </button>
+          <div className="flex h-10 items-center border-b-4 border-black bg-white px-3">
+            <span className="font-heading text-xs font-black uppercase tracking-wider text-black">
+              Files
+            </span>
           </div>
-          {!isFilePaneCollapsed && (
-            <div className="h-[calc(100%-2.25rem)] overflow-y-auto">
-              <FileTree
-                tree={tree}
-                selectedPath={selectedPath}
-                expandedPaths={expandedPaths}
-                onSelect={handleSelect}
-                onToggleExpand={handleToggleExpand}
-                onLoadDirectory={handleLoadDirectory}
-              />
-            </div>
-          )}
-          {!isFilePaneCollapsed && (
-            <div
-              className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-primary/50"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                const startX = e.clientX;
-                const startWidth = filePaneWidth;
-                const onMove = (ev: MouseEvent) => {
-                  setFilePaneWidth(Math.max(120, Math.min(240, startWidth + ev.clientX - startX)));
-                };
-                const onUp = () => {
-                  document.removeEventListener('mousemove', onMove);
-                  document.removeEventListener('mouseup', onUp);
-                };
-                document.addEventListener('mousemove', onMove);
-                document.addEventListener('mouseup', onUp);
-              }}
+          <div className="h-[calc(100%-2.5rem)] overflow-y-auto">
+            <FileTree
+              tree={tree}
+              selectedPath={selectedPath}
+              expandedPaths={expandedPaths}
+              onSelect={handleSelect}
+              onToggleExpand={handleToggleExpand}
+              onLoadDirectory={handleLoadDirectory}
             />
-          )}
+          </div>
+          <div
+            className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-primary/50"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              const startX = e.clientX;
+              const startWidth = filePaneWidth;
+              const onMove = (ev: MouseEvent) => {
+                setFilePaneWidth(Math.max(120, Math.min(240, startWidth + ev.clientX - startX)));
+              };
+              const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+              };
+              document.addEventListener('mousemove', onMove);
+              document.addEventListener('mouseup', onUp);
+            }}
+          />
         </div>
         <div className="flex h-full flex-1 flex-col overflow-hidden bg-brutal-cream">
           <div className="flex items-center justify-between border-b-4 border-black bg-white px-3 py-2">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="border-2 border-black bg-brutal-info-light px-2 py-0.5 font-heading text-[10px] font-black uppercase tracking-wider">
-                Readonly
-              </span>
               <span className="truncate font-heading text-sm font-black">
                 {selectedPath ? selectedPath.split('/').pop() : 'No file selected'}
               </span>
             </div>
-            {selectedPath && (
-              <span className="ml-3 flex-shrink-0 font-mono text-[10px] font-bold uppercase text-muted-foreground">
-                {selectedPath.split('.').pop()}
-              </span>
-            )}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto bg-brutal-cream">
             {selectedPath ? (

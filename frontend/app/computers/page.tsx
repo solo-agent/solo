@@ -24,6 +24,7 @@ import {
   MonitorDot,
   Server,
   Cpu,
+  ChevronDown,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { t } from '@/lib/i18n';
@@ -229,11 +230,11 @@ export default function ComputersPage() {
         />
       </div>
 
-      <main className="flex flex-1 flex-col overflow-hidden">
+      <main className="flex flex-1 flex-col overflow-hidden bg-white">
         {/* Top bar (page label lives in the left column) */}
         <div className="flex flex-shrink-0 items-center h-14 border-b-2 border-black bg-brutal-cream px-4" />
-        <div className="flex-1 overflow-y-auto px-6 py-6">
-          <div className="w-full max-w-[760px]">
+        <div className="flex-1 overflow-y-auto bg-white">
+          <div className={cn('w-full', selectedComputer ? '' : 'px-6 py-6')}>
             {/* Error state */}
             {error && (
               <div className="mb-6 space-y-2">
@@ -371,8 +372,8 @@ function ComputerCard({
   const osInfo = getOsIcon(computer.os);
 
   return (
-    <div className="bg-brutal-cream">
-      <div className="border-2 border-black bg-white p-4">
+    <div className="bg-white">
+      <div className="border-b-2 border-black bg-white px-4 py-3">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-info shadow-brutal-sm">
             {osInfo.icon}
@@ -410,7 +411,7 @@ function ComputerCard({
 
       {/* Detail panel */}
       <div>
-        <div className="space-y-4 bg-brutal-cream py-4">
+        <div className="space-y-4 bg-white p-4">
           {/* Section: System Info */}
           <section className={detailSectionClass()}>
             <SectionHeader label={t('computersSystemInfo')} />
@@ -441,40 +442,46 @@ function ComputerCard({
             <div className="space-y-1 font-body text-sm">
               <InfoRow label={t('computersName')}>
                 {editingId === computer.id ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex w-full items-center justify-between gap-3">
                     <input
                       ref={editInputRef}
                       type="text"
                       value={editName}
                       onChange={(e) => onEditNameChange(e.target.value)}
                       onKeyDown={(e) => onEditKeyDown(e, computer.id)}
-                      className="input-brutal h-8 w-48 py-1 text-sm"
+                      className="input-brutal h-8 w-full max-w-sm py-1 text-sm"
                       disabled={isSaving}
                     />
-                    <Button
-                      variant="default"
-                      size="icon"
-                      onClick={() => onSaveName(computer.id)}
-                      disabled={isSaving || !editName.trim()}
-                      aria-label={t('computersSaveName')}
-                      className="h-8 w-8"
-                    >
-                      <Check className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={onCancelEdit}
-                      disabled={isSaving}
-                      aria-label={t('computersCancelEdit')}
-                      className="h-8 w-8"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex flex-shrink-0 items-center gap-1.5">
+                      <Button
+                        type="button"
+                        variant="success"
+                        size="sm"
+                        onClick={() => onSaveName(computer.id)}
+                        disabled={isSaving || !editName.trim()}
+                        aria-label={t('computersSaveName')}
+                        className="gap-1 text-[10px] uppercase tracking-wider"
+                      >
+                        <Check className="h-3 w-3" />
+                        {isSaving ? t('saving') : t('save')}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={onCancelEdit}
+                        disabled={isSaving}
+                        aria-label={t('computersCancelEdit')}
+                        className="gap-1 text-[10px] uppercase tracking-wider"
+                      >
+                        <X className="h-3 w-3" />
+                        {t('cancel')}
+                      </Button>
+                    </div>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold">{computer.name}</span>
+                  <div className="flex w-full items-center justify-between gap-3">
+                    <span className="min-w-0 truncate font-bold">{computer.name}</span>
                     <button
                       type="button"
                       onClick={() => onStartEdit(computer)}
@@ -528,10 +535,7 @@ function ComputerCard({
 
           {/* Section: Connected Agents (v1.5) */}
           <section className={detailSectionClass()}>
-            <SectionHeader label={t('computersConnectedAgents')} />
-            <div className="mt-3">
-              <ConnectedAgents key={agentVersion} computerId={computer.id} onCreateAgent={onCreateAgent} />
-            </div>
+            <ConnectedAgents key={agentVersion} computerId={computer.id} onCreateAgent={onCreateAgent} />
           </section>
 
         </div>
@@ -545,26 +549,58 @@ function ComputerCard({
 function ConnectedAgents({ computerId, onCreateAgent }: { computerId: string | null; onCreateAgent?: () => void }) {
   const { agents, isLoading, error } = useComputerAgents(computerId);
   const router = useRouter();
+  const [isOpen, setIsOpen] = useState(false);
 
   if (!computerId) {
     return <p className="font-body text-sm text-muted-foreground">{t('computersExpandCard')}</p>;
   }
 
+  const Header = (
+    <button
+      type="button"
+      onClick={() => setIsOpen((open) => !open)}
+      className="flex w-full items-center justify-between gap-2 text-left"
+    >
+      <span className={detailSectionTitleClass()}>
+        ★ {t('computersConnectedAgents')}
+        {!isLoading && !error && (
+          <span className="ml-1 inline-block border-2 border-black bg-white px-1 font-mono text-[9px] text-black">
+            {agents.length}
+          </span>
+        )}
+      </span>
+      <ChevronDown className={cn('h-4 w-4 transition-transform', isOpen && 'rotate-180')} />
+    </button>
+  );
+
+  if (!isOpen) {
+    return Header;
+  }
+
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 py-2">
-        <Spinner size="sm" />
-        <span className="text-sm text-muted-foreground">{t('loading')}</span>
-      </div>
+      <>
+        {Header}
+        <div className="mt-3 flex items-center gap-2 py-2">
+          <Spinner size="sm" />
+          <span className="text-sm text-muted-foreground">{t('loading')}</span>
+        </div>
+      </>
     );
   }
 
   if (error) {
-    return <p className="font-body text-sm text-muted-foreground">{error}</p>;
+    return (
+      <>
+        {Header}
+        <p className="mt-3 font-body text-sm text-muted-foreground">{error}</p>
+      </>
+    );
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
+      {Header}
       <div className="flex items-center justify-between">
         <p className="font-body text-sm text-muted-foreground">
           {t('computersAgentCount', { n: agents.length })}

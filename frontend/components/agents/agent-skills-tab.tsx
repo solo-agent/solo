@@ -136,7 +136,6 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
       >
         <span
           className="inline-flex items-center gap-1.5 border-2 border-black bg-brutal-primary px-2.5 py-1 font-heading text-[11px] font-black uppercase tracking-widest text-black shadow-brutal-sm"
-          style={{ transform: 'rotate(-0.8deg)' }}
         >
           <Puzzle className="h-3 w-3" />
           {t('agentSkillCatalog')}

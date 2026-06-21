@@ -327,7 +327,6 @@ export function AgentProfileTab({ agentId, showHeader = true }: AgentProfileTabP
             <div className="flex items-center gap-3">
               <div
                 className="border-2 border-black shadow-brutal-sm bg-brutal-cream"
-                style={{ transform: 'rotate(-2deg)' }}
               >
                 <PixelAvatar agentId={agent.id} avatarUrl={agent.avatar_url} size="md" />
               </div>

@@ -209,7 +209,7 @@ export function RelationshipDetailPanel({
             type="button"
             onClick={handleMessageAgent}
             disabled={isOpeningDM}
-            variant="outline"
+            variant="primary"
             size="sm"
             className="flex-shrink-0 gap-1.5 px-2.5 text-[10px] font-black uppercase tracking-wider"
             aria-label={`${t('teamsMessage')} ${agent.name}`}
