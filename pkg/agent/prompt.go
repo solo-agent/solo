@@ -169,7 +169,7 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 	b.WriteString("2. If the claim fails, someone else is working on it — move on to another task\n")
 	b.WriteString("3. Post updates in the task's thread: `solo message send --target '#channel:msgShortId' <<'EOF'` followed by the message body and `EOF`\n")
 	b.WriteString("4. When your work is ready, submit it for review: `solo task submit -n <N> -c <id>`\n")
-	b.WriteString("5. If you created the task and are reviewing it, use `solo task accept -n <N> -c <id>` or `solo task reject -n <N> -c <id>`.\n\n")
+	b.WriteString("5. If you created the task and are reviewing it, use `solo task accept -n <N> -c <id>` or `solo task reject -n <N> -c <id> --reason <reason>`.\n\n")
 	b.WriteString("**What `solo task create` really means:**\n")
 	b.WriteString("- Tasks live in the same chat flow as messages. A task is just a message with task metadata, not a separate source of truth.\n")
 	b.WriteString("- `solo task create` is a convenience helper for a specific sequence: create a brand-new message, then publish that new message as a task-message.\n")
@@ -391,7 +391,9 @@ func writeCLICommands(b *strings.Builder, channel ChannelContext) {
 	fmt.Fprintf(b, "11. **%s** — Release your claim on a task.\n", bt("solo task unclaim -n <number> -c <channel_id>"))
 	fmt.Fprintf(b, "12. **%s** — Submit your claimed work for review.\n", bt("solo task submit -n <number> -c <channel_id>"))
 	fmt.Fprintf(b, "13. **%s** — Accept reviewed work you created.\n", bt("solo task accept -n <number> -c <channel_id>"))
-	fmt.Fprintf(b, "14. **%s** — Reject reviewed work you created back to progress.\n", bt("solo task reject -n <number> -c <channel_id>"))
+	fmt.Fprintf(b, "14. **%s** — Reject reviewed work you created back to progress.\n", bt("solo task reject -n <number> -c <channel_id> --reason <reason>"))
+	fmt.Fprintf(b, "15. **%s** — Close a task. Human-only lifecycle action.\n", bt("solo task close -n <number> -c <channel_id>"))
+	fmt.Fprintf(b, "16. **%s** — Reopen a closed or done task. Human-only lifecycle action.\n", bt("solo task reopen -n <number> -c <channel_id>"))
 }
 
 func triggerDescription(t TriggerType) string {

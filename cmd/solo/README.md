@@ -42,13 +42,13 @@ solo task claim -n <number> -c <channel_id>
 
 Claims the task by its channel-scoped `task_number`. Success prints the updated task object to stdout. Returns exit code 1 and an error message if the task is already claimed (HTTP 409).
 
-### task update -- change a task's status
+### task update -- deprecated for lifecycle status
 
 ```bash
 solo task update -n <number> -c <channel_id> -s <status>
 ```
 
-`-s` accepts `todo`, `in_progress`, `in_review`, or `done`. Sends a `PATCH` with `{"status":"<value>"}`.
+Lifecycle status changes no longer use `task update`. Use `claim`, `unclaim`, `submit`, `accept`, `reject`, `close`, or `reopen`.
 
 ### task create -- create a new task
 
@@ -67,15 +67,17 @@ solo task unclaim -n <number> -c <channel_id>
 
 Sends `DELETE /api/v1/channels/{channel_id}/tasks/{number}/claim`.
 
-### task submit / accept / reject -- review lifecycle actions
+### task submit / accept / reject / close / reopen -- lifecycle actions
 
 ```bash
 solo task submit -n <number> -c <channel_id>
 solo task accept -n <number> -c <channel_id>
-solo task reject -n <number> -c <channel_id>
+solo task reject -n <number> -c <channel_id> --reason <reason>
+solo task close -n <number> -c <channel_id>
+solo task reopen -n <number> -c <channel_id>
 ```
 
-`submit` moves claimed work to review. `accept` marks reviewed work done. `reject` sends reviewed work back to progress.
+`submit` moves claimed work to review. `accept` marks reviewed work done. `reject` sends reviewed work back to progress. `close` and `reopen` are human lifecycle actions.
 
 ### message send -- send a message to a channel
 

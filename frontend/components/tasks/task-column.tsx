@@ -10,21 +10,12 @@
 
 import { Decoration } from '@/components/ui/decoration';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Clock, ChevronRight, ChevronDown } from 'lucide-react';
 import type { Task, TaskStatus } from '@/lib/types';
 import { t } from '@/lib/i18n';
-
-// ---- Valid status transitions ----
-
-const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
-  todo: ['in_progress', 'closed'],
-  in_progress: ['in_review', 'closed'],
-  in_review: ['done', 'in_progress', 'closed'],
-  done: ['closed'],
-  closed: ['todo'],
-};
+import { TaskActionButtons } from './task-action-buttons';
 
 // ---- Status display config ----
 // v3.3: shadowClass drives the hover color-coded shadow on each card.
@@ -101,98 +92,24 @@ function formatRelativeTime(iso?: string): string {
   }
 }
 
-// ---- Status badge with dropdown ----
-
-const STATUS_LABELS: Record<TaskStatus, string> = {
-  todo: 'TODO',
-  in_progress: 'IN PROGRESS',
-  in_review: 'IN REVIEW',
-  done: 'DONE',
-  closed: 'CLOSED',
-};
-
-function StatusBadge({
-  status,
-  onChange,
-}: {
-  status: TaskStatus;
-  onChange: (newStatus: TaskStatus) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLSpanElement>(null);
-  const transitions = VALID_TRANSITIONS[status] ?? [];
-  const config = STATUS_COLUMN_CONFIG[status];
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
-
-  return (
-    <span ref={ref} className="relative inline-flex">
-      <span
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        className={cn(
-          'badge-brutal cursor-pointer hover:opacity-80 transition-opacity inline-flex items-center gap-0.5',
-          config.bgClass,
-          config.textClass,
-        )}
-        aria-label={config.label}
-        tabIndex={0}
-      >
-        {config.label}
-        <ChevronDown className="h-3 w-3" />
-      </span>
-
-      {open && (
-        <div className="absolute left-0 top-full mt-1 z-30 min-w-[140px] border-2 border-black bg-white shadow-brutal py-1">
-          {transitions.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onChange(s);
-                setOpen(false);
-              }}
-              className="block w-full text-left px-3 py-1.5 font-heading text-xs font-bold bg-white text-black transition-colors hover:bg-brutal-primary hover:text-black"
-            >
-              {STATUS_LABELS[s]}
-            </button>
-          ))}
-        </div>
-      )}
-    </span>
-  );
-}
-
 // ---- Task card ----
 
 interface TaskCardProps {
   task: Task;
   childTasks?: Task[];
   onClick: (task: Task) => void;
-  onStatusChange: (task: Task, newStatus: TaskStatus) => void;
   parentTaskNumber?: number;
   onParentClick?: (taskId: string) => void;
+  onActionComplete?: (task: Task) => void;
 }
 
 function TaskCard({
   task,
   childTasks = [],
   onClick,
-  onStatusChange,
   parentTaskNumber,
   onParentClick,
+  onActionComplete,
 }: TaskCardProps) {
   const [subtasksOpen, setSubtasksOpen] = useState(true);
   const statusConf = STATUS_COLUMN_CONFIG[task.status];
@@ -299,11 +216,16 @@ function TaskCard({
           </div>
         )}
 
-        {/* Status badge — with dropdown for non-terminal */}
-        <StatusBadge
-          status={task.status}
-          onChange={(newStatus) => onStatusChange(task, newStatus)}
-        />
+        <span
+          className={cn(
+            'badge-brutal inline-flex items-center gap-0.5',
+            statusConf.bgClass,
+            statusConf.textClass,
+          )}
+          aria-label={statusConf.label}
+        >
+          {statusConf.label}
+        </span>
 
         {/* Terminal state marker */}
         {isTerminal ? (
@@ -334,6 +256,8 @@ function TaskCard({
             )}
           </div>
         )}
+
+        <TaskActionButtons task={task} onActionComplete={onActionComplete} />
 
         {/* Subtask progress bar (parent task) */}
         {hasSubtasks && (
@@ -433,10 +357,10 @@ interface TaskColumnProps {
   tasks: Task[];
   isLoading: boolean;
   onTaskClick: (task: Task) => void;
-  onStatusChange: (task: Task, newStatus: TaskStatus) => void;
   parentTaskMap?: Map<string, number>;
   onParentClick?: (taskId: string) => void;
   childrenByParent?: Map<string, Task[]>;
+  onActionComplete?: (task: Task) => void;
 }
 
 // ---- Component ----
@@ -446,10 +370,10 @@ export function TaskColumn({
   tasks,
   isLoading,
   onTaskClick,
-  onStatusChange,
   parentTaskMap,
   onParentClick,
   childrenByParent,
+  onActionComplete,
 }: TaskColumnProps) {
   const label = COLUMN_HEADERS[status];
   const count = tasks.length;
@@ -484,9 +408,9 @@ export function TaskColumn({
             task={task}
             childTasks={childrenByParent?.get(task.id)}
             onClick={onTaskClick}
-            onStatusChange={onStatusChange}
             parentTaskNumber={task.parent_task_id ? parentTaskMap?.get(task.parent_task_id) : undefined}
             onParentClick={onParentClick}
+            onActionComplete={onActionComplete}
           />
         ))}
 

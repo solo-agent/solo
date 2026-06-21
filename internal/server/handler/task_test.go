@@ -20,10 +20,10 @@ import (
 type testBroadcaster struct{}
 
 func (b *testBroadcaster) BroadcastToScope(scopeType, scopeID string, message []byte) {}
-func (b *testBroadcaster) BroadcastToChannel(channelID string, message []byte)     {}
-func (b *testBroadcaster) BroadcastToThread(threadID string, message []byte)       {}
-func (b *testBroadcaster) SendToUser(userID string, message []byte)                {}
-func (b *testBroadcaster) Broadcast(message []byte)                                {}
+func (b *testBroadcaster) BroadcastToChannel(channelID string, message []byte)        {}
+func (b *testBroadcaster) BroadcastToThread(threadID string, message []byte)          {}
+func (b *testBroadcaster) SendToUser(userID string, message []byte)                   {}
+func (b *testBroadcaster) Broadcast(message []byte)                                   {}
 
 var _ realtime.Broadcaster = (*testBroadcaster)(nil)
 
@@ -37,6 +37,8 @@ func setupChiRouterForTask(h *TaskHandler) chi.Router {
 			r.Get("/", h.Get)
 			r.Patch("/", h.Update)
 			r.Delete("/", h.Delete)
+			r.Post("/close", h.Close)
+			r.Post("/reopen", h.Reopen)
 		})
 	})
 	return r
@@ -161,6 +163,25 @@ func TestTaskHandler_Update_MissingAuth(t *testing.T) {
 
 	if rr.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", rr.Code)
+	}
+}
+
+func TestTaskHandler_CloseReopen_MissingAuth(t *testing.T) {
+	h := newTestTaskHandler()
+	r := setupChiRouterForTask(h)
+
+	for _, path := range []string{
+		"/api/v1/channels/ch-1/tasks/task-1/close",
+		"/api/v1/channels/ch-1/tasks/task-1/reopen",
+	} {
+		req := httptest.NewRequest("POST", path, nil)
+		rr := httptest.NewRecorder()
+
+		r.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusUnauthorized {
+			t.Errorf("%s: expected 401, got %d", path, rr.Code)
+		}
 	}
 }
 

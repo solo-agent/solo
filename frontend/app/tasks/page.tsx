@@ -12,7 +12,6 @@ import { t } from '@/lib/i18n';
 import { useTasks, useDMTasks } from '@/lib/hooks/use-tasks';
 import { useChannels } from '@/lib/hooks/use-channels';
 import { useDM } from '@/lib/hooks/use-dm';
-import { useToast } from '@/components/ui/toast';
 import { NavBar } from '@/components/ui/navbar';
 import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
@@ -20,7 +19,7 @@ import { Select } from '@/components/ui/select';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TasksLeftColumn } from '@/components/tasks/tasks-left-column';
 import { TaskBoard } from '@/components/tasks/task-board';
-import type { Task, TaskStatus, Message } from '@/lib/types';
+import type { Task, Message } from '@/lib/types';
 
 // SOLO-63-F: Lazy-load ThreadPanel
 const ThreadPanel = lazy(() =>
@@ -45,7 +44,6 @@ function TasksPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { showToast } = useToast();
 
   // ---- Left column data ----
   const { channels, isLoading: channelsLoading, error: channelsError, refetch: refetchChannels } = useChannels();
@@ -73,18 +71,12 @@ function TasksPageContent() {
     tasks: allTasks,
     isLoading: tasksLoading,
     error: tasksError,
-    updateTask,
-    claimTask,
-    unclaimTask,
     refetch: refetchTasks,
   } = useTasks();
   const {
     tasks: dmTasks,
     isLoading: dmTasksLoading,
     error: dmTasksError,
-    updateTask: dmUpdateTask,
-    claimTask: dmClaimTask,
-    unclaimTask: dmUnclaimTask,
     refetch: refetchDMTasks,
   } = useDMTasks(filterDmId);
 
@@ -222,54 +214,12 @@ function TasksPageContent() {
     setThreadTask(null);
   }, []);
 
-  // ---- Status change from board ----
-  // In DM mode, the mutation must go through the DM-specific hook (the
-  // channel-scoped endpoint would 404 because the task's channel_id is
-  // actually the dm_id).
-  const handleBoardStatusChange = useCallback(
-    async (task: Task, newStatus: TaskStatus) => {
-      try {
-        const updated = filterDmId
-          ? await dmUpdateTask(task.id, { status: newStatus })
-          : await updateTask(task.channel_id, task.id, { status: newStatus });
-        setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
-        showToast(t('taskStatusUpdated', { status: newStatus }), 'success');
-      } catch {
-        // Error handled by hook
-      }
+  const handleBoardActionComplete = useCallback(
+    (updated: Task) => {
+      setThreadTask((prev) => (prev?.id === updated.id ? updated : prev));
+      sourceRefetch();
     },
-    [filterDmId, updateTask, dmUpdateTask, showToast],
-  );
-
-  // ---- Claim / Unclaim ----
-  const handleClaim = useCallback(
-    async (task: Task) => {
-      try {
-        const updated = filterDmId
-          ? await dmClaimTask(task.channel_id, task.id)
-          : await claimTask(task.channel_id, task.id);
-        setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
-        showToast(t('taskClaimed', { n: task.task_number ?? '?' }), 'success');
-      } catch {
-        // 409: silent
-      }
-    },
-    [filterDmId, claimTask, dmClaimTask, showToast],
-  );
-
-  const handleUnclaim = useCallback(
-    async (task: Task) => {
-      try {
-        const updated = filterDmId
-          ? await dmUnclaimTask(task.channel_id, task.id)
-          : await unclaimTask(task.channel_id, task.id);
-        setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
-        showToast(t('taskReleased', { n: task.task_number ?? '?' }), 'info');
-      } catch {
-        // silent
-      }
-    },
-    [filterDmId, unclaimTask, dmUnclaimTask, showToast],
+    [sourceRefetch],
   );
 
   // Resolve selected channel/DM name for the filter bar header.
@@ -416,8 +366,8 @@ function TasksPageContent() {
                   isLoading={sourceIsLoading}
                   error={sourceError}
                   onTaskClick={handleTaskClick}
-                  onStatusChange={handleBoardStatusChange}
                   onRefetch={sourceRefetch}
+                  onActionComplete={handleBoardActionComplete}
                 />
               )}
             </div>
@@ -440,8 +390,6 @@ function TasksPageContent() {
                   parentMessage={threadMessage}
                   onClose={handleThreadClose}
                   task={threadTask ?? undefined}
-                  onClaimTask={handleClaim}
-                  onUnclaimTask={handleUnclaim}
                 />
               </Suspense>
             )}

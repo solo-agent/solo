@@ -3,7 +3,6 @@
 // - List tasks with optional status/claimer/channel filters
 // - Get single task
 // - Create, update, delete tasks
-// - Claim / unclaim tasks
 // - Convert message to task (asTask)
 // ============================================================================
 
@@ -15,7 +14,7 @@ import { apiClient, ApiError } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
 import type { Task, CreateTaskInput, UpdateTaskInput, TaskStatus } from '@/lib/types';
 
-// ---- Backend response shapes (匹配 Phase 1 Claim API) ----
+// ---- Backend response shapes ----
 
 interface TaskResponse {
   id: string;
@@ -243,26 +242,6 @@ export function useTasks(filters?: TaskFilters) {
     setTasks((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // ---- Claim / Unclaim ----
-
-  const claimTask = useCallback(async (channelId: string, taskId: string): Promise<Task> => {
-    const res = await apiClient.post<TaskResponse>(
-      `/api/v1/channels/${channelId}/tasks/${taskId}/claim`,
-    );
-    const updated = mapTask(res);
-    setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
-    return updated;
-  }, []);
-
-  const unclaimTask = useCallback(async (channelId: string, taskId: string): Promise<Task> => {
-    const res = await apiClient.delete<TaskResponse>(
-      `/api/v1/channels/${channelId}/tasks/${taskId}/claim`,
-    );
-    const updated = mapTask(res);
-    setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
-    return updated;
-  }, []);
-
   // ---- Convert message to task ----
 
   const convertMessageToTask = useCallback(
@@ -289,8 +268,6 @@ export function useTasks(filters?: TaskFilters) {
     createTask,
     updateTask,
     deleteTask,
-    claimTask,
-    unclaimTask,
     convertMessageToTask,
     refetch: loadTasks,
   } as const;
@@ -300,8 +277,6 @@ export function useTasks(filters?: TaskFilters) {
 // Uses DM-specific REST endpoints:
 //   GET    /api/v1/dm/{dmID}/tasks          → list
 //   POST   /api/v1/dm/{dmID}/tasks          → create
-//   POST   /api/v1/dm/{dmID}/tasks/{id}/claim   → claim
-//   DELETE /api/v1/dm/{dmID}/tasks/{id}/claim   → unclaim
 
 interface DMTaskResponse {
   id: string;
@@ -488,24 +463,6 @@ export function useDMTasks(dmId: string | null) {
     return updated;
   }, []);
 
-  const claimTask = useCallback(async (dmId: string, taskId: string): Promise<Task> => {
-    const res = await apiClient.post<DMTaskResponse>(
-      `/api/v1/dm/${dmId}/tasks/${taskId}/claim`,
-    );
-    const updated = mapDMTask(res);
-    setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
-    return updated;
-  }, []);
-
-  const unclaimTask = useCallback(async (dmId: string, taskId: string): Promise<Task> => {
-    const res = await apiClient.delete<DMTaskResponse>(
-      `/api/v1/dm/${dmId}/tasks/${taskId}/claim`,
-    );
-    const updated = mapDMTask(res);
-    setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
-    return updated;
-  }, []);
-
   // ---- DM convert message to task ----
   // POST /api/v1/dm/{dmID}/messages/{messageID}/convert-to-task
 
@@ -531,8 +488,6 @@ export function useDMTasks(dmId: string | null) {
     error,
     createTask,
     updateTask,
-    claimTask,
-    unclaimTask,
     convertMessageToTask,
     refetch: loadTasks,
   } as const;

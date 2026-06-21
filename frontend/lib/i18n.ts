@@ -92,8 +92,6 @@ const en = {
   notYetClaimed: 'Not yet claimed',
   claim: 'Claim',
   release: 'Release',
-  claimTask: 'Claim task',
-  releaseTask: 'Release task',
   priorityLabel: 'Priority',
   claimerLabel: 'Claimer',
 
@@ -239,8 +237,6 @@ const en = {
 
   // ── Tasks ──
   taskCreatedToast: 'Task #{n} created',
-  taskClaimed: 'Task #{n} claimed',
-  taskReleased: 'Task #{n} released',
   taskConverted: 'Converted to task #{n}',
   taskConvertError: 'Could not convert to task. Please try again.',
   taskStatusUpdated: 'Task status updated: {status}',

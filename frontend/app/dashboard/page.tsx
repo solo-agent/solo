@@ -42,7 +42,7 @@ const DMView = dynamic(
   },
 );
 import { InboxView } from "@/components/inbox/inbox-view";
-import type { Channel, DMChannel, CreateChannelInput, CreateDMInput, Message, Task, TaskStatus } from "@/lib/types";
+import type { Channel, DMChannel, CreateChannelInput, CreateDMInput, Message, Task } from "@/lib/types";
 import { useToast } from "@/components/ui/toast";
 
 export default function DashboardPage() {
@@ -117,49 +117,9 @@ function DashboardContent() {
     tasks: dmTasks,
     isLoading: dmTasksLoading,
     error: dmTasksError,
-    updateTask: dmUpdateTask,
-    claimTask: dmClaimTask,
-    unclaimTask: dmUnclaimTask,
     convertMessageToTask: dmConvertMessageToTask,
     refetch: dmRefetchTasks,
   } = useDMTasks(selectedDmId);
-
-  const handleDMTaskClaim = useCallback(
-    async (task: Task) => {
-      if (!selectedDmId) return;
-      try {
-        await dmClaimTask(selectedDmId, task.id);
-        showToast(t('taskClaimed', { n: task.task_number ?? '?' }), 'success');
-      } catch {
-        // 409: silent
-      }
-    },
-    [selectedDmId, dmClaimTask, showToast],
-  );
-
-  const handleDMTaskUnclaim = useCallback(
-    async (task: Task) => {
-      if (!selectedDmId) return;
-      try {
-        await dmUnclaimTask(selectedDmId, task.id);
-        showToast(t('taskReleased', { n: task.task_number ?? '?' }), 'info');
-      } catch {
-        // silent
-      }
-    },
-    [selectedDmId, dmUnclaimTask, showToast],
-  );
-
-  const handleDMTaskStatusChange = useCallback(
-    async (task: Task, newStatus: TaskStatus): Promise<Task | void> => {
-      try {
-        return await dmUpdateTask(task.id, { status: newStatus });
-      } catch {
-        // handled by hook
-      }
-    },
-    [dmUpdateTask],
-  );
 
   // ---- SOLO-island PR3: AgentViewPanel state lives at the dashboard
   // level so the AgentIsland (also mounted here) can summon it on click.
@@ -393,9 +353,6 @@ function DashboardContent() {
           tasksLoading={dmTasksLoading}
           tasksError={dmTasksError}
           refetchTasks={dmRefetchTasks}
-          onTaskStatusChange={handleDMTaskStatusChange}
-          onClaimTask={handleDMTaskClaim}
-          onUnclaimTask={handleDMTaskUnclaim}
           onConvertToTask={handleDMConvertToTask}
           onTaskCreated={dmRefetchTasks}
           onThreadChange={handleDMThreadChange}
