@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -391,6 +392,8 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, err.Error())
 		case err == service.ErrTaskInvalidStatus || err == service.ErrTaskInvalidTransition:
 			writeError(w, http.StatusBadRequest, err.Error())
+		case err == service.ErrTaskLifecyclePatch:
+			writeError(w, http.StatusBadRequest, err.Error())
 		default:
 			slog.Error("failed to update task", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to update task")
@@ -747,7 +750,70 @@ func (h *TaskHandler) Accept(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) Reject(w http.ResponseWriter, r *http.Request) {
-	h.lifecycleAction(w, r, h.svc.RejectTask)
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	channelID := chi.URLParam(r, "channelID")
+	taskID := chi.URLParam(r, "taskID")
+	if channelID == "" || taskID == "" {
+		writeError(w, http.StatusBadRequest, "channel ID and task ID are required")
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && r.Body != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	task, err := h.svc.RejectTask(r.Context(), channelID, taskID, userID, strings.TrimSpace(req.Reason))
+	if err != nil {
+		h.writeTaskLifecycleError(w, err)
+		return
+	}
+	h.writeTaskUpdate(w, task)
+}
+
+func (h *TaskHandler) Close(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleAction(w, r, h.svc.CloseTask)
+}
+
+func (h *TaskHandler) Reopen(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleAction(w, r, h.svc.ReopenTask)
+}
+
+func (h *TaskHandler) AcceptGlobal(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleActionGlobal(w, r, h.svc.AcceptTask)
+}
+
+func (h *TaskHandler) RejectGlobal(w http.ResponseWriter, r *http.Request) {
+	userID, task, ok := h.globalLifecycleTask(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && r.Body != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	updated, err := h.svc.RejectTask(r.Context(), task.ChannelID, task.ID, userID, strings.TrimSpace(req.Reason))
+	if err != nil {
+		h.writeTaskLifecycleError(w, err)
+		return
+	}
+	h.writeTaskUpdate(w, updated)
+}
+
+func (h *TaskHandler) CloseGlobal(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleActionGlobal(w, r, h.svc.CloseTask)
+}
+
+func (h *TaskHandler) ReopenGlobal(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleActionGlobal(w, r, h.svc.ReopenTask)
 }
 
 func (h *TaskHandler) lifecycleAction(
@@ -769,25 +835,67 @@ func (h *TaskHandler) lifecycleAction(
 
 	task, err := action(r.Context(), channelID, taskID, userID)
 	if err != nil {
-		switch {
-		case err == service.ErrTaskNotFound:
-			writeError(w, http.StatusNotFound, "task not found")
-		case err == service.ErrTaskNotChannelMember:
-			writeError(w, http.StatusForbidden, "not a channel member")
-		case err == service.ErrTaskNotClaimer:
-			writeError(w, http.StatusForbidden, "you are not the claimer of this task")
-		case err == service.ErrTaskNotCreator:
-			writeError(w, http.StatusForbidden, "you are not the creator of this task")
-		case err == service.ErrTaskNotSubmittable || err == service.ErrTaskNotReviewable:
-			writeError(w, http.StatusConflict, err.Error())
-		default:
-			slog.Error("failed task lifecycle action", "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to update task")
-		}
+		h.writeTaskLifecycleError(w, err)
 		return
 	}
 
 	h.writeTaskUpdate(w, task)
+}
+
+func (h *TaskHandler) lifecycleActionGlobal(
+	w http.ResponseWriter,
+	r *http.Request,
+	action func(context.Context, string, string, string) (*service.Task, error),
+) {
+	userID, task, ok := h.globalLifecycleTask(w, r)
+	if !ok {
+		return
+	}
+	updated, err := action(r.Context(), task.ChannelID, task.ID, userID)
+	if err != nil {
+		h.writeTaskLifecycleError(w, err)
+		return
+	}
+	h.writeTaskUpdate(w, updated)
+}
+
+func (h *TaskHandler) globalLifecycleTask(w http.ResponseWriter, r *http.Request) (string, *service.Task, bool) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return "", nil, false
+	}
+	taskID := chi.URLParam(r, "taskID")
+	if taskID == "" {
+		writeError(w, http.StatusBadRequest, "task ID is required")
+		return "", nil, false
+	}
+	task, err := h.svc.GetTaskGlobal(r.Context(), taskID, userID)
+	if err != nil {
+		h.writeTaskLifecycleError(w, err)
+		return "", nil, false
+	}
+	return userID, task, true
+}
+
+func (h *TaskHandler) writeTaskLifecycleError(w http.ResponseWriter, err error) {
+	switch {
+	case err == service.ErrTaskNotFound:
+		writeError(w, http.StatusNotFound, "task not found")
+	case err == service.ErrTaskNotChannelMember:
+		writeError(w, http.StatusForbidden, "not a channel member")
+	case err == service.ErrTaskNotClaimer:
+		writeError(w, http.StatusForbidden, "you are not the claimer of this task")
+	case err == service.ErrTaskNotCreator || err == service.ErrTaskHumanOnly:
+		writeError(w, http.StatusForbidden, err.Error())
+	case err == service.ErrTaskNotSubmittable || err == service.ErrTaskNotReviewable || err == service.ErrTaskInTerminalState || err == service.ErrTaskInvalidTransition:
+		writeError(w, http.StatusConflict, err.Error())
+	case err == service.ErrTaskReasonRequired:
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		slog.Error("failed task lifecycle action", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to update task")
+	}
 }
 
 // --- asTask — Convert message to task ---
@@ -1081,7 +1189,7 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 		`SELECT COALESCE(
 			(SELECT display_name FROM users WHERE id = $1),
 			(SELECT name FROM agents WHERE id = $1),
-			$1
+			$1::text
 		)`, userID,
 	).Scan(&senderName); err != nil {
 		slog.Warn("failed to resolve sender name for task message",
@@ -1245,6 +1353,8 @@ func (h *TaskHandler) UpdateGlobal(w http.ResponseWriter, r *http.Request) {
 		case err == service.ErrTaskHumanOnly:
 			writeError(w, http.StatusForbidden, err.Error())
 		case err == service.ErrTaskInvalidStatus || err == service.ErrTaskInvalidTransition:
+			writeError(w, http.StatusBadRequest, err.Error())
+		case err == service.ErrTaskLifecyclePatch:
 			writeError(w, http.StatusBadRequest, err.Error())
 		default:
 			slog.Error("failed to update task", "error", err)

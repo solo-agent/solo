@@ -32,8 +32,8 @@ interface TaskBoardProps {
   isLoading: boolean;
   error: string | null;
   onTaskClick: (task: Task) => void;
-  onStatusChange: (task: Task, newStatus: TaskStatus) => void;
   onRefetch: () => void;
+  onActionComplete?: (task: Task) => void;
 }
 
 // ---- Component ----
@@ -43,8 +43,8 @@ export function TaskBoard({
   isLoading,
   error,
   onTaskClick,
-  onStatusChange,
   onRefetch,
+  onActionComplete,
 }: TaskBoardProps) {
   // Group tasks by status
   const { tasksByStatus, childrenByParent } = useMemo(() => {
@@ -130,10 +130,10 @@ export function TaskBoard({
             tasks={tasksByStatus[status]}
             isLoading={isLoading}
             onTaskClick={onTaskClick}
-            onStatusChange={onStatusChange}
             parentTaskMap={parentTaskMap}
             onParentClick={handleParentClick}
             childrenByParent={childrenByParent}
+            onActionComplete={onActionComplete}
           />
         ))}
       </div>
@@ -147,10 +147,10 @@ export function TaskBoard({
             tasks={tasksByStatus[status]}
             isLoading={isLoading}
             onTaskClick={onTaskClick}
-            onStatusChange={onStatusChange}
             parentTaskMap={parentTaskMap}
             onParentClick={handleParentClick}
             childrenByParent={childrenByParent}
+            onActionComplete={onActionComplete}
           />
         ))}
       </div>

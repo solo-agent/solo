@@ -13,7 +13,9 @@
 //	solo task unclaim  -n <number> -c <channel_id>
 //	solo task submit   -n <number> -c <channel_id>
 //	solo task accept   -n <number> -c <channel_id>
-//	solo task reject   -n <number> -c <channel_id>
+//	solo task reject   -n <number> -c <channel_id> --reason <reason>
+//	solo task close    -n <number> -c <channel_id>
+//	solo task reopen   -n <number> -c <channel_id>
 //	solo channel members -c <channel_id> [--output json]
 //	solo channel join  --target <#channel-name>
 //	solo thread unfollow --target <#channel:shortid>
@@ -158,7 +160,7 @@ func proxyRequest(action, channelID, content, threadID, token string, taskNumber
 
 func handleTask(args []string, baseURL, token string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "solo: error: task subcommand required (list, claim, update, create, unclaim, submit, accept, reject)")
+		fmt.Fprintln(os.Stderr, "solo: error: task subcommand required (list, claim, update, create, unclaim, submit, accept, reject, close, reopen)")
 		printUsage()
 		doExit(exitUsage)
 	}
@@ -174,7 +176,7 @@ func handleTask(args []string, baseURL, token string) {
 		handleTaskCreate(args[1:], baseURL, token)
 	case "unclaim":
 		handleTaskUnclaim(args[1:], baseURL, token)
-	case "submit", "accept", "reject":
+	case "submit", "accept", "reject", "close", "reopen":
 		handleTaskLifecycle(args[1:], baseURL, token, args[0])
 	default:
 		fmt.Fprintf(os.Stderr, "solo: error: unknown task subcommand %q\n", args[0])
@@ -346,31 +348,8 @@ func handleTaskUpdate(args []string, baseURL, token string) {
 		doExit(exitUsage)
 	}
 
-	channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
-	if resolveErr != nil {
-		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
-		doExit(exitBusiness)
-	}
-
-	// Try daemon proxy first (uses fresh JWT)
-	statusCode, body, err := proxyRequest("task_update", channelID, "", "", token, number, status)
-	if err != nil {
-		// Fallback to direct API
-		reqBody, _ := json.Marshal(map[string]string{"status": status})
-		url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d", baseURL, channelID, number)
-		statusCode, body, err = doHTTP(http.MethodPatch, url, token, reqBody)
-	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
-		doExit(exitUsage)
-	}
-
-	if statusCode >= 400 {
-		handleNonProxyHTTPError(statusCode, body)
-	}
-
-	printTaskUpdateResult(body, number)
-	doExit(exitOK)
+	fmt.Fprintln(os.Stderr, "solo: task update no longer changes lifecycle status; use task claim, unclaim, submit, accept, reject, close, or reopen")
+	doExit(exitUsage)
 }
 
 // --- task create ---
@@ -490,13 +469,15 @@ func handleTaskUnclaim(args []string, baseURL, token string) {
 }
 
 func handleTaskLifecycle(args []string, baseURL, token, action string) {
-	var channel string
+	var channel, reason string
 	var number int
 	fs := flag.NewFlagSet("task "+action, flag.ExitOnError)
 	fs.StringVar(&channel, "c", "", "Channel ID or #name (required)")
 	fs.StringVar(&channel, "channel", "", "Channel ID or #name (required)")
 	fs.IntVar(&number, "n", 0, "Task number (required)")
 	fs.IntVar(&number, "number", 0, "Task number (required)")
+	fs.StringVar(&reason, "r", "", "Reason for reject")
+	fs.StringVar(&reason, "reason", "", "Reason for reject")
 	fs.Parse(args)
 
 	if channel == "" {
@@ -507,6 +488,10 @@ func handleTaskLifecycle(args []string, baseURL, token, action string) {
 		fmt.Fprintln(os.Stderr, "solo: error: -n <number> must be a positive integer")
 		doExit(exitUsage)
 	}
+	if action == "reject" && strings.TrimSpace(reason) == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: --reason is required for task reject")
+		doExit(exitUsage)
+	}
 
 	channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
 	if resolveErr != nil {
@@ -515,7 +500,11 @@ func handleTaskLifecycle(args []string, baseURL, token, action string) {
 	}
 
 	url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d/%s", baseURL, channelID, number, action)
-	statusCode, body, err := doHTTP(http.MethodPost, url, token, nil)
+	var reqBody []byte
+	if action == "reject" {
+		reqBody, _ = json.Marshal(map[string]string{"reason": strings.TrimSpace(reason)})
+	}
+	statusCode, body, err := doHTTP(http.MethodPost, url, token, reqBody)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
 		doExit(exitUsage)
@@ -1218,7 +1207,9 @@ func printUsage() {
   solo task unclaim  -n <number> -c <channel_id>
   solo task submit   -n <number> -c <channel_id>
   solo task accept   -n <number> -c <channel_id>
-  solo task reject   -n <number> -c <channel_id>
+  solo task reject   -n <number> -c <channel_id> --reason <reason>
+  solo task close    -n <number> -c <channel_id>
+  solo task reopen   -n <number> -c <channel_id>
   solo channel members -c <channel_id> [--output json]
   solo channel join  --target <#channel-name>
   solo thread unfollow --target <#channel:shortid>

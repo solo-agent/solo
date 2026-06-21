@@ -12,6 +12,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -396,30 +397,18 @@ func TestHandleTaskUpdate(t *testing.T) {
 	}))
 	defer server.Close()
 
-	code, stdout, _ := captureAndRun(t, func() {
+	code, _, stderr := captureAndRun(t, func() {
 		handleTaskUpdate([]string{"-n", "1", "-c", "550e8400-e29b-41d4-a716-446655440001", "-s", "in_review"}, server.URL, "test-token")
 	})
 
-	if code != 0 {
-		t.Errorf("expected exit 0, got %d", code)
+	if code != exitUsage {
+		t.Errorf("expected exit %d, got %d", exitUsage, code)
 	}
-	if capturedMethod != http.MethodPatch {
-		t.Errorf("expected PATCH, got %s", capturedMethod)
+	if capturedMethod != "" || capturedPath != "" || len(capturedBody) != 0 {
+		t.Errorf("task update should not send lifecycle PATCH, got %s %s %s", capturedMethod, capturedPath, capturedBody)
 	}
-	if capturedPath != "/api/v1/channels/550e8400-e29b-41d4-a716-446655440001/tasks/1" {
-		t.Errorf("expected path /api/v1/channels/550e8400-e29b-41d4-a716-446655440001/tasks/1, got %s", capturedPath)
-	}
-	if !strings.Contains(stdout, "in_review") {
-		t.Errorf("expected stdout to contain in_review, got %q", stdout)
-	}
-
-	// Verify PATCH body: {"status":"in_review"}
-	var body map[string]string
-	if err := json.Unmarshal(capturedBody, &body); err != nil {
-		t.Fatalf("failed to unmarshal body: %v\nraw: %s", err, capturedBody)
-	}
-	if body["status"] != "in_review" {
-		t.Errorf("expected status=in_review, got %s", body["status"])
+	if !strings.Contains(stderr, "no longer changes lifecycle status") {
+		t.Errorf("expected deprecation error, got %q", stderr)
 	}
 }
 
@@ -449,6 +438,72 @@ func TestHandleTaskLifecycleSubmit(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "in_review") {
 		t.Errorf("expected stdout to contain in_review, got %q", stdout)
+	}
+}
+
+func TestHandleTaskLifecycleRejectReason(t *testing.T) {
+	var capturedMethod, capturedPath string
+	var capturedBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedPath = r.URL.Path
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"1","status":"in_progress"}`))
+	}))
+	defer server.Close()
+
+	code, stdout, _ := captureAndRun(t, func() {
+		handleTaskLifecycle([]string{"-n", "1", "-c", "550e8400-e29b-41d4-a716-446655440001", "--reason", "needs tests"}, server.URL, "test-token", "reject")
+	})
+
+	if code != 0 {
+		t.Errorf("expected exit 0, got %d", code)
+	}
+	if capturedMethod != http.MethodPost {
+		t.Errorf("expected POST, got %s", capturedMethod)
+	}
+	if capturedPath != "/api/v1/channels/550e8400-e29b-41d4-a716-446655440001/tasks/1/reject" {
+		t.Errorf("unexpected path: %s", capturedPath)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(capturedBody, &body); err != nil {
+		t.Fatalf("failed to unmarshal body: %v\nraw: %s", err, capturedBody)
+	}
+	if body["reason"] != "needs tests" {
+		t.Errorf("expected reason body, got %#v", body)
+	}
+	if !strings.Contains(stdout, "in_progress") {
+		t.Errorf("expected stdout to contain in_progress, got %q", stdout)
+	}
+}
+
+func TestHandleTaskLifecycleCloseReopen(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"1","status":"closed"}`))
+	}))
+	defer server.Close()
+
+	for _, action := range []string{"close", "reopen"} {
+		code, _, _ := captureAndRun(t, func() {
+			handleTaskLifecycle([]string{"-n", "1", "-c", "550e8400-e29b-41d4-a716-446655440001"}, server.URL, "test-token", action)
+		})
+		if code != 0 {
+			t.Fatalf("%s: expected exit 0, got %d", action, code)
+		}
+	}
+
+	want := []string{
+		"/api/v1/channels/550e8400-e29b-41d4-a716-446655440001/tasks/1/close",
+		"/api/v1/channels/550e8400-e29b-41d4-a716-446655440001/tasks/1/reopen",
+	}
+	if fmt.Sprint(paths) != fmt.Sprint(want) {
+		t.Errorf("unexpected paths: got %v want %v", paths, want)
 	}
 }
 
@@ -723,21 +778,18 @@ func TestHandleTaskUpdateLongFlags(t *testing.T) {
 	defer server.Close()
 
 	channelUUID := "550e8400-e29b-41d4-a716-446655440002"
-	code, _, _ := captureAndRun(t, func() {
+	code, _, stderr := captureAndRun(t, func() {
 		handleTaskUpdate([]string{"--number", "7", "--channel", channelUUID, "--status", "done"}, server.URL, "test-token")
 	})
 
-	if code != 0 {
-		t.Errorf("expected exit 0, got %d", code)
+	if code != exitUsage {
+		t.Errorf("expected exit %d, got %d", exitUsage, code)
 	}
-	if capturedMethod != http.MethodPatch {
-		t.Errorf("expected PATCH with long flags, got %s", capturedMethod)
+	if capturedMethod != "" || len(capturedBody) != 0 {
+		t.Errorf("task update should not send PATCH, got %s %s", capturedMethod, capturedBody)
 	}
-
-	var body map[string]string
-	json.Unmarshal(capturedBody, &body)
-	if body["status"] != "done" {
-		t.Errorf("expected status=done with long flag, got %s", body["status"])
+	if !strings.Contains(stderr, "no longer changes lifecycle status") {
+		t.Errorf("expected deprecation error, got %q", stderr)
 	}
 }
 

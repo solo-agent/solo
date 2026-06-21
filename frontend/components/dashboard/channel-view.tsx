@@ -27,7 +27,7 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { WizardCard } from '@/components/onboarding/wizard-card';
 import { t } from '@/lib/i18n';
-import type { Channel, Message, Task, TaskStatus } from '@/lib/types';
+import type { Channel, Message, Task } from '@/lib/types';
 
 // SOLO-63-F: Lazy-load ThreadPanel (only rendered when a thread is open)
 const ThreadPanel = lazy(() =>
@@ -139,9 +139,6 @@ export function ChannelView({
     tasks: channelTasks,
     isLoading: tasksLoading,
     error: tasksError,
-    updateTask,
-    claimTask,
-    unclaimTask,
     convertMessageToTask,
     refetch: refetchTasks,
   } = useTasks({ channel_id: channel.id });
@@ -342,28 +339,6 @@ export function ChannelView({
 
   // ---- Task quick-create handler (SOLO-128-F) ----
 
-  // ---- Claim / Unclaim handlers ----
-
-  const handleClaim = async (task: Task) => {
-    try {
-      const updated = await claimTask(task.channel_id, task.id);
-      setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
-      showToast(t('taskClaimed', { n: task.task_number ?? '?' }), 'success');
-    } catch {
-      // 409: silent — per spec, no error toast
-    }
-  };
-
-  const handleUnclaim = async (task: Task) => {
-    try {
-      const updated = await unclaimTask(task.channel_id, task.id);
-      setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
-      showToast(t('taskReleased', { n: task.task_number ?? '?' }), 'info');
-    } catch {
-      // Errors handled silently for claim/unclaim
-    }
-  };
-
   // ---- AsTask handler: convert directly, no dialog ----
   const handleAsTaskOpen = useCallback(
     async (message: Message) => {
@@ -382,14 +357,10 @@ export function ChannelView({
     [convertMessageToTask, showToast],
   );
 
-  const handleStatusChange = async (task: Task, newStatus: TaskStatus) => {
-    try {
-      const updated = await updateTask(task.channel_id, task.id, { status: newStatus });
-      setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
-    } catch {
-      // handled by hook
-    }
-  };
+  const handleTaskActionComplete = useCallback((updated: Task) => {
+    setThreadTask((prev) => (prev?.id === updated.id ? updated : prev));
+    refetchTasks();
+  }, [refetchTasks]);
 
   // SOLO-island PR2: removed agentActivities aggregation — the
   // TypingIndicator it fed is now replaced by AgentIsland, which
@@ -533,8 +504,8 @@ export function ChannelView({
                 isLoading={tasksLoading}
                 error={tasksError}
                 onTaskClick={handleTaskClickInTab}
-                onStatusChange={handleStatusChange}
                 onRefetch={refetchTasks}
+                onActionComplete={handleTaskActionComplete}
               />
             </div>
           </div>
@@ -593,8 +564,6 @@ export function ChannelView({
               members={members}
               replyCount={threadMessage.reply_count ?? 0}
               task={threadTask ?? undefined}
-              onClaimTask={handleClaim}
-              onUnclaimTask={handleUnclaim}
               onMarkRead={handleThreadMarkRead}
             />
           </Suspense>

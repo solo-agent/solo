@@ -1,7 +1,7 @@
 // ============================================================================
 // ThreadPanel — right-side thread reply panel (neubrutalist)
 // - card-brutal container with thick left border
-// - Optional task metadata bar: #N title [status] -> @claimer + claim/unclaim
+// - Optional task metadata bar: #N title [status] -> @claimer
 // - Parent message: message-bubble style
 // - Input: input-brutal font-mono
 // - Send: btn-brutal btn-brutal-primary
@@ -44,10 +44,6 @@ interface ThreadPanelProps {
   replyCount?: number;
   /** Optional task associated with this thread's parent message */
   task?: Task;
-  /** Callback when user claims the task from the metadata bar */
-  onClaimTask?: (task: Task) => void;
-  /** Callback when user unclaims the task from the metadata bar */
-  onUnclaimTask?: (task: Task) => void;
   /** Callback after the thread has been marked as read (P25-08-F) */
   onMarkRead?: () => void;
 }
@@ -532,15 +528,7 @@ function ParentMessageTaskBar({ message }: { message: Message }) {
 
 // ---- Task metadata bar (shown above parent message when thread is task-bound) ----
 
-function TaskMetaBar({
-  task,
-  onClaim,
-  onUnclaim,
-}: {
-  task: Task;
-  onClaim?: (task: Task) => void;
-  onUnclaim?: (task: Task) => void;
-}) {
+function TaskMetaBar({ task }: { task: Task }) {
   const badgeClass = STATUS_BADGE_COLORS[task.status] ?? STATUS_BADGE_COLORS.todo;
   const statusLabel = STATUS_LABELS[task.status] ?? task.status;
   const priorityLabel = PRIORITY_LABELS[task.priority] ?? task.priority;
@@ -569,7 +557,7 @@ function TaskMetaBar({
         </span>
       </div>
 
-      {/* Line 2: priority + claimer + claim/unclaim */}
+      {/* Line 2: priority + claimer */}
       <div className="flex items-center gap-2 text-xs flex-wrap">
         <span className="font-mono text-muted-foreground">
           Priority:{' '}
@@ -578,42 +566,18 @@ function TaskMetaBar({
         <span className="font-mono text-muted-foreground">|</span>
         <span className="font-mono text-muted-foreground">Claimer:</span>
         {isClaimed ? (
-          <div className="">
-            <span className="flex items-center gap-1">
-              <span className="flex h-4 w-4 items-center justify-center border-2 border-black bg-brutal-success font-heading text-[9px] font-bold text-black">
-                {(claimerDisplay || '?').charAt(0).toUpperCase()}
-              </span>
-              <span className="font-heading text-xs font-bold text-foreground">
-                @{claimerDisplay}{claimerDeletedSuffix}
-              </span>
+          <span className="flex items-center gap-1">
+            <span className="flex h-4 w-4 items-center justify-center border-2 border-black bg-brutal-success font-heading text-[9px] font-bold text-black">
+              {(claimerDisplay || '?').charAt(0).toUpperCase()}
             </span>
-            {onUnclaim && (
-              <button
-                type="button"
-                onClick={() => onUnclaim(task)}
-                className="btn-brutal btn-brutal-sm ml-1 text-[10px]"
-                aria-label={t('releaseTask')}
-              >
-                Release
-              </button>
-            )}
-          </div>
+            <span className="font-heading text-xs font-bold text-foreground">
+              @{claimerDisplay}{claimerDeletedSuffix}
+            </span>
+          </span>
         ) : (
-          <div className="">
-            <span className="font-heading text-xs text-muted-foreground">
-              Not yet claimed
-            </span>
-            {onClaim && (
-              <button
-                type="button"
-                onClick={() => onClaim(task)}
-                className="btn-brutal btn-brutal-sm ml-1 text-[10px]"
-                aria-label={t('claimTask')}
-              >
-                Claim
-              </button>
-            )}
-          </div>
+          <span className="font-heading text-xs text-muted-foreground">
+            Not yet claimed
+          </span>
         )}
       </div>
     </div>
@@ -629,8 +593,6 @@ export function ThreadPanel({
   targetMessageId,
   replyCount: initialReplyCount = 0,
   task,
-  onClaimTask,
-  onUnclaimTask,
   onMarkRead,
 }: ThreadPanelProps) {
   const {
@@ -761,11 +723,7 @@ export function ThreadPanel({
         <div ref={scrollRef} className="flex-1 overflow-y-auto">
           {/* Task metadata bar: prefer full Task object, fallback to message fields */}
           {task ? (
-            <TaskMetaBar
-              task={task}
-              onClaim={onClaimTask}
-              onUnclaim={onUnclaimTask}
-            />
+            <TaskMetaBar task={task} />
           ) : parentMessage.task_status ? (
             <ParentMessageTaskBar message={parentMessage} />
           ) : null}

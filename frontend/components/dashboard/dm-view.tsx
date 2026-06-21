@@ -23,7 +23,7 @@ const ThreadPanel = lazy(() =>
   import('./thread-panel').then((m) => ({ default: m.ThreadPanel })),
 );
 import { t } from '@/lib/i18n';
-import type { DMChannel, ChannelMember, Message, Task, TaskStatus } from '@/lib/types';
+import type { DMChannel, ChannelMember, Message, Task } from '@/lib/types';
 
 interface DMViewProps {
   dm: DMChannel;
@@ -46,9 +46,6 @@ interface DMViewProps {
   tasksLoading?: boolean;
   tasksError?: string | null;
   refetchTasks?: () => void;
-  onTaskStatusChange?: (task: Task, newStatus: TaskStatus) => Promise<Task | void>;
-  onClaimTask?: (task: Task) => void;
-  onUnclaimTask?: (task: Task) => void;
   onConvertToTask?: (channelId: string, messageId: string, title?: string) => Promise<Task>;
   onTaskCreated?: () => void;
   /** v1.5: Called when thread opens/closes so the parent can sync to URL */
@@ -95,9 +92,6 @@ export function DMView({
   tasksLoading,
   tasksError,
   refetchTasks,
-  onTaskStatusChange,
-  onClaimTask,
-  onUnclaimTask,
   onConvertToTask,
   onTaskCreated,
   onThreadChange,
@@ -202,15 +196,10 @@ export function DMView({
     refetch();
   }, [refetch]);
 
-  const handleStatusChange = useCallback(
-    async (task: Task, newStatus: TaskStatus) => {
-      const updated = await onTaskStatusChange?.(task, newStatus);
-      if (updated) {
-        setThreadTask((prev) => (prev?.id === task.id ? updated : prev));
-      }
-    },
-    [onTaskStatusChange],
-  );
+  const handleTaskActionComplete = useCallback((updated: Task) => {
+    setThreadTask((prev) => (prev?.id === updated.id ? updated : prev));
+    refetchTasks?.();
+  }, [refetchTasks]);
 
   // ---- ThreadPanel handlers ----
 
@@ -436,8 +425,8 @@ export function DMView({
                 isLoading={tasksLoading ?? false}
                 error={tasksError ?? null}
                 onTaskClick={handleTaskClickFromBoard}
-                onStatusChange={handleStatusChange}
                 onRefetch={refetchTasks ?? (() => {})}
+                onActionComplete={handleTaskActionComplete}
               />
             </div>
           </div>
@@ -482,8 +471,6 @@ export function DMView({
               parentMessage={threadMessage}
               task={threadTask ?? undefined}
               onClose={handleThreadClose}
-              onClaimTask={onClaimTask}
-              onUnclaimTask={onUnclaimTask}
               replyCount={threadMessage.reply_count ?? 0}
             />
           </Suspense>

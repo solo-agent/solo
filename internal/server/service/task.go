@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -76,6 +77,8 @@ var (
 	ErrTaskHumanOnly         = errors.New("this task action is human-only")
 	ErrTaskNotSubmittable    = errors.New("task is not ready to submit")
 	ErrTaskNotReviewable     = errors.New("task is not in review")
+	ErrTaskReasonRequired    = errors.New("reject reason is required")
+	ErrTaskLifecyclePatch    = errors.New("task lifecycle status changes must use lifecycle endpoints")
 )
 
 // Task represents a task in a channel.
@@ -131,12 +134,17 @@ type TaskFilter struct {
 
 // TaskService handles task business logic.
 type TaskService struct {
-	pool *pgxpool.Pool
+	pool          *pgxpool.Pool
+	agentNotifier *AgentNotifier
 }
 
 // NewTaskService creates a new TaskService.
 func NewTaskService(pool *pgxpool.Pool) *TaskService {
 	return &TaskService{pool: pool}
+}
+
+func (s *TaskService) SetAgentNotifier(n *AgentNotifier) {
+	s.agentNotifier = n
 }
 
 // CreateTask creates a new task in the channel with per-channel task numbering.
@@ -432,7 +440,13 @@ func (s *TaskService) SubmitTask(ctx context.Context, channelID, taskID, userID 
 	if task.Status != TaskStatusInProgress {
 		return nil, ErrTaskNotSubmittable
 	}
-	return s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusInReview)
+	updated, err := s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusInReview)
+	if err == nil && s.agentNotifier != nil {
+		if notifyErr := s.agentNotifier.NotifyReviewReady(ctx, updated.ID, userID); notifyErr != nil {
+			slog.Warn("notify review ready failed", "task_id", updated.ID, "err", notifyErr)
+		}
+	}
+	return updated, err
 }
 
 func (s *TaskService) AcceptTask(ctx context.Context, channelID, taskID, userID string) (*Task, error) {
@@ -446,10 +460,20 @@ func (s *TaskService) AcceptTask(ctx context.Context, channelID, taskID, userID 
 	if task.Status != TaskStatusInReview {
 		return nil, ErrTaskNotReviewable
 	}
-	return s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusDone)
+	updated, err := s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusDone)
+	if err == nil && s.agentNotifier != nil {
+		if notifyErr := s.agentNotifier.NotifyAccepted(ctx, updated.ID, userID); notifyErr != nil {
+			slog.Warn("notify accepted failed", "task_id", updated.ID, "err", notifyErr)
+		}
+	}
+	return updated, err
 }
 
-func (s *TaskService) RejectTask(ctx context.Context, channelID, taskID, userID string) (*Task, error) {
+func (s *TaskService) RejectTask(ctx context.Context, channelID, taskID, userID, reason string) (*Task, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil, ErrTaskReasonRequired
+	}
 	task, err := s.GetTask(ctx, channelID, taskID, userID)
 	if err != nil {
 		return nil, err
@@ -460,7 +484,64 @@ func (s *TaskService) RejectTask(ctx context.Context, channelID, taskID, userID 
 	if task.Status != TaskStatusInReview {
 		return nil, ErrTaskNotReviewable
 	}
-	return s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusInProgress)
+	updated, err := s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusInProgress)
+	if err == nil && s.agentNotifier != nil {
+		if notifyErr := s.agentNotifier.NotifyRejected(ctx, updated.ID, userID, reason); notifyErr != nil {
+			slog.Warn("notify rejected failed", "task_id", updated.ID, "err", notifyErr)
+		}
+	}
+	return updated, err
+}
+
+func (s *TaskService) CloseTask(ctx context.Context, channelID, taskID, userID string) (*Task, error) {
+	task, err := s.GetTask(ctx, channelID, taskID, userID)
+	if err != nil {
+		return nil, err
+	}
+	isAgent, err := s.isAgentActor(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if isAgent {
+		return nil, ErrTaskHumanOnly
+	}
+	if task.Status == TaskStatusClosed {
+		return nil, ErrTaskInTerminalState
+	}
+	updated, err := s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusClosed)
+	if err == nil && s.agentNotifier != nil {
+		if notifyErr := s.agentNotifier.NotifyClosed(ctx, updated.ID, userID); notifyErr != nil {
+			slog.Warn("notify closed failed", "task_id", updated.ID, "err", notifyErr)
+		}
+	}
+	return updated, err
+}
+
+func (s *TaskService) ReopenTask(ctx context.Context, channelID, taskID, userID string) (*Task, error) {
+	task, err := s.GetTask(ctx, channelID, taskID, userID)
+	if err != nil {
+		return nil, err
+	}
+	isAgent, err := s.isAgentActor(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if isAgent {
+		return nil, ErrTaskHumanOnly
+	}
+	if task.CreatorID != userID {
+		return nil, ErrTaskNotCreator
+	}
+	if task.Status != TaskStatusClosed && task.Status != TaskStatusDone {
+		return nil, ErrTaskInvalidTransition
+	}
+	updated, err := s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusTodo)
+	if err == nil && s.agentNotifier != nil {
+		if notifyErr := s.agentNotifier.NotifyReopened(ctx, updated.ID, userID); notifyErr != nil {
+			slog.Warn("notify reopened failed", "task_id", updated.ID, "err", notifyErr)
+		}
+	}
+	return updated, err
 }
 
 func (s *TaskService) setTaskStatus(ctx context.Context, channelID, taskID, userID, status string) (*Task, error) {
@@ -669,12 +750,7 @@ func (s *TaskService) UpdateTask(ctx context.Context, channelID, taskID, userID 
 
 	// Validate status transition if status is being changed
 	if req.Status != nil && *req.Status != "" {
-		if err := validateStatusTransition(currentTask.Status, *req.Status); err != nil {
-			return nil, err
-		}
-		if err := s.validateStatusActor(ctx, currentTask, userID, *req.Status); err != nil {
-			return nil, err
-		}
+		return nil, ErrTaskLifecyclePatch
 	}
 
 	// Build dynamic update

@@ -48,6 +48,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	workspaceRoot := defaultAgentWorkspaceRoot()
 	relationshipMD := service.NewRelationshipsMDGenerator(pool, workspaceRoot)
 	taskSvc := service.NewTaskService(pool)
+	taskSvc.SetAgentNotifier(service.NewAgentNotifier(pool, hub, agentSvc))
 	relationshipSvc := service.NewAgentRelationshipService(pool, relationshipMD)
 	templateSvc := service.NewTemplateService(pool, relationshipMD)
 	computerSvc := service.NewComputerService(pool)
@@ -167,6 +168,8 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 						r.Post("/submit", taskHandler.Submit)
 						r.Post("/accept", taskHandler.Accept)
 						r.Post("/reject", taskHandler.Reject)
+						r.Post("/close", taskHandler.Close)
+						r.Post("/reopen", taskHandler.Reopen)
 					})
 				})
 
@@ -236,15 +239,15 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Post("/api/v1/onboarding/create-lucy", onboardingHandler.CreateLucy)
 
 		// Global tasks routes (all channels)
-		r.Route("/api/v1/tasks", func(r chi.Router) {
-			r.Get("/", taskHandler.ListAll)
-			r.Post("/", taskHandler.CreateGlobal)
-			r.Route("/{taskID}", func(r chi.Router) {
-				r.Get("/", taskHandler.GetGlobal)
-				r.Patch("/", taskHandler.UpdateGlobal)
-				r.Delete("/", taskHandler.DeleteGlobal)
-			})
-		})
+		r.Get("/api/v1/tasks", taskHandler.ListAll)
+		r.Post("/api/v1/tasks", taskHandler.CreateGlobal)
+		r.Get("/api/v1/tasks/{taskID}", taskHandler.GetGlobal)
+		r.Patch("/api/v1/tasks/{taskID}", taskHandler.UpdateGlobal)
+		r.Delete("/api/v1/tasks/{taskID}", taskHandler.DeleteGlobal)
+		r.Post("/api/v1/tasks/{taskID}/accept", taskHandler.AcceptGlobal)
+		r.Post("/api/v1/tasks/{taskID}/reject", taskHandler.RejectGlobal)
+		r.Post("/api/v1/tasks/{taskID}/close", taskHandler.CloseGlobal)
+		r.Post("/api/v1/tasks/{taskID}/reopen", taskHandler.ReopenGlobal)
 
 		// DM routes (SOLO-55-B, SOLO-56-B)
 		r.Route("/api/v1/dm", func(r chi.Router) {
