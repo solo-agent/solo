@@ -19,6 +19,7 @@ import { AgentProfileTab } from '@/components/agents/agent-profile-tab';
 import { AgentRuntimeTab } from '@/components/agents/agent-runtime-tab';
 import { AgentSkillsTab } from '@/components/agents/agent-skills-tab';
 import { Button } from '@/components/ui/button';
+import { detailSectionClass } from '@/components/ui/detail-section';
 import {
   Dialog,
   DialogHeader,
@@ -83,10 +84,10 @@ export function TeamsAgentProfile({
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         <AgentProfileTab agentId={agentId} showHeader={showProfileHeader} />
-        <div className="border-2 border-black bg-white p-3">
+        <div className={detailSectionClass()}>
           <AgentRuntimeTab agentId={agentId} />
         </div>
-        <div className="border-2 border-black bg-white p-3">
+        <div className={detailSectionClass()}>
           <AgentSkillsTab agentId={agentId} />
         </div>
       </div>

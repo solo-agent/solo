@@ -15,6 +15,12 @@ import { X, Trash2, Edit3, Check, AlertTriangle, MessageSquare } from 'lucide-re
 import { Select } from '@/components/ui/select';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Button, iconActionClass } from '@/components/ui/button';
+import {
+  detailEditActionClass,
+  detailFieldLabelClass,
+  detailSectionClass,
+  detailSectionTitleClass,
+} from '@/components/ui/detail-section';
 import { panelHeaderClass, panelTitleClass } from '@/components/ui/panel-header';
 import { TeamsAgentProfile } from '@/components/teams/teams-agent-profile';
 import { TeamsAgentWorkspace } from '@/components/teams/teams-agent-workspace';
@@ -357,16 +363,16 @@ export function RelationshipDetailPanel({
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* Instruction */}
-        <div className="p-3 border-2 border-black bg-white">
+        <div className={detailSectionClass()}>
           <div className="flex items-center justify-between mb-2">
-            <div className="inline-flex items-center gap-1.5 border-2 border-black bg-brutal-primary px-2.5 py-1 font-heading text-[11px] font-black uppercase tracking-widest text-black shadow-brutal-sm">
+            <div className={detailSectionTitleClass()}>
               ★ {relationship.rel_type === 'assigns_to' ? 'Delegation Criteria' : 'Collaboration Criteria'}
             </div>
             {!isEditingInstruction ? (
               <button
                 type="button"
                 onClick={() => { setIsEditingInstruction(true); setEditInstruction(relationship.instruction || ''); }}
-                className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground hover:text-black"
+                className={detailEditActionClass()}
               >
                 <Edit3 className="h-3 w-3" />
                 {t('edit')}
@@ -429,16 +435,16 @@ export function RelationshipDetailPanel({
         </div>
 
         {/* Type edit (in-place) */}
-        <div className="p-3 border-2 border-black bg-white">
+        <div className={detailSectionClass()}>
           <div className="flex items-center justify-between mb-2">
-            <div className="inline-flex items-center gap-1.5 border-2 border-black bg-brutal-primary px-2.5 py-1 font-heading text-[11px] font-black uppercase tracking-widest text-black shadow-brutal-sm">
+            <div className={detailSectionTitleClass()}>
               ★ {t('relationshipEditorType')}
             </div>
             {!isEditing ? (
               <button
                 type="button"
                 onClick={() => { setIsEditing(true); setEditType(relationship.rel_type); }}
-                className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground hover:text-black"
+                className={detailEditActionClass()}
               >
                 <Edit3 className="h-3 w-3" />
                 {t('edit')}
@@ -493,8 +499,8 @@ export function RelationshipDetailPanel({
 
         {/* Channel info */}
         {relationship.channel_id && (
-          <div className="p-3 border-2 border-black bg-brutal-cream">
-            <div className="mb-2 inline-block bg-brutal-primary-light border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-black">
+          <div className={detailSectionClass()}>
+            <div className={detailFieldLabelClass('mb-2')}>
               Channel
             </div>
             <div className="font-mono text-xs text-black">
@@ -507,8 +513,8 @@ export function RelationshipDetailPanel({
 
         {/* Weight */}
         {relationship.weight !== undefined && relationship.weight !== null && (
-          <div className="p-3 border-2 border-black bg-brutal-cream">
-            <div className="mb-2 inline-flex items-center gap-1.5 border-2 border-black bg-brutal-primary px-2.5 py-1 font-heading text-[11px] font-black uppercase tracking-widest text-black shadow-brutal-sm">
+          <div className={detailSectionClass()}>
+            <div className={detailSectionTitleClass('mb-2')}>
               ★ Weight
             </div>
             <div className="font-mono text-xs text-black">{relationship.weight}</div>
@@ -517,8 +523,8 @@ export function RelationshipDetailPanel({
 
         {/* Created at */}
         {relationship.created_at && (
-          <div className="p-3 border-2 border-black bg-brutal-cream">
-            <div className="mb-2 inline-flex items-center gap-1.5 border-2 border-black bg-brutal-primary px-2.5 py-1 font-heading text-[11px] font-black uppercase tracking-widest text-black shadow-brutal-sm">
+          <div className={detailSectionClass()}>
+            <div className={detailSectionTitleClass('mb-2')}>
               ★ Created
             </div>
             <div className="font-mono text-xs text-black">

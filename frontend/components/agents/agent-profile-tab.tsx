@@ -14,6 +14,12 @@ import { apiClient, ApiError } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import {
+  detailEditActionClass,
+  detailFieldLabelClass,
+  detailSectionClass,
+  detailSectionTitleClass,
+} from '@/components/ui/detail-section';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Decoration } from '@/components/ui/decoration';
 import { useComputers } from '@/lib/hooks/use-computers';
@@ -118,7 +124,7 @@ function InlineTextField({
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-2">
-        <span className="inline-block bg-brutal-primary-light border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-black">
+        <span className={detailFieldLabelClass()}>
           {label}
         </span>
         <button
@@ -127,7 +133,7 @@ function InlineTextField({
             setDraft(value);
             setEditing(true);
           }}
-          className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground hover:text-black"
+          className={detailEditActionClass()}
           aria-label={t('agentProfileEdit', { label })}
         >
           <Pencil className="h-3 w-3" />
@@ -344,7 +350,7 @@ export function AgentProfileTab({ agentId, showHeader = true }: AgentProfileTabP
       )}
 
       {/* Status toggle */}
-      <div className="border-2 border-black bg-white p-3">
+      <div className={detailSectionClass()}>
         <StatusToggle
           active={agent.is_active}
           onToggle={(active) => handleUpdate('is_active', active)}
@@ -354,12 +360,9 @@ export function AgentProfileTab({ agentId, showHeader = true }: AgentProfileTabP
       {/* v3.3: Name field removed (the avatar/header above already
           shows the name). Description + System Prompt are grouped under
           a single `★ INFO` tilted sticker section. */}
-      <div className="space-y-3 border-2 border-black bg-white p-3">
+      <div className={detailSectionClass('space-y-3')}>
         <h4>
-          <span
-            className="inline-flex items-center gap-1.5 border-2 border-black bg-brutal-primary px-2.5 py-1 font-heading text-[11px] font-black uppercase tracking-widest text-black shadow-brutal-sm"
-            style={{ transform: 'rotate(-0.8deg)' }}
-          >
+          <span className={detailSectionTitleClass()}>
             ★ {t('agentProfileInfo')}
           </span>
         </h4>
@@ -385,18 +388,15 @@ export function AgentProfileTab({ agentId, showHeader = true }: AgentProfileTabP
       {/* Read-only metadata — v3.3: bare layout (no card-brutal wrapper)
           to match the chunky-sticker-title + naked-fields style of the
           Computers detail. Section header is a tilted primary chip. */}
-      <div className="space-y-3 border-2 border-black bg-white p-3">
+      <div className={detailSectionClass('space-y-3')}>
         <h4>
-          <span
-            className="inline-flex items-center gap-1.5 border-2 border-black bg-brutal-primary px-2.5 py-1 font-heading text-[11px] font-black uppercase tracking-widest text-black shadow-brutal-sm"
-            style={{ transform: 'rotate(-0.8deg)' }}
-          >
+          <span className={detailSectionTitleClass()}>
             ★ {t('agentProfileMeta')}
           </span>
         </h4>
         <div className="space-y-1">
           <div className="flex items-center gap-3 py-1.5">
-            <span className="inline-block bg-brutal-primary-light border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-black flex-shrink-0">
+            <span className={detailFieldLabelClass('flex-shrink-0')}>
               ID
             </span>
             <span className="font-mono text-xs text-foreground">
@@ -404,19 +404,19 @@ export function AgentProfileTab({ agentId, showHeader = true }: AgentProfileTabP
             </span>
           </div>
           <div className="flex items-center gap-3 py-1.5">
-            <span className="inline-block bg-brutal-primary-light border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-black flex-shrink-0">
+            <span className={detailFieldLabelClass('flex-shrink-0')}>
               {t('agentProfileCreatedAt')}
             </span>
             <span className="font-mono text-xs text-foreground">{formatDate(agent.created_at)}</span>
           </div>
           <div className="flex items-center gap-3 py-1.5">
-            <span className="inline-block bg-brutal-primary-light border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-black flex-shrink-0">
+            <span className={detailFieldLabelClass('flex-shrink-0')}>
               {t('agentProfileCreatedBy')}
             </span>
             <span className="font-mono text-xs text-foreground">{agent.owner_id?.slice(0, 8) ?? '—'}</span>
           </div>
           <div className="flex items-center gap-3 py-1.5">
-            <span className="inline-block bg-brutal-primary-light border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-black flex-shrink-0">
+            <span className={detailFieldLabelClass('flex-shrink-0')}>
               Computer
             </span>
             {connectedComputer ? (

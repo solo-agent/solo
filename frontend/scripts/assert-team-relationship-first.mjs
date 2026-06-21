@@ -18,6 +18,7 @@ const relationshipNode = read('components/relationships/relationship-node.tsx');
 const typeSelector = read('components/relationships/type-selector.tsx');
 const teamsAgentWorkspace = read('components/teams/teams-agent-workspace.tsx');
 const button = read('components/ui/button.tsx');
+const detailSection = read('components/ui/detail-section.tsx');
 const dialog = read('components/ui/dialog.tsx');
 const panelHeader = read('components/ui/panel-header.tsx');
 const selectableRow = read('components/ui/selectable-row.tsx');
@@ -105,6 +106,18 @@ assert(
 assert(
   !teamsAgentProfile.includes('BrutalSeparator') && !agentProfileTab.includes('<BrutalSeparator'),
   'agent detail should use boxed sections instead of long separator lines',
+);
+assert(
+  detailSection.includes('export function detailSectionClass') &&
+    detailSection.includes('export function detailSectionTitleClass') &&
+    detailSection.includes('export function detailFieldLabelClass') &&
+    agentProfileTab.includes('detailSectionClass') &&
+    agentProfileTab.includes('detailSectionTitleClass') &&
+    detailPanel.includes('detailSectionClass') &&
+    detailPanel.includes('detailSectionTitleClass') &&
+    teamsAgentProfile.includes('detailSectionClass') &&
+    !agentProfileTab.includes("style={{ transform: 'rotate(-0.8deg)' }}"),
+  'Agent and relationship detail sections should share the same Card-like brutal section primitives',
 );
 assert(
   button.includes('success: "btn-brutal-success"') &&
