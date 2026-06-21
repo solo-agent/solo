@@ -111,6 +111,10 @@ assert(
   'workspace drawer should fullscreen in-place instead of linking away',
 );
 assert(
+  teamsAgentWorkspace.includes('Workspace') && teamsAgentWorkspace.includes('Readonly') && teamsAgentWorkspace.includes('border-b-4 border-black'),
+  'workspace preview should keep a brutal header aligned with the file pane',
+);
+assert(
   !teamsAgentWorkspace.includes('href={`/workspace?agent=${agentId}`}') && !navbar.includes("href: '/workspace'"),
   'workspace should not be exposed as a separate left-nav tab from Teams',
 );

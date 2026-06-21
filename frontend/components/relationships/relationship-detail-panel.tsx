@@ -10,12 +10,14 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { X, Trash2, Edit3, Check, AlertTriangle } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { X, Trash2, Edit3, Check, AlertTriangle, MessageSquare } from 'lucide-react';
 import { Select } from '@/components/ui/select';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Button } from '@/components/ui/button';
 import { TeamsAgentProfile } from '@/components/teams/teams-agent-profile';
 import { TeamsAgentWorkspace } from '@/components/teams/teams-agent-workspace';
+import { useDM } from '@/lib/hooks/use-dm';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { t } from '@/lib/i18n';
 import type { RelationshipType, Agent, AgentRelationship } from '@/lib/types';
@@ -57,6 +59,8 @@ export function RelationshipDetailPanel({
   onDelete,
   onAgentDeleted,
 }: RelationshipDetailPanelProps) {
+  const router = useRouter();
+  const { createOrGetDM } = useDM();
   const [isEditing, setIsEditing] = useState(false);
   const [agentTab, setAgentTab] = useState<'profile' | 'workspace'>('profile');
   const [panelWidth, setPanelWidth] = useState(400);
@@ -68,6 +72,7 @@ export function RelationshipDetailPanel({
   const [editInstruction, setEditInstruction] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isOpeningDM, setIsOpeningDM] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -122,6 +127,20 @@ export function RelationshipDetailPanel({
       setIsDeleting(false);
     }
   }, [relationship, onDelete, onClose]);
+
+  const handleMessageAgent = useCallback(async () => {
+    if (!agent) return;
+    setIsOpeningDM(true);
+    setError(null);
+    try {
+      const dm = await createOrGetDM({ agent_id: agent.id });
+      router.push(`/dashboard?dm=${dm.id}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to open message');
+    } finally {
+      setIsOpeningDM(false);
+    }
+  }, [agent, createOrGetDM, router]);
 
   // ---- Render agent detail ----
 
@@ -179,6 +198,16 @@ export function RelationshipDetailPanel({
               )}
             </div>
           </div>
+          <button
+            type="button"
+            onClick={handleMessageAgent}
+            disabled={isOpeningDM}
+            className="inline-flex h-8 flex-shrink-0 items-center gap-1.5 border-2 border-black bg-white px-2.5 font-heading text-[10px] font-black uppercase tracking-wider hover:bg-brutal-primary-light active:translate-x-0.5 active:translate-y-0.5 active:shadow-none disabled:opacity-50 transition-all"
+            aria-label={`${t('teamsMessage')} ${agent.name}`}
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+            <span>{t('teamsMessage')}</span>
+          </button>
         </div>
 
         <div className="grid grid-cols-2 border-b-2 border-black">

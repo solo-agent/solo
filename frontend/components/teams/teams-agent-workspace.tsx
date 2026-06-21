@@ -1,7 +1,7 @@
 // ============================================================================
 // TeamsAgentWorkspace — Workspace tab content for an agent on /teams.
-// Top bar: agent's workspace path + refresh button.
-// Body:   file tree (left, 260px) + file preview with Shiki (right, flex).
+// Top bar: agent's workspace path + refresh/fullscreen actions.
+// Body:   narrow file tree + read-only editor preview.
 // Read-only — no edit, no upload, no delete.
 // ============================================================================
 
@@ -149,12 +149,17 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
       : 'flex h-full flex-col'
     }>
       {/* Path bar */}
-      <div className="flex items-center justify-between border-b-2 border-black bg-white px-3 py-1.5">
-        <div className="flex min-w-0 items-center gap-2 font-mono text-[11px] text-muted-foreground">
-          <FolderOpen className="h-3.5 w-3.5 flex-shrink-0" />
-          <span className="truncate">
-            agents/<span className="font-bold text-foreground">{agentId.slice(0, 8)}</span>/workspace
+      <div className="flex items-center justify-between border-b-4 border-black bg-white px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="border-2 border-black bg-brutal-primary px-2 py-0.5 font-heading text-[10px] font-black uppercase tracking-wider shadow-brutal-sm">
+            Workspace
           </span>
+          <div className="flex min-w-0 items-center gap-2 border-2 border-black bg-brutal-cream px-2 py-1 font-mono text-[11px] text-muted-foreground">
+            <FolderOpen className="h-3.5 w-3.5 flex-shrink-0" />
+            <span className="truncate">
+              agents/<span className="font-bold text-foreground">{agentId.slice(0, 8)}</span>/workspace
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-1.5">
           <button
@@ -179,19 +184,19 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
       {/* Tree + preview split */}
       <div className="flex flex-1 overflow-hidden">
         <div
-          className="relative h-full flex-shrink-0 overflow-hidden border-r-2 border-black bg-white"
+          className="relative h-full flex-shrink-0 overflow-hidden border-r-4 border-black bg-brutal-cream"
           style={{ width: isFilePaneCollapsed ? 34 : filePaneWidth }}
         >
-          <div className="flex items-center border-b-2 border-black px-3 py-2">
+          <div className="flex items-center border-b-4 border-black bg-white px-3 py-2">
             {!isFilePaneCollapsed && (
-              <span className="font-heading text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+              <span className="border-2 border-black bg-white px-1.5 py-0.5 font-heading text-[10px] font-black uppercase tracking-wider text-black">
                 Files
               </span>
             )}
             <button
               type="button"
               onClick={() => setIsFilePaneCollapsed((collapsed) => !collapsed)}
-              className="ml-auto flex h-5 w-5 items-center justify-center border-2 border-black bg-white hover:bg-brutal-primary-light"
+              className="ml-auto flex h-6 w-6 items-center justify-center border-2 border-transparent bg-white text-muted-foreground transition-all hover:border-black hover:bg-brutal-primary-light hover:text-black active:translate-x-0.5 active:translate-y-0.5"
               aria-label={isFilePaneCollapsed ? 'Expand files' : 'Collapse files'}
             >
               {isFilePaneCollapsed ? <PanelLeftOpen className="h-3 w-3" /> : <PanelLeftClose className="h-3 w-3" />}
@@ -229,23 +234,40 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
             />
           )}
         </div>
-        <div className="h-full flex-1 overflow-y-auto bg-brutal-cream">
-          {selectedPath ? (
-            <FilePreview
-              path={selectedPath}
-              content={fileContent}
-              isLoading={isContentLoading}
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center">
-              <div className="text-center">
-                <FileText className="mx-auto h-6 w-6 text-muted-foreground" />
-                <p className="mt-2 font-mono text-xs text-muted-foreground">
-                  Select a file to preview its content
-                </p>
-              </div>
+        <div className="flex h-full flex-1 flex-col overflow-hidden bg-brutal-cream">
+          <div className="flex items-center justify-between border-b-4 border-black bg-white px-3 py-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="border-2 border-black bg-brutal-info-light px-2 py-0.5 font-heading text-[10px] font-black uppercase tracking-wider">
+                Readonly
+              </span>
+              <span className="truncate font-heading text-sm font-black">
+                {selectedPath ? selectedPath.split('/').pop() : 'No file selected'}
+              </span>
             </div>
-          )}
+            {selectedPath && (
+              <span className="ml-3 flex-shrink-0 font-mono text-[10px] font-bold uppercase text-muted-foreground">
+                {selectedPath.split('.').pop()}
+              </span>
+            )}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto bg-brutal-cream">
+            {selectedPath ? (
+              <FilePreview
+                path={selectedPath}
+                content={fileContent}
+                isLoading={isContentLoading}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center">
+                <div className="border-2 border-black bg-white p-4 text-center shadow-brutal-sm">
+                  <FileText className="mx-auto h-6 w-6 text-muted-foreground" />
+                  <p className="mt-2 font-mono text-xs text-muted-foreground">
+                    Select a file to preview its content
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
