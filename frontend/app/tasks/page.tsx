@@ -172,6 +172,10 @@ function TasksPageContent() {
     router.push('/tasks');
   }, [router]);
 
+  const handleGoToDashboard = useCallback(() => {
+    router.push('/dashboard');
+  }, [router]);
+
   // Thread panel state
   const [threadMessage, setThreadMessage] = useState<Message | null>(null);
   const [threadTask, setThreadTask] = useState<Task | null>(null);
@@ -359,6 +363,8 @@ function TasksPageContent() {
                   variant="dashed"
                   icon={<Plus className="h-6 w-6 text-muted-foreground" />}
                   title={t('noTasks')}
+                  actionLabel={t('navChannels')}
+                  onAction={handleGoToDashboard}
                 />
               ) : (
                 <TaskBoard
