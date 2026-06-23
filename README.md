@@ -17,9 +17,9 @@
 
 <div align="center">
 
-| | | | | |
-|:---:|:---:|:---:|:---:|:---:|
-| **Works<br/>with** | <img src="assets/logos/opencode.svg" width="32" height="32" alt="OpenCode"><br/>**OpenCode** | <img src="assets/logos/claude.svg" width="32" height="32" alt="Claude Code"><br/>**Claude Code** | <img src="assets/logos/hermes.png" width="32" height="32" alt="Hermes"><br/>**Hermes** | <img src="assets/logos/openclaw.svg" width="32" height="32" alt="OpenClaw"><br/>**OpenClaw** |
+| | | | | | |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Works<br/>with** | <img src="assets/logos/opencode.svg" width="32" height="32" alt="OpenCode"><br/>**OpenCode** | <img src="assets/logos/claude.svg" width="32" height="32" alt="Claude Code"><br/>**Claude Code** | <img src="assets/logos/codex.svg" width="32" height="32" alt="Codex CLI"><br/>**Codex CLI** | <img src="assets/logos/hermes.png" width="32" height="32" alt="Hermes"><br/>**Hermes** | <img src="assets/logos/openclaw.svg" width="32" height="32" alt="OpenClaw"><br/>**OpenClaw** |
 
 
 </div>
@@ -32,7 +32,7 @@ Solo runs three layers on your machine:
 
 1. **Server** (:8080) — HTTP API, WebSocket hub, PostgreSQL persistence.
 2. **Daemon** (:8081) — Spawns and manages AI agent processes. One daemon per machine.
-3. **Agent CLI** — Your local AI tool (Claude Code, OpenCode, Hermes, OpenClaw) runs as a subprocess, reading stdin and writing stdout. Solo wraps it with a system prompt, memory, and the `solo` CLI so the agent can send messages, claim tasks, and search channels.
+3. **Agent CLI** — Your local AI tool (Claude Code, Codex CLI, OpenCode, Hermes, OpenClaw) runs as a subprocess, reading stdin and writing stdout. Solo wraps it with a system prompt, memory, and the `solo` CLI so the agent can send messages, claim tasks, and search channels.
 
 Agents don't just reply to messages — they are long-lived processes with persistent workspaces, file system access, and autonomous decision-making.
 
@@ -80,6 +80,7 @@ make db-reset # Wipe local DB and re-migrate
 | Backend | CLI Binary | Protocol |
 |----------|------------|----------|
 | **Claude Code** | `claude` | stream-json |
+| **Codex CLI** | `codex` | JSON-RPC |
 | **OpenCode** | `opencode` | NDJSON |
 | **Hermes** | `hermes` | ACP |
 | **OpenClaw** | `openclaw` | ACP |

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -147,6 +148,17 @@ func TestCodexSemanticInactivityTimeout(t *testing.T) {
 			t.Errorf("expected default %s, got %s", defaultCodexSemanticInactivityTimeout, timeout)
 		}
 	})
+}
+
+func TestCodexPersistentStartDoesNotPrependSystemPrompt(t *testing.T) {
+	src, err := os.ReadFile("codex.go")
+	if err != nil {
+		t.Fatalf("read codex.go: %v", err)
+	}
+
+	if strings.Contains(string(src), `prompt = opts.SystemPrompt + "\n\n---\n\n" + prompt`) {
+		t.Fatal("persistent Codex must pass SystemPrompt via developerInstructions only, not prepend it to user input")
+	}
 }
 
 // resolveCodexSemanticInactivityTimeout mirrors the logic in Execute().

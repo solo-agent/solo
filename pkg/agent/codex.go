@@ -50,9 +50,6 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 	}
 
 	prompt := buildPrompt(req, opts)
-	if opts.SystemPrompt != "" {
-		prompt = opts.SystemPrompt + "\n\n---\n\n" + prompt
-	}
 
 	msgCh := make(chan OutputChunk, 256)
 	resCh := make(chan *Result, 1)

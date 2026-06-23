@@ -20,7 +20,7 @@ export interface CliDetectionState {
 }
 
 /** Whitelist of runtimes available for agent creation. */
-const ALLOWED_RUNTIMES = new Set(["openclaw", "hermes", "claude", "opencode"]);
+const ALLOWED_RUNTIMES = new Set(["openclaw", "hermes", "claude", "opencode", "codex"]);
 
 /** Raw shape from backend — matches GET /api/v1/agent-backends/detect */
 interface DetectResponseItem {
