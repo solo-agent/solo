@@ -18,7 +18,7 @@ import {
   useState,
   useCallback,
 } from 'react';
-import { X, AlertCircle, RefreshCw, Send, MessageSquare, SquareCheckBig } from 'lucide-react';
+import { X, AlertCircle, RefreshCw, Send, MessageSquare, SquareCheckBig, FileText } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -50,6 +50,7 @@ interface ThreadPanelProps {
   onViewInChannel?: () => void;
   onViewTask?: () => void;
   showViewTask?: boolean;
+  onGenerateArtifact?: () => void;
   onAgentClick?: (agent: AgentDetailTarget) => void;
 }
 
@@ -638,6 +639,7 @@ export function ThreadPanel({
   onViewInChannel,
   onViewTask,
   showViewTask,
+  onGenerateArtifact,
   onAgentClick,
 }: ThreadPanelProps) {
   const router = useRouter();
@@ -773,6 +775,16 @@ export function ThreadPanel({
           )}
         </h3>
         <div className="flex items-center gap-2">
+          {onGenerateArtifact && (
+            <button
+              type="button"
+              onClick={onGenerateArtifact}
+              className="inline-flex items-center gap-1 border-2 border-black bg-white px-2 py-1 font-mono text-[10px] font-bold uppercase shadow-brutal-sm hover:bg-brutal-info"
+            >
+              <FileText className="h-3 w-3" />
+              Generate Artifact
+            </button>
+          )}
           {(taskNumber != null || showViewTask) && (
             <button
               type="button"

@@ -15,6 +15,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { AlertCircle, RefreshCw, MessageSquare, Circle, SquareCheckBig } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useStreamingMessages } from '@/lib/hooks/use-streaming-messages';
+import { useTaskArtifact } from '@/lib/hooks/use-task-artifact';
 import { MessageList } from './message-list';
 import { MessageInput } from './message-input';
 import { TaskBoard } from '@/components/tasks/task-board';
@@ -26,7 +27,7 @@ const ThreadPanel = lazy(() =>
   import('./thread-panel').then((m) => ({ default: m.ThreadPanel })),
 );
 import { t } from '@/lib/i18n';
-import type { AgentDetailTarget, DMChannel, ChannelMember, Message, Task } from '@/lib/types';
+import type { AgentDetailTarget, DMChannel, ChannelMember, Message, Task, TaskArtifact } from '@/lib/types';
 
 interface DMViewProps {
   dm: DMChannel;
@@ -107,12 +108,14 @@ export function DMView({
   );
   const [threadMessage, setThreadMessage] = useState<Message | null>(null);
   const [threadTask, setThreadTask] = useState<Task | null>(null);
+  const [artifactPreview, setArtifactPreview] = useState<TaskArtifact | null>(null);
   const [threadPanelWidth, setThreadPanelWidth] = useState(400);
   const [scrollToMessageId, setScrollToMessageId] = useState<string | undefined>(undefined);
   const [scrollMsgKey, setScrollMsgKey] = useState(0);
   const [selectedAgentDetail, setSelectedAgentDetail] = useState<AgentDetailTarget | null>(null);
   const [activeRightPanel, setActiveRightPanel] = useState<'thread' | 'agent' | null>(null);
   const rightPanelOpen = activeRightPanel !== null;
+  const { generateArtifact } = useTaskArtifact();
 
   useEffect(() => {
     if (searchParams.get('dm') !== dm.id) return;
@@ -232,6 +235,11 @@ export function DMView({
     setThreadTask((prev) => (prev?.id === updated.id ? updated : prev));
     refetchTasks?.();
   }, [refetchTasks]);
+
+  const handleGenerateArtifact = useCallback(async (task: Task) => {
+    const artifact = await generateArtifact(task.id);
+    setArtifactPreview(artifact);
+  }, [generateArtifact]);
 
   // ---- ThreadPanel handlers ----
 
@@ -478,6 +486,7 @@ export function DMView({
                 onTaskClick={handleTaskClickFromBoard}
                 onRefetch={refetchTasks ?? (() => {})}
                 onActionComplete={handleTaskActionComplete}
+                onGenerateArtifact={handleGenerateArtifact}
               />
             </div>
           </div>
@@ -525,6 +534,7 @@ export function DMView({
               replyCount={threadMessage.reply_count ?? 0}
               onViewInChannel={handleViewThreadInDM}
               onViewTask={handleViewThreadTask}
+              onGenerateArtifact={threadTask ? () => handleGenerateArtifact(threadTask) : undefined}
               onAgentClick={openAgentDetail}
             />
           </Suspense>
@@ -541,6 +551,32 @@ export function DMView({
           />
         )}
       </div>
+
+      {artifactPreview && (
+        <div className="fixed inset-4 z-50 flex flex-col border-4 border-black bg-white shadow-brutal-xl">
+          <div className="flex items-center justify-between border-b-4 border-black px-4 py-2">
+            <div className="font-heading text-sm font-black uppercase">{artifactPreview.title}</div>
+            <div className="flex items-center gap-2">
+              <a
+                href={artifactPreview.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border-2 border-black bg-white px-2 py-1 font-mono text-xs font-bold uppercase shadow-brutal-sm"
+              >
+                Open
+              </a>
+              <button
+                type="button"
+                onClick={() => setArtifactPreview(null)}
+                className="border-2 border-black bg-white px-2 py-1 font-mono text-xs font-bold uppercase shadow-brutal-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+          <iframe title={artifactPreview.title} src={artifactPreview.url} className="min-h-0 flex-1 bg-white" />
+        </div>
+      )}
     </div>
   );
 }

@@ -12,7 +12,7 @@ import { Decoration } from '@/components/ui/decoration';
 
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
-import { Clock, ChevronRight, ChevronDown } from 'lucide-react';
+import { Clock, ChevronRight, ChevronDown, FileText } from 'lucide-react';
 import type { Task, TaskStatus } from '@/lib/types';
 import { t } from '@/lib/i18n';
 import { TaskActionButtons } from './task-action-buttons';
@@ -101,6 +101,7 @@ interface TaskCardProps {
   parentTaskNumber?: number;
   onParentClick?: (taskId: string) => void;
   onActionComplete?: (task: Task) => void;
+  onGenerateArtifact?: (task: Task) => void;
 }
 
 function TaskCard({
@@ -110,6 +111,7 @@ function TaskCard({
   parentTaskNumber,
   onParentClick,
   onActionComplete,
+  onGenerateArtifact,
 }: TaskCardProps) {
   const [subtasksOpen, setSubtasksOpen] = useState(true);
   const statusConf = STATUS_COLUMN_CONFIG[task.status];
@@ -318,9 +320,25 @@ function TaskCard({
         )}
 
         {/* Footer: last activity */}
-        <div className="mt-2 flex items-center text-[11px] text-muted-foreground">
-          <Clock className="mr-1 h-3 w-3" />
-          {formatRelativeTime(lastActivity)}
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          {onGenerateArtifact && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onGenerateArtifact(task);
+              }}
+              className="inline-flex items-center gap-1 border-2 border-black bg-white px-2 py-1 font-mono text-[10px] font-bold uppercase shadow-brutal-sm hover:bg-brutal-info hover:text-black"
+              aria-label={`Generate artifact for ${task.title}`}
+            >
+              <FileText className="h-3 w-3" />
+              Artifact
+            </button>
+          )}
+          <span className="flex items-center">
+            <Clock className="mr-1 h-3 w-3" />
+            {formatRelativeTime(lastActivity)}
+          </span>
         </div>
       </div>
     </div>
@@ -361,6 +379,7 @@ interface TaskColumnProps {
   onParentClick?: (taskId: string) => void;
   childrenByParent?: Map<string, Task[]>;
   onActionComplete?: (task: Task) => void;
+  onGenerateArtifact?: (task: Task) => void;
 }
 
 // ---- Component ----
@@ -374,6 +393,7 @@ export function TaskColumn({
   onParentClick,
   childrenByParent,
   onActionComplete,
+  onGenerateArtifact,
 }: TaskColumnProps) {
   const label = COLUMN_HEADERS[status];
   const count = tasks.length;
@@ -411,6 +431,7 @@ export function TaskColumn({
             parentTaskNumber={task.parent_task_id ? parentTaskMap?.get(task.parent_task_id) : undefined}
             onParentClick={onParentClick}
             onActionComplete={onActionComplete}
+            onGenerateArtifact={onGenerateArtifact}
           />
         ))}
 

@@ -8,7 +8,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { Calendar, User, ChevronRight } from 'lucide-react';
+import { Calendar, User, ChevronRight, FileText } from 'lucide-react';
 import type { Task, TaskStatus, TaskPriority } from '@/lib/types';
 import { t } from '@/lib/i18n';
 
@@ -56,11 +56,12 @@ interface TaskCardProps {
   parentTaskNumber?: number;
   /** Called when the parent badge is clicked */
   onParentClick?: (taskId: string) => void;
+  onGenerateArtifact?: (task: Task) => void;
 }
 
 // ---- Component ----
 
-export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, onParentClick }: TaskCardProps) {
+export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, onParentClick, onGenerateArtifact }: TaskCardProps) {
   const statusConf = STATUS_CONFIG[task.status] || STATUS_CONFIG.todo;
   const priorityConf = PRIORITY_CONFIG[task.priority] || PRIORITY_CONFIG.normal;
   const hasSubtasks = (task.subtask_count ?? 0) > 0;
@@ -159,6 +160,21 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
 
         {/* Bottom row: assignee + channel + due date */}
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          {onGenerateArtifact && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onGenerateArtifact(task);
+              }}
+              className="inline-flex items-center gap-1 border-2 border-black bg-white px-2 py-1 font-mono text-[10px] font-bold uppercase shadow-brutal-sm hover:bg-brutal-info hover:text-black"
+              aria-label={`Generate artifact for ${task.title}`}
+            >
+              <FileText className="h-3 w-3" />
+              Artifact
+            </button>
+          )}
+
           {task.assignee_name && (
             <span className="flex items-center gap-1">
               <User className="h-3 w-3" />

@@ -12,6 +12,7 @@ import { useMessages } from '@/lib/hooks/use-messages';
 import { useChannelMembers } from '@/lib/hooks/use-channel-members';
 import { useWebSocket } from '@/lib/ws-context';
 import { useTasks } from '@/lib/hooks/use-tasks';
+import { useTaskArtifact } from '@/lib/hooks/use-task-artifact';
 import { MessageList } from './message-list';
 import { MessageInput } from './message-input';
 import { MemberList } from './member-list';
@@ -31,7 +32,7 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { WizardCard } from '@/components/onboarding/wizard-card';
 import { t } from '@/lib/i18n';
-import type { AgentDetailTarget, Channel, Message, Task } from '@/lib/types';
+import type { AgentDetailTarget, Channel, Message, Task, TaskArtifact } from '@/lib/types';
 
 // SOLO-63-F: Lazy-load ThreadPanel (only rendered when a thread is open)
 const ThreadPanel = lazy(() =>
@@ -111,6 +112,7 @@ export function ChannelView({
   const [isAddAgentModalOpen, setIsAddAgentModalOpen] = useState(false);
   const [selectedAgentDetail, setSelectedAgentDetail] = useState<AgentDetailTarget | null>(null);
   const [threadTask, setThreadTask] = useState<Task | null>(null);
+  const [artifactPreview, setArtifactPreview] = useState<TaskArtifact | null>(null);
   const [activeRightPanel, setActiveRightPanel] = useState<'thread' | 'agent' | null>(null);
   const rightPanelOpen = activeRightPanel !== null;
 
@@ -130,6 +132,7 @@ export function ChannelView({
   const [isMemberPopoverOpen, setIsMemberPopoverOpen] = useState(false);
 
   const { showToast } = useToast();
+  const { generateArtifact } = useTaskArtifact();
 
   const openAgentDetail = useCallback((agent: AgentDetailTarget) => {
     setSelectedAgentDetail(agent);
@@ -467,6 +470,11 @@ export function ChannelView({
     refetchTasks();
   }, [refetchTasks]);
 
+  const handleGenerateArtifact = useCallback(async (task: Task) => {
+    const artifact = await generateArtifact(task.id);
+    setArtifactPreview(artifact);
+  }, [generateArtifact]);
+
   // SOLO-island PR2: removed agentActivities aggregation — the
   // TypingIndicator it fed is now replaced by AgentIsland, which
   // subscribes to agent.activity events directly.
@@ -649,6 +657,7 @@ export function ChannelView({
                 onTaskClick={handleTaskClickInTab}
                 onRefetch={refetchTasks}
                 onActionComplete={handleTaskActionComplete}
+                onGenerateArtifact={handleGenerateArtifact}
               />
             </div>
           </div>
@@ -698,6 +707,7 @@ export function ChannelView({
               onMarkRead={handleThreadMarkRead}
               onViewInChannel={handleViewThreadInChannel}
               onViewTask={handleViewThreadTask}
+              onGenerateArtifact={threadTask ? () => handleGenerateArtifact(threadTask) : undefined}
               onAgentClick={openAgentDetail}
             />
           </Suspense>
@@ -714,6 +724,32 @@ export function ChannelView({
           />
         )}
       </div>
+
+      {artifactPreview && (
+        <div className="fixed inset-4 z-50 flex flex-col border-4 border-black bg-white shadow-brutal-xl">
+          <div className="flex items-center justify-between border-b-4 border-black px-4 py-2">
+            <div className="font-heading text-sm font-black uppercase">{artifactPreview.title}</div>
+            <div className="flex items-center gap-2">
+              <a
+                href={artifactPreview.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="border-2 border-black bg-white px-2 py-1 font-mono text-xs font-bold uppercase shadow-brutal-sm"
+              >
+                Open
+              </a>
+              <button
+                type="button"
+                onClick={() => setArtifactPreview(null)}
+                className="border-2 border-black bg-white px-2 py-1 font-mono text-xs font-bold uppercase shadow-brutal-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+          <iframe title={artifactPreview.title} src={artifactPreview.url} className="min-h-0 flex-1 bg-white" />
+        </div>
+      )}
 
       {/* Add Agent to Channel modal */}
       <AddAgentModal

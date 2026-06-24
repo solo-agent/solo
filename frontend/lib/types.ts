@@ -205,6 +205,20 @@ export interface Task {
   updated_at: string;
 }
 
+export interface TaskArtifact {
+  id: string;
+  task_id: string;
+  channel_id: string;
+  kind: string;
+  title: string;
+  html_path: string;
+  url: string;
+  summary?: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CreateTaskInput {
   channel_id: string;
   title: string;
