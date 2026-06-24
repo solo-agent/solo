@@ -78,6 +78,7 @@ export function useTaskArtifact() {
   );
 
   const fetchArtifactHTML = useCallback((artifact: TaskArtifact): Promise<string> => {
+    if (!artifact.updated_at) return apiClient.getText(artifact.url);
     const separator = artifact.url.includes('?') ? '&' : '?';
     return apiClient.getText(`${artifact.url}${separator}v=${encodeURIComponent(artifact.updated_at)}`);
   }, []);
