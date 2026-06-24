@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -91,11 +92,15 @@ func (s *ArtifactService) Finalize(ctx context.Context, taskID, userID string) (
 }
 
 func (s *ArtifactService) Latest(ctx context.Context, taskID, userID string) (*Artifact, error) {
+	return s.LatestMode(ctx, taskID, userID, "latest")
+}
+
+func (s *ArtifactService) LatestMode(ctx context.Context, taskID, userID, mode string) (*Artifact, error) {
 	task, err := NewTaskService(s.pool).GetTaskGlobal(ctx, taskID, userID)
 	if err != nil {
 		return nil, err
 	}
-	return s.getByTaskPath(ctx, task.ID, userID, artifactFilename("latest"))
+	return s.getByTaskPath(ctx, task.ID, userID, artifactFilename(mode))
 }
 
 func (s *ArtifactService) Get(ctx context.Context, artifactID, userID string) (*Artifact, error) {
@@ -136,11 +141,11 @@ func (s *ArtifactService) Publish(ctx context.Context, taskID, userID, mode, htm
 	if err := os.WriteFile(path, []byte(htmlContent), 0o644); err != nil {
 		return nil, err
 	}
-	snapshot, err := json.Marshal(artifactSnapshot{TaskID: task.ID, MessageID: task.MessageID, Mode: mode})
+	snapshot, err := s.currentArtifactSnapshot(ctx, task, mode)
 	if err != nil {
 		return nil, err
 	}
-	return s.upsertArtifact(ctx, task, userID, mode, path, snapshot)
+	return s.upsertArtifact(ctx, task, userID, mode, path, snapshot, "")
 }
 
 func (s *ArtifactService) generate(ctx context.Context, taskID, userID, mode string) (*Artifact, error) {
@@ -154,6 +159,13 @@ func (s *ArtifactService) generate(ctx context.Context, taskID, userID, mode str
 	}
 	data.GeneratedAt = time.Now().UTC()
 	data.Mode = mode
+	snapshot, err := buildArtifactSnapshot(task.ID, data.RootMessage, data.Thread, mode)
+	if err != nil {
+		return nil, err
+	}
+	if existing, err := s.getByTaskPath(ctx, task.ID, userID, artifactFilename(mode)); err == nil && bytes.Equal(existing.SourceSnapshot, snapshot) {
+		return existing, nil
+	}
 	if s.artifactRequester != nil {
 		if err := s.artifactRequester(ctx, task, data, userID, mode); err != nil {
 			slog.Warn("artifact: failed to request agent artifact", "task_id", taskID, "mode", mode, "error", err)
@@ -164,15 +176,19 @@ func (s *ArtifactService) generate(ctx context.Context, taskID, userID, mode str
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(path, []byte(renderArtifactHTML(data)), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(renderPendingArtifactHTML(data)), 0o644); err != nil {
 		return nil, err
 	}
 
-	snapshot, err := buildArtifactSnapshot(task.ID, data.RootMessage, data.Thread, mode)
-	if err != nil {
-		return nil, err
+	return s.upsertArtifact(ctx, task, userID, mode, path, snapshot, "pending")
+}
+
+func (s *ArtifactService) currentArtifactSnapshot(ctx context.Context, task *Task, mode string) ([]byte, error) {
+	data, err := s.loadRenderData(ctx, task)
+	if err == nil {
+		return buildArtifactSnapshot(task.ID, data.RootMessage, data.Thread, mode)
 	}
-	return s.upsertArtifact(ctx, task, userID, mode, path, snapshot)
+	return json.Marshal(artifactSnapshot{TaskID: task.ID, MessageID: task.MessageID, Mode: mode})
 }
 
 func (s *ArtifactService) loadRenderData(ctx context.Context, task *Task) (artifactRenderData, error) {
@@ -215,17 +231,18 @@ func (s *ArtifactService) artifactPath(taskID, mode string) string {
 	return filepath.Join(s.rootDir, taskID, artifactFilename(mode))
 }
 
-func (s *ArtifactService) upsertArtifact(ctx context.Context, task *Task, userID, mode, path string, snapshot []byte) (*Artifact, error) {
+func (s *ArtifactService) upsertArtifact(ctx context.Context, task *Task, userID, mode, path string, snapshot []byte, summary string) (*Artifact, error) {
 	var a Artifact
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO artifacts (task_id, channel_id, kind, title, html_path, source_snapshot, created_by, updated_at)
-		VALUES ($1, $2, 'task_snapshot', $3, $4, $5, $6, now())
+		INSERT INTO artifacts (task_id, channel_id, kind, title, html_path, source_snapshot, created_by, summary, updated_at)
+		VALUES ($1, $2, 'task_snapshot', $3, $4, $5, $6, $7, now())
 		ON CONFLICT (task_id, kind, html_path) DO UPDATE
 		SET title = EXCLUDED.title,
 		    source_snapshot = EXCLUDED.source_snapshot,
+		    summary = EXCLUDED.summary,
 		    updated_at = now()
 		RETURNING id, task_id, channel_id, kind, title, html_path, COALESCE(summary, ''), source_snapshot, created_by, created_at, updated_at`,
-		task.ID, task.ChannelID, task.Title, path, snapshot, userID,
+		task.ID, task.ChannelID, task.Title, path, snapshot, userID, summary,
 	).Scan(&a.ID, &a.TaskID, &a.ChannelID, &a.Kind, &a.Title, &a.HTMLPath, &a.Summary, &a.SourceSnapshot, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -414,139 +431,32 @@ func writeArtifactPromptMessage(b *strings.Builder, msg ArtifactMessage) {
 	}
 }
 
-func renderArtifactHTML(data artifactRenderData) string {
+func renderPendingArtifactHTML(data artifactRenderData) string {
 	var b strings.Builder
 	b.WriteString("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
 	b.WriteString("<title>")
 	b.WriteString(html.EscapeString(data.Task.Title))
 	b.WriteString("</title><style>")
-	b.WriteString("body{font-family:ui-sans-serif,system-ui;margin:0;background:#f8fafc;color:#0f172a}main{max-width:960px;margin:0 auto;padding:32px}.card{background:white;border:2px solid #0f172a;border-radius:8px;padding:18px;margin:16px 0;box-shadow:6px 6px 0 #2563eb}.badge{display:inline-block;border:1px solid #0f172a;border-radius:999px;padding:2px 8px;font-size:12px;font-weight:700}pre{white-space:pre-wrap}footer{margin-top:32px;color:#64748b;font-size:12px}.msg{border-left:4px solid #2563eb;padding-left:12px;margin:14px 0}.meta{display:flex;gap:8px;flex-wrap:wrap}dl{display:grid;grid-template-columns:max-content 1fr;gap:8px 14px}dt{font-weight:700}dd{margin:0}img{max-width:100%;height:auto;border:1px solid #cbd5e1;border-radius:8px}")
+	b.WriteString("body{font-family:ui-sans-serif,system-ui;margin:0;background:#f8fafc;color:#0f172a}main{max-width:760px;margin:0 auto;padding:48px 24px}.panel{background:white;border:3px solid #0f172a;box-shadow:8px 8px 0 #2563eb;padding:24px}h1{font-size:28px;margin:0 0 12px;font-weight:900}.badge{display:inline-block;border:2px solid #0f172a;padding:4px 8px;font-size:12px;font-weight:900;text-transform:uppercase}.meta{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}p{line-height:1.55}footer{margin-top:20px;color:#64748b;font-size:12px}")
 	b.WriteString("</style></head><body><main>")
-	b.WriteString("<h1>")
+	b.WriteString("<section class=\"panel\"><div class=\"badge\">Generating artifact</div><h1>")
 	b.WriteString(html.EscapeString(data.Task.Title))
-	b.WriteString("</h1><div class=\"meta\"><span class=\"badge\">#")
+	b.WriteString("</h1><div class=\"meta\"><span class=\"badge\">Task ")
+	b.WriteString(html.EscapeString(data.Task.ID))
+	b.WriteString("</span><span class=\"badge\">#")
 	b.WriteString(html.EscapeString(stringInt(data.Task.Number)))
 	b.WriteString("</span><span class=\"badge\">")
 	b.WriteString(html.EscapeString(data.Task.Status))
 	b.WriteString("</span><span class=\"badge\">")
-	b.WriteString(html.EscapeString(data.Task.Priority))
-	b.WriteString("</span><span class=\"badge\">")
 	b.WriteString(html.EscapeString(data.Mode))
 	b.WriteString("</span></div>")
-	if artifactNeedsInput(data) {
-		b.WriteString("<section class=\"card\"><h2>Needs input</h2><p>This task appears to need a decision or review before it is treated as complete.</p></section>")
-	}
-	b.WriteString("<section class=\"card\"><h2>Task</h2>")
-	b.WriteString("<p>")
-	b.WriteString(html.EscapeString(data.Task.Description))
-	b.WriteString("</p><dl>")
-	writeArtifactField(&b, "Priority", data.Task.Priority)
-	writeArtifactField(&b, "Creator", data.Task.CreatorName)
-	writeArtifactField(&b, "Claimer", data.Task.ClaimerName)
-	writeArtifactField(&b, "Created", artifactTime(data.Task.CreatedAt))
-	writeArtifactField(&b, "Updated", artifactTime(data.Task.UpdatedAt))
-	b.WriteString("</dl></section>")
-	b.WriteString("<section class=\"card\"><h2>Root message</h2>")
-	writeArtifactMessage(&b, data.RootMessage)
-	b.WriteString("</section><section class=\"card\"><h2>Thread timeline</h2>")
-	if len(data.Thread) == 0 {
-		b.WriteString("<p>No thread replies yet.</p>")
-	}
-	for _, msg := range data.Thread {
-		writeArtifactMessage(&b, msg)
-	}
-	b.WriteString("</section><footer>Generated by Solo artifact renderer at ")
+	b.WriteString("<p>The leader agent is building the Solo-brutal artifact and will publish it back into Solo with <code>solo artifact publish</code>.</p>")
+	b.WriteString("<footer>Requested at ")
 	b.WriteString(html.EscapeString(data.GeneratedAt.Format(time.RFC3339)))
-	b.WriteString(". Task ")
-	b.WriteString(html.EscapeString(data.Task.ID))
 	b.WriteString(" in channel ")
 	b.WriteString(html.EscapeString(data.Task.ChannelID))
-	b.WriteString(". review before external sharing.</footer></main></body></html>")
+	b.WriteString(".</footer></section></main></body></html>")
 	return b.String()
-}
-
-func artifactNeedsInput(data artifactRenderData) bool {
-	if data.Task.Status == TaskStatusInReview {
-		return true
-	}
-	if asksForDecision(data.RootMessage.Content) {
-		return true
-	}
-	for _, msg := range data.Thread {
-		if asksForDecision(msg.Content) {
-			return true
-		}
-	}
-	return false
-}
-
-func asksForDecision(content string) bool {
-	lower := strings.ToLower(content)
-	if !strings.Contains(lower, "?") && !strings.Contains(lower, "？") {
-		return false
-	}
-	for _, token := range []string{"decide", "decision", "approve", "reject", "review", "accept", "确认", "决定", "通过", "拒绝", "评审", "审核", "接受", "是否"} {
-		if strings.Contains(lower, token) {
-			return true
-		}
-	}
-	return false
-}
-
-func writeArtifactField(b *strings.Builder, label, value string) {
-	if value == "" {
-		return
-	}
-	b.WriteString("<dt>")
-	b.WriteString(html.EscapeString(label))
-	b.WriteString("</dt><dd>")
-	b.WriteString(html.EscapeString(value))
-	b.WriteString("</dd>")
-}
-
-func artifactTime(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.Format(time.RFC3339)
-}
-
-func writeArtifactMessage(b *strings.Builder, msg ArtifactMessage) {
-	b.WriteString("<div class=\"msg\"><strong>")
-	b.WriteString(html.EscapeString(msg.SenderName))
-	b.WriteString("</strong> <small>")
-	b.WriteString(html.EscapeString(msg.CreatedAt.Format(time.RFC3339)))
-	b.WriteString("</small><pre>")
-	b.WriteString(html.EscapeString(msg.Content))
-	b.WriteString("</pre>")
-	if len(msg.Attachments) > 0 {
-		b.WriteString("<ul>")
-		for _, a := range msg.Attachments {
-			b.WriteString("<li>")
-			if strings.HasPrefix(a.MIMEType, "image/") {
-				b.WriteString("<img loading=\"lazy\" src=\"")
-				b.WriteString(html.EscapeString(a.URL))
-				b.WriteString("\" alt=\"")
-				b.WriteString(html.EscapeString(a.Filename))
-				b.WriteString("\"> ")
-				b.WriteString(html.EscapeString(a.Filename))
-			} else {
-				b.WriteString("<a href=\"")
-				b.WriteString(html.EscapeString(a.URL))
-				b.WriteString("\">")
-				b.WriteString(html.EscapeString(a.Filename))
-				b.WriteString("</a>")
-			}
-			b.WriteString(" ")
-			b.WriteString(html.EscapeString(a.MIMEType))
-			b.WriteString(" ")
-			b.WriteString(html.EscapeString(strconv.FormatInt(a.Size, 10)))
-			b.WriteString(" bytes")
-			b.WriteString("</li>")
-		}
-		b.WriteString("</ul>")
-	}
-	b.WriteString("</div>")
 }
 
 func stringInt(n int) string {

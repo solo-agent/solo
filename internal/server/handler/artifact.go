@@ -77,7 +77,15 @@ func (h *ArtifactHandler) Latest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "task ID is required")
 		return
 	}
-	artifact, err := h.svc.Latest(r.Context(), taskID, userID)
+	mode := r.URL.Query().Get("mode")
+	if mode == "" {
+		mode = "latest"
+	}
+	if mode != "latest" && mode != "final" {
+		writeError(w, http.StatusBadRequest, "invalid artifact mode")
+		return
+	}
+	artifact, err := h.svc.LatestMode(r.Context(), taskID, userID, mode)
 	if err != nil {
 		writeArtifactError(w, err)
 		return
