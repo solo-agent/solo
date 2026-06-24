@@ -785,7 +785,7 @@ export function ThreadPanel({
               className="inline-flex items-center gap-1 border-2 border-black bg-white px-2 py-1 font-mono text-[10px] font-bold uppercase shadow-brutal-sm hover:bg-brutal-info disabled:pointer-events-none disabled:opacity-50"
             >
               <FileText className="h-3 w-3" />
-              Generate Artifact
+              Artifact
             </button>
           )}
           {(taskNumber != null || showViewTask) && (

@@ -32,10 +32,10 @@ assert(taskBoard.includes('onGenerateArtifact?: (task: Task) => void'), 'TaskBoa
 assert(taskBoard.includes('isArtifactGenerating?: boolean'), 'TaskBoard should accept artifact pending state');
 assert(taskColumn.includes('onGenerateArtifact?: (task: Task) => void'), 'TaskColumn should pass artifact action');
 assert(taskColumn.includes('isArtifactGenerating?: boolean'), 'TaskColumn should pass artifact pending state');
-assert(threadPanel.includes('onGenerateArtifact?: () => void') && threadPanel.includes('Generate Artifact'), 'ThreadPanel should expose artifact generation');
+assert(threadPanel.includes('onGenerateArtifact?: () => void') && threadPanel.includes('Artifact'), 'ThreadPanel should expose artifact access');
 assert(threadPanel.includes('isArtifactGenerating?: boolean'), 'ThreadPanel should accept artifact pending state');
 assert(channelView.includes('useTaskArtifact') && channelView.includes('handleGenerateArtifact') && channelView.includes('<iframe'), 'Channel view should wire artifact generation into an iframe viewer');
-assert(channelView.includes('artifactHistory') && channelView.includes('showLatestPublishedArtifact'), 'Channel view should expose existing published artifacts instead of only generating');
+assert(channelView.includes('artifactHistory') && channelView.includes('showExistingArtifact') && channelView.includes('if (await showExistingArtifact(task.id)) return'), 'Channel view should open existing published artifacts before generating');
 assert(channelView.includes('showToast') && channelView.includes('catch'), 'Channel view should surface artifact generation errors');
 assert(channelView.includes('URL.createObjectURL') && channelView.includes('URL.revokeObjectURL') && channelView.includes('previewUrl'), 'Channel viewer should use revokable blob URLs for protected artifact HTML');
 assert(channelView.includes('handleFinalizeArtifact') && channelView.includes('Finalize'), 'Channel viewer should expose final artifact generation');
@@ -46,7 +46,7 @@ assert(channelView.includes("event.key === 'Tab'") && channelView.includes('arti
 assert(channelView.includes('artifactFinalizeButtonRef'), 'Channel artifact viewer should include finalize in focus handling');
 assert(channelView.includes('artifactFrameRef') && channelView.includes('tabIndex={0}'), 'Channel artifact viewer should include iframe in the focus trap');
 assert(dmView.includes('useTaskArtifact') && dmView.includes('handleGenerateArtifact') && dmView.includes('<iframe'), 'DM view should wire artifact generation into an iframe viewer');
-assert(dmView.includes('artifactHistory') && dmView.includes('showLatestPublishedArtifact'), 'DM view should expose existing published artifacts instead of only generating');
+assert(dmView.includes('artifactHistory') && dmView.includes('showExistingArtifact') && dmView.includes('if (await showExistingArtifact(task.id)) return'), 'DM view should open existing published artifacts before generating');
 assert(dmView.includes('showToast') && dmView.includes('catch'), 'DM view should surface artifact generation errors');
 assert(dmView.includes('URL.createObjectURL') && dmView.includes('URL.revokeObjectURL') && dmView.includes('previewUrl'), 'DM viewer should use revokable blob URLs for protected artifact HTML');
 assert(dmView.includes('handleFinalizeArtifact') && dmView.includes('Finalize'), 'DM viewer should expose final artifact generation');

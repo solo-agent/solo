@@ -160,7 +160,7 @@ export function DMView({
     return artifacts;
   }, [listArtifacts]);
 
-  const showLatestPublishedArtifact = useCallback(async (taskId: string) => {
+  const showExistingArtifact = useCallback(async (taskId: string) => {
     const artifacts = await refreshArtifactHistory(taskId);
     const published = artifacts.find((artifact) => artifact.summary !== 'pending');
     if (published) {
@@ -340,13 +340,14 @@ export function DMView({
       : null;
 
     try {
+      if (await showExistingArtifact(task.id)) return;
       const artifact = await generateArtifact(task.id);
       await refreshArtifactHistory(task.id);
       await showArtifactPreview(artifact);
     } catch (error) {
       if (error instanceof TaskArtifactGenerationInProgressError) return;
       if (error instanceof TaskArtifactStillPendingError) {
-        const showedExisting = await showLatestPublishedArtifact(task.id);
+        const showedExisting = await showExistingArtifact(task.id);
         if (!showedExisting) {
           artifactReturnFocusRef.current = null;
           showToast('Artifact is still generating. Try again in a moment.', 'error');
@@ -356,7 +357,7 @@ export function DMView({
       artifactReturnFocusRef.current = null;
       showToast('Could not generate artifact. Please try again.', 'error');
     }
-  }, [generateArtifact, isGenerating, refreshArtifactHistory, showArtifactPreview, showLatestPublishedArtifact, showToast]);
+  }, [generateArtifact, isGenerating, refreshArtifactHistory, showArtifactPreview, showExistingArtifact, showToast]);
 
   const handleFinalizeArtifact = useCallback(async () => {
     if (!artifactPreview || isGenerating) return;
