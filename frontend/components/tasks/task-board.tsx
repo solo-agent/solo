@@ -35,6 +35,7 @@ interface TaskBoardProps {
   onRefetch: () => void;
   onActionComplete?: (task: Task) => void;
   onGenerateArtifact?: (task: Task) => void;
+  isArtifactGenerating?: boolean;
 }
 
 // ---- Component ----
@@ -47,6 +48,7 @@ export function TaskBoard({
   onRefetch,
   onActionComplete,
   onGenerateArtifact,
+  isArtifactGenerating,
 }: TaskBoardProps) {
   // Group tasks by status
   const { tasksByStatus, childrenByParent } = useMemo(() => {
@@ -137,6 +139,7 @@ export function TaskBoard({
             childrenByParent={childrenByParent}
             onActionComplete={onActionComplete}
             onGenerateArtifact={onGenerateArtifact}
+            isArtifactGenerating={isArtifactGenerating}
           />
         ))}
       </div>
@@ -155,6 +158,7 @@ export function TaskBoard({
             childrenByParent={childrenByParent}
             onActionComplete={onActionComplete}
             onGenerateArtifact={onGenerateArtifact}
+            isArtifactGenerating={isArtifactGenerating}
           />
         ))}
       </div>

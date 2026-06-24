@@ -132,7 +132,32 @@ export function ChannelView({
   const [isMemberPopoverOpen, setIsMemberPopoverOpen] = useState(false);
 
   const { showToast } = useToast();
-  const { generateArtifact } = useTaskArtifact();
+  const { generateArtifact, isGenerating } = useTaskArtifact();
+  const artifactCloseButtonRef = useRef<HTMLButtonElement>(null);
+  const artifactReturnFocusRef = useRef<HTMLElement | null>(null);
+
+  const closeArtifactPreview = useCallback(() => {
+    setArtifactPreview(null);
+  }, []);
+
+  useEffect(() => {
+    if (!artifactPreview) return;
+
+    artifactCloseButtonRef.current?.focus();
+    const handleArtifactPreviewKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeArtifactPreview();
+      }
+    };
+
+    document.addEventListener('keydown', handleArtifactPreviewKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleArtifactPreviewKeyDown);
+      artifactReturnFocusRef.current?.focus();
+      artifactReturnFocusRef.current = null;
+    };
+  }, [artifactPreview, closeArtifactPreview]);
 
   const openAgentDetail = useCallback((agent: AgentDetailTarget) => {
     setSelectedAgentDetail(agent);
@@ -471,9 +496,19 @@ export function ChannelView({
   }, [refetchTasks]);
 
   const handleGenerateArtifact = useCallback(async (task: Task) => {
-    const artifact = await generateArtifact(task.id);
-    setArtifactPreview(artifact);
-  }, [generateArtifact]);
+    if (isGenerating) return;
+    artifactReturnFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+
+    try {
+      const artifact = await generateArtifact(task.id);
+      setArtifactPreview(artifact);
+    } catch {
+      artifactReturnFocusRef.current = null;
+      showToast('Could not generate artifact. Please try again.', 'error');
+    }
+  }, [generateArtifact, isGenerating, showToast]);
 
   // SOLO-island PR2: removed agentActivities aggregation — the
   // TypingIndicator it fed is now replaced by AgentIsland, which
@@ -658,6 +693,7 @@ export function ChannelView({
                 onRefetch={refetchTasks}
                 onActionComplete={handleTaskActionComplete}
                 onGenerateArtifact={handleGenerateArtifact}
+                isArtifactGenerating={isGenerating}
               />
             </div>
           </div>
@@ -708,6 +744,7 @@ export function ChannelView({
               onViewInChannel={handleViewThreadInChannel}
               onViewTask={handleViewThreadTask}
               onGenerateArtifact={threadTask ? () => handleGenerateArtifact(threadTask) : undefined}
+              isArtifactGenerating={isGenerating}
               onAgentClick={openAgentDetail}
             />
           </Suspense>
@@ -726,9 +763,14 @@ export function ChannelView({
       </div>
 
       {artifactPreview && (
-        <div className="fixed inset-4 z-50 flex flex-col border-4 border-black bg-white shadow-brutal-xl">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="channel-artifact-preview-title"
+          className="fixed inset-4 z-50 flex flex-col border-4 border-black bg-white shadow-brutal-xl"
+        >
           <div className="flex items-center justify-between border-b-4 border-black px-4 py-2">
-            <div className="font-heading text-sm font-black uppercase">{artifactPreview.title}</div>
+            <div id="channel-artifact-preview-title" className="font-heading text-sm font-black uppercase">{artifactPreview.title}</div>
             <div className="flex items-center gap-2">
               <a
                 href={artifactPreview.url}
@@ -739,9 +781,11 @@ export function ChannelView({
                 Open
               </a>
               <button
+                ref={artifactCloseButtonRef}
                 type="button"
-                onClick={() => setArtifactPreview(null)}
+                onClick={closeArtifactPreview}
                 className="border-2 border-black bg-white px-2 py-1 font-mono text-xs font-bold uppercase shadow-brutal-sm"
+                aria-label="Close artifact preview"
               >
                 Close
               </button>

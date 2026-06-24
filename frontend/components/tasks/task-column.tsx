@@ -102,6 +102,7 @@ interface TaskCardProps {
   onParentClick?: (taskId: string) => void;
   onActionComplete?: (task: Task) => void;
   onGenerateArtifact?: (task: Task) => void;
+  isArtifactGenerating?: boolean;
 }
 
 function TaskCard({
@@ -112,6 +113,7 @@ function TaskCard({
   onParentClick,
   onActionComplete,
   onGenerateArtifact,
+  isArtifactGenerating,
 }: TaskCardProps) {
   const [subtasksOpen, setSubtasksOpen] = useState(true);
   const statusConf = STATUS_COLUMN_CONFIG[task.status];
@@ -324,11 +326,13 @@ function TaskCard({
           {onGenerateArtifact && (
             <button
               type="button"
+              disabled={isArtifactGenerating}
               onClick={(e) => {
                 e.stopPropagation();
+                if (isArtifactGenerating) return;
                 onGenerateArtifact(task);
               }}
-              className="inline-flex items-center gap-1 border-2 border-black bg-white px-2 py-1 font-mono text-[10px] font-bold uppercase shadow-brutal-sm hover:bg-brutal-info hover:text-black"
+              className="inline-flex items-center gap-1 border-2 border-black bg-white px-2 py-1 font-mono text-[10px] font-bold uppercase shadow-brutal-sm hover:bg-brutal-info hover:text-black disabled:pointer-events-none disabled:opacity-50"
               aria-label={`Generate artifact for ${task.title}`}
             >
               <FileText className="h-3 w-3" />
@@ -380,6 +384,7 @@ interface TaskColumnProps {
   childrenByParent?: Map<string, Task[]>;
   onActionComplete?: (task: Task) => void;
   onGenerateArtifact?: (task: Task) => void;
+  isArtifactGenerating?: boolean;
 }
 
 // ---- Component ----
@@ -394,6 +399,7 @@ export function TaskColumn({
   childrenByParent,
   onActionComplete,
   onGenerateArtifact,
+  isArtifactGenerating,
 }: TaskColumnProps) {
   const label = COLUMN_HEADERS[status];
   const count = tasks.length;
@@ -432,6 +438,7 @@ export function TaskColumn({
             onParentClick={onParentClick}
             onActionComplete={onActionComplete}
             onGenerateArtifact={onGenerateArtifact}
+            isArtifactGenerating={isArtifactGenerating}
           />
         ))}
 

@@ -23,6 +23,7 @@ import { RelationshipDetailPanel } from '@/components/relationships/relationship
 import { Skeleton } from '@/components/ui/skeleton';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { tabButtonClass } from '@/components/ui/tab-bar';
+import { useToast } from '@/components/ui/toast';
 const ThreadPanel = lazy(() =>
   import('./thread-panel').then((m) => ({ default: m.ThreadPanel })),
 );
@@ -115,7 +116,33 @@ export function DMView({
   const [selectedAgentDetail, setSelectedAgentDetail] = useState<AgentDetailTarget | null>(null);
   const [activeRightPanel, setActiveRightPanel] = useState<'thread' | 'agent' | null>(null);
   const rightPanelOpen = activeRightPanel !== null;
-  const { generateArtifact } = useTaskArtifact();
+  const { showToast } = useToast();
+  const { generateArtifact, isGenerating } = useTaskArtifact();
+  const artifactCloseButtonRef = useRef<HTMLButtonElement>(null);
+  const artifactReturnFocusRef = useRef<HTMLElement | null>(null);
+
+  const closeArtifactPreview = useCallback(() => {
+    setArtifactPreview(null);
+  }, []);
+
+  useEffect(() => {
+    if (!artifactPreview) return;
+
+    artifactCloseButtonRef.current?.focus();
+    const handleArtifactPreviewKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeArtifactPreview();
+      }
+    };
+
+    document.addEventListener('keydown', handleArtifactPreviewKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleArtifactPreviewKeyDown);
+      artifactReturnFocusRef.current?.focus();
+      artifactReturnFocusRef.current = null;
+    };
+  }, [artifactPreview, closeArtifactPreview]);
 
   useEffect(() => {
     if (searchParams.get('dm') !== dm.id) return;
@@ -237,9 +264,19 @@ export function DMView({
   }, [refetchTasks]);
 
   const handleGenerateArtifact = useCallback(async (task: Task) => {
-    const artifact = await generateArtifact(task.id);
-    setArtifactPreview(artifact);
-  }, [generateArtifact]);
+    if (isGenerating) return;
+    artifactReturnFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+
+    try {
+      const artifact = await generateArtifact(task.id);
+      setArtifactPreview(artifact);
+    } catch {
+      artifactReturnFocusRef.current = null;
+      showToast('Could not generate artifact. Please try again.', 'error');
+    }
+  }, [generateArtifact, isGenerating, showToast]);
 
   // ---- ThreadPanel handlers ----
 
@@ -487,6 +524,7 @@ export function DMView({
                 onRefetch={refetchTasks ?? (() => {})}
                 onActionComplete={handleTaskActionComplete}
                 onGenerateArtifact={handleGenerateArtifact}
+                isArtifactGenerating={isGenerating}
               />
             </div>
           </div>
@@ -535,6 +573,7 @@ export function DMView({
               onViewInChannel={handleViewThreadInDM}
               onViewTask={handleViewThreadTask}
               onGenerateArtifact={threadTask ? () => handleGenerateArtifact(threadTask) : undefined}
+              isArtifactGenerating={isGenerating}
               onAgentClick={openAgentDetail}
             />
           </Suspense>
@@ -553,9 +592,14 @@ export function DMView({
       </div>
 
       {artifactPreview && (
-        <div className="fixed inset-4 z-50 flex flex-col border-4 border-black bg-white shadow-brutal-xl">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="dm-artifact-preview-title"
+          className="fixed inset-4 z-50 flex flex-col border-4 border-black bg-white shadow-brutal-xl"
+        >
           <div className="flex items-center justify-between border-b-4 border-black px-4 py-2">
-            <div className="font-heading text-sm font-black uppercase">{artifactPreview.title}</div>
+            <div id="dm-artifact-preview-title" className="font-heading text-sm font-black uppercase">{artifactPreview.title}</div>
             <div className="flex items-center gap-2">
               <a
                 href={artifactPreview.url}
@@ -566,9 +610,11 @@ export function DMView({
                 Open
               </a>
               <button
+                ref={artifactCloseButtonRef}
                 type="button"
-                onClick={() => setArtifactPreview(null)}
+                onClick={closeArtifactPreview}
                 className="border-2 border-black bg-white px-2 py-1 font-mono text-xs font-bold uppercase shadow-brutal-sm"
+                aria-label="Close artifact preview"
               >
                 Close
               </button>

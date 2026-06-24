@@ -57,11 +57,12 @@ interface TaskCardProps {
   /** Called when the parent badge is clicked */
   onParentClick?: (taskId: string) => void;
   onGenerateArtifact?: (task: Task) => void;
+  isArtifactGenerating?: boolean;
 }
 
 // ---- Component ----
 
-export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, onParentClick, onGenerateArtifact }: TaskCardProps) {
+export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, onParentClick, onGenerateArtifact, isArtifactGenerating }: TaskCardProps) {
   const statusConf = STATUS_CONFIG[task.status] || STATUS_CONFIG.todo;
   const priorityConf = PRIORITY_CONFIG[task.priority] || PRIORITY_CONFIG.normal;
   const hasSubtasks = (task.subtask_count ?? 0) > 0;
@@ -163,11 +164,13 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
           {onGenerateArtifact && (
             <button
               type="button"
+              disabled={isArtifactGenerating}
               onClick={(e) => {
                 e.stopPropagation();
+                if (isArtifactGenerating) return;
                 onGenerateArtifact(task);
               }}
-              className="inline-flex items-center gap-1 border-2 border-black bg-white px-2 py-1 font-mono text-[10px] font-bold uppercase shadow-brutal-sm hover:bg-brutal-info hover:text-black"
+              className="inline-flex items-center gap-1 border-2 border-black bg-white px-2 py-1 font-mono text-[10px] font-bold uppercase shadow-brutal-sm hover:bg-brutal-info hover:text-black disabled:pointer-events-none disabled:opacity-50"
               aria-label={`Generate artifact for ${task.title}`}
             >
               <FileText className="h-3 w-3" />
