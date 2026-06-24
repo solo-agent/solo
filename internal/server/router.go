@@ -265,6 +265,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Post("/api/v1/tasks/{taskID}/artifact/finalize", artifactHandler.Finalize)
 		r.Post("/api/v1/tasks/{taskID}/artifact/publish", artifactHandler.Publish)
 		r.Get("/api/v1/tasks/{taskID}/artifact/latest", artifactHandler.Latest)
+		r.Get("/api/v1/tasks/{taskID}/artifacts", artifactHandler.List)
 		r.Get("/api/v1/artifacts/{artifactID}", artifactHandler.Serve)
 
 		// DM routes (SOLO-55-B, SOLO-56-B)

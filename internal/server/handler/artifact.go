@@ -31,6 +31,25 @@ func (h *ArtifactHandler) Finalize(w http.ResponseWriter, r *http.Request) {
 	h.generate(w, r, true)
 }
 
+func (h *ArtifactHandler) List(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	taskID := chi.URLParam(r, "taskID")
+	if taskID == "" {
+		writeError(w, http.StatusBadRequest, "task ID is required")
+		return
+	}
+	artifacts, err := h.svc.List(r.Context(), taskID, userID)
+	if err != nil {
+		writeArtifactError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, artifacts)
+}
+
 func (h *ArtifactHandler) Publish(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {

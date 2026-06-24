@@ -17,6 +17,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const (
+	artifactPendingSummary = "pending"
+	artifactPendingTTL     = 5 * time.Minute
+)
+
 type Artifact struct {
 	ID             string    `json:"id"`
 	TaskID         string    `json:"task_id"`
@@ -103,6 +108,35 @@ func (s *ArtifactService) LatestMode(ctx context.Context, taskID, userID, mode s
 	return s.getByTaskPath(ctx, task.ID, userID, artifactFilename(mode))
 }
 
+func (s *ArtifactService) List(ctx context.Context, taskID, userID string) ([]Artifact, error) {
+	task, err := NewTaskService(s.pool).GetTaskGlobal(ctx, taskID, userID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, task_id, channel_id, kind, title, html_path, COALESCE(summary, ''), source_snapshot, created_by, created_at, updated_at
+		FROM artifacts
+		WHERE task_id = $1 AND kind = 'task_snapshot'
+		ORDER BY updated_at DESC`,
+		task.ID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var artifacts []Artifact
+	for rows.Next() {
+		var a Artifact
+		if err := rows.Scan(&a.ID, &a.TaskID, &a.ChannelID, &a.Kind, &a.Title, &a.HTMLPath, &a.Summary, &a.SourceSnapshot, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			return nil, err
+		}
+		a.URL = "/api/v1/artifacts/" + a.ID
+		artifacts = append(artifacts, a)
+	}
+	return artifacts, rows.Err()
+}
+
 func (s *ArtifactService) Get(ctx context.Context, artifactID, userID string) (*Artifact, error) {
 	var a Artifact
 	err := s.pool.QueryRow(ctx, `SELECT id, task_id, channel_id, kind, title, html_path, COALESCE(summary, ''), source_snapshot, created_by, created_at, updated_at FROM artifacts WHERE id = $1`, artifactID).
@@ -164,11 +198,8 @@ func (s *ArtifactService) generate(ctx context.Context, taskID, userID, mode str
 		return nil, err
 	}
 	if existing, err := s.getByTaskPath(ctx, task.ID, userID, artifactFilename(mode)); err == nil && bytes.Equal(existing.SourceSnapshot, snapshot) {
-		return existing, nil
-	}
-	if s.artifactRequester != nil {
-		if err := s.artifactRequester(ctx, task, data, userID, mode); err != nil {
-			slog.Warn("artifact: failed to request agent artifact", "task_id", taskID, "mode", mode, "error", err)
+		if existing.Summary != artifactPendingSummary || time.Since(existing.UpdatedAt) < artifactPendingTTL {
+			return existing, nil
 		}
 	}
 
@@ -179,8 +210,16 @@ func (s *ArtifactService) generate(ctx context.Context, taskID, userID, mode str
 	if err := os.WriteFile(path, []byte(renderPendingArtifactHTML(data)), 0o644); err != nil {
 		return nil, err
 	}
-
-	return s.upsertArtifact(ctx, task, userID, mode, path, snapshot, "pending")
+	artifact, err := s.upsertArtifact(ctx, task, userID, mode, path, snapshot, artifactPendingSummary)
+	if err != nil {
+		return nil, err
+	}
+	if s.artifactRequester != nil {
+		if err := s.artifactRequester(ctx, task, data, userID, mode); err != nil {
+			slog.Warn("artifact: failed to request agent artifact", "task_id", taskID, "mode", mode, "error", err)
+		}
+	}
+	return artifact, nil
 }
 
 func (s *ArtifactService) currentArtifactSnapshot(ctx context.Context, task *Task, mode string) ([]byte, error) {

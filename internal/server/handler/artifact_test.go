@@ -14,6 +14,7 @@ func setupArtifactRouter(h *ArtifactHandler) chi.Router {
 	r.Post("/api/v1/tasks/{taskID}/artifact", h.GenerateLatest)
 	r.Post("/api/v1/tasks/{taskID}/artifact/finalize", h.Finalize)
 	r.Post("/api/v1/tasks/{taskID}/artifact/publish", h.Publish)
+	r.Get("/api/v1/tasks/{taskID}/artifacts", h.List)
 	r.Get("/api/v1/tasks/{taskID}/artifact/latest", h.Latest)
 	r.Get("/api/v1/artifacts/{artifactID}", h.Serve)
 	return r
@@ -30,6 +31,7 @@ func TestArtifactHandler_MissingAuth(t *testing.T) {
 		{http.MethodPost, "/api/v1/tasks/task-1/artifact"},
 		{http.MethodPost, "/api/v1/tasks/task-1/artifact/finalize"},
 		{http.MethodPost, "/api/v1/tasks/task-1/artifact/publish"},
+		{http.MethodGet, "/api/v1/tasks/task-1/artifacts"},
 		{http.MethodGet, "/api/v1/tasks/task-1/artifact/latest"},
 		{http.MethodGet, "/api/v1/artifacts/artifact-1"},
 	} {

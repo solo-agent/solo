@@ -12,7 +12,7 @@ import { useMessages } from '@/lib/hooks/use-messages';
 import { useChannelMembers } from '@/lib/hooks/use-channel-members';
 import { useWebSocket } from '@/lib/ws-context';
 import { useTasks } from '@/lib/hooks/use-tasks';
-import { TaskArtifactGenerationInProgressError, useTaskArtifact } from '@/lib/hooks/use-task-artifact';
+import { TaskArtifactGenerationInProgressError, TaskArtifactStillPendingError, useTaskArtifact } from '@/lib/hooks/use-task-artifact';
 import { MessageList } from './message-list';
 import { MessageInput } from './message-input';
 import { MemberList } from './member-list';
@@ -115,6 +115,7 @@ export function ChannelView({
   const [selectedAgentDetail, setSelectedAgentDetail] = useState<AgentDetailTarget | null>(null);
   const [threadTask, setThreadTask] = useState<Task | null>(null);
   const [artifactPreview, setArtifactPreview] = useState<ArtifactPreview | null>(null);
+  const [artifactHistory, setArtifactHistory] = useState<TaskArtifact[]>([]);
   const [activeRightPanel, setActiveRightPanel] = useState<'thread' | 'agent' | null>(null);
   const rightPanelOpen = activeRightPanel !== null;
 
@@ -134,7 +135,7 @@ export function ChannelView({
   const [isMemberPopoverOpen, setIsMemberPopoverOpen] = useState(false);
 
   const { showToast } = useToast();
-  const { generateArtifact, finalizeArtifact, fetchArtifactHTML, isGenerating } = useTaskArtifact();
+  const { generateArtifact, finalizeArtifact, fetchArtifactHTML, listArtifacts, isGenerating } = useTaskArtifact();
   const artifactOpenLinkRef = useRef<HTMLAnchorElement>(null);
   const artifactFinalizeButtonRef = useRef<HTMLButtonElement>(null);
   const artifactFrameRef = useRef<HTMLIFrameElement>(null);
@@ -167,6 +168,22 @@ export function ChannelView({
       URL.revokeObjectURL(previousPreviewUrl);
     }
   }, [fetchArtifactHTML]);
+
+  const refreshArtifactHistory = useCallback(async (taskId: string) => {
+    const artifacts = await listArtifacts(taskId);
+    setArtifactHistory(artifacts);
+    return artifacts;
+  }, [listArtifacts]);
+
+  const showLatestPublishedArtifact = useCallback(async (taskId: string) => {
+    const artifacts = await refreshArtifactHistory(taskId);
+    const published = artifacts.find((artifact) => artifact.summary !== 'pending');
+    if (published) {
+      await showArtifactPreview(published);
+      return true;
+    }
+    return false;
+  }, [refreshArtifactHistory, showArtifactPreview]);
 
   useEffect(() => {
     if (!artifactPreview) return;
@@ -556,25 +573,39 @@ export function ChannelView({
 
     try {
       const artifact = await generateArtifact(task.id);
+      await refreshArtifactHistory(task.id);
       await showArtifactPreview(artifact);
     } catch (error) {
-      artifactReturnFocusRef.current = null;
       if (error instanceof TaskArtifactGenerationInProgressError) return;
+      if (error instanceof TaskArtifactStillPendingError) {
+        const showedExisting = await showLatestPublishedArtifact(task.id);
+        if (!showedExisting) {
+          artifactReturnFocusRef.current = null;
+          showToast('Artifact is still generating. Try again in a moment.', 'error');
+        }
+        return;
+      }
+      artifactReturnFocusRef.current = null;
       showToast('Could not generate artifact. Please try again.', 'error');
     }
-  }, [generateArtifact, isGenerating, showArtifactPreview, showToast]);
+  }, [generateArtifact, isGenerating, refreshArtifactHistory, showArtifactPreview, showLatestPublishedArtifact, showToast]);
 
   const handleFinalizeArtifact = useCallback(async () => {
     if (!artifactPreview || isGenerating) return;
 
     try {
       const artifact = await finalizeArtifact(artifactPreview.task_id);
+      await refreshArtifactHistory(artifactPreview.task_id);
       await showArtifactPreview(artifact);
     } catch (error) {
       if (error instanceof TaskArtifactGenerationInProgressError) return;
+      if (error instanceof TaskArtifactStillPendingError) {
+        showToast('Final artifact is still generating. Try again in a moment.', 'error');
+        return;
+      }
       showToast('Could not finalize artifact. Please try again.', 'error');
     }
-  }, [artifactPreview, finalizeArtifact, isGenerating, showArtifactPreview, showToast]);
+  }, [artifactPreview, finalizeArtifact, isGenerating, refreshArtifactHistory, showArtifactPreview, showToast]);
 
   // SOLO-island PR2: removed agentActivities aggregation — the
   // TypingIndicator it fed is now replaced by AgentIsland, which
@@ -838,6 +869,18 @@ export function ChannelView({
           <div className="flex items-center justify-between border-b-4 border-black px-4 py-2">
             <div id="channel-artifact-preview-title" className="font-heading text-sm font-black uppercase">{artifactPreview.title}</div>
             <div className="flex items-center gap-2">
+              {artifactHistory
+                .filter((artifact) => artifact.summary !== 'pending')
+                .map((artifact) => (
+                  <button
+                    key={artifact.id}
+                    type="button"
+                    onClick={() => showArtifactPreview(artifact)}
+                    className="border-2 border-black bg-white px-2 py-1 font-mono text-xs font-bold uppercase shadow-brutal-sm"
+                  >
+                    {artifact.html_path.endsWith('final.html') ? 'Final' : 'Latest'}
+                  </button>
+                ))}
               <a
                 ref={artifactOpenLinkRef}
                 href={artifactPreview.previewUrl}

@@ -14,6 +14,13 @@ export class TaskArtifactGenerationInProgressError extends Error {
   }
 }
 
+export class TaskArtifactStillPendingError extends Error {
+  constructor() {
+    super('Task artifact is still generating');
+    this.name = 'TaskArtifactStillPendingError';
+  }
+}
+
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 export function useTaskArtifact() {
@@ -24,19 +31,18 @@ export function useTaskArtifact() {
 
   const waitForPublishedArtifact = useCallback(async (taskId: string, mode: 'latest' | 'final', baseline: TaskArtifact): Promise<TaskArtifact> => {
     if (baseline.summary !== 'pending') return baseline;
-    const baselineTime = Date.parse(baseline.updated_at);
     for (let attempt = 0; attempt < ARTIFACT_POLL_ATTEMPTS; attempt += 1) {
       await sleep(ARTIFACT_POLL_INTERVAL_MS);
       try {
         const artifact = await apiClient.get<TaskArtifact>(`/api/v1/tasks/${taskId}/artifact/latest?mode=${mode}`);
-        if (artifact.summary !== 'pending' && Date.parse(artifact.updated_at) > baselineTime) {
+        if (artifact.summary !== 'pending') {
           return artifact;
         }
       } catch {
         // The agent may not have published yet.
       }
     }
-    return baseline;
+    throw new TaskArtifactStillPendingError();
   }, []);
 
   const runArtifactMutation = useCallback(async (taskId: string, endpoint: string, mode: 'latest' | 'final'): Promise<TaskArtifact> => {
@@ -75,5 +81,9 @@ export function useTaskArtifact() {
     return apiClient.getText(artifact.url);
   }, []);
 
-  return { generateArtifact, finalizeArtifact, fetchArtifactHTML, isGenerating };
+  const listArtifacts = useCallback((taskId: string): Promise<TaskArtifact[]> => {
+    return apiClient.get<TaskArtifact[]>(`/api/v1/tasks/${taskId}/artifacts`);
+  }, []);
+
+  return { generateArtifact, finalizeArtifact, fetchArtifactHTML, listArtifacts, isGenerating };
 }
