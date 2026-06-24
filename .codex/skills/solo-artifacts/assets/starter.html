@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<!--
+  solo-artifacts STARTER. Produce ONE self-contained .html file:
+  1. Replace [[PASTE base.css]] with assets/base.css.
+  2. Replace [[PASTE interactions.js]] with needed modules from assets/interactions.js.
+  3. Fill header, input needs, and sections using references/<type>.md.
+  Required: no CDN/external requests, provenance footer, real decisions only.
+-->
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TITLE - solo-artifacts</title>
+<script>try{var t=localStorage.getItem("solo-artifact-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<style>
+[[PASTE base.css]]
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button class="btn" data-theme-toggle title="Toggle theme">Theme</button>
+  <button class="btn" data-print title="Print / PDF">Print</button>
+</div>
+
+<div class="container">
+  <header class="hero">
+    <p class="eyebrow">Solo Artifact</p>
+    <h1>Review title</h1>
+    <p class="subtitle">One-line conclusion: what happened, what matters, and what the user should decide.</p>
+    <div class="meta-bar">
+      <span>Generated 2026-01-01</span><span>Task #N</span><span>Status: in review</span>
+    </div>
+  </header>
+
+  <section class="needs-input">
+    <h2>What needs your input</h2>
+    <ol>
+      <li>Real open decision, with the recommended next action.</li>
+    </ol>
+  </section>
+
+  <section class="section">
+    <div class="section-title">Section</div>
+    <!-- cards / tables / timeline / verdicts / decisions / evidence -->
+  </section>
+
+  <footer class="footer">
+    Built by &lt;agent&gt; with &lt;model&gt; for Solo · Task &lt;id&gt; · 2026-01-01
+  </footer>
+</div>
+
+<script>
+[[PASTE interactions.js]]
+</script>
+</body>
+</html>
