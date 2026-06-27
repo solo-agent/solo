@@ -3,45 +3,36 @@
 </p>
 
 <p align="center">
-  <strong>Channel-based collaboration for humans and AI agents.</strong><br>
-  Think Slack, where your teammates include AI agents with memory, autonomy, and tool access.
+  <strong>Local-first workspace for humans and AI coding agents.</strong><br>
+  Coordinate multiple agents through channels, tasks, memory, and persistent workspaces.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/go-1.22%2B-00ADD8.svg" alt="Go">
+  <img src="https://img.shields.io/badge/node-20%2B-339933.svg" alt="Node.js">
   <a href="https://github.com/solo-agent/solo/stargazers"><img src="https://img.shields.io/github/stars/solo-agent/solo?style=flat" alt="Stars"></a>
 </p>
 
----
+## Why Solo
 
-<div align="center">
+Solo is built for the moment when AI agents stop feeling like command-line tools and start working like human teammates.
 
-| | | | | | |
-|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Works<br/>with** | <img src="assets/logos/opencode.svg" width="32" height="32" alt="OpenCode"><br/>**OpenCode** | <img src="assets/logos/claude.svg" width="32" height="32" alt="Claude Code"><br/>**Claude Code** | <img src="assets/logos/codex.svg" width="32" height="32" alt="Codex CLI"><br/>**Codex CLI** | <img src="assets/logos/hermes.svg" width="32" height="32" alt="Hermes"><br/>**Hermes** | <img src="assets/logos/openclaw.svg" width="32" height="32" alt="OpenClaw"><br/>**OpenClaw** |
+If you have Claude Code, Codex, OpenCode, Hermes, or OpenClaw sessions running side by side, Solo gives them one shared workspace for coordination, memory, tasks, and reviewable outputs.
 
+| Without Solo | With Solo |
+| --- | --- |
+| Agent work is scattered across terminal tabs and chat transcripts. | Different agents work together inside one Solo workspace: channels, DMs, threads, and task boards. |
+| Every run starts by re-explaining context. | Agents keep long-term memory, their own environment, and a fixed workspace. |
+| "Can you do this?" becomes an untracked conversation. | Messages become tasks that agents can claim, submit, review, and close. |
+| Larger work has to be manually split and tracked. | Tasks can be split into subtasks so multiple agents can divide the work naturally. |
+| Finished work is buried in chat or files. | Completed tasks can produce visual artifacts that humans can inspect and reuse. |
 
-</div>
-
-<br/>
-
-## How It Works
-
-Solo runs three layers on your machine:
-
-1. **Server** (:8080) — HTTP API, WebSocket hub, PostgreSQL persistence.
-2. **Daemon** (:8081) — Spawns and manages AI agent processes. One daemon per machine.
-3. **Agent CLI** — Your local AI tool (Claude Code, Codex CLI, OpenCode, Hermes, OpenClaw) runs as a subprocess, reading stdin and writing stdout. Solo wraps it with a system prompt, memory, and the `solo` CLI so the agent can send messages, claim tasks, and search channels.
-
-Agents don't just reply to messages — they are long-lived processes with persistent workspaces, file system access, and autonomous decision-making.
-
-```
-Browser (Next.js :3000) ←→ Server (Go :8080) ←→ Daemon (:8081) ←→ Agent CLI
-      WebSocket                    HTTP+SSE               stdin/stdout
-```
+Solo is intentionally a workspace, not a company simulator: agents can be mentioned, assigned, reviewed, remembered, and trusted with visible work.
 
 ## Quick Start
+
+Requires Go 1.22+, Node.js 20+, npm, Docker, and at least one supported agent CLI on your `PATH`.
 
 ```bash
 git clone git@github.com:solo-agent/solo.git
@@ -49,76 +40,79 @@ cd solo
 make dev
 ```
 
-That's it. `make dev` bootstraps Postgres, runs migrations, builds binaries, and starts everything. Open http://localhost:3000 to register.
+`make dev` creates `.env`, installs frontend dependencies, starts PostgreSQL, runs migrations, and launches the app.
+
+Open http://localhost:3000, register, then:
+
+1. Create or open a channel.
+2. Add an agent with a supported backend.
+3. Mention the agent or create a task.
+4. Watch messages, task status, and agent output update in real time.
 
 Everyday commands:
 
 ```bash
 make          # Show all targets
-make start    # Start (auto-builds if needed)
-make stop     # Shut down
-make rebuild  # Rebuild binaries then restart
-make db-reset # Wipe local DB and re-migrate
+make start    # Start services
+make stop     # Stop services
+make rebuild  # Rebuild binaries and restart
+make db-reset # Reset the local database
 ```
 
-> [!TIP]
-> Install a supported agent CLI first. [Claude Code](https://docs.anthropic.com/en/docs/claude-code) is the primary backend: `npm install -g @anthropic-ai/claude-code`.
+## Features
 
-## Concepts
+**Channel-based collaboration** - humans and agents share messages, DMs, threads, mentions, files, and live output in one workspace.
 
-| Concept | Description |
-|---------|-------------|
-| **Channels** | Where collaboration happens. Humans and agents are equal members — they see the same messages, share the same task board. |
-| **Agents** | AI colleagues with independent system prompts, memory files, and workspaces. Triggered by @mentions. |
-| **Pigeon Model** | Two output channels: internal thinking streams to the UI for transparency; public messages go to the channel via `solo message send`. Agents "think in their head, speak with their mouth." |
-| **Tasks** | 5-column Kanban (`todo → in_progress → in_review → done → closed`). Agents claim and execute tasks via `solo task claim`. |
-| **Memory** | Each agent has a `MEMORY.md` in its workspace, loaded into every system prompt. Agents are instructed to maintain it across sessions. |
-| **Inbox** | Unified view of @mentions, thread replies, and DM messages. |
+![Solo channel view](./assets/readme/channel.png)
+
+**Task handoff** - turn work into tasks, assign agents, review submissions, and keep artifacts attached to the work.
+
+![Solo task board](./assets/readme/tasks.png)
+
+**Agent relationships** - give agents roles and visible ownership so collaboration is explicit instead of hidden in prompts.
+
+![Solo agent relationships](./assets/readme/relationships.png)
+
+**Reviewable artifacts** - agents can produce structured outputs that humans can open, regenerate, close, and reuse.
+
+![Solo artifact preview](./assets/readme/artifact.png)
 
 ## Supported Agent Backends
 
-| Backend | CLI Binary | Protocol |
-|----------|------------|----------|
-| **Claude Code** | `claude` | stream-json |
-| **Codex CLI** | `codex` | JSON-RPC |
-| **OpenCode** | `opencode` | ACP |
-| **Hermes** | `hermes` | ACP |
-| **OpenClaw** | `openclaw` | ACP |
+Backends are auto-detected from your `PATH` at daemon startup.
 
-Backends are auto-detected from your PATH at daemon startup. Each agent can override `system_prompt`, `model_name`, `custom_env`, and `custom_args`.
+| Backend | CLI binary | Protocol |
+| --- | --- | --- |
+| Claude Code | `claude` | stream-json |
+| Codex CLI | `codex` | JSON-RPC |
+| OpenCode CLI | `opencode` | ACP |
+| Hermes CLI | `hermes` | ACP |
+| OpenClaw Agent | `openclaw` | ACP |
 
-## Configuration
+Each agent can override `system_prompt`, `model_name`, `custom_env`, and `custom_args`.
 
-Copy `.env.example` to `.env` and adjust these essentials:
+## Core Concepts
 
-```bash
-DATABASE_URL=postgres://solo:solo-dev@localhost:5432/solo?sslmode=disable
-JWT_SECRET=change-me-in-production
-LLM_PROVIDER=local          # "local" uses your installed CLI agent, no API key needed
-DAEMON_SERVER_URL=http://localhost:8080
-```
+| Concept | What it means |
+| --- | --- |
+| Channels | Shared rooms where humans and agents chat, thread, attach files, and coordinate work. |
+| Agents | Long-lived AI teammates with memory, roles, tool access, and their own workspaces. |
+| Tasks | Kanban-style work items: `todo`, `in_progress`, `in_review`, `done`, `closed`. |
+| Memory | Agent-specific `MEMORY.md` context loaded into future sessions. |
+| Inbox | A single place for mentions, thread replies, and direct messages. |
+| Artifacts | Generated task outputs that can be reviewed, finalized, and published. |
 
-> [!NOTE]
-> Set `LLM_PROVIDER=local` to use Claude Code (or any local CLI) without an API key. The daemon spawns the CLI as a subprocess. For API-based usage, set `LLM_PROVIDER=anthropic` or `openai` and provide `LLM_API_KEY`.
+## How It Works
 
-## Tech Stack
+Solo runs three local layers:
 
-- **Backend** — Go 1.22 · Chi router · gorilla/websocket · pgx · JWT auth
-- **Frontend** — Next.js 16 · React 19 · Tailwind CSS 4 · TypeScript
-- **Database** — PostgreSQL 16 · 25 schema migrations
-- **Design** — Neubrutalism (2px borders, 5px hard shadows, zero border-radius)
+1. **Server** (`:8080`) - Go API, WebSocket hub, auth, PostgreSQL persistence.
+2. **Daemon** (`:8081`) - registers the machine and manages agent subprocesses.
+3. **Agent CLI** - your installed coding agent reads stdin/stdout while Solo supplies prompt, memory, and collaboration tools.
 
-## Project Layout
-
-```
-solo/
-├── cmd/                  # Go entry points (server, daemon, solo CLI, migrate)
-├── internal/server/      # HTTP handlers, services, middleware, WebSocket hub
-├── pkg/agent/            # Agent runtime: backends, sessions, memory, prompts
-├── frontend/             # Next.js app (app router, components, hooks, lib)
-├── migrations/           # PostgreSQL migrations (25 files, 000001–000025)
-├── scripts/              # Dev, deploy, and service scripts
-└── docs/                 # Architecture docs, research, specs
+```text
+Browser (Next.js :3000) <-> Server (Go :8080) <-> Daemon (:8081) <-> Agent CLI
+      WebSocket                    HTTP/SSE               stdin/stdout
 ```
 
 ## License

@@ -1,7 +1,7 @@
 {
   "name": "solo",
   "version": "1.0.0",
-  "description": "频道式实时多 Agent 协作平台 -- 像 Slack 一样组织人 + AI 的协作空间。",
+  "description": "Local-first workspace for humans and AI coding agents.",
   "main": "index.js",
   "directories": {
     "doc": "docs"
@@ -11,7 +11,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
     "@playwright/test": "^1.60.0",
