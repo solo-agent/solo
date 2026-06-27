@@ -15,6 +15,7 @@ interface ComputerResponse {
   id: string;
   name: string;
   owner_id: string;
+  my_role?: 'owner' | 'member' | null;
   daemon_id?: string;
   daemon_url?: string;
   status: string;
@@ -32,6 +33,7 @@ function mapComputer(resp: ComputerResponse): Computer {
     id: resp.id,
     name: resp.name,
     owner_id: resp.owner_id,
+    my_role: resp.my_role ?? null,
     daemon_id: resp.daemon_id,
     daemon_url: resp.daemon_url,
     status: resp.status as Computer['status'],
@@ -101,9 +103,9 @@ export function useComputers() {
   const claimComputer = useCallback(async (id: string): Promise<Computer> => {
     const res = await apiClient.post<ComputerResponse>(`/api/v1/computers/${id}/claim`);
     const claimed = mapComputer(res);
-    setComputers((prev) => prev.map((c) => (c.id === id ? claimed : c)));
+    void loadComputers();
     return claimed;
-  }, []);
+  }, [loadComputers]);
 
   return {
     computers,

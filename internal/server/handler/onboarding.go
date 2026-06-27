@@ -101,6 +101,23 @@ func (h *OnboardingHandler) CreateLucy(w http.ResponseWriter, r *http.Request) {
 	// Create Lucy agent via direct SQL with the selected runtime as model_provider.
 	// Store computer binding in runtime_id column (dead column from migration 000021, repurposed).
 	computerID := strings.TrimSpace(req.ComputerID)
+	if computerID != "" {
+		var isMember bool
+		if err := h.pool.QueryRow(r.Context(),
+			`SELECT EXISTS(
+				SELECT 1 FROM computer_members WHERE computer_id = $1 AND user_id = $2
+			)`,
+			computerID, userID,
+		).Scan(&isMember); err != nil {
+			slog.Error("onboarding: check computer membership failed", "computer_id", computerID, "user_id", userID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to verify computer access")
+			return
+		}
+		if !isMember {
+			writeError(w, http.StatusForbidden, "computer is not accessible to this user")
+			return
+		}
+	}
 	_, err := h.pool.Exec(r.Context(),
 		`INSERT INTO agents (id, name, description, owner_id, model_provider, model_name,
 			system_prompt, runtime_id, custom_env, custom_args)

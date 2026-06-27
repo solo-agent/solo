@@ -15,8 +15,8 @@ import (
 
 // ComputerHandler handles computer-related HTTP requests.
 type ComputerHandler struct {
-	svc *service.ComputerService
-	dm  *service.DaemonManager
+	svc  *service.ComputerService
+	dm   *service.DaemonManager
 	pool *pgxpool.Pool
 }
 
@@ -35,6 +35,7 @@ type ComputerResponse struct {
 	ID            string   `json:"id"`
 	Name          string   `json:"name"`
 	OwnerID       string   `json:"owner_id"`
+	MyRole        *string  `json:"my_role,omitempty"`
 	DaemonID      string   `json:"daemon_id,omitempty"`
 	DaemonURL     string   `json:"daemon_url,omitempty"`
 	Status        string   `json:"status"`
@@ -59,6 +60,7 @@ func toResponse(c *service.Computer) ComputerResponse {
 		ID:        c.ID,
 		Name:      c.Name,
 		OwnerID:   c.OwnerID,
+		MyRole:    c.MyRole,
 		DaemonID:  c.DaemonID,
 		DaemonURL: c.DaemonURL,
 		Status:    c.Status,
@@ -246,7 +248,7 @@ func (h *ComputerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // Claim handles POST /api/v1/computers/{computerID}/claim
-// Binds an unclaimed computer to the current user.
+// Adds the current user as a member of the computer.
 func (h *ComputerHandler) Claim(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
@@ -262,8 +264,8 @@ func (h *ComputerHandler) Claim(w http.ResponseWriter, r *http.Request) {
 
 	c, err := h.svc.ClaimComputer(r.Context(), computerID, userID)
 	if err != nil {
-		if err == service.ErrAlreadyClaimed {
-			writeError(w, http.StatusConflict, "computer is already claimed")
+		if err == service.ErrNotFound {
+			writeError(w, http.StatusNotFound, "computer not found")
 			return
 		}
 		slog.Error("claim computer failed", "computer_id", computerID, "user_id", userID, "error", err)

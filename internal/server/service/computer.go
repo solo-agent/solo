@@ -30,6 +30,7 @@ type Computer struct {
 	IP            string     `json:"ip"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
+	MyRole        *string    `json:"my_role,omitempty"`
 }
 
 // ComputerSystemInfo carries OS, hostname and IP reported by a daemon.
@@ -93,14 +94,17 @@ func (s *ComputerService) GetComputer(ctx context.Context, id, userID string) (*
 	return &c, nil
 }
 
-// ListComputers lists all computers owned by the given user.
+// ListComputers lists online computers and annotates the caller's membership.
 func (s *ComputerService) ListComputers(ctx context.Context, userID string) ([]Computer, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, COALESCE(owner_id::text, ''), COALESCE(daemon_id, ''), COALESCE(daemon_url, ''),
-		        status, last_heartbeat, agent_ids, COALESCE(os, ''), COALESCE(hostname, ''), COALESCE(ip, ''), created_at, updated_at
-		 FROM computers
-		 WHERE 1=1
-		 ORDER BY created_at DESC`,
+		`SELECT c.id, c.name, COALESCE(c.owner_id::text, ''), COALESCE(c.daemon_id, ''), COALESCE(c.daemon_url, ''),
+		        c.status, c.last_heartbeat, c.agent_ids, COALESCE(c.os, ''), COALESCE(c.hostname, ''), COALESCE(c.ip, ''), c.created_at, c.updated_at,
+		        cm.role
+		 FROM computers c
+		 LEFT JOIN computer_members cm ON cm.computer_id = c.id AND cm.user_id = $1
+		 WHERE c.status = 'online'
+		 ORDER BY c.created_at DESC`,
+		userID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list computers: %w", err)
@@ -112,13 +116,15 @@ func (s *ComputerService) ListComputers(ctx context.Context, userID string) ([]C
 		var c Computer
 		var daemonID, daemonURL string
 		var lastHeartbeat *time.Time
+		var role *string
 		if err := rows.Scan(&c.ID, &c.Name, &c.OwnerID, &daemonID, &daemonURL,
-			&c.Status, &lastHeartbeat, &c.AgentIDs, &c.OS, &c.Hostname, &c.IP, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			&c.Status, &lastHeartbeat, &c.AgentIDs, &c.OS, &c.Hostname, &c.IP, &c.CreatedAt, &c.UpdatedAt, &role); err != nil {
 			return nil, fmt.Errorf("scan computer row: %w", err)
 		}
 		c.DaemonID = daemonID
 		c.DaemonURL = daemonURL
 		c.LastHeartbeat = lastHeartbeat
+		c.MyRole = role
 		computers = append(computers, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -246,25 +252,53 @@ func (s *ComputerService) MarkOffline(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
-// ClaimComputer binds an unclaimed computer to the given user.
-// Returns ErrAlreadyClaimed if the computer is already owned by someone else.
+// ClaimComputer joins the user to a computer. If nobody owns it yet, this user
+// becomes the first owner.
 func (s *ComputerService) ClaimComputer(ctx context.Context, computerID, userID string) (*Computer, error) {
-	result, err := s.pool.Exec(ctx,
-		`UPDATE computers SET owner_id = $1, updated_at = now()
-		 WHERE id = $2 AND owner_id IS NULL`,
-		userID, computerID,
-	)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("claim computer: %w", err)
+		return nil, fmt.Errorf("claim computer: begin: %w", err)
 	}
-	if result.RowsAffected() == 0 {
-		return nil, ErrAlreadyClaimed
+	defer tx.Rollback(ctx)
+
+	var hasOwner bool
+	if err := tx.QueryRow(ctx,
+		`SELECT owner_id IS NOT NULL FROM computers WHERE id = $1 FOR UPDATE`,
+		computerID,
+	).Scan(&hasOwner); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("claim computer: get computer: %w", err)
 	}
 
+	role := "member"
+	if !hasOwner {
+		role = "owner"
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO computer_members (computer_id, user_id, role)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (computer_id, user_id) DO NOTHING`,
+		computerID, userID, role,
+	); err != nil {
+		return nil, fmt.Errorf("claim computer: insert member: %w", err)
+	}
+
+	if !hasOwner {
+		if _, err := tx.Exec(ctx,
+			`UPDATE computers SET owner_id = $1, updated_at = now() WHERE id = $2`,
+			userID, computerID,
+		); err != nil {
+			return nil, fmt.Errorf("claim computer: set owner: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("claim computer: commit: %w", err)
+	}
 	return s.GetComputer(ctx, computerID, userID)
 }
-
-var ErrAlreadyClaimed = fmt.Errorf("computer already claimed by another user")
 
 // ErrNotFound is returned when a requested computer does not exist.
 var ErrNotFound = fmt.Errorf("computer not found")

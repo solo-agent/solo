@@ -288,6 +288,7 @@ export interface Computer {
   id: string;
   name: string;
   owner_id: string;
+  my_role?: 'owner' | 'member' | null;
   daemon_id?: string;
   daemon_url?: string;
   status: 'online' | 'offline';

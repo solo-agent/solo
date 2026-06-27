@@ -1,11 +1,10 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Check, Monitor, Cpu, Sparkles, AlertCircle, ChevronDown, RefreshCw } from 'lucide-react';
+import { Check, Monitor, Cpu, Sparkles, AlertCircle, RefreshCw } from 'lucide-react';
 import { useCliDetection } from '@/lib/hooks/use-cli-detection';
 import { useComputers } from '@/lib/hooks/use-computers';
 import { useOnboarding } from '@/lib/hooks/use-onboarding';
-import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Select, type SelectOption } from '@/components/ui/select';
@@ -19,15 +18,14 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
   const { results: cliResults, isLoaded: cliLoaded } = useCliDetection();
   const { computers, isLoading: computersLoading, claimComputer, refetch } = useComputers();
   const { createLucy, isCreating, error: createError } = useOnboarding();
-  const { user } = useAuth();
 
   const [selectedRuntime, setSelectedRuntime] = useState<string>('');
   const [done, setDone] = useState(false);
   const [claimingId, setClaimingId] = useState<string | null>(null);
 
-  const myComputer = computers.find((c) => c.status === 'online' && c.owner_id === user?.id);
-  const unclaimedComputers = computers.filter((c) => c.status === 'online' && !c.owner_id);
-  const computerOnline = !!myComputer || unclaimedComputers.length > 0;
+  const isMember = (c: { my_role?: string | null }) => c.my_role === 'owner' || c.my_role === 'member';
+  const myComputer = computers.find((c) => c.status === 'online' && isMember(c));
+  const joinableComputers = computers.filter((c) => c.status === 'online' && !isMember(c));
 
   const runtimeOptions: SelectOption[] = useMemo(() => {
     const options: SelectOption[] = [];
@@ -108,9 +106,9 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
                   <Monitor className="mr-1 inline h-3 w-3" />
                   {myComputer.name} — online
                 </span>
-              ) : unclaimedComputers.length > 0 ? (
+              ) : joinableComputers.length > 0 ? (
                 <div className="mt-1 space-y-1">
-                  {unclaimedComputers.map((c) => (
+                  {joinableComputers.map((c) => (
                     <button
                       key={c.id}
                       type="button"
