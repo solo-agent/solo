@@ -300,10 +300,10 @@ function ReplyItem({
           size="sm"
           onClick={onAgentClick ? () => onAgentClick?.({
             id: message.sender_id || message.id,
-            name: message.display_name || 'Agent',
+            name: message.display_name || t('agent'),
             is_active: message.sender_active,
           }) : undefined}
-          ariaLabel={t('viewAgentDetail', { name: message.display_name || 'Agent' })}
+          ariaLabel={t('viewAgentDetail', { name: message.display_name || t('agent') })}
         />
       ) : (
         <Avatar
@@ -321,14 +321,14 @@ function ReplyItem({
           </span>
           {isAgent && (
             <span className="badge-brutal bg-brutal-primary text-black">
-              Agent
+              {t('agent')}
             </span>
           )}
         </div>
         <div className="">
           {isStreaming && !message.content ? (
             <div className="py-1">
-              <span className="inline-flex items-center gap-1" aria-label="Agent is typing">
+              <span className="inline-flex items-center gap-1" aria-label={t('typing')}>
                 {[0, 1, 2].map((i) => (
                   <span
                     key={i}
@@ -402,7 +402,7 @@ function ThreadEmpty() {
     <div className="flex flex-1 items-center justify-center px-6">
       <div className="text-center">
         <p className="font-body text-sm text-muted-foreground">
-          No replies yet. Start the discussion.
+          {t('noRepliesYet')}
         </p>
       </div>
     </div>
@@ -429,7 +429,7 @@ function ThreadError({
           className="btn-brutal btn-brutal-sm"
         >
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-          Retry
+          {t('retry')}
         </button>
       </div>
     </div>
@@ -598,13 +598,15 @@ const STATUS_BADGE_COLORS: Record<string, string> = {
   closed: 'bg-brutal-muted text-black border-black',
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  todo: 'TODO',
-  in_progress: 'In Progress',
-  in_review: 'In Review',
-  done: 'Done',
-  closed: 'Closed',
-};
+function taskStatusLabel(status: string): string {
+  return {
+    todo: t('statusTodo'),
+    in_progress: t('statusInProgress'),
+    in_review: t('statusInReview'),
+    done: t('statusDone'),
+    closed: t('statusClosed'),
+  }[status] ?? status;
+}
 
 const PRIORITY_LABELS: Record<string, string> = {
   urgent: 'P0',
@@ -618,7 +620,7 @@ const PRIORITY_LABELS: Record<string, string> = {
 function ParentMessageTaskBar({ message }: { message: Message }) {
   const statusKey = message.task_status as TaskStatus | undefined;
   const badgeClass = statusKey ? (STATUS_BADGE_COLORS[statusKey] ?? STATUS_BADGE_COLORS.todo) : '';
-  const statusLabel = statusKey ? (STATUS_LABELS[statusKey] ?? statusKey) : '';
+  const statusLabel = statusKey ? taskStatusLabel(statusKey) : '';
   const taskNum = message.task_number ? `#${message.task_number}` : '';
   const claimerName = message.task_claimer_name;
 
@@ -638,11 +640,11 @@ function ParentMessageTaskBar({ message }: { message: Message }) {
         <span className="font-mono text-xs text-muted-foreground">&middot;</span>
         {claimerName ? (
           <span className="font-heading text-xs font-bold text-foreground">
-            @{claimerName}{message.task_claimer_deleted ? ' (Deleted)' : ''}
+            @{claimerName}{message.task_claimer_deleted ? ` (${t('deleted')})` : ''}
           </span>
         ) : (
           <span className="font-heading text-xs text-muted-foreground">
-            Unclaimed
+            {t('unclaimed')}
           </span>
         )}
       </div>
@@ -654,7 +656,7 @@ function ParentMessageTaskBar({ message }: { message: Message }) {
 
 function TaskMetaBar({ task }: { task: Task }) {
   const badgeClass = STATUS_BADGE_COLORS[task.status] ?? STATUS_BADGE_COLORS.todo;
-  const statusLabel = STATUS_LABELS[task.status] ?? task.status;
+  const statusLabel = taskStatusLabel(task.status);
   const priorityLabel = PRIORITY_LABELS[task.priority] ?? task.priority;
   const taskNum = task.task_number ? `#${task.task_number}` : '';
   const isClaimed = !!task.claimer_id;
@@ -662,7 +664,7 @@ function TaskMetaBar({ task }: { task: Task }) {
     task.claimer_name ||
     task.assignee_name ||
     (task.claimer_id ? task.claimer_id.slice(0, 8) : '');
-  const claimerDeletedSuffix = task.claimer_deleted ? ' (Deleted)' : '';
+  const claimerDeletedSuffix = task.claimer_deleted ? ` (${t('deleted')})` : '';
 
   return (
     <div className="border-b-2 border-black bg-brutal-cream px-6 py-3">
@@ -684,11 +686,11 @@ function TaskMetaBar({ task }: { task: Task }) {
       {/* Line 2: priority + claimer */}
       <div className="flex items-center gap-2 text-xs flex-wrap">
         <span className="font-mono text-muted-foreground">
-          Priority:{' '}
+          {t('priorityLabel')}:{' '}
           <span className="font-bold text-foreground">{priorityLabel}</span>
         </span>
         <span className="font-mono text-muted-foreground">|</span>
-        <span className="font-mono text-muted-foreground">Claimer:</span>
+        <span className="font-mono text-muted-foreground">{t('claimerLabel')}:</span>
         {isClaimed ? (
           <span className="flex items-center gap-1">
             <span className="flex h-4 w-4 items-center justify-center border-2 border-black bg-brutal-success font-heading text-[9px] font-bold text-black">
@@ -700,7 +702,7 @@ function TaskMetaBar({ task }: { task: Task }) {
           </span>
         ) : (
           <span className="font-heading text-xs text-muted-foreground">
-            Not yet claimed
+            {t('notYetClaimed')}
           </span>
         )}
       </div>
@@ -850,9 +852,9 @@ export function ThreadPanel({
       {/* Header */}
       <div className="flex h-14 flex-shrink-0 items-center justify-between border-b-2 border-black px-4">
         <h3 className="font-heading text-base font-bold text-foreground">
-          Thread{replyCount > 0 && (
+          {t('thread')}{replyCount > 0 && (
             <span className="ml-1.5 font-mono text-sm text-muted-foreground">
-              &middot; {replyCount} replies
+              &middot; {t('threadReplies', { n: replyCount })}
             </span>
           )}
         </h3>
@@ -862,8 +864,8 @@ export function ThreadPanel({
               type="button"
               onClick={handleViewTask}
               className="btn-brutal btn-brutal-sm flex h-8 w-8 items-center justify-center p-0"
-              aria-label="View task"
-              title="View task"
+              aria-label={t('observabilityTask')}
+              title={t('observabilityTask')}
             >
               <SquareCheckBig className="h-3.5 w-3.5" />
             </button>
@@ -872,8 +874,8 @@ export function ThreadPanel({
             type="button"
             onClick={handleViewInChannel}
             className="btn-brutal btn-brutal-sm flex h-8 w-8 items-center justify-center p-0"
-            aria-label="View in channel"
-            title="View in channel"
+            aria-label={t('navChannels')}
+            title={t('navChannels')}
           >
             <MessageSquare className="h-3.5 w-3.5" />
           </button>

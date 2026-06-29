@@ -153,7 +153,7 @@ export function TaskForm({
               }}
               options={[
                 { value: 'user', label: t('user') },
-                { value: 'agent', label: 'Agent' },
+                { value: 'agent', label: t('agent') },
               ]}
               size="md"
               className="w-24 flex-shrink-0"

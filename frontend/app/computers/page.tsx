@@ -498,12 +498,12 @@ function ComputerCard({
                 <span className="font-mono text-xs">{computer.id}</span>
               </InfoRow>
               {computer.daemon_id && (
-                <InfoRow label="Daemon ID">
+                <InfoRow label={t('computersDaemonID')}>
                   <span className="font-mono text-xs">{computer.daemon_id}</span>
                 </InfoRow>
               )}
               {computer.daemon_url && (
-                <InfoRow label="Daemon URL">
+                <InfoRow label={t('computersDaemonURL')}>
                   <span className="font-mono text-xs">{computer.daemon_url}</span>
                 </InfoRow>
               )}

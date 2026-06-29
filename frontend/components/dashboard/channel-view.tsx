@@ -838,12 +838,12 @@ export function ChannelView({
                     pushDashboardTaskUrl({ tab: 'tasks', task: value });
                   }}
                   options={[
-                    { value: '', label: 'All tasks' },
+                    { value: '', label: t('taskFilterAll') },
                     ...taskNumberOptions,
                   ]}
                   size="sm"
                   className="w-40"
-                  aria-label="Filter by task number"
+                  aria-label={t('taskFilterByNumber')}
                 />
                 {hasChannelTaskFilters && (
                   <Button

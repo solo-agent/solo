@@ -407,7 +407,7 @@ function DashboardContent() {
     <div className="flex h-screen min-w-[1024px] overflow-hidden bg-brutal-cream">
       <NavBar />
       <Sidebar
-        routeTitle="Chat"
+        routeTitle={t('navChannels')}
         channels={channels}
         isLoading={channelsLoading}
         selectedChannelId={selectedChannelId}

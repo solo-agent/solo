@@ -43,13 +43,13 @@ function ChannelListSkeleton() {
 function ChannelListEmpty({ onCreateChannel }: { onCreateChannel: () => void }) {
   return (
     <div className="space-y-3 px-2 py-4 text-center">
-      <p className="text-sm text-sidebar-muted-foreground">No channels yet</p>
+      <p className="text-sm text-sidebar-muted-foreground">{t('noChannelsYet')}</p>
       <button
         onClick={onCreateChannel}
         className="inline-flex items-center gap-1 border-2 border-black bg-brutal-primary px-3 py-1.5 text-sm font-medium text-black shadow-brutal-sm hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all"
       >
         <Plus className="h-3.5 w-3.5" />
-        Create Channel
+        {t('createChannel')}
       </button>
     </div>
   );
@@ -141,7 +141,7 @@ export function ChannelList({
               isExpanded ? 'rotate-0' : '-rotate-90',
             )}
           />
-          <span>Channels</span>
+          <span>{t('navChannels')}</span>
           <span className="ml-auto text-xs tabular-nums opacity-50">{channels.length}</span>
         </button>
         <button

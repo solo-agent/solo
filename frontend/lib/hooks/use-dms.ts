@@ -166,7 +166,7 @@ export function useDMs() {
         type: 'dm',
         ...(input.user_id
           ? { other_user: { id: input.user_id, display_name: participant?.display_name ?? t('user') } }
-          : { other_agent: { id: input.agent_id!, name: participant?.display_name ?? 'Agent' } }),
+          : { other_agent: { id: input.agent_id!, name: participant?.display_name ?? t('agent') } }),
         last_reply_at: new Date().toISOString(),
         unread_count: 0,
         created_at: new Date().toISOString(),

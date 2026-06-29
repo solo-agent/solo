@@ -31,7 +31,7 @@ export function InboxBadge({ unreadCount, isSelected, onClick }: InboxBadgeProps
       aria-label={t('inboxAriaLabel', { n: unreadCount })}
     >
       <Mail className="h-3.5 w-3.5" />
-      <span>Inbox</span>
+      <span>{t('sidebarInbox')}</span>
       {unreadCount > 0 && (
         <span
           // v3.1: bounce-slow draws the eye to unread state without

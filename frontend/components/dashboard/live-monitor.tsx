@@ -131,17 +131,20 @@ interface AgentTranscriptEntry {
   raw?: unknown;
 }
 
-const GROUP_LABELS: Record<string, string> = {
-  working: t('observabilityGroupWorking'),
-  needs_attention: t('observabilityGroupNeedsAttention'),
-  idle_recent: t('observabilityGroupIdleRecent'),
-};
-
 const GROUP_HEADER_CLASSES: Record<string, string> = {
   working: 'bg-brutal-info',
   needs_attention: 'bg-brutal-violet',
   idle_recent: 'bg-brutal-success',
 };
+
+function groupLabel(key: string, fallback: string) {
+  const labels: Record<string, string> = {
+    working: t('observabilityGroupWorking'),
+    needs_attention: t('observabilityGroupNeedsAttention'),
+    idle_recent: t('observabilityGroupIdleRecent'),
+  };
+  return labels[key] ?? fallback;
+}
 
 const QUESTION_HUES = [
   { bg: 'bg-brutal-primary-light', swatch: 'bg-brutal-primary' },
@@ -292,7 +295,7 @@ function LiveGroup({ group, selectedAgentId, onSelect }: { group: DashboardLiveG
     return (
       <section className="border-2 border-black bg-brutal-cream shadow-brutal-sm">
         <div className={cn('flex items-center justify-between px-3 py-2', groupHeaderClass(group.key))}>
-          <h2 className="font-heading text-base font-black">{GROUP_LABELS[group.key] ?? group.label}</h2>
+          <h2 className="font-heading text-base font-black">{groupLabel(group.key, group.label)}</h2>
           <span className="font-mono text-xs">{group.count} · {t('observabilityNone')}</span>
         </div>
       </section>
@@ -302,7 +305,7 @@ function LiveGroup({ group, selectedAgentId, onSelect }: { group: DashboardLiveG
   return (
     <section className="min-w-0 border-2 border-black bg-brutal-cream shadow-brutal-sm">
       <div className={cn('flex items-center justify-between border-b-2 border-black px-3 py-2', groupHeaderClass(group.key))}>
-        <h2 className="font-heading text-base font-black">{GROUP_LABELS[group.key] ?? group.label}</h2>
+        <h2 className="font-heading text-base font-black">{groupLabel(group.key, group.label)}</h2>
         <span className="font-mono text-xs">{group.count}</span>
       </div>
       <div className="grid gap-3 p-3 md:grid-cols-2 2xl:grid-cols-3">
@@ -725,7 +728,7 @@ function agentFromRun(run: AgentRunDetail, live: DashboardLive | null): Dashboar
   const base = live ? findAgent(live, run.agent_id) : null;
   return {
     agent_id: run.agent_id,
-    agent_name: base?.agent_name ?? 'Agent',
+    agent_name: base?.agent_name ?? t('agent'),
     avatar_url: base?.avatar_url,
     group: base?.group ?? 'working',
     run_id: run.id,

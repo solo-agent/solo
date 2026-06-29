@@ -122,7 +122,7 @@ export function AddAgentModal({
     try {
       setTemplates(await listTemplates());
     } catch (err) {
-      setTemplateError(err instanceof Error ? err.message : 'Failed to load templates');
+      setTemplateError(err instanceof Error ? err.message : t('relationshipTemplateLoadError'));
     } finally {
       setTemplatesLoading(false);
     }
@@ -131,7 +131,7 @@ export function AddAgentModal({
   const handleApplyTemplate = useCallback(
     async (templateId: string) => {
       if (!selectedModelProvider) {
-        setTemplateError('Please select a runtime');
+        setTemplateError(t('relationshipRuntimeRequiredError'));
         return;
       }
       setApplyingTemplate(templateId);
@@ -142,7 +142,7 @@ export function AddAgentModal({
         await refetch();
         onOpenChange(false);
       } catch (err) {
-        setTemplateError(err instanceof Error ? err.message : 'Failed to apply template');
+        setTemplateError(err instanceof Error ? err.message : t('relationshipTemplateApplyError'));
       } finally {
         setApplyingTemplate(null);
       }
@@ -159,7 +159,7 @@ export function AddAgentModal({
         className="gap-2"
       >
         <Plus className="h-4 w-4" />
-        Single Agent
+        {t('relationshipSingleAgent')}
       </Button>
       <Button
         type="button"
@@ -168,7 +168,7 @@ export function AddAgentModal({
         className="gap-2"
       >
         <Layers className="h-4 w-4" />
-        From Template
+        {t('relationshipFromTemplate')}
       </Button>
     </div>
   );
@@ -177,7 +177,7 @@ export function AddAgentModal({
     <Dialog open={open} onOpenChange={onOpenChange} width={mode === 'template' ? 'lg' : 'md'}>
       <DialogHeader>
         <DialogTitle>
-          {mode === 'create' ? t('teamsCreateAgent') : mode === 'template' ? 'Create from Template' : t('addAgentToChannel')}
+          {mode === 'create' ? t('teamsCreateAgent') : mode === 'template' ? t('relationshipCreateFromTemplate') : t('addAgentToChannel')}
         </DialogTitle>
         <DialogCloseButton onClick={() => onOpenChange(false)} />
       </DialogHeader>
@@ -223,7 +223,7 @@ export function AddAgentModal({
           <div className="space-y-4 max-h-[60vh] overflow-y-auto">
           <div>
             <label className="block font-heading text-xs font-bold uppercase tracking-wider mb-1.5">
-              Runtime <span className="text-brutal-danger">*</span>
+              {t('relationshipRuntimeRequired')}
             </label>
             <Select
               value={selectedModelProvider}
@@ -233,7 +233,7 @@ export function AddAgentModal({
                 label: `${rt.available ? '●' : '○'} ${rt.display_name}${rt.version ? ` (${rt.version})` : ''}`,
                 disabled: !rt.available,
               }))}
-              placeholder="Select runtime..."
+              placeholder={t('relationshipSelectRuntime')}
               size="md"
               className="w-full"
             />
@@ -243,7 +243,7 @@ export function AddAgentModal({
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : templates.length === 0 ? (
-            <p className="font-mono text-sm text-muted-foreground text-center py-4">No templates available.</p>
+            <p className="font-mono text-sm text-muted-foreground text-center py-4">{t('relationshipNoTemplates')}</p>
           ) : (
             [...new Set(templates.map((template) => template.category))].map((category) => (
               <div key={category}>
@@ -271,7 +271,7 @@ export function AddAgentModal({
                         size="sm"
                         className="flex-shrink-0"
                       >
-                        {applyingTemplate === template.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Apply'}
+                        {applyingTemplate === template.id ? <Loader2 className="h-3 w-3 animate-spin" /> : t('relationshipApplyTemplate')}
                       </Button>
                     </div>
                   ))}

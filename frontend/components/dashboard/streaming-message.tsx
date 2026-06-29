@@ -68,7 +68,7 @@ function BlinkingCursor() {
 function TypingDots() {
   const dots = [0, 1, 2];
   return (
-    <span className="inline-flex items-center gap-1" aria-label="Agent is typing">
+    <span className="inline-flex items-center gap-1" aria-label={t('typing')}>
       {dots.map((i) => (
         <span
           key={i}
@@ -139,7 +139,7 @@ export function StreamingMessage({ message, onAgentClick }: StreamingMessageProp
           </span>
           {message.sender_active === false && (
             <span className="badge-brutal bg-brutal-muted text-black">
-              DELETED
+              {t('deleted')}
             </span>
           )}
           <span className="font-mono text-[11px] text-muted-foreground">

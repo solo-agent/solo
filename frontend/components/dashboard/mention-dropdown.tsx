@@ -105,7 +105,7 @@ export function MentionDropdown({
                 </span>
                 {isAgent && (
                   <span className="ml-auto text-[10px] text-brutal-success">
-                    Agent
+                    {t('agent')}
                   </span>
                 )}
               </button>

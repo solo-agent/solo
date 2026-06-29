@@ -20,6 +20,10 @@ func TestAgentRunServiceLifecycle(t *testing.T) {
 	ctx := context.Background()
 	ownerID := agentRunUser(t, pool)
 	agentID := agentRunAgent(t, pool, ownerID)
+	var agentName string
+	if err := pool.QueryRow(ctx, `SELECT name FROM agents WHERE id = $1`, agentID).Scan(&agentName); err != nil {
+		t.Fatalf("load agent name: %v", err)
+	}
 	channelID := agentRunChannel(t, pool, ownerID)
 	messageID := agentRunMessage(t, pool, channelID, ownerID)
 	taskID := agentRunTask(t, pool, channelID, ownerID)
@@ -85,6 +89,24 @@ func TestAgentRunServiceLifecycle(t *testing.T) {
 	}
 	if run.Status != AgentRunStatusRunning {
 		t.Fatalf("bound run status = %q, want %q", run.Status, AgentRunStatusRunning)
+	}
+	activeRuns, err := svc.ListActiveRuns(ctx)
+	if err != nil {
+		t.Fatalf("ListActiveRuns: %v", err)
+	}
+	var activeRun AgentRun
+	foundActive := false
+	for _, active := range activeRuns {
+		if active.ID == run.ID {
+			activeRun = active
+			foundActive = true
+		}
+	}
+	if !foundActive {
+		t.Fatalf("ListActiveRuns did not include active run %s", run.ID)
+	}
+	if activeRun.AgentName != agentName {
+		t.Fatalf("active run agent_name = %q, want %q", activeRun.AgentName, agentName)
 	}
 	transcript, err := svc.GetRunTranscript(ctx, run.ID, 10)
 	if err != nil {
@@ -277,7 +299,7 @@ func TestAgentRunServiceLifecycle(t *testing.T) {
 	if foundTask.LinkedRunCount != 1 || foundTask.LastRunID != run.ID {
 		t.Fatalf("task summary = %+v, want linked_run_count=1 last_run_id=%s", foundTask, run.ID)
 	}
-	activeRuns, err := svc.ListActiveRuns(ctx)
+	activeRuns, err = svc.ListActiveRuns(ctx)
 	if err != nil {
 		t.Fatalf("ListActiveRuns: %v", err)
 	}

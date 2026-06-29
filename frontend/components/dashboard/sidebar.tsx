@@ -9,6 +9,7 @@ import { ChannelList } from './channel-list';
 import { DMList } from './dm-list';
 import { InboxBadge } from '@/components/inbox/inbox-badge';
 import { useInboxUnread } from '@/lib/hooks/use-inbox-unread';
+import { t } from '@/lib/i18n';
 import type { Channel, DMChannel } from '@/lib/types';
 
 interface SidebarProps {
@@ -45,7 +46,7 @@ export function Sidebar({
   onCreateDM,
   inboxSelected,
   onSelectInbox,
-  routeTitle = 'Chat',
+  routeTitle = t('navChannels'),
 }: SidebarProps) {
   const { unreadCount, isLoading: unreadLoading } = useInboxUnread();
   const [channelsExpanded, setChannelsExpanded] = useState(true);

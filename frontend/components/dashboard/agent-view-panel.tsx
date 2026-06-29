@@ -96,7 +96,7 @@ export function AgentViewPanel({
       <div className="flex items-center justify-between px-3 py-2 border-b-2 border-black bg-white flex-shrink-0">
         <div className="flex items-center gap-2">
           <Eye className="h-4 w-4 text-brutal-primary" />
-          <span className="font-heading text-sm font-bold">Agent View</span>
+          <span className="font-heading text-sm font-bold">{t('agentView')}</span>
           {activeAgentIds.length > 0 && (
             <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 font-mono text-[10px] font-bold bg-brutal-primary text-black border-2 border-black shadow-brutal-sm">
               {activeAgentIds.length}

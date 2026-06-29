@@ -414,7 +414,7 @@ export function useDM(dmId: string | null = null) {
               id: event.id,
               channel_id: event.channel_id,
               user_id: event.sender_id || '',
-              display_name: event.sender_name || event.sender_id || 'Agent',
+              display_name: event.sender_name || event.sender_id || t('agent'),
               content: event.content,
               created_at: event.created_at,
               status: 'streaming' as const,

@@ -8,6 +8,7 @@ import { ConnectionBanner } from "@/components/connection-banner";
 import { NetworkStatus } from "@/components/network-status";
 import { ToastProvider } from "@/components/ui/toast";
 import { GlobalSearchTrigger } from "@/components/search/global-search-trigger";
+import { LocaleHydrator } from "@/components/locale-hydrator";
 import "./globals.brutal.css";
 
 const inter = Inter({
@@ -41,7 +42,7 @@ export default function RootLayout({
 }) {
   return (
     <html
-      lang="zh-CN"
+      lang="en"
       className={`${inter.variable} ${spaceGrotesk.variable} ${spaceMono.variable}`}
     >
       <body className="min-h-screen antialiased">
@@ -49,10 +50,12 @@ export default function RootLayout({
           <WSProvider>
             <ToastProvider>
               <WSAuthBridge />
-              <ConnectionBanner />
-              <NetworkStatus />
-              <GlobalSearchTrigger />
-              {children}
+              <LocaleHydrator>
+                <ConnectionBanner />
+                <NetworkStatus />
+                <GlobalSearchTrigger />
+                {children}
+              </LocaleHydrator>
             </ToastProvider>
           </WSProvider>
         </AuthProvider>

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
+import { t } from '@/lib/i18n';
 
 export type AgentRunStatus =
   | 'queued'
@@ -38,6 +39,7 @@ interface AgentRunResponse {
   id: string;
   session_id?: string;
   agent_id: string;
+  agent_name?: string;
   channel_id?: string;
   thread_id?: string;
   status: AgentRunStatus;
@@ -63,7 +65,7 @@ function fromRunResponse(run: AgentRunResponse): IslandAgent {
     runId: run.id,
     sessionId: run.session_id ?? null,
     agentId: run.agent_id,
-    agentName: 'Agent',
+    agentName: run.agent_name ?? t('agent'),
     taskId: null,
     channelId: run.channel_id ?? null,
     threadId: run.thread_id ?? null,
@@ -121,7 +123,7 @@ export function useAgentIsland() {
         runId: event.run_id,
         sessionId: event.session_id ?? existing?.sessionId ?? null,
         agentId: event.agent_id,
-        agentName: event.agent_name ?? existing?.agentName ?? 'Agent',
+        agentName: event.agent_name ?? existing?.agentName ?? t('agent'),
         taskId: event.task_id ?? existing?.taskId ?? null,
         channelId: event.channel_id ?? existing?.channelId ?? null,
         threadId: event.thread_id ?? existing?.threadId ?? null,

@@ -24,11 +24,11 @@ const KIND_LABELS: Record<string, string> = {
   claude: 'Claude', codex: 'Codex', opencode: 'OpenCode',
   copilot: 'Copilot', cursor: 'Cursor', kiro: 'Kiro',
   openclaw: 'OpenClaw', hermes: 'Hermes', pi: 'Pi',
-  agents: 'Agent',
 };
 
 function kindLabel(kind: string): string {
   const base = kind.replace(/^ws-/, '');
+  if (base === 'agents') return t('agent');
   return KIND_LABELS[base] || base.toUpperCase();
 }
 

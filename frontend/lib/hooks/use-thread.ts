@@ -11,6 +11,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
+import { t } from '@/lib/i18n';
 import type { WSMessage, WSMessageSource } from '@/lib/ws-types';
 
 // ---- API 响应类型（与后端 handler/thread.go 对齐） ----
@@ -162,8 +163,8 @@ export function useThread(): UseThreadReturn {
             channel_id: event.channel_id,
             sender_type: 'agent' as WSMessageSource,
             sender_id: event.sender_id,
-            sender_name: event.sender_name || event.sender_id || 'Agent',
-            display_name: event.sender_name || event.sender_id || 'Agent',
+            sender_name: event.sender_name || event.sender_id || t('agent'),
+            display_name: event.sender_name || event.sender_id || t('agent'),
             content: event.content,
             thread_parent_id: event.thread_id,
             created_at: event.created_at,

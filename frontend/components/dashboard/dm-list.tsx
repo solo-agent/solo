@@ -140,12 +140,12 @@ function DMItem({
           </span>
           {deleted && (
             <span className="badge-brutal bg-brutal-muted text-black flex-shrink-0">
-              DELETED
+              {t('deleted')}
             </span>
           )}
           {!deleted && isAgent && (
             <span className="badge-brutal bg-brutal-primary text-black text-[10px]">
-              Agent
+              {t('agent')}
             </span>
           )}
           {/* Unread dot */}
@@ -251,7 +251,7 @@ export function DMList({
               isExpanded ? 'rotate-0' : '-rotate-90',
             )}
           />
-          <span>Direct Messages</span>
+          <span>{t('directMessages')}</span>
           <span className="ml-auto text-xs tabular-nums opacity-50">{sortedDMs.length}</span>
         </button>
         {onCreateDM && (

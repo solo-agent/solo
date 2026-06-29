@@ -98,7 +98,7 @@ export function CreateRelationshipModal({
     .filter((a) => a.id !== fromAgentId) // Can't select self as target
     .map((a) => ({
       value: a.id,
-      label: `${a.name}${a.is_active ? '' : ' (offline)'}`,
+      label: `${a.name}${a.is_active ? '' : ` (${t('offline')})`}`,
       disabled: !a.is_active,
     }));
 
@@ -137,7 +137,7 @@ export function CreateRelationshipModal({
       onCreated();
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create relationship');
+      setError(err instanceof Error ? err.message : t('relationshipCreateError'));
     } finally {
       setIsSubmitting(false);
     }
@@ -162,7 +162,7 @@ export function CreateRelationshipModal({
               options={fromAgentOptions}
               value={fromAgentId}
               onChange={setFromAgentId}
-              placeholder={preselectedFrom ? agents.find((a) => a.id === preselectedFrom)?.name : 'Select agent...'}
+              placeholder={preselectedFrom ? agents.find((a) => a.id === preselectedFrom)?.name : t('relationshipSelectAgent')}
               size="md"
               className="w-full"
               disabled={!!preselectedFrom}
@@ -178,7 +178,7 @@ export function CreateRelationshipModal({
               options={agentOptions}
               value={toAgentId}
               onChange={setToAgentId}
-              placeholder={preselectedTo ? agents.find((a) => a.id === preselectedTo)?.name : 'Select agent...'}
+              placeholder={preselectedTo ? agents.find((a) => a.id === preselectedTo)?.name : t('relationshipSelectAgent')}
               size="md"
               className="w-full"
               disabled={!!preselectedTo}
@@ -191,8 +191,8 @@ export function CreateRelationshipModal({
             disabled={!fromAgentId && !toAgentId}
             variant="outline"
             size="icon"
-            aria-label="Swap from and to agents"
-            title="Swap"
+            aria-label={t('relationshipSwapAgents')}
+            title={t('relationshipSwapAgents')}
           >
             <ArrowLeftRight className="h-4 w-4" />
           </Button>
@@ -236,20 +236,22 @@ export function CreateRelationshipModal({
         {/* Instruction */}
         <div>
           <label className="block font-heading text-xs font-bold uppercase tracking-wider mb-1.5">
-            {relType === 'assigns_to' ? 'Delegation Criteria' : 'Collaboration Criteria'}
+            {relType === 'assigns_to' ? t('relationshipCriteriaDelegation') : t('relationshipCriteriaCollaboration')}
           </label>
           <Textarea
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
             placeholder={relType === 'assigns_to'
-              ? `Delegate coding tasks with: clear requirement description, acceptance criteria, relevant file paths, existing patterns to follow.\n\nReport back with: implementation status, files changed, acceptance criteria checklist (pass/fail each), test results, and self-review concerns.`
-              : `Coordinate on: API contract sync, shared component design, integration testing.\n\nKeep in sync: interface definitions, breaking changes, deployment order.`
+              ? t('relationshipDelegationPlaceholder')
+              : t('relationshipCollaborationPlaceholder')
             }
             className="min-h-[100px] font-mono text-xs resize-y"
             rows={4}
           />
           <p className="mt-1 font-mono text-[10px] text-muted-foreground">
-            Appears in RELATIONSHIPS.md as &quot;{relType === 'assigns_to' ? 'DELEGATE when' : 'COLLABORATES when'}&quot;.
+            {t('relationshipCriteriaExportHint', {
+              marker: relType === 'assigns_to' ? 'DELEGATE when' : 'COLLABORATES when',
+            })}
           </p>
         </div>
 

@@ -9,6 +9,7 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
+import { t } from '@/lib/i18n';
 
 export interface AgentNodeData {
   agentId: string;
@@ -41,9 +42,9 @@ function RelationshipNodeComponent({ data, selected }: NodeProps) {
             </div>
             <div className="font-mono text-[10px] font-bold uppercase tracking-wider mt-0.5">
               {isActive ? (
-                <span className="text-brutal-success">ONLINE</span>
+                <span className="text-brutal-success">{t('online')}</span>
               ) : (
-                <span className="text-brutal-muted">OFFLINE</span>
+                <span className="text-brutal-muted">{t('offline')}</span>
               )}
             </div>
           </div>

@@ -305,7 +305,7 @@ const MessageItem = memo(function MessageItem({
           </span>
           {message.sender_type === 'agent' && message.sender_active === false && (
             <span className="badge-brutal bg-brutal-muted text-black">
-              DELETED
+              {t('deleted')}
             </span>
           )}
           <span className="font-mono text-[11px] text-muted-foreground">
@@ -418,7 +418,7 @@ const MessageItem = memo(function MessageItem({
           {isTaskMessage && headerConfig && (
             <span className={cn('badge-brutal', headerConfig.badgeClass)}>
               {message.task_claimer_name ? (
-                <>@{message.task_claimer_name}{message.task_claimer_deleted ? ' (Deleted)' : ''}</>
+                <>@{message.task_claimer_name}{message.task_claimer_deleted ? ` (${t('deleted')})` : ''}</>
               ) : (
                 t('unclaimed')
               )}
@@ -438,7 +438,7 @@ const MessageItem = memo(function MessageItem({
             )}
           >
             <MessageSquare className="mr-1 h-3 w-3" />
-            <span>{message.reply_count} REPLIES</span>
+            <span>{t('threadReplies', { n: message.reply_count ?? 0 })}</span>
           </button>
         )}
         </div>

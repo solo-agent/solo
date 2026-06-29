@@ -1,4 +1,5 @@
 import type { Task } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
 export type TaskArtifactAction = 'hidden' | 'generate' | 'pending' | 'read';
 
@@ -14,7 +15,7 @@ export function getTaskArtifactAction(task: Task | null | undefined, isGeneratin
 }
 
 export function taskArtifactActionLabel(action: TaskArtifactAction): string {
-  if (action === 'generate') return 'Generate Artifact';
-  if (action === 'pending') return 'Generating';
-  return 'Artifact';
+  if (action === 'generate') return t('taskArtifactGenerate');
+  if (action === 'pending') return t('taskArtifactGenerating');
+  return t('taskArtifactRead');
 }

@@ -7,14 +7,14 @@ import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { useAgentIsland, type AgentRunStatus, type IslandAgent } from '@/lib/hooks/use-agent-island';
 import { displayAgentActivity } from '@/lib/agent-activity';
 import { cn } from '@/lib/utils';
-import { t } from '@/lib/i18n';
+import { t, type TranslationKey } from '@/lib/i18n';
 
 type StatusVisuals = {
   icon: typeof Brain;
   dotClass: string;
   iconClass: string;
   badgeClass: string;
-  label: string;
+  labelKey: TranslationKey;
   spin?: boolean;
   pulse?: boolean;
 };
@@ -25,14 +25,14 @@ const STATUS_VISUALS: Record<AgentRunStatus, StatusVisuals> = {
     dotClass: 'bg-brutal-muted',
     iconClass: 'text-foreground',
     badgeClass: 'bg-brutal-muted text-white',
-    label: t('agentQueued'),
+    labelKey: 'agentQueued',
   },
   thinking: {
     icon: Brain,
     dotClass: 'bg-brutal-accent',
     iconClass: 'text-yellow-600',
     badgeClass: 'bg-brutal-accent text-black',
-    label: t('agentThinking'),
+    labelKey: 'agentThinking',
     pulse: true,
   },
   running: {
@@ -40,7 +40,7 @@ const STATUS_VISUALS: Record<AgentRunStatus, StatusVisuals> = {
     dotClass: 'bg-brutal-info',
     iconClass: 'text-cyan-600',
     badgeClass: 'bg-brutal-info text-black',
-    label: t('agentExecuting'),
+    labelKey: 'agentExecuting',
     spin: true,
   },
   streaming: {
@@ -48,7 +48,7 @@ const STATUS_VISUALS: Record<AgentRunStatus, StatusVisuals> = {
     dotClass: 'bg-brutal-success',
     iconClass: 'text-green-600',
     badgeClass: 'bg-brutal-success text-black',
-    label: t('agentGenerating'),
+    labelKey: 'agentGenerating',
     pulse: true,
   },
   waiting_input: {
@@ -56,7 +56,7 @@ const STATUS_VISUALS: Record<AgentRunStatus, StatusVisuals> = {
     dotClass: 'bg-brutal-warning',
     iconClass: 'text-orange-600',
     badgeClass: 'bg-brutal-warning text-black',
-    label: t('agentWaitingInput'),
+    labelKey: 'agentWaitingInput',
     pulse: true,
   },
   waiting_approval: {
@@ -64,7 +64,7 @@ const STATUS_VISUALS: Record<AgentRunStatus, StatusVisuals> = {
     dotClass: 'bg-brutal-warning',
     iconClass: 'text-orange-600',
     badgeClass: 'bg-brutal-warning text-black',
-    label: t('agentWaitingApproval'),
+    labelKey: 'agentWaitingApproval',
     pulse: true,
   },
   completed: {
@@ -72,28 +72,28 @@ const STATUS_VISUALS: Record<AgentRunStatus, StatusVisuals> = {
     dotClass: 'bg-brutal-success',
     iconClass: 'text-green-700',
     badgeClass: 'bg-brutal-success text-black',
-    label: t('agentDone'),
+    labelKey: 'agentDone',
   },
   failed: {
     icon: XCircle,
     dotClass: 'bg-brutal-danger',
     iconClass: 'text-red-600',
     badgeClass: 'bg-brutal-danger text-white',
-    label: t('runFailed'),
+    labelKey: 'runFailed',
   },
   cancelled: {
     icon: XCircle,
     dotClass: 'bg-brutal-muted',
     iconClass: 'text-foreground',
     badgeClass: 'bg-brutal-muted text-white',
-    label: t('runCancelled'),
+    labelKey: 'runCancelled',
   },
   timeout: {
     icon: AlertTriangle,
     dotClass: 'bg-brutal-danger',
     iconClass: 'text-red-600',
     badgeClass: 'bg-brutal-danger text-white',
-    label: t('runTimeout'),
+    labelKey: 'runTimeout',
   },
 };
 
@@ -151,7 +151,8 @@ function CollapsedPill({
 }) {
   const visual = STATUS_VISUALS[primary.status];
   const Icon = visual.icon;
-  const activity = displayAgentActivity(primary.status, primary.activityText, primary.toolInputSummary, visual.label);
+  const label = t(visual.labelKey);
+  const activity = displayAgentActivity(primary.status, primary.activityText, primary.toolInputSummary, label);
 
   return (
     <div className="border-t-2 border-black bg-brutal-cream px-3 py-2">
@@ -159,7 +160,7 @@ function CollapsedPill({
         type="button"
         onClick={onOpenRun}
         className="group flex w-full flex-col text-left"
-        aria-label={`${primary.agentName} ${visual.label}`}
+        aria-label={`${primary.agentName} ${label}`}
       >
         <div className="flex w-full items-center gap-2">
           <PixelAvatar agentId={primary.agentId} avatarUrl={null} size="sm" />
@@ -167,7 +168,7 @@ function CollapsedPill({
             {primary.agentName}
           </span>
           <span className={cn('badge-brutal px-1.5 py-0 text-[9px]', visual.badgeClass)}>
-            {visual.label}
+            {label}
           </span>
           {overflow > 0 && (
             <span className="border-2 border-black bg-brutal-primary px-1 font-mono text-[9px] font-bold text-black">
@@ -247,7 +248,8 @@ function ExpandedPanel({
 function AgentRow({ agent, onClick }: { agent: IslandAgent; onClick: () => void }) {
   const visual = STATUS_VISUALS[agent.status];
   const Icon = visual.icon;
-  const activity = displayAgentActivity(agent.status, agent.activityText, agent.toolInputSummary, visual.label);
+  const label = t(visual.labelKey);
+  const activity = displayAgentActivity(agent.status, agent.activityText, agent.toolInputSummary, label);
 
   return (
     <button type="button" onClick={onClick} className="flex w-full items-start gap-2 px-2.5 py-1.5 text-left hover:bg-brutal-muted-light">
@@ -257,7 +259,7 @@ function AgentRow({ agent, onClick }: { agent: IslandAgent; onClick: () => void 
           <span className={cn('h-1.5 w-1.5 rounded-full', visual.dotClass, visual.pulse && 'animate-pulse')} />
           <Icon className={cn('h-2.5 w-2.5', visual.iconClass, visual.spin && 'animate-spin-slow')} />
           <span className="truncate font-heading text-[11px] font-bold">{agent.agentName}</span>
-          <span className={cn('badge-brutal px-1 py-0 text-[8px]', visual.badgeClass)}>{visual.label}</span>
+          <span className={cn('badge-brutal px-1 py-0 text-[8px]', visual.badgeClass)}>{label}</span>
           <span className="ml-auto font-mono text-[9px]">{elapsed(agent)}</span>
         </div>
         <p className="mt-0.5 truncate font-mono text-[10px] text-foreground">

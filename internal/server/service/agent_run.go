@@ -82,6 +82,7 @@ type AgentSession struct {
 type AgentRun struct {
 	ID               string          `json:"id"`
 	AgentID          string          `json:"agent_id"`
+	AgentName        string          `json:"agent_name,omitempty"`
 	SessionID        string          `json:"session_id,omitempty"`
 	TriggerType      string          `json:"trigger_type"`
 	TriggerMessageID string          `json:"trigger_message_id,omitempty"`
@@ -291,7 +292,9 @@ func (s *AgentRunService) StartRun(ctx context.Context, input StartRunInput) (*A
 		   id, agent_id, session_id, trigger_type, trigger_message_id, channel_id, thread_id,
 		   status, activity_text, tool_name, tool_input_summary, source, usage_json
 		 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		 RETURNING id::text, agent_id::text, COALESCE(session_id::text, ''), trigger_type,
+		 RETURNING id::text, agent_id::text,
+		       COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
+		       COALESCE(session_id::text, ''), trigger_type,
 		       COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
 		       COALESCE(thread_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		       COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
@@ -317,7 +320,9 @@ func (s *AgentRunService) BindRunSession(ctx context.Context, input BindRunSessi
 		        activity_text = CASE WHEN status = 'queued' THEN '执行中' ELSE activity_text END,
 		        updated_at = now()
 		  WHERE id = $1
-		  RETURNING id::text, agent_id::text, COALESCE(session_id::text, ''), trigger_type,
+		  RETURNING id::text, agent_id::text,
+		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
+		        COALESCE(session_id::text, ''), trigger_type,
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
 		        COALESCE(thread_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''),
@@ -356,7 +361,9 @@ func (s *AgentRunService) UpdateStatus(ctx context.Context, input UpdateRunStatu
 		        usage_json = CASE WHEN $7::jsonb = '{}'::jsonb THEN usage_json ELSE $7::jsonb END,
 		        updated_at = now()
 		  WHERE id = $1
-		  RETURNING id::text, agent_id::text, COALESCE(session_id::text, ''), trigger_type,
+		  RETURNING id::text, agent_id::text,
+		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
+		        COALESCE(session_id::text, ''), trigger_type,
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
 		        COALESCE(thread_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
@@ -375,7 +382,9 @@ func (s *AgentRunService) UpdateRunTranscript(ctx context.Context, input UpdateR
 		    SET transcript_path = COALESCE($2, transcript_path),
 		        updated_at = now()
 		  WHERE id = $1
-		  RETURNING id::text, agent_id::text, COALESCE(session_id::text, ''), trigger_type,
+		  RETURNING id::text, agent_id::text,
+		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
+		        COALESCE(session_id::text, ''), trigger_type,
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
 		        COALESCE(thread_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''),
@@ -414,7 +423,9 @@ func (s *AgentRunService) FinishRun(ctx context.Context, input FinishRunInput) (
 		        updated_at = now(),
 		        finished_at = now()
 		  WHERE id = $1
-		  RETURNING id::text, agent_id::text, COALESCE(session_id::text, ''), trigger_type,
+		  RETURNING id::text, agent_id::text,
+		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
+		        COALESCE(session_id::text, ''), trigger_type,
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
 		        COALESCE(thread_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
@@ -424,13 +435,13 @@ func (s *AgentRunService) FinishRun(ctx context.Context, input FinishRunInput) (
 }
 
 func (s *AgentRunService) GetRun(ctx context.Context, runID string) (*AgentRun, error) {
-	return scanAgentRun(s.pool.QueryRow(ctx, baseAgentRunSelect()+` WHERE id = $1`, runID))
+	return scanAgentRun(s.pool.QueryRow(ctx, baseAgentRunSelect()+` WHERE r.id = $1`, runID))
 }
 
 func (s *AgentRunService) ListActiveRuns(ctx context.Context) ([]AgentRun, error) {
 	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
-		 WHERE status = ANY($1)
-		 ORDER BY updated_at DESC
+		 WHERE r.status = ANY($1)
+		 ORDER BY r.updated_at DESC
 		 LIMIT 100`,
 		[]string{
 			string(AgentRunStatusQueued),
@@ -445,22 +456,22 @@ func (s *AgentRunService) ListActiveRuns(ctx context.Context) ([]AgentRun, error
 
 func (s *AgentRunService) ListRecentRuns(ctx context.Context) ([]AgentRun, error) {
 	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
-		 ORDER BY updated_at DESC
+		 ORDER BY r.updated_at DESC
 		 LIMIT 100`))
 }
 
 func (s *AgentRunService) ListRunsByAgent(ctx context.Context, agentID string) ([]AgentRun, error) {
 	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
-		 WHERE agent_id = $1
-		 ORDER BY started_at DESC
+		 WHERE r.agent_id = $1
+		 ORDER BY r.started_at DESC
 		 LIMIT 100`, agentID))
 }
 
 func (s *AgentRunService) ListRunsByTask(ctx context.Context, taskID string) ([]AgentRun, error) {
 	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
-		 WHERE id IN (SELECT run_id FROM agent_run_task_links WHERE task_id = $1)
+		 WHERE r.id IN (SELECT run_id FROM agent_run_task_links WHERE task_id = $1)
 		   AND (
-		     NOT (status = ANY($2))
+		     NOT (r.status = ANY($2))
 		     OR NOT EXISTS (
 		       SELECT 1
 		         FROM agent_runs r2
@@ -468,7 +479,7 @@ func (s *AgentRunService) ListRunsByTask(ctx context.Context, taskID string) ([]
 		          AND NOT (r2.status = ANY($2))
 		     )
 		   )
-		 ORDER BY started_at DESC
+		 ORDER BY r.started_at DESC
 		 LIMIT 100`, taskID, nonPrimaryTaskRunStatuses))
 }
 
@@ -616,12 +627,13 @@ func (s *AgentRunService) ListAgentTasks(ctx context.Context, agentID string) ([
 }
 
 func baseAgentRunSelect() string {
-	return `SELECT id::text, agent_id::text, COALESCE(session_id::text, ''), trigger_type,
-	        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
-	        COALESCE(thread_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
-	        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
-	        started_at, updated_at, finished_at
-	   FROM agent_runs`
+	return `SELECT r.id::text, r.agent_id::text, COALESCE(a.name, ''), COALESCE(r.session_id::text, ''), r.trigger_type,
+	        COALESCE(r.trigger_message_id::text, ''), COALESCE(r.channel_id::text, ''),
+	        COALESCE(r.thread_id::text, ''), r.status, r.activity_text, COALESCE(r.tool_name, ''),
+	        COALESCE(r.tool_input_summary, ''), COALESCE(r.source, ''), COALESCE(r.transcript_path, ''), r.usage_json,
+	        r.started_at, r.updated_at, r.finished_at
+	   FROM agent_runs r
+	   LEFT JOIN agents a ON a.id = r.agent_id`
 }
 
 func scanAgentRuns(rows pgx.Rows, err error) ([]AgentRun, error) {
@@ -657,7 +669,7 @@ func scanAgentRun(row interface {
 	var status string
 	var finished sql.NullTime
 	if err := row.Scan(
-		&run.ID, &run.AgentID, &run.SessionID, &run.TriggerType, &run.TriggerMessageID,
+		&run.ID, &run.AgentID, &run.AgentName, &run.SessionID, &run.TriggerType, &run.TriggerMessageID,
 		&run.ChannelID, &run.ThreadID, &status, &run.ActivityText, &run.ToolName,
 		&run.ToolInputSummary, &run.Source, &run.TranscriptPath, &run.UsageJSON,
 		&run.StartedAt, &run.UpdatedAt, &finished,

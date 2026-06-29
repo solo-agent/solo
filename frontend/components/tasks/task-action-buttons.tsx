@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
+import { t } from '@/lib/i18n';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import {
@@ -39,13 +40,13 @@ export function TaskActionButtons({ task, onActionComplete }: TaskActionButtonsP
     setBusy(action);
     try {
       const updated = await apiClient.post<Task>(`/api/v1/tasks/${task.id}/${action}`, body);
-      showToast(`Task ${action} succeeded`, 'success');
+      showToast(t('taskActionSucceeded', { action: taskActionLabel(action) }), 'success');
       onActionComplete?.(updated);
       if (action === 'close') setConfirmingClose(false);
       setRejecting(false);
       setReason('');
     } catch {
-      showToast(`Task ${action} failed`, 'error');
+      showToast(t('taskActionFailed', { action: taskActionLabel(action) }), 'error');
     } finally {
       setBusy(null);
     }
@@ -59,11 +60,11 @@ export function TaskActionButtons({ task, onActionComplete }: TaskActionButtonsP
           <div className="mt-2 flex flex-wrap gap-2">
             <ActionButton disabled={disabled} onClick={() => run('accept')} tone="success">
               <Check className="h-3 w-3" />
-              Accept
+              {t('taskActionAccept')}
             </ActionButton>
             <ActionButton disabled={disabled} onClick={() => setRejecting((v) => !v)} tone="warning">
               <RotateCcw className="h-3 w-3" />
-              Reject
+              {t('taskActionReject')}
             </ActionButton>
           </div>
         )}
@@ -74,7 +75,7 @@ export function TaskActionButtons({ task, onActionComplete }: TaskActionButtonsP
               onChange={(e) => setReason(e.target.value)}
               onClick={(e) => e.stopPropagation()}
               onKeyDown={(e) => e.stopPropagation()}
-              placeholder="Reason"
+              placeholder={t('taskActionReason')}
               className="input-brutal h-8 w-full px-2 py-1 font-body text-xs"
             />
             <ActionButton
@@ -82,7 +83,7 @@ export function TaskActionButtons({ task, onActionComplete }: TaskActionButtonsP
               onClick={() => run('reject', { reason: reason.trim() })}
               tone="warning"
             >
-              Send back
+              {t('taskActionSendBack')}
             </ActionButton>
           </div>
         )}
@@ -103,7 +104,7 @@ export function TaskActionButtons({ task, onActionComplete }: TaskActionButtonsP
       <div className="mt-2">
         <ActionButton disabled={disabled} onClick={() => run('reopen')} tone="info">
           <RotateCcw className="h-3 w-3" />
-          Reopen
+          {t('taskActionReopen')}
         </ActionButton>
       </div>
     );
@@ -140,18 +141,18 @@ function CloseTaskDialog({
     <div onClick={(e) => e.stopPropagation()}>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogHeader>
-          <DialogTitle>Close Task</DialogTitle>
+          <DialogTitle>{t('taskActionCloseTitle')}</DialogTitle>
           <DialogCloseButton onClick={() => onOpenChange(false)} />
         </DialogHeader>
         <DialogDescription>
-          Are you sure you want to close <strong>{taskTitle}</strong>? This will move it out of active work.
+          {t('taskActionCloseDesc', { title: taskTitle })}
         </DialogDescription>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={disabled}>
-            Cancel
+            {t('cancel')}
           </Button>
           <Button type="button" variant="danger" onClick={onConfirm} disabled={disabled}>
-            {disabled ? 'Closing...' : 'Close Task'}
+            {disabled ? t('taskActionClosing') : t('taskActionCloseTitle')}
           </Button>
         </DialogFooter>
       </Dialog>
@@ -168,12 +169,21 @@ function CloseHoverButton({ disabled, onClick }: { disabled?: boolean; onClick: 
         e.stopPropagation();
         onClick();
       }}
-      aria-label="Close task"
+      aria-label={t('taskActionClose')}
       className="absolute right-2 top-2 z-20 inline-flex h-6 w-6 items-center justify-center border-2 border-black bg-white p-0 text-black opacity-0 shadow-brutal-sm transition-all duration-100 hover:-translate-y-px hover:bg-brutal-danger hover:shadow-brutal focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-danger focus-visible:ring-offset-2 group-hover:opacity-100 disabled:cursor-not-allowed disabled:grayscale disabled:opacity-50"
     >
       <X className="h-3.5 w-3.5" />
     </button>
   );
+}
+
+function taskActionLabel(action: TaskAction): string {
+  return {
+    accept: t('taskActionAccept'),
+    reject: t('taskActionReject'),
+    close: t('taskActionClose'),
+    reopen: t('taskActionReopen'),
+  }[action];
 }
 
 function ActionButton({

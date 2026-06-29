@@ -7,6 +7,7 @@
 
 import { memo } from 'react';
 import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
+import { t } from '@/lib/i18n';
 import type { RelationshipType } from '@/lib/types';
 
 interface RelationshipEdgeData {
@@ -14,10 +15,14 @@ interface RelationshipEdgeData {
   channelName?: string;
 }
 
-const EDGE_STYLES: Record<RelationshipType, { stroke: string; label: string }> = {
-  assigns_to:        { stroke: '#3B7DD8', label: 'Assigns To' },
-  collaborates_with: { stroke: '#10B981', label: 'Collaborates' },
+const EDGE_STYLES: Record<RelationshipType, { stroke: string }> = {
+  assigns_to:        { stroke: '#3B7DD8' },
+  collaborates_with: { stroke: '#10B981' },
 };
+
+function relationshipTypeLabel(type: RelationshipType) {
+  return type === 'assigns_to' ? t('assignsTo') : t('collaboratesWith');
+}
 
 function RelationshipEdgeComponent({
   id,
@@ -117,7 +122,7 @@ function RelationshipEdgeComponent({
               ? 'bg-brutal-primary text-black shadow-brutal-sm'
               : 'bg-white text-muted-foreground',
           ].join(' ')}>
-            {relType.replace(/_/g, ' ')}
+            {relationshipTypeLabel(relType)}
             {edgeData?.channelName ? ` · #${edgeData.channelName}` : ''}
           </span>
         </div>

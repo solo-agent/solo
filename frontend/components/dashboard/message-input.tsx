@@ -71,7 +71,7 @@ async function uploadSingleFile(file: File): Promise<UploadItem> {
 
   // Validate size (max 50MB)
   if (file.size > 50 * 1024 * 1024) {
-    throw new Error(`${file.name} exceeds the 50MB limit`);
+    throw new Error(t('fileSizeExceeded', { name: file.name }));
   }
 
   const formData = new FormData();
@@ -100,7 +100,7 @@ async function uploadSingleFile(file: File): Promise<UploadItem> {
 
 export function MessageInput({
   onSend,
-  placeholder = 'Type a message... (Enter to send, Shift+Enter for new line)',
+  placeholder = t('messagePlaceholder'),
   members,
   showAsTaskToggle = false,
 }: MessageInputProps) {
@@ -229,7 +229,7 @@ export function MessageInput({
 
       // Validate size
       if (file.size > 50 * 1024 * 1024) {
-        showToast(`${file.name} exceeds the 50MB limit`, 'error');
+        showToast(t('fileSizeExceeded', { name: file.name }), 'error');
         setUploads((prev) =>
           prev.map((u) =>
             u.id === placeholder.id ? { ...u, status: 'error' as const } : u,
@@ -584,7 +584,7 @@ export function MessageInput({
 
         {/* Message / Task mode */}
         {showAsTaskToggle && (
-          <div className="mb-2 flex w-fit items-center gap-2" role="group" aria-label="Message mode">
+          <div className="mb-2 flex w-fit items-center gap-2" role="group" aria-label={`${t('messages')} / ${t('tasks')}`}>
             <button
               type="button"
               onClick={() => setAsTask(false)}
@@ -595,7 +595,7 @@ export function MessageInput({
               aria-pressed={!asTask}
             >
               <MessageSquare className="h-3.5 w-3.5" />
-              Message
+              {t('messages')}
             </button>
             <button
               type="button"
@@ -607,7 +607,7 @@ export function MessageInput({
               aria-pressed={asTask}
             >
               <SquareCheckBig className="h-3.5 w-3.5" />
-              Task
+              {t('tasks')}
             </button>
           </div>
         )}
@@ -656,7 +656,7 @@ export function MessageInput({
             aria-label={asTask ? t('createTask') : t('sendMessage')}
           >
             {asTask ? (
-              <span className="font-mono text-[11px] font-bold whitespace-nowrap">Create Task</span>
+              <span className="font-mono text-[11px] font-bold whitespace-nowrap">{t('createTask')}</span>
             ) : (
               <Send className="h-4 w-4" />
             )}
@@ -664,9 +664,7 @@ export function MessageInput({
         </div>
       </div>
       <p className="mt-1.5 text-center font-mono text-[10px] text-muted-foreground">
-        {asTask
-          ? 'Enter to create tracked work · stays linked to this conversation'
-          : 'Enter to send · Shift+Enter for new line · @ to mention · Drag & drop files or Ctrl+V to paste images'}
+        {asTask ? t('taskInputHint') : t('messageInputHint')}
       </p>
     </div>
   );

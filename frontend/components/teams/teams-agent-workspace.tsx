@@ -121,7 +121,7 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
           className="btn-brutal btn-brutal-sm mt-4"
         >
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-          Retry
+          {t('retry')}
         </button>
       </div>
     );
@@ -133,9 +133,9 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
       <div className="flex h-full items-center justify-center">
         <div className="text-center">
           <FolderOpen className="mx-auto h-10 w-10 text-muted-foreground" />
-          <p className="mt-2 font-heading text-sm font-bold">Agent workspace has no files yet</p>
+          <p className="mt-2 font-heading text-sm font-bold">{t('agentWorkspaceNoFiles')}</p>
           <p className="mt-1 font-mono text-xs text-muted-foreground">
-            Files will appear here after running agent tasks
+            {t('agentWorkspaceHint')}
           </p>
         </div>
       </div>

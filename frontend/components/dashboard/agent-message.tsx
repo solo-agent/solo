@@ -128,11 +128,11 @@ export function AgentMessage({ message, onReply, validNames = [], isHighlighted,
           </span>
           {message.sender_active === false ? (
             <span className="badge-brutal bg-brutal-muted text-black">
-              DELETED
+              {t('deleted')}
             </span>
           ) : (
             <span className="badge-brutal bg-brutal-primary text-black">
-              Agent
+              {t('agent')}
             </span>
           )}
           <span className="font-mono text-[11px] text-muted-foreground">
@@ -287,7 +287,7 @@ export function AgentMessage({ message, onReply, validNames = [], isHighlighted,
             )}
           >
             <MessageSquare className="mr-1 h-3 w-3" />
-            <span>{message.reply_count} REPLIES</span>
+            <span>{t('threadReplies', { n: message.reply_count ?? 0 })}</span>
           </button>
         )}
       </div>

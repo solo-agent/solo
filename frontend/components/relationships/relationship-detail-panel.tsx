@@ -44,10 +44,16 @@ const EDGE_COLORS: Record<RelationshipType, { stroke: string; bg: string }> = {
   collaborates_with: { stroke: '#10B981', bg: '#E6F7F0' },
 };
 
-const REL_TYPE_OPTIONS = [
-  { value: 'assigns_to', label: 'Assigns To' },
-  { value: 'collaborates_with', label: 'Collaborates With' },
-];
+function relationshipTypeLabel(type: RelationshipType) {
+  return type === 'assigns_to' ? t('assignsTo') : t('collaboratesWith');
+}
+
+function relationshipTypeOptions() {
+  return [
+    { value: 'assigns_to', label: t('assignsTo') },
+    { value: 'collaborates_with', label: t('collaboratesWith') },
+  ];
+}
 
 // ---- Component ----
 
@@ -214,9 +220,9 @@ export function RelationshipDetailPanel({
             </div>
             <div className="font-mono text-[10px] font-bold uppercase tracking-wider">
               {isActive ? (
-                <span className="text-brutal-success">ONLINE</span>
+                <span className="text-brutal-success">{t('online')}</span>
               ) : (
-                <span className="text-brutal-muted">OFFLINE</span>
+                <span className="text-brutal-muted">{t('offline')}</span>
               )}
             </div>
           </div>
@@ -243,7 +249,7 @@ export function RelationshipDetailPanel({
               agentTab === 'profile' ? 'bg-brutal-primary text-black' : 'bg-white hover:bg-brutal-primary-light',
             ].join(' ')}
           >
-            Profile
+            {t('agentProfileTitle')}
           </button>
           <button
             type="button"
@@ -256,7 +262,7 @@ export function RelationshipDetailPanel({
               agentTab === 'workspace' ? 'bg-brutal-primary text-black' : 'bg-white hover:bg-brutal-primary-light',
             ].join(' ')}
           >
-            Workspace
+            {t('navWorkspace')}
           </button>
         </div>
 
@@ -338,7 +344,7 @@ export function RelationshipDetailPanel({
               strokeDasharray={relationship.rel_type === 'collaborates_with' ? '6,3' : 'none'}
             />
           </svg>
-          {relationship.rel_type.replace(/_/g, ' ')}
+          {relationshipTypeLabel(relationship.rel_type)}
         </div>
 
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
@@ -354,7 +360,7 @@ export function RelationshipDetailPanel({
                 'font-mono text-[9px] font-bold uppercase tracking-wider',
                 relationship.from_agent_active ? 'text-brutal-success' : 'text-brutal-muted',
               ].join(' ')}>
-                {relationship.from_agent_active ? 'ONLINE' : 'OFFLINE'}
+                {relationship.from_agent_active ? t('online') : t('offline')}
               </span>
             )}
           </div>
@@ -373,7 +379,7 @@ export function RelationshipDetailPanel({
                 'font-mono text-[9px] font-bold uppercase tracking-wider',
                 relationship.to_agent_active ? 'text-brutal-success' : 'text-brutal-muted',
               ].join(' ')}>
-                {relationship.to_agent_active ? 'ONLINE' : 'OFFLINE'}
+                {relationship.to_agent_active ? t('online') : t('offline')}
               </span>
             )}
           </div>
@@ -386,7 +392,7 @@ export function RelationshipDetailPanel({
         <div className={detailSectionClass()}>
           <div className="flex items-center justify-between mb-2">
             <div className={detailSectionTitleClass()}>
-              ★ {relationship.rel_type === 'assigns_to' ? 'Delegation Criteria' : 'Collaboration Criteria'}
+              ★ {relationship.rel_type === 'assigns_to' ? t('relationshipCriteriaDelegation') : t('relationshipCriteriaCollaboration')}
             </div>
             {!isEditingInstruction ? (
               <button
@@ -406,8 +412,8 @@ export function RelationshipDetailPanel({
                 value={editInstruction}
                 onChange={(e) => setEditInstruction(e.target.value)}
                 placeholder={relationship.rel_type === 'assigns_to'
-                  ? 'Delegate coding tasks with: clear requirement description...\n\nReport back with: implementation status, files changed...'
-                  : 'Coordinate on: API contract sync, shared component design...\n\nKeep in sync: interface definitions, breaking changes...'
+                  ? t('relationshipDelegationPlaceholder')
+                  : t('relationshipCollaborationPlaceholder')
                 }
                 className="input-brutal min-h-[80px] w-full resize-y px-3 py-2 font-mono text-xs"
                 rows={4}
@@ -446,8 +452,8 @@ export function RelationshipDetailPanel({
               {relationship.instruction || (
                 <span className="text-muted-foreground italic">
                   {relationship.rel_type === 'assigns_to'
-                    ? 'No delegation criteria set.'
-                    : 'No collaboration criteria set.'}
+                    ? t('relationshipNoDelegationCriteria')
+                    : t('relationshipNoCollaborationCriteria')}
                 </span>
               )}
             </div>
@@ -475,7 +481,7 @@ export function RelationshipDetailPanel({
           {isEditing ? (
             <div className="space-y-2">
               <Select
-                options={REL_TYPE_OPTIONS}
+                options={relationshipTypeOptions()}
                 value={editType}
                 onChange={(v) => setEditType(v as RelationshipType)}
                 size="md"
@@ -512,7 +518,7 @@ export function RelationshipDetailPanel({
             </div>
           ) : (
             <div className="font-mono text-xs text-black">
-              {relationship.rel_type.replace(/_/g, ' ')}
+              {relationshipTypeLabel(relationship.rel_type)}
             </div>
           )}
         </div>
@@ -521,7 +527,7 @@ export function RelationshipDetailPanel({
         {relationship.channel_id && (
           <div className={detailSectionClass()}>
             <div className={detailFieldLabelClass('mb-2')}>
-              Channel
+              {t('relationshipChannel')}
             </div>
             <div className="font-mono text-xs text-black">
               {relationship.channel_name
@@ -535,7 +541,7 @@ export function RelationshipDetailPanel({
         {relationship.weight !== undefined && relationship.weight !== null && (
           <div className={detailSectionClass()}>
             <div className={detailSectionTitleClass('mb-2')}>
-              ★ Weight
+              ★ {t('relationshipWeight')}
             </div>
             <div className="font-mono text-xs text-black">{relationship.weight}</div>
           </div>
@@ -545,7 +551,7 @@ export function RelationshipDetailPanel({
         {relationship.created_at && (
           <div className={detailSectionClass()}>
             <div className={detailSectionTitleClass('mb-2')}>
-              ★ Created
+              ★ {t('relationshipCreated')}
             </div>
             <div className="font-mono text-xs text-black">
               {new Date(relationship.created_at).toLocaleString()}

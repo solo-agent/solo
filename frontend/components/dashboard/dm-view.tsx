@@ -666,7 +666,7 @@ export function DMView({
             {deleted && (
               <div className="border-t-2 border-black bg-brutal-muted/20 px-4 py-3 text-center">
                 <span className="badge-brutal bg-brutal-muted text-black">
-                  DELETED
+                  {t('deleted')}
                 </span>
                 <p className="mt-2 font-body text-xs text-muted-foreground">
                   {t('agentDeletedDM')}

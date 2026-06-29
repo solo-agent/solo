@@ -9,11 +9,12 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Mail, ArrowLeft, LogOut } from 'lucide-react';
+import { User, Mail, ArrowLeft, LogOut, Globe2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
-import { t } from '@/lib/i18n';
+import { getLocale, languageOptions, setLocale, t, type Locale } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 
@@ -22,6 +23,11 @@ export default function SettingsPage() {
   const { user, isAuthenticated, isLoading: authLoading, logout } = useAuth();
 
   const [loggingOut, setLoggingOut] = useState(false);
+  const [language, setLanguage] = useState<Locale>('en');
+
+  useEffect(() => {
+    setLanguage(getLocale());
+  }, []);
 
   const handleLogout = useCallback(async () => {
     setLoggingOut(true);
@@ -32,6 +38,12 @@ export default function SettingsPage() {
       setLoggingOut(false);
     }
   }, [logout, router]);
+
+  const handleLanguageChange = useCallback((next: string) => {
+    if (setLocale(next)) {
+      setLanguage(getLocale());
+    }
+  }, []);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -133,6 +145,25 @@ export default function SettingsPage() {
                 <span className="font-body text-sm text-foreground">{user.display_name}</span>
               </div>
               <p className="mt-1 font-mono text-[11px] text-muted-foreground">{t('settingsDisplayNameHint')}</p>
+            </div>
+
+            {/* Language */}
+            <div className="border-t-2 border-black px-6 py-5">
+              <Label className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                {t('settingsLanguage')}
+              </Label>
+              <div className="mt-2 flex items-center gap-2">
+                <Globe2 className="h-4 w-4 text-muted-foreground" />
+                <Select
+                  options={languageOptions}
+                  value={language}
+                  onChange={handleLanguageChange}
+                  size="md"
+                  className="w-40"
+                  aria-label={t('settingsLanguage')}
+                />
+              </div>
+              <p className="mt-1 font-mono text-[11px] text-muted-foreground">{t('settingsLanguageHint')}</p>
             </div>
           </div>
 

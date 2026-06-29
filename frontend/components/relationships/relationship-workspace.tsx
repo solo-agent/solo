@@ -57,6 +57,10 @@ function isEditableTarget(target: EventTarget | null) {
   return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
 }
 
+function relationshipTypeLabel(type: RelationshipType | string) {
+  return type === 'assigns_to' ? t('assignsTo') : t('collaboratesWith');
+}
+
 // ---- Helpers ----
 
 interface UndoEntry {
@@ -392,7 +396,7 @@ export function RelationshipWorkspace({
     try {
       setTemplates(await listTemplates());
     } catch (err) {
-      setTemplateError(err instanceof Error ? err.message : 'Failed to load templates');
+      setTemplateError(err instanceof Error ? err.message : t('relationshipTemplateLoadError'));
     } finally {
       setTemplatesLoading(false);
     }
@@ -410,7 +414,7 @@ export function RelationshipWorkspace({
 
   const handleApplyTemplate = useCallback(async (templateID: string) => {
     if (!selectedModelProvider) {
-      setTemplateError('Please select a runtime');
+      setTemplateError(t('relationshipRuntimeRequiredError'));
       return;
     }
     setApplyingTemplate(templateID);
@@ -420,9 +424,9 @@ export function RelationshipWorkspace({
       await refetchAgents();
       await loadData();
       setShowTemplateModal(false);
-      showToast('Team created from template', 'success');
+      showToast(t('relationshipTemplateApplied'), 'success');
     } catch (err) {
-      setTemplateError(err instanceof Error ? err.message : 'Failed to apply template');
+      setTemplateError(err instanceof Error ? err.message : t('relationshipTemplateApplyError'));
     } finally {
       setApplyingTemplate(null);
     }
@@ -704,7 +708,7 @@ export function RelationshipWorkspace({
             className="gap-1.5 uppercase tracking-wider"
           >
             <Plus className="h-3.5 w-3.5" />
-            Agent
+            {t('relationshipAddAgent')}
           </Button>
         </div>
 
@@ -762,7 +766,7 @@ export function RelationshipWorkspace({
 
           <Dialog open={showChoiceDialog} onOpenChange={setShowChoiceDialog} width="sm">
             <DialogHeader>
-              <DialogTitle>Create Agent</DialogTitle>
+              <DialogTitle>{t('relationshipCreateAgent')}</DialogTitle>
               <DialogCloseButton onClick={() => setShowChoiceDialog(false)} />
             </DialogHeader>
             <div className="space-y-3">
@@ -776,8 +780,8 @@ export function RelationshipWorkspace({
               >
                 <Plus className="h-5 w-5 flex-shrink-0" />
                 <div>
-                  <div className="font-heading text-sm font-bold">Single Agent</div>
-                  <p className="font-sans text-xs text-muted-foreground mt-0.5">Create one agent with custom name, role, and runtime.</p>
+                  <div className="font-heading text-sm font-bold">{t('relationshipSingleAgent')}</div>
+                  <p className="font-sans text-xs text-muted-foreground mt-0.5">{t('relationshipSingleAgentDesc')}</p>
                 </div>
               </button>
               <button
@@ -787,8 +791,8 @@ export function RelationshipWorkspace({
               >
                 <Layers className="h-5 w-5 flex-shrink-0" />
                 <div>
-                  <div className="font-heading text-sm font-bold">From Template</div>
-                  <p className="font-sans text-xs text-muted-foreground mt-0.5">Create a team of agents with preset roles and relationships.</p>
+                  <div className="font-heading text-sm font-bold">{t('relationshipFromTemplate')}</div>
+                  <p className="font-sans text-xs text-muted-foreground mt-0.5">{t('relationshipFromTemplateDesc')}</p>
                 </div>
               </button>
             </div>
@@ -827,7 +831,7 @@ export function RelationshipWorkspace({
 
           <Dialog open={showTemplateModal} onOpenChange={setShowTemplateModal} width="lg">
             <DialogHeader>
-              <DialogTitle>Create from Template</DialogTitle>
+              <DialogTitle>{t('relationshipCreateFromTemplate')}</DialogTitle>
               <DialogCloseButton onClick={() => setShowTemplateModal(false)} />
             </DialogHeader>
             <Button
@@ -846,10 +850,10 @@ export function RelationshipWorkspace({
             <div className="space-y-4 max-h-[60vh] overflow-y-auto">
               <div>
                 <label className="block font-heading text-xs font-bold uppercase tracking-wider mb-1.5">
-                  Runtime <span className="text-brutal-danger">*</span>
+                  {t('relationshipRuntimeRequired')}
                 </label>
                 {detectionLoading ? (
-                  <p className="font-mono text-xs text-muted-foreground">Detecting runtimes...</p>
+                  <p className="font-mono text-xs text-muted-foreground">{t('relationshipDetectingRuntimes')}</p>
                 ) : (
                   <Select
                     value={selectedModelProvider}
@@ -859,7 +863,7 @@ export function RelationshipWorkspace({
                       label: `${rt.available ? '●' : '○'} ${rt.display_name}${rt.version ? ` (${rt.version})` : ''}`,
                       disabled: !rt.available,
                     }))}
-                    placeholder="Select runtime..."
+                    placeholder={t('relationshipSelectRuntime')}
                     size="md"
                     className="w-full"
                   />
@@ -871,7 +875,7 @@ export function RelationshipWorkspace({
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
               ) : templates.length === 0 ? (
-                <p className="font-mono text-sm text-muted-foreground text-center py-4">No templates available.</p>
+                <p className="font-mono text-sm text-muted-foreground text-center py-4">{t('relationshipNoTemplates')}</p>
               ) : (
                 [...new Set(templates.map((tmpl) => tmpl.category))].map((category) => (
                   <div key={category}>
@@ -899,7 +903,7 @@ export function RelationshipWorkspace({
                             size="sm"
                             className="flex-shrink-0"
                           >
-                            {applyingTemplate === tmpl.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Apply'}
+                            {applyingTemplate === tmpl.id ? <Loader2 className="h-3 w-3 animate-spin" /> : t('relationshipApplyTemplate')}
                           </Button>
                         </div>
                       ))}
@@ -929,7 +933,7 @@ export function RelationshipWorkspace({
         {/* Bottom legend */}
         <div className="flex items-center gap-4 h-10 px-4 border-t-2 border-black bg-white">
           <span className="font-heading text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-            Legend:
+            {t('relationshipLegend')}:
           </span>
           {[
             { type: 'assigns_to', color: '#4A90D9', dash: '' },
@@ -937,7 +941,7 @@ export function RelationshipWorkspace({
           ].map(({ type, color, dash }) => (
             <span key={type} className="flex items-center gap-1.5 font-mono text-[10px]">
               <svg width="24" height="8"><line x1="0" y1="4" x2="24" y2="4" stroke={color} strokeWidth={2} strokeDasharray={dash || undefined} /></svg>
-              {type.replace(/_/g, ' ')}
+              {relationshipTypeLabel(type)}
             </span>
           ))}
         </div>

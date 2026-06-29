@@ -24,47 +24,44 @@ import { TaskActionButtons } from './task-action-buttons';
 
 export const STATUS_COLUMN_CONFIG: Record<
   TaskStatus,
-  { label: string; bgClass: string; textClass: string; shadowClass: string }
+  { bgClass: string; textClass: string; shadowClass: string }
 > = {
   todo: {
-    label: 'TODO',
     bgClass: 'bg-brutal-warning',
     textClass: 'text-black',
     shadowClass: 'hover:shadow-brutal-warning',
   },
   in_progress: {
-    label: 'IN PROGRESS',
     bgClass: 'bg-brutal-info',
     textClass: 'text-black',
     shadowClass: 'hover:shadow-brutal-info',
   },
   in_review: {
-    label: 'IN REVIEW',
     bgClass: 'bg-brutal-violet',
     textClass: 'text-black',
     shadowClass: 'hover:shadow-brutal-violet',
   },
   done: {
-    label: 'DONE',
     bgClass: 'bg-brutal-success',
     textClass: 'text-black',
     shadowClass: 'hover:shadow-brutal-success',
   },
   closed: {
-    label: 'CLOSED',
     bgClass: 'bg-brutal-muted',
     textClass: 'text-black',
     shadowClass: 'hover:shadow-brutal-accent',
   },
 };
 
-const COLUMN_HEADERS: Record<TaskStatus, string> = {
-  todo: 'TODO',
-  in_progress: 'IN PROGRESS',
-  in_review: 'IN REVIEW',
-  done: 'DONE',
-  closed: 'CLOSED',
-};
+function taskColumnHeader(status: TaskStatus): string {
+  return {
+    todo: t('statusTodo'),
+    in_progress: t('statusInProgress'),
+    in_review: t('statusInReview'),
+    done: t('statusDone'),
+    closed: t('statusClosed'),
+  }[status];
+}
 
 // ---- Helpers ----
 
@@ -309,7 +306,6 @@ function TaskCard({
 // ---- Column skeleton ----
 
 function ColumnSkeleton({ status }: { status: TaskStatus }) {
-  const label = COLUMN_HEADERS[status];
   return (
     <div className="flex w-[280px] flex-shrink-0 flex-col">
       <div className="mb-3 flex items-center gap-2 px-1">
@@ -358,7 +354,7 @@ export function TaskColumn({
   onGenerateArtifact,
   isArtifactGenerating,
 }: TaskColumnProps) {
-  const label = COLUMN_HEADERS[status];
+  const label = taskColumnHeader(status);
   const count = tasks.length;
 
   if (isLoading) {
