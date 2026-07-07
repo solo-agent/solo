@@ -44,6 +44,69 @@ type ChannelResponse struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
+type WorkspaceViewDefaults struct {
+	ChannelID  string `json:"channel_id"`
+	Scope      string `json:"scope"`
+	LeftTab    string `json:"left_tab"`
+	RightPanel string `json:"right_panel"`
+}
+
+type ChannelContextResponse struct {
+	ChannelID            string           `json:"channel_id"`
+	Target               string           `json:"target"`
+	Agenda               json.RawMessage  `json:"agenda"`
+	ContextVersion       int              `json:"context_version"`
+	LatestSummaryRecords []RecordResponse `json:"latest_summary_records"`
+}
+
+type RecordResponse struct {
+	ID          string          `json:"id"`
+	ChannelID   string          `json:"channel_id"`
+	Scope       string          `json:"scope"`
+	SubjectType string          `json:"subject_type,omitempty"`
+	SubjectID   string          `json:"subject_id,omitempty"`
+	RecordType  string          `json:"record_type"`
+	Title       string          `json:"title"`
+	Body        string          `json:"body"`
+	AuthorType  string          `json:"author_type"`
+	AuthorID    string          `json:"author_id,omitempty"`
+	ArtifactRef json.RawMessage `json:"artifact_ref,omitempty"`
+	CreatedAt   string          `json:"created_at"`
+}
+
+type TeamSurfaceResponse struct {
+	Agents         []TeamAgentResponse        `json:"agents"`
+	Relationships  []TeamRelationshipResponse `json:"relationships"`
+	SummaryRecords []RecordResponse           `json:"summary_records"`
+}
+
+type TeamAgentResponse struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Role   string `json:"role,omitempty"`
+	Status string `json:"status,omitempty"`
+}
+
+type TeamRelationshipResponse struct {
+	ID          string `json:"id,omitempty"`
+	FromAgentID string `json:"from_agent_id"`
+	ToAgentID   string `json:"to_agent_id"`
+	RelType     string `json:"rel_type"`
+	Label       string `json:"label,omitempty"`
+}
+
+type ChannelWorkspaceResponse struct {
+	Channel      ChannelResponse        `json:"channel"`
+	ViewDefaults WorkspaceViewDefaults  `json:"view_defaults"`
+	Context      ChannelContextResponse `json:"context"`
+	Team         TeamSurfaceResponse    `json:"team"`
+}
+
+type PatchChannelContextRequest struct {
+	Target *string          `json:"target,omitempty"`
+	Agenda *json.RawMessage `json:"agenda,omitempty"`
+}
+
 // Create handles POST /api/v1/channels
 // JoinByTarget handles POST /api/v1/channels/join
 // Agent joins a channel by name (e.g. "#test").
@@ -80,7 +143,6 @@ func (h *ChannelHandler) JoinByTarget(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "joined", "channel_id": channelID})
 }
-
 
 // ServerInfo handles GET /api/v1/server/info
 // Returns channels, agents, and humans visible to the authenticated user.
@@ -321,6 +383,193 @@ func (h *ChannelHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, ch)
 }
 
+// Workspace handles GET /api/v1/channels/{id}/workspace.
+func (h *ChannelHandler) Workspace(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	channelID := chi.URLParam(r, "channelID")
+	if channelID == "" {
+		writeError(w, http.StatusBadRequest, "channel ID is required")
+		return
+	}
+
+	ch, ok := h.channelForMember(w, r, channelID, userID)
+	if !ok {
+		return
+	}
+
+	context, ok := h.channelContext(w, r, channelID)
+	if !ok {
+		return
+	}
+	context.LatestSummaryRecords = h.latestContextRecords(r, channelID, "summary", 5)
+	team := h.channelTeamSurface(r, channelID)
+	team.SummaryRecords = h.latestContextRecords(r, channelID, "team_summary", 5)
+
+	writeJSON(w, http.StatusOK, ChannelWorkspaceResponse{
+		Channel: ch,
+		ViewDefaults: WorkspaceViewDefaults{
+			ChannelID:  channelID,
+			Scope:      "channel",
+			LeftTab:    "conversation",
+			RightPanel: "overview",
+		},
+		Context: context,
+		Team:    team,
+	})
+}
+
+func (h *ChannelHandler) channelTeamSurface(r *http.Request, channelID string) TeamSurfaceResponse {
+	team := TeamSurfaceResponse{
+		Agents:        []TeamAgentResponse{},
+		Relationships: []TeamRelationshipResponse{},
+	}
+	rows, err := h.pool.Query(r.Context(),
+		`SELECT a.id::text, a.name, cm.role,
+		        CASE WHEN a.is_active THEN 'active' ELSE 'inactive' END
+		   FROM channel_members cm
+		   JOIN agents a ON a.id = cm.member_id
+		  WHERE cm.channel_id = $1 AND cm.member_type = 'agent'
+		  ORDER BY CASE WHEN cm.role IN ('lead', 'leader') THEN 0 ELSE 1 END, cm.joined_at ASC, a.name ASC`,
+		channelID,
+	)
+	if err != nil {
+		slog.Warn("failed to query channel team agents", "channel_id", channelID, "error", err)
+		return team
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var agent TeamAgentResponse
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Role, &agent.Status); err != nil {
+			slog.Warn("failed to scan channel team agent", "channel_id", channelID, "error", err)
+			continue
+		}
+		team.Agents = append(team.Agents, agent)
+	}
+
+	relRows, err := h.pool.Query(r.Context(),
+		`SELECT r.id::text, r.from_agent_id::text, r.to_agent_id::text, r.rel_type, COALESCE(r.instruction, '')
+		   FROM agent_relationships r
+		  WHERE r.from_agent_id IN (
+			SELECT member_id FROM channel_members WHERE channel_id = $1 AND member_type = 'agent'
+		  )
+		    AND r.to_agent_id IN (
+			SELECT member_id FROM channel_members WHERE channel_id = $1 AND member_type = 'agent'
+		  )
+		  ORDER BY r.created_at ASC`,
+		channelID,
+	)
+	if err != nil {
+		slog.Warn("failed to query channel team relationships", "channel_id", channelID, "error", err)
+		return team
+	}
+	defer relRows.Close()
+	for relRows.Next() {
+		var rel TeamRelationshipResponse
+		if err := relRows.Scan(&rel.ID, &rel.FromAgentID, &rel.ToAgentID, &rel.RelType, &rel.Label); err != nil {
+			slog.Warn("failed to scan channel team relationship", "channel_id", channelID, "error", err)
+			continue
+		}
+		team.Relationships = append(team.Relationships, rel)
+	}
+	return team
+}
+
+// PatchContext handles PATCH /api/v1/channels/{id}/context.
+func (h *ChannelHandler) PatchContext(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	channelID := chi.URLParam(r, "channelID")
+	if channelID == "" {
+		writeError(w, http.StatusBadRequest, "channel ID is required")
+		return
+	}
+
+	var req PatchChannelContextRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Target == nil && req.Agenda == nil {
+		writeError(w, http.StatusBadRequest, "target or agenda is required")
+		return
+	}
+
+	var targetArg any
+	if req.Target != nil {
+		target := strings.TrimSpace(*req.Target)
+		if len(target) > 10000 {
+			writeError(w, http.StatusBadRequest, "target must be 10000 characters or less")
+			return
+		}
+		targetArg = target
+	}
+
+	var agendaArg any
+	if req.Agenda != nil {
+		agenda := strings.TrimSpace(string(*req.Agenda))
+		if agenda == "" || agenda[0] != '[' || !json.Valid([]byte(agenda)) {
+			writeError(w, http.StatusBadRequest, "agenda must be a JSON array")
+			return
+		}
+		agendaArg = agenda
+	}
+
+	if _, ok := h.channelForMember(w, r, channelID, userID); !ok {
+		return
+	}
+
+	var target string
+	var agenda json.RawMessage
+	var version int
+	err := h.pool.QueryRow(r.Context(), `
+		WITH incoming AS (
+			SELECT $1::uuid AS channel_id, $2::text AS target, $3::jsonb AS agenda_json
+		)
+		INSERT INTO channel_contexts (channel_id, target, agenda_json)
+		SELECT channel_id, COALESCE(target, ''), COALESCE(agenda_json, '[]'::jsonb)
+		  FROM incoming
+		ON CONFLICT (channel_id) DO UPDATE SET
+			target = CASE WHEN $2::text IS NULL THEN channel_contexts.target ELSE EXCLUDED.target END,
+			agenda_json = CASE WHEN $3::jsonb IS NULL THEN channel_contexts.agenda_json ELSE EXCLUDED.agenda_json END,
+			context_version = CASE
+				WHEN channel_contexts.target IS DISTINCT FROM CASE WHEN $2::text IS NULL THEN channel_contexts.target ELSE EXCLUDED.target END
+				  OR channel_contexts.agenda_json IS DISTINCT FROM CASE WHEN $3::jsonb IS NULL THEN channel_contexts.agenda_json ELSE EXCLUDED.agenda_json END
+				THEN channel_contexts.context_version + 1
+				ELSE channel_contexts.context_version
+			END,
+			updated_at = CASE
+				WHEN channel_contexts.target IS DISTINCT FROM CASE WHEN $2::text IS NULL THEN channel_contexts.target ELSE EXCLUDED.target END
+				  OR channel_contexts.agenda_json IS DISTINCT FROM CASE WHEN $3::jsonb IS NULL THEN channel_contexts.agenda_json ELSE EXCLUDED.agenda_json END
+				THEN now()
+				ELSE channel_contexts.updated_at
+			END
+		RETURNING target, agenda_json, context_version`,
+		channelID, targetArg, agendaArg,
+	).Scan(&target, &agenda, &version)
+	if err != nil {
+		slog.Error("failed to patch channel context", "channel_id", channelID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to update channel context")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ChannelContextResponse{
+		ChannelID:            channelID,
+		Target:               target,
+		Agenda:               normalizeRawJSON(agenda, "[]"),
+		ContextVersion:       version,
+		LatestSummaryRecords: h.latestContextRecords(r, channelID, "summary", 5),
+	})
+}
+
 // Update handles PATCH /api/v1/channels/{id}
 func (h *ChannelHandler) Update(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
@@ -472,4 +721,93 @@ func (h *ChannelHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("channel archived", "channel_id", channelID, "user_id", userID)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "channel deleted"})
+}
+
+func (h *ChannelHandler) channelForMember(w http.ResponseWriter, r *http.Request, channelID, userID string) (ChannelResponse, bool) {
+	var ch ChannelResponse
+	var createdAt, updatedAt time.Time
+	err := h.pool.QueryRow(r.Context(),
+		`SELECT c.id, c.name, COALESCE(c.description, ''), c.type, c.created_by, c.is_archived, c.created_at, c.updated_at
+		 FROM channels c
+		 JOIN channel_members cm ON cm.channel_id = c.id
+		 WHERE c.id = $1 AND cm.member_type = 'user' AND cm.member_id = $2 AND c.is_archived = false`,
+		channelID, userID,
+	).Scan(&ch.ID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy, &ch.IsArchived, &createdAt, &updatedAt)
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "channel not found")
+			return ch, false
+		}
+		slog.Error("failed to query channel workspace", "channel_id", channelID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return ch, false
+	}
+	ch.CreatedAt = createdAt.Format(time.RFC3339)
+	ch.UpdatedAt = updatedAt.Format(time.RFC3339)
+	return ch, true
+}
+
+func (h *ChannelHandler) channelContext(w http.ResponseWriter, r *http.Request, channelID string) (ChannelContextResponse, bool) {
+	context := ChannelContextResponse{
+		ChannelID:      channelID,
+		Agenda:         json.RawMessage("[]"),
+		ContextVersion: 1,
+	}
+	var agenda json.RawMessage
+	err := h.pool.QueryRow(r.Context(),
+		`SELECT target, agenda_json, context_version FROM channel_contexts WHERE channel_id = $1`,
+		channelID,
+	).Scan(&context.Target, &agenda, &context.ContextVersion)
+	if err != nil {
+		if isNotFound(err) {
+			return context, true
+		}
+		slog.Error("failed to query channel context", "channel_id", channelID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to query channel context")
+		return context, false
+	}
+	context.Agenda = normalizeRawJSON(agenda, "[]")
+	return context, true
+}
+
+func (h *ChannelHandler) latestContextRecords(r *http.Request, channelID, recordType string, limit int) []RecordResponse {
+	rows, err := h.pool.Query(r.Context(),
+		`SELECT id::text, channel_id::text, scope, COALESCE(subject_type, ''), COALESCE(subject_id::text, ''),
+		        record_type, title, body, author_type, COALESCE(author_id::text, ''),
+		        COALESCE(artifact_ref_json::text, ''), created_at
+		   FROM context_records
+		  WHERE channel_id = $1 AND record_type = $2
+		  ORDER BY created_at DESC
+		  LIMIT $3`,
+		channelID, recordType, limit,
+	)
+	if err != nil {
+		slog.Warn("failed to query context records", "channel_id", channelID, "record_type", recordType, "error", err)
+		return []RecordResponse{}
+	}
+	defer rows.Close()
+
+	records := []RecordResponse{}
+	for rows.Next() {
+		var rec RecordResponse
+		var artifactRef string
+		var createdAt time.Time
+		if err := rows.Scan(&rec.ID, &rec.ChannelID, &rec.Scope, &rec.SubjectType, &rec.SubjectID, &rec.RecordType, &rec.Title, &rec.Body, &rec.AuthorType, &rec.AuthorID, &artifactRef, &createdAt); err != nil {
+			slog.Warn("failed to scan context record", "channel_id", channelID, "error", err)
+			continue
+		}
+		if artifactRef != "" {
+			rec.ArtifactRef = json.RawMessage(artifactRef)
+		}
+		rec.CreatedAt = createdAt.Format(time.RFC3339)
+		records = append(records, rec)
+	}
+	return records
+}
+
+func normalizeRawJSON(raw json.RawMessage, fallback string) json.RawMessage {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return json.RawMessage(fallback)
+	}
+	return raw
 }

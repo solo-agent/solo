@@ -86,6 +86,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	agentRunHandler := handler.NewAgentRunHandler(pool)
 	dashboardHandler := handler.NewDashboardHandler(pool)
 	threadHandler := handler.NewThreadHandler(pool, hub, agentSvc)
+	thoughtHandler := handler.NewThoughtHandler(pool, hub)
 	dmHandler := handler.NewDMHandler(pool, hub, agentSvc, taskSvc)
 	daemonHandler := handler.NewDaemonHandler(dm, agentSvc, computerSvc)
 	mentionSvc := service.NewMentionService(pool)
@@ -171,6 +172,10 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 				r.Get("/", channelHandler.Get)
 				r.Patch("/", channelHandler.Update)
 				r.Delete("/", channelHandler.Delete)
+				r.Get("/workspace", channelHandler.Workspace)
+				r.Patch("/context", channelHandler.PatchContext)
+				r.Get("/thoughts", thoughtHandler.ListByChannel)
+				r.Post("/thoughts", thoughtHandler.Create)
 
 				// Channel member management routes
 				r.Route("/members", func(r chi.Router) {
@@ -183,6 +188,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 				r.Route("/tasks", func(r chi.Router) {
 					r.Get("/", taskHandler.List)
 					r.Post("/", taskHandler.Create)
+					r.Post("/from-context", taskHandler.CreateFromContext)
 
 					r.Route("/{taskID}", func(r chi.Router) {
 						r.Get("/", taskHandler.Get)
@@ -213,6 +219,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 
 					// Convert message to task (Phase 1)
 					r.Post("/{messageID}/convert-to-task", taskHandler.ConvertToTask)
+					r.Post("/{messageID}/create-channel", messageHandler.CreateChannelFromCard)
 
 					// Thread routes (nested under messages)
 					r.Route("/{messageID}/thread", func(r chi.Router) {
@@ -259,6 +266,12 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Route("/api/v1/templates", func(r chi.Router) {
 			r.Get("/", templateHandler.List)
 			r.Post("/{templateID}/apply", templateHandler.Apply)
+		})
+
+		r.Route("/api/v1/thoughts", func(r chi.Router) {
+			r.Get("/{thoughtID}", thoughtHandler.Get)
+			r.Post("/{thoughtID}/review", thoughtHandler.RequestReview)
+			r.Post("/{thoughtID}/complete", thoughtHandler.Complete)
 		})
 
 		// Agent backends metadata (registered backend adapters)

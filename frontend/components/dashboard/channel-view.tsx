@@ -4,12 +4,15 @@
 
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense, type CSSProperties, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Users, Loader2, SquareCheckBig, MessageSquare, Plus, X } from 'lucide-react';
+import { ArrowLeft, Users, Loader2, MessageSquare, Plus, X, Target, ListChecks, Network, GitBranch, KanbanSquare, RefreshCw, Send } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useMessages } from '@/lib/hooks/use-messages';
+import { useMessages, type MessageScopeOptions } from '@/lib/hooks/use-messages';
 import { useChannelMembers } from '@/lib/hooks/use-channel-members';
+import { useChannelWorkspace } from '@/lib/hooks/use-channel-workspace';
+import { useThoughts } from '@/lib/hooks/use-thoughts';
+import { buildDashboardHref, parseDashboardParams, type DashboardPanel, type DashboardUrlState, type DashboardView } from '@/lib/dashboard-url';
 import { useWebSocket } from '@/lib/ws-context';
 import { useTasks } from '@/lib/hooks/use-tasks';
 import { TaskArtifactStillPendingError, useTaskArtifact } from '@/lib/hooks/use-task-artifact';
@@ -22,10 +25,9 @@ import { MemberList } from './member-list';
 import { AddAgentModal } from './add-agent-modal';
 import { TaskBoard } from '@/components/tasks/task-board';
 import { RelationshipDetailPanel } from '@/components/relationships/relationship-detail-panel';
+import { RelationshipWorkspace } from '@/components/relationships/relationship-workspace';
 import { Button } from '@/components/ui/button';
-import { Select } from '@/components/ui/select';
 import { tabButtonClass } from '@/components/ui/tab-bar';
-import { filterTaskTree } from '@/lib/task-filters';
 import {
   Dialog,
   DialogHeader,
@@ -35,14 +37,1048 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { WizardCard } from '@/components/onboarding/wizard-card';
 import { t } from '@/lib/i18n';
-import type { AgentDetailTarget, Channel, Message, Task, TaskArtifact } from '@/lib/types';
+import type { AgentDetailTarget, AgentRelationship, Channel, ChannelAgendaItem, ChannelContext, ChannelMember, ContextRecord, Message, Task, TaskArtifact, TaskStatus, TeamSurface, ThoughtNode, ThoughtSession } from '@/lib/types';
 
 type ArtifactPreview = TaskArtifact & { previewUrl: string };
+type WorkspaceDetail = {
+  relationship: AgentRelationship | null;
+  agent: (AgentDetailTarget & { isActive?: boolean }) | null;
+};
+type WorkspaceScope = 'channel' | 'thought' | 'task';
+type LeftTab = 'conversation' | 'summary' | 'insight' | 'artifact';
+type WorkspacePanelTab = 'overview' | 'team' | 'thought' | 'task';
+type RightMode = 'map' | 'board' | 'graph';
+
+const SCOPE_LEFT_TABS: Record<WorkspaceScope, Array<{ key: LeftTab; label: string }>> = {
+  channel: [
+    { key: 'conversation', label: '对话' },
+    { key: 'summary', label: '摘要' },
+  ],
+  thought: [
+    { key: 'conversation', label: '对话' },
+    { key: 'summary', label: '摘要' },
+    { key: 'insight', label: '洞察' },
+    { key: 'artifact', label: '产物' },
+  ],
+  task: [
+    { key: 'conversation', label: '对话' },
+    { key: 'summary', label: '摘要' },
+    { key: 'artifact', label: '产物' },
+  ],
+};
+
+function defaultRightMode(panel: WorkspacePanelTab): RightMode | undefined {
+  if (panel === 'thought') return 'map';
+  if (panel === 'task') return 'board';
+  return undefined;
+}
+
+function viewToWorkspacePanelTab(view: DashboardView): WorkspacePanelTab {
+  if (view === 'team') return 'team';
+  if (view.startsWith('task.')) return 'task';
+  if (view.startsWith('thought.')) return 'thought';
+  return 'overview';
+}
+
+function viewToRightMode(view: DashboardView): RightMode | undefined {
+  if (view.endsWith('.graph')) return 'graph';
+  if (view.endsWith('.board')) return 'board';
+  if (view.endsWith('.map')) return 'map';
+  return undefined;
+}
+
+function tabToView(tab: WorkspacePanelTab): DashboardView {
+  if (tab === 'team') return 'team';
+  if (tab === 'task') return 'task.board';
+  if (tab === 'thought') return 'thought.map';
+  return 'overview';
+}
+
+function panelToWorkspaceScope(panel: DashboardPanel, view: DashboardView): WorkspaceScope {
+  if (panel === 'thought' || (panel === 'insight' && view.startsWith('thought.'))) return 'thought';
+  if (panel === 'task' || (panel === 'artifact' && view.startsWith('task.'))) return 'task';
+  return 'channel';
+}
+
+function panelToLeftTab(panel: DashboardPanel): LeftTab {
+  if (panel === 'summary' || panel === 'insight' || panel === 'artifact') return panel;
+  return 'conversation';
+}
+
+function coerceLeftTab(scope: WorkspaceScope, tab: LeftTab | null): LeftTab {
+  const tabs = SCOPE_LEFT_TABS[scope].map((item) => item.key);
+  return tab && tabs.includes(tab) ? tab : 'conversation';
+}
+
+function parseMessageCardPayload<T>(message: Message): T | null {
+  try {
+    return JSON.parse(message.content) as T;
+  } catch {
+    return null;
+  }
+}
 
 // SOLO-63-F: Lazy-load ThreadPanel (only rendered when a thread is open)
 const ThreadPanel = lazy(() =>
   import('./thread-panel').then((m) => ({ default: m.ThreadPanel })),
 );
+
+const WORKSPACE_PANEL_TABS: Array<{
+  key: WorkspacePanelTab;
+  label: string;
+  icon: ReactNode;
+}> = [
+  { key: 'overview', label: 'Overview', icon: <Target className="h-3.5 w-3.5" /> },
+  { key: 'team', label: 'Team', icon: <Network className="h-3.5 w-3.5" /> },
+  { key: 'task', label: 'Task', icon: <KanbanSquare className="h-3.5 w-3.5" /> },
+];
+
+function ChannelWorkspacePanel({
+  activeTab,
+  mode,
+  channelId,
+  onTabChange,
+  onModeChange,
+  context,
+  team,
+  tasks,
+  tasksLoading,
+  tasksError,
+  selectedTask,
+  selectedThoughtNodeId,
+  thought,
+  thoughts,
+  thoughtsLoading,
+  thoughtsError,
+  onThoughtRetry,
+  onCompleteThought,
+  onThoughtNodeSelect,
+  onTaskSelect,
+  onTaskRetry,
+  onTaskActionComplete,
+  onGenerateTaskArtifact,
+  isTaskArtifactGenerating,
+  onTeamDetailOpen,
+  onTeamDetailClose,
+  canAddAgents,
+  onAddAgent,
+  onOpenMembers,
+  isLoading,
+  error,
+  onRetry,
+}: {
+  activeTab: WorkspacePanelTab;
+  mode?: RightMode;
+  channelId: string;
+  onTabChange: (tab: WorkspacePanelTab) => void;
+  onModeChange: (mode: RightMode) => void;
+  context: ChannelContext | null;
+  team: TeamSurface | null;
+  tasks: Task[];
+  tasksLoading: boolean;
+  tasksError: string | null;
+  selectedTask: Task | null;
+  selectedThoughtNodeId?: string;
+  thought: ThoughtSession | null;
+  thoughts: ThoughtSession[];
+  thoughtsLoading: boolean;
+  thoughtsError: string | null;
+  onThoughtRetry: () => void;
+  onCompleteThought: (thoughtId: string) => Promise<void>;
+  onThoughtNodeSelect: (nodeId: string) => void;
+  onTaskSelect: (task: Task) => void;
+  onTaskRetry: () => void;
+  onTaskActionComplete: (task: Task) => void;
+  onGenerateTaskArtifact: (task: Task) => void;
+  isTaskArtifactGenerating: (task: Task) => boolean;
+  onTeamDetailOpen: (detail: WorkspaceDetail) => void;
+  onTeamDetailClose: () => void;
+  canAddAgents: boolean;
+  onAddAgent: () => void;
+  onOpenMembers: () => void;
+  isLoading: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  return (
+    <aside className="flex h-full min-w-[360px] flex-col bg-brutal-cream">
+      <div className="flex h-14 flex-shrink-0 items-center justify-between border-b-2 border-black px-4">
+        <div className="flex items-center gap-1">
+          {WORKSPACE_PANEL_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => onTabChange(tab.key)}
+              className={tabButtonClass(activeTab === tab.key)}
+            >
+              {tab.icon}
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        {isLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+      </div>
+
+      <div className={cn('min-h-0 flex-1', activeTab === 'team' && !error ? 'flex overflow-hidden' : 'overflow-y-auto p-4')}>
+        {error ? (
+          <div className="border-2 border-black bg-brutal-danger-light p-4 shadow-brutal-sm">
+            <div className="font-heading text-sm font-black">Workspace failed to load</div>
+            <p className="mt-1 font-body text-sm text-muted-foreground">{error}</p>
+            <Button variant="outline" size="sm" className="mt-3" onClick={onRetry}>
+              <RefreshCw className="mr-2 h-3.5 w-3.5" />
+              {t('retry')}
+            </Button>
+          </div>
+        ) : activeTab === 'overview' ? (
+          <OverviewPanel context={context} />
+        ) : activeTab === 'team' ? (
+          isLoading ? (
+            <div className="flex flex-1 items-center justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <RelationshipWorkspace
+              embedded
+              channelFilterId={channelId}
+              channelTeam={team}
+              onChannelTeamRefresh={onRetry}
+              onDetailOpen={onTeamDetailOpen}
+              onDetailClose={onTeamDetailClose}
+              embeddedActions={(
+                <>
+                  {canAddAgents && (
+                    <Button
+                      type="button"
+                      onClick={onAddAgent}
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      aria-label={t('addAgentToChannel')}
+                      title={t('addAgentToChannel')}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    onClick={onOpenMembers}
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    aria-label={t('channelMembers')}
+                    title={t('channelMembers')}
+                  >
+                    <Users className="h-4 w-4" />
+                  </Button>
+                </>
+              )}
+            />
+          )
+        ) : activeTab === 'thought' ? (
+          <ThoughtPanel
+            thought={thought}
+            thoughts={thoughts}
+            selectedNodeId={selectedThoughtNodeId}
+            mode={mode === 'board' ? 'board' : 'map'}
+            onModeChange={onModeChange}
+            onNodeSelect={onThoughtNodeSelect}
+            isLoading={thoughtsLoading}
+            error={thoughtsError}
+            onRetry={onThoughtRetry}
+            onComplete={onCompleteThought}
+          />
+        ) : (
+          <TaskPanel
+            tasks={tasks}
+            tasksLoading={tasksLoading}
+            tasksError={tasksError}
+            selectedTask={selectedTask}
+            mode={mode === 'board' ? 'board' : 'graph'}
+            onModeChange={onModeChange}
+            onTaskSelect={onTaskSelect}
+            onTaskRetry={onTaskRetry}
+            onTaskActionComplete={onTaskActionComplete}
+            onGenerateTaskArtifact={onGenerateTaskArtifact}
+            isTaskArtifactGenerating={isTaskArtifactGenerating}
+          />
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function OverviewPanel({ context }: { context: ChannelContext | null }) {
+  const agenda = context?.agenda ?? [];
+  const hasContext = Boolean(context?.target?.trim()) || agenda.length > 0;
+
+  if (!hasContext) {
+    return (
+      <EmptyWorkspacePanel
+        title="Channel overview"
+        body="Target and agenda will appear here after Lucy creates the channel context."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <section className="border-2 border-black bg-white p-4 shadow-brutal-sm">
+        <div className="mb-2 flex items-center gap-2 font-heading text-xs font-black uppercase tracking-wide text-muted-foreground">
+          <Target className="h-4 w-4 text-brutal-info" />
+          Target
+        </div>
+        <p className="whitespace-pre-wrap font-body text-sm leading-6 text-foreground">
+          {context?.target || 'No target yet.'}
+        </p>
+      </section>
+
+      <section className="border-2 border-black bg-white p-4 shadow-brutal-sm">
+        <div className="mb-3 flex items-center gap-2 font-heading text-xs font-black uppercase tracking-wide text-muted-foreground">
+          <ListChecks className="h-4 w-4 text-brutal-success" />
+          Agenda
+        </div>
+        <AgendaTree items={agenda} />
+      </section>
+
+    </div>
+  );
+}
+
+function AgendaTree({ items, depth = 0 }: { items: ChannelAgendaItem[]; depth?: number }) {
+  if (items.length === 0) {
+    return <p className="font-body text-sm text-muted-foreground">No agenda yet.</p>;
+  }
+
+  return (
+    <ul className={cn('space-y-2', depth > 0 && 'mt-2 border-l-2 border-black pl-3')}>
+      {items.map((item, index) => (
+        <li key={item.id || `${depth}-${index}`}>
+          <div className="flex items-start gap-2">
+            <span className="mt-0.5 inline-flex h-5 min-w-5 items-center justify-center border-2 border-black bg-brutal-primary px-1 font-mono text-[10px] font-black shadow-brutal-sm">
+              {index + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="font-body text-sm font-bold text-foreground">
+                {item.title || 'Untitled'}
+              </div>
+              {item.status && (
+                <div className="mt-1 inline-flex border-2 border-black bg-white px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-muted-foreground">
+                  {item.status.replace('_', ' ')}
+                </div>
+              )}
+              {item.children?.length ? <AgendaTree items={item.children} depth={depth + 1} /> : null}
+            </div>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function WorkspaceGraphCanvas({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        'relative min-h-[520px] overflow-hidden border-2 border-black bg-brutal-cream shadow-brutal-sm',
+        className,
+      )}
+      style={{
+        backgroundImage: 'linear-gradient(rgba(0,0,0,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.08) 1px, transparent 1px)',
+        backgroundSize: '32px 32px',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function GraphNodeButton({
+  active,
+  children,
+  className,
+  onClick,
+  style,
+}: {
+  active?: boolean;
+  children: ReactNode;
+  className?: string;
+  onClick: () => void;
+  style?: CSSProperties;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={style}
+      className={cn(
+        'absolute z-10 flex min-h-16 min-w-28 max-w-40 flex-col items-center justify-center border-2 border-black px-3 py-2 text-center shadow-brutal-sm transition-transform hover:-translate-y-px hover:shadow-brutal',
+        className,
+        active ? 'bg-brutal-primary' : !className && 'bg-white',
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ThoughtPanel({
+  thought,
+  thoughts,
+  selectedNodeId,
+  mode,
+  onModeChange,
+  onNodeSelect,
+  isLoading,
+  error,
+  onRetry,
+  onComplete,
+}: {
+  thought: ThoughtSession | null;
+  thoughts: ThoughtSession[];
+  selectedNodeId?: string;
+  mode: 'map' | 'board';
+  onModeChange: (mode: RightMode) => void;
+  onNodeSelect: (nodeId: string) => void;
+  isLoading: boolean;
+  error: string | null;
+  onRetry: () => void;
+  onComplete: (thoughtId: string) => Promise<void>;
+}) {
+  const root = thought?.nodes.find((node) => node.is_root);
+  const children = thought?.nodes.filter((node) => node.parent_id === root?.id) ?? [];
+  const [busy, setBusy] = useState(false);
+
+  const done = async () => {
+    if (!thought || thought.status === 'done' || busy) return;
+    setBusy(true);
+    try {
+      await onComplete(thought.id);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[240px] items-center justify-center border-2 border-black bg-white">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="border-2 border-black bg-brutal-danger-light p-4 shadow-brutal-sm">
+        <div className="font-heading text-sm font-black">Thought failed to load</div>
+        <p className="mt-1 font-body text-sm text-muted-foreground">{error}</p>
+        <Button variant="outline" size="sm" className="mt-3" onClick={onRetry}>
+          <RefreshCw className="mr-2 h-3.5 w-3.5" />
+          {t('retry')}
+        </Button>
+      </div>
+    );
+  }
+
+  if (!thought || !root) {
+    return (
+      <EmptyWorkspacePanel
+        title="Thought map"
+        body="Thought sessions will appear here after Lucy starts exploration."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate font-heading text-base font-black">{thought.title}</div>
+          <div className="mt-1 inline-flex border-2 border-black bg-white px-2 py-0.5 font-mono text-[10px] font-bold uppercase shadow-brutal-sm">
+            {thought.status.replace('_', ' ')}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant={mode === 'board' ? 'default' : 'outline'} onClick={() => onModeChange('board')}>
+            Board
+          </Button>
+          <Button size="sm" variant={mode === 'map' ? 'default' : 'outline'} onClick={() => onModeChange('map')}>
+            Map
+          </Button>
+          <Button
+            size="sm"
+            variant="success"
+            disabled={thought.status === 'done' || busy}
+            onClick={done}
+          >
+            {busy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+            Done
+          </Button>
+        </div>
+      </div>
+
+      {mode === 'board' ? (
+        <ThoughtBoard thoughts={thoughts} onThoughtSelect={(item) => onNodeSelect(item.nodes.find((node) => node.is_root)?.id ?? item.id)} />
+      ) : (
+        <WorkspaceGraphCanvas>
+          <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+            {children.map((node, index) => {
+              const left = children.length === 1 ? 50 : 16 + (68 / Math.max(children.length - 1, 1)) * index;
+              return (
+                <line
+                  key={node.id}
+                  x1="50"
+                  y1="25"
+                  x2={left}
+                  y2="62"
+                  stroke="black"
+                  strokeWidth="0.6"
+                />
+              );
+            })}
+          </svg>
+          <GraphNodeButton
+            active={selectedNodeId === root.id}
+            onClick={() => onNodeSelect(root.id)}
+            style={{ left: '50%', top: '14%', transform: 'translateX(-50%)' }}
+            className="min-h-20 min-w-32 rounded-full bg-brutal-primary"
+          >
+            <span className="font-heading text-sm font-black">{root.title}</span>
+            <span className="mt-1 font-mono text-[10px] font-bold uppercase">Root</span>
+          </GraphNodeButton>
+          {children.map((node, index) => {
+            const left = children.length === 1 ? 50 : 16 + (68 / Math.max(children.length - 1, 1)) * index;
+            return (
+              <GraphNodeButton
+                key={node.id}
+                active={selectedNodeId === node.id}
+                onClick={() => onNodeSelect(node.id)}
+                style={{ left: `${left}%`, top: '58%', transform: 'translateX(-50%)' }}
+                className="bg-white"
+              >
+                <span className="w-full truncate font-heading text-sm font-black">{node.title}</span>
+                <span className="mt-1 border-2 border-black bg-brutal-info-light px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase">
+                  {node.status.replace('_', ' ')}
+                </span>
+              </GraphNodeButton>
+            );
+          })}
+        </WorkspaceGraphCanvas>
+      )}
+    </div>
+  );
+}
+
+function ThoughtBoard({
+  thoughts,
+  onThoughtSelect,
+}: {
+  thoughts: ThoughtSession[];
+  onThoughtSelect: (thought: ThoughtSession) => void;
+}) {
+  const statuses: Array<Exclude<TaskStatus, 'closed'>> = ['todo', 'in_progress', 'in_review', 'done'];
+  return (
+    <div className="grid min-h-[320px] grid-cols-4 gap-3 border-2 border-black bg-brutal-cream p-3">
+      {statuses.map((status) => (
+        <div key={status} className="border-2 border-black bg-white">
+          <div className="border-b-2 border-black bg-brutal-primary px-2 py-1 font-heading text-xs font-black uppercase">
+            {status.replace('_', ' ')}
+          </div>
+          <div className="space-y-2 p-2">
+            {thoughts.filter((item) => item.status === status).map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onThoughtSelect(item)}
+                className="w-full border-2 border-black bg-brutal-cream p-2 text-left shadow-brutal-sm hover:-translate-y-px hover:shadow-brutal"
+              >
+                <div className="font-heading text-sm font-bold">{item.title}</div>
+                <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+                  {item.nodes.length} nodes
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TaskPanel({
+  tasks,
+  tasksLoading,
+  tasksError,
+  selectedTask,
+  mode,
+  onModeChange,
+  onTaskSelect,
+  onTaskRetry,
+  onTaskActionComplete,
+  onGenerateTaskArtifact,
+  isTaskArtifactGenerating,
+}: {
+  tasks: Task[];
+  tasksLoading: boolean;
+  tasksError: string | null;
+  selectedTask: Task | null;
+  mode: 'graph' | 'board';
+  onModeChange: (mode: RightMode) => void;
+  onTaskSelect: (task: Task) => void;
+  onTaskRetry: () => void;
+  onTaskActionComplete: (task: Task) => void;
+  onGenerateTaskArtifact: (task: Task) => void;
+  isTaskArtifactGenerating: (task: Task) => boolean;
+}) {
+  const rootTasks = tasks.filter((task) => !task.parent_task_id);
+  const selectedRoot = selectedTask && !selectedTask.parent_task_id
+    ? selectedTask
+    : selectedTask?.parent_task_id
+      ? rootTasks.find((task) => task.id === selectedTask.parent_task_id) ?? rootTasks[0] ?? null
+      : rootTasks[0] ?? null;
+  const childTasks = selectedRoot
+    ? tasks.filter((task) => task.parent_task_id === selectedRoot.id)
+    : [];
+
+  if (mode === 'board') {
+    return (
+      <TaskBoard
+        tasks={tasks}
+        isLoading={tasksLoading}
+        error={tasksError}
+        onTaskClick={onTaskSelect}
+        onRefetch={onTaskRetry}
+        onActionComplete={onTaskActionComplete}
+        onGenerateArtifact={onGenerateTaskArtifact}
+        isArtifactGenerating={isTaskArtifactGenerating}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="font-heading text-base font-black">Task Graph</div>
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onModeChange('board')}>
+          <ArrowLeft className="h-3.5 w-3.5" />
+          {t('back')}
+        </Button>
+      </div>
+      {selectedRoot ? (
+        <WorkspaceGraphCanvas>
+          <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+            {childTasks.map((task, index) => {
+              const left = childTasks.length === 1 ? 50 : 16 + (68 / Math.max(childTasks.length - 1, 1)) * index;
+              return (
+                <line
+                  key={task.id}
+                  x1="50"
+                  y1="25"
+                  x2={left}
+                  y2="62"
+                  stroke="black"
+                  strokeWidth="0.6"
+                />
+              );
+            })}
+          </svg>
+          <GraphNodeButton
+            active={selectedTask?.id === selectedRoot.id}
+            onClick={() => onTaskSelect(selectedRoot)}
+            style={{ left: '50%', top: '14%', transform: 'translateX(-50%)' }}
+            className="min-h-20 min-w-32 rounded-full bg-brutal-primary"
+          >
+            <span className="font-heading text-sm font-black">
+              {selectedRoot.task_number ? `#${selectedRoot.task_number} ` : ''}{selectedRoot.title}
+            </span>
+            <span className="mt-1 font-mono text-[10px] font-bold uppercase">Main task</span>
+          </GraphNodeButton>
+          {childTasks.map((task, index) => {
+            const left = childTasks.length === 1 ? 50 : 16 + (68 / Math.max(childTasks.length - 1, 1)) * index;
+            return (
+              <GraphNodeButton
+                key={task.id}
+                active={selectedTask?.id === task.id}
+                onClick={() => onTaskSelect(task)}
+                style={{ left: `${left}%`, top: '58%', transform: 'translateX(-50%)' }}
+                className="bg-white"
+              >
+                <span className="w-full truncate font-heading text-sm font-black">
+                  {task.task_number ? `#${task.task_number} ` : ''}{task.title}
+                </span>
+                <span className="mt-1 border-2 border-black bg-brutal-info-light px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase">
+                  {task.status.replace('_', ' ')}
+                </span>
+              </GraphNodeButton>
+            );
+          })}
+        </WorkspaceGraphCanvas>
+      ) : (
+        <EmptyWorkspacePanel title="Task graph" body="Tasks will appear after Lucy creates work from the channel context." />
+      )}
+    </div>
+  );
+}
+
+function RecordList({ title, records }: { title: string; records: ContextRecord[] }) {
+  return (
+    <section className="border-2 border-black bg-white p-4 shadow-brutal-sm">
+      <div className="mb-3 font-heading text-xs font-black uppercase tracking-wide text-muted-foreground">
+        {title}
+      </div>
+      <div className="space-y-2">
+        {records.map((record) => (
+          <article key={record.id} className="border-2 border-black bg-brutal-cream p-3 shadow-brutal-sm">
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="truncate font-heading text-sm font-bold">{record.title}</h4>
+              <time className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                {new Date(record.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+              </time>
+            </div>
+            <p className="mt-1 line-clamp-3 whitespace-pre-wrap font-body text-sm text-muted-foreground">
+              {record.body}
+            </p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RecordTimelinePanel({
+  title,
+  records,
+}: {
+  title: string;
+  records: ContextRecord[];
+}) {
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <div className="mx-auto max-w-3xl space-y-3">
+          {records.length === 0 ? (
+            <EmptyWorkspacePanel
+              title={title}
+              body="这里暂时还没有记录。继续对话或完成 review 后会自动沉淀。"
+            />
+          ) : records.map((record) => (
+            <article key={record.id} className="border-2 border-black bg-white p-4 shadow-brutal-sm">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-heading text-sm font-black">{record.title}</div>
+                  <div className="mt-1 font-mono text-[10px] font-bold uppercase text-muted-foreground">
+                    {record.record_type.replace('_', ' ')} · {record.author_type}
+                  </div>
+                </div>
+                <time className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                  {new Date(record.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                </time>
+              </div>
+              <p className="whitespace-pre-wrap font-body text-sm leading-6 text-foreground">
+                {record.body}
+              </p>
+              {record.artifact_ref ? (
+                <div className="mt-3 inline-flex border-2 border-black bg-brutal-primary px-2 py-1 font-mono text-[10px] font-black uppercase shadow-brutal-sm">
+                  artifact
+                </div>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScopedConversationInput({
+  placeholder,
+  onSubmit,
+}: {
+  placeholder: string;
+  onSubmit: (content: string) => void;
+}) {
+  const [content, setContent] = useState('');
+  const trimmed = content.trim();
+
+  return (
+    <div className="flex-shrink-0 border-t-2 border-black bg-brutal-cream px-6 py-4">
+      <div className="relative flex items-end gap-2">
+        <textarea
+          value={content}
+          onChange={(event) => setContent(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              if (!trimmed) return;
+              onSubmit(trimmed);
+              setContent('');
+            }
+          }}
+          placeholder={placeholder}
+          rows={1}
+          className="input-brutal min-h-[44px] resize-none pr-12 font-mono text-sm leading-relaxed placeholder:font-mono placeholder:text-muted-foreground/60"
+        />
+        <button
+          type="button"
+          onClick={() => {
+            if (!trimmed) return;
+            onSubmit(trimmed);
+            setContent('');
+          }}
+          disabled={!trimmed}
+          className={cn(
+            'btn-brutal btn-brutal-success absolute bottom-2 right-2 flex h-8 w-8 items-center justify-center p-0',
+            !trimmed && 'pointer-events-none opacity-40',
+          )}
+          aria-label="Send scoped message"
+        >
+          <Send className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ThoughtConversationPanel({
+  thought,
+  node,
+  messages,
+  members,
+  onRetry,
+  onCompleteThoughtFromCard,
+  onSubmit,
+}: {
+  thought: ThoughtSession | null;
+  node: ThoughtNode | null;
+  messages: Message[];
+  members: ChannelMember[];
+  onRetry: (messageId: string, content: string) => void;
+  onCompleteThoughtFromCard: (message: Message, thoughtId: string) => Promise<void>;
+  onSubmit: (content: string) => void;
+}) {
+  const beforeItems = thought && node ? (
+    <div role="listitem" className="px-6">
+      <ThoughtChatBubble
+        author="Lucy"
+        time={thought.created_at}
+        text={node.is_root
+          ? `已进入 Thought「${thought.title}」。这里是这次探索的 Root。`
+          : `现在选中 ${node.title} 节点。这里的对话只围绕 ${node.title} 展开。`}
+      />
+      {(node.is_root ? thought.summary_records : thought.summary_records.filter((record) => record.subject_id === node.id)).map((record) => (
+        <ThoughtChatBubble
+          key={record.id}
+          author={record.author_type === 'agent' ? 'Lucy' : 'Solo'}
+          time={record.created_at}
+          text={record.body}
+        />
+      ))}
+      <div className="mt-3 flex items-center gap-2 border-2 border-black bg-white px-3 py-2 shadow-brutal-sm">
+        <GitBranch className="h-4 w-4 text-brutal-info" />
+        <div className="min-w-0">
+          <div className="truncate font-heading text-sm font-black">{node.title}</div>
+          <div className="font-mono text-[10px] font-bold uppercase text-muted-foreground">
+            {node.status.replace('_', ' ')}
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : (
+    <div role="listitem" className="px-6">
+      <EmptyWorkspacePanel title="Thought conversation" body="Start a thought from the channel timeline first." />
+    </div>
+  );
+
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream">
+      <MessageList
+        messages={messages}
+        beforeItems={beforeItems}
+        showBeginningMarker={false}
+        isLoading={false}
+        error={null}
+        onRetry={onRetry}
+        hasMore={false}
+        isLoadingMore={false}
+        loadMoreError={null}
+        onLoadMore={() => {}}
+        members={members}
+        onCompleteThoughtFromCard={onCompleteThoughtFromCard}
+      />
+      <ScopedConversationInput
+        placeholder={node ? `输入 ${node.title} 的探索消息...` : '输入 thought 探索消息...'}
+        onSubmit={onSubmit}
+      />
+    </div>
+  );
+}
+
+function ThoughtChatBubble({ author, time, text }: { author: string; time: string; text: string }) {
+  return (
+    <article className="flex gap-3 border-b border-brutal-muted px-2 py-3">
+      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm">
+        <span className="font-heading text-xs font-black">S</span>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-baseline gap-2">
+          <span className="font-heading text-sm font-black">{author}</span>
+          <time className="font-mono text-[11px] text-muted-foreground">
+            {new Date(time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+          </time>
+        </div>
+        <p className="whitespace-pre-wrap break-words font-body text-sm leading-6 text-foreground">{text}</p>
+      </div>
+    </article>
+  );
+}
+
+function TaskContextCard({ task }: { task: Task }) {
+  return (
+    <section className="border-2 border-black bg-white p-4 shadow-brutal-sm">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate font-heading text-sm font-black">
+            {task.task_number ? `#${task.task_number} ` : ''}{task.title}
+          </div>
+          <div className="mt-1 inline-flex border-2 border-black bg-brutal-info-light px-2 py-0.5 font-mono text-[10px] font-bold uppercase">
+            {task.status.replace('_', ' ')}
+          </div>
+        </div>
+        {task.claimer_name || task.assignee_name ? (
+          <div className="shrink-0 border-2 border-black bg-brutal-cream px-2 py-1 font-mono text-[10px] font-bold">
+            {task.claimer_name || task.assignee_name}
+          </div>
+        ) : null}
+      </div>
+      {task.description ? (
+        <p className="whitespace-pre-wrap font-body text-sm leading-6 text-foreground">
+          {task.description}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function TaskConversationPanel({
+  task,
+  cardMessages,
+  members,
+  onRetry,
+  onViewTaskGraph,
+  onTaskReviewAction,
+  onSubmitFallback,
+}: {
+  task: Task | null;
+  parentMessage: Message | null;
+  cardMessages: Message[];
+  members: ChannelMember[];
+  onRetry: (messageId: string, content: string) => void;
+  onClose: () => void;
+  onMarkRead: () => void;
+  onViewInChannel: () => void;
+  onViewTaskGraph: () => void;
+  onTaskReviewAction: () => Promise<void> | void;
+  onOpenArtifactReference: (ref: string) => void;
+  onAgentClick: (agent: AgentDetailTarget) => void;
+  onSubmitFallback: (content: string) => void;
+}) {
+  if (!task) {
+    return (
+      <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream">
+        <MessageList
+          messages={cardMessages}
+          beforeItems={(
+            <div role="listitem" className="px-6">
+              <EmptyWorkspacePanel title="Task conversation" body="Select a task node to open its thread." />
+            </div>
+          )}
+          showBeginningMarker={false}
+          isLoading={false}
+          error={null}
+          onRetry={onRetry}
+          hasMore={false}
+          isLoadingMore={false}
+          loadMoreError={null}
+          onLoadMore={() => {}}
+          members={members}
+          onTaskReviewAction={onTaskReviewAction}
+          onViewTaskGraph={onViewTaskGraph}
+        />
+        <ScopedConversationInput
+          placeholder="选中 task 后可在 thread 中讨论..."
+          onSubmit={onSubmitFallback}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream">
+      <MessageList
+        messages={cardMessages}
+        beforeItems={(
+          <div role="listitem" className="px-6">
+            <TaskContextCard task={task} />
+          </div>
+        )}
+        showBeginningMarker={false}
+        isLoading={false}
+        error={null}
+        onRetry={onRetry}
+        hasMore={false}
+        isLoadingMore={false}
+        loadMoreError={null}
+        onLoadMore={() => {}}
+        members={members}
+        onTaskReviewAction={onTaskReviewAction}
+      />
+      <ScopedConversationInput
+        placeholder={`输入 ${task.title} 的 task 讨论...`}
+        onSubmit={onSubmitFallback}
+      />
+    </div>
+  );
+}
+
+function taskArtifactToRecord(artifact: TaskArtifact): ContextRecord {
+  return {
+    id: artifact.id,
+    channel_id: artifact.channel_id,
+    scope: 'task',
+    subject_type: 'task',
+    subject_id: artifact.task_id,
+    record_type: 'artifact',
+    title: artifact.title,
+    body: artifact.summary && artifact.summary !== 'pending'
+      ? artifact.summary
+      : artifact.html_path,
+    author_type: 'system',
+    artifact_ref: {
+      id: artifact.id,
+      title: artifact.title,
+      kind: artifact.kind,
+      url: artifact.url,
+    },
+    created_at: artifact.created_at,
+  };
+}
+
+function EmptyWorkspacePanel({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="flex min-h-[240px] flex-col items-center justify-center border-2 border-dashed border-black bg-white p-6 text-center">
+      <div className="mb-3 flex h-10 w-10 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm">
+        <MessageSquare className="h-5 w-5" />
+      </div>
+      <h3 className="font-heading text-base font-black text-foreground">{title}</h3>
+      <p className="mt-2 max-w-xs font-body text-sm text-muted-foreground">{body}</p>
+    </div>
+  );
+}
 
 
 interface ChannelViewProps {
@@ -53,22 +1089,8 @@ interface ChannelViewProps {
   initialThreadMessageId?: string;
   /** Optional message ID to scroll to on mount */
   initialScrollToMessageId?: string;
-  /** v1.5: Called when thread opens/closes so the parent can sync to URL */
-  onThreadChange?: (threadId: string | null) => void;
-  /** SOLO-island PR3: whether the right-side AgentViewPanel is visible. */
-  agentViewVisible?: boolean;
-  /** SOLO-island PR3: toggle the AgentViewPanel. Called with `true` to
-   * open, `false` to close. */
-  onAgentViewVisibleChange?: (visible: boolean) => void;
-  /** SOLO-island PR3: width of the AgentViewPanel (controlled by parent
-   * so it can outlive unmounts). */
-  agentViewWidth?: number;
-  /** SOLO-island PR3: called when the user drags the panel's resize
-   * handle. Parent should persist the new width. */
-  onAgentViewWidthChange?: (width: number) => void;
-  /** SOLO-island PR3: when set, the panel scrolls/highlights this agent
-   * (driven by AgentIsland's "查看完整 trace" action). */
-  agentViewFocusedAgentId?: string | null;
+  /** Called after a card creates a channel so the sidebar can refresh. */
+  onChannelCreated?: () => Promise<void> | void;
 }
 
 export function ChannelView({
@@ -76,15 +1098,11 @@ export function ChannelView({
   showOnboardingWizard,
   initialThreadMessageId,
   initialScrollToMessageId,
-  onThreadChange,
-  agentViewVisible,
-  onAgentViewVisibleChange,
-  agentViewWidth,
-  onAgentViewWidthChange,
-  agentViewFocusedAgentId,
+  onChannelCreated,
 }: ChannelViewProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const dashboardUrlState = useMemo(() => parseDashboardParams(searchParams), [searchParams]);
   const {
     messages,
     isLoading,
@@ -96,6 +1114,7 @@ export function ChannelView({
     isLoadingMore,
     loadMoreError,
     loadMore,
+    refetch: refetchMessages,
     markMessageThreadRead,
   } = useMessages(channel.id);
 
@@ -115,21 +1134,20 @@ export function ChannelView({
 
   const [threadMessage, setThreadMessage] = useState<Message | null>(null);
   const [isAddAgentModalOpen, setIsAddAgentModalOpen] = useState(false);
-  const [selectedAgentDetail, setSelectedAgentDetail] = useState<AgentDetailTarget | null>(null);
+  const [workspaceDetail, setWorkspaceDetail] = useState<WorkspaceDetail | null>(null);
+  const [mainPanel, setMainPanel] = useState<'thread' | 'detail' | 'thought' | null>(
+    dashboardUrlState.panel === 'thread'
+      ? 'thread'
+      : dashboardUrlState.panel === 'agent' || dashboardUrlState.panel === 'relationship'
+        ? 'detail'
+        : dashboardUrlState.panel === 'thought'
+          ? 'thought'
+          : null,
+  );
   const [threadTask, setThreadTask] = useState<Task | null>(null);
   const [artifactPreview, setArtifactPreview] = useState<ArtifactPreview | null>(null);
   const [artifactHistory, setArtifactHistory] = useState<TaskArtifact[]>([]);
   const [artifactReviewBusy, setArtifactReviewBusy] = useState(false);
-  const [activeRightPanel, setActiveRightPanel] = useState<'thread' | 'agent' | null>(null);
-  const rightPanelOpen = activeRightPanel !== null;
-
-  // ---- Thread panel width ----
-  const [threadPanelWidth, setThreadPanelWidth] = useState(400);
-
-  // ---- Tasks tab state (SOLO-128-F) ----
-  const [channelViewTab, setChannelViewTab] = useState<'messages' | 'tasks'>(
-    searchParams.get('tab') === 'tasks' ? 'tasks' : 'messages',
-  );
 
   // ---- Channel search state (SOLO-237-F) ----
   const [scrollToMessageId, setScrollToMessageId] = useState<string | undefined>(undefined);
@@ -264,9 +1282,30 @@ export function ChannelView({
   }, [artifactPreview, closeArtifactPreview]);
 
   const openAgentDetail = useCallback((agent: AgentDetailTarget) => {
-    setSelectedAgentDetail(agent);
-    setActiveRightPanel('agent');
-  }, []);
+    setWorkspaceDetail({ relationship: null, agent });
+    setMainPanel('detail');
+    router.push(buildDashboardHref(channel.id, {
+      ...dashboardUrlState,
+      panel: 'agent',
+      agentId: agent.id,
+      relationshipId: null,
+      threadId: null,
+      messageId: null,
+    }));
+  }, [channel.id, dashboardUrlState, router]);
+
+  const openWorkspaceDetail = useCallback((detail: WorkspaceDetail) => {
+    setWorkspaceDetail(detail);
+    setMainPanel('detail');
+    router.push(buildDashboardHref(channel.id, {
+      ...dashboardUrlState,
+      panel: detail.relationship ? 'relationship' : 'agent',
+      agentId: detail.agent?.id ?? null,
+      relationshipId: detail.relationship?.id ?? null,
+      threadId: null,
+      messageId: null,
+    }));
+  }, [channel.id, dashboardUrlState, router]);
 
   const {
     tasks: channelTasks,
@@ -276,89 +1315,282 @@ export function ChannelView({
     refetch: refetchTasks,
   } = useTasks({ channel_id: channel.id });
 
-  const [taskFilterAssignee, setTaskFilterAssignee] = useState('');
-  const [taskFilterCreator, setTaskFilterCreator] = useState('');
-  const [taskFilterNumber, setTaskFilterNumber] = useState('');
+  const {
+    context: channelContext,
+    team: channelTeam,
+    isLoading: workspaceLoading,
+    error: workspaceError,
+    refetch: refetchWorkspace,
+  } = useChannelWorkspace(channel.id);
 
-  useEffect(() => {
-    if (searchParams.get('channel') !== channel.id) return;
-    setChannelViewTab(searchParams.get('tab') === 'tasks' ? 'tasks' : 'messages');
-    setTaskFilterAssignee(searchParams.get('assignee') || '');
-    setTaskFilterCreator(searchParams.get('creator') || '');
-    setTaskFilterNumber(searchParams.get('task') || '');
-  }, [channel.id, searchParams]);
+  const {
+    thoughts,
+    activeThought,
+    isLoading: thoughtsLoading,
+    error: thoughtsError,
+    refetch: refetchThoughts,
+    completeThought,
+    requestThoughtReview,
+  } = useThoughts(channel.id);
 
-  const pushDashboardTaskUrl = useCallback(
-    (next: { tab?: 'messages' | 'tasks'; assignee?: string; creator?: string; task?: string }) => {
-      const params = new URLSearchParams(searchParams.toString());
-      params.set('channel', channel.id);
-      const tab = next.tab ?? channelViewTab;
-      if (tab === 'tasks') params.set('tab', 'tasks');
-      else params.delete('tab');
-      const assignee = next.assignee ?? taskFilterAssignee;
-      const creator = next.creator ?? taskFilterCreator;
-      const task = next.task ?? taskFilterNumber;
-      if (assignee) params.set('assignee', assignee);
-      else params.delete('assignee');
-      if (creator) params.set('creator', creator);
-      else params.delete('creator');
-      if (task) params.set('task', task);
-      else params.delete('task');
-      router.push(`/dashboard?${params.toString()}`);
+  const workspaceScope = panelToWorkspaceScope(dashboardUrlState.panel, dashboardUrlState.view);
+  const workspaceLeftTab = coerceLeftTab(workspaceScope, panelToLeftTab(dashboardUrlState.panel));
+  const workspacePanelTab = viewToWorkspacePanelTab(dashboardUrlState.view);
+  const workspaceRightMode = viewToRightMode(dashboardUrlState.view) ?? defaultRightMode(workspacePanelTab);
+  const workspaceLeftTabs = SCOPE_LEFT_TABS[workspaceScope];
+  const scopedMessageScope = useMemo<MessageScopeOptions>(() => {
+    if (workspaceScope === 'thought') return { workspaceScope: 'thought' };
+    if (workspaceScope === 'task') return { workspaceScope: 'task' };
+    return { workspaceScope: 'channel' };
+  }, [workspaceScope]);
+  const scopedMessages = useMessages(channel.id, scopedMessageScope);
+
+  const selectedTask = useMemo(() => {
+    if (dashboardUrlState.taskId) {
+      return channelTasks.find((task) => task.id === dashboardUrlState.taskId) ?? null;
+    }
+    return channelTasks.find((task) => !task.parent_task_id) ?? channelTasks[0] ?? null;
+  }, [channelTasks, dashboardUrlState.taskId]);
+
+  const selectedThoughtNode = useMemo(() => {
+    if (!activeThought) return null;
+    const nodeParam = dashboardUrlState.nodeId;
+    if (!nodeParam) return activeThought.nodes.find((node) => node.is_root) ?? null;
+    return activeThought.nodes.find((node) => node.id === nodeParam || node.title.toLowerCase() === nodeParam.toLowerCase()) ?? null;
+  }, [activeThought, dashboardUrlState.nodeId]);
+
+  const selectedTaskParentMessage = useMemo((): Message | null => {
+    if (!selectedTask?.message_id) return null;
+    const existing = messages.find((message) => message.id === selectedTask.message_id);
+    if (existing) return { ...existing, display_name: selectedTask.creator_name || existing.display_name };
+    return {
+      id: selectedTask.message_id,
+      channel_id: channel.id,
+      user_id: selectedTask.creator_id,
+      display_name: selectedTask.creator_name || selectedTask.creator_id.slice(0, 8),
+      content: selectedTask.description || selectedTask.title,
+      created_at: selectedTask.created_at,
+      status: 'sent',
+      sender_type: 'user',
+      task_number: selectedTask.task_number,
+      task_status: selectedTask.status,
+      task_claimer_name: selectedTask.claimer_name || selectedTask.assignee_name,
+    };
+  }, [channel.id, messages, selectedTask]);
+
+  const thoughtConversationMessages = useMemo(() => (
+    scopedMessages.messages.filter((message) => {
+      if (message.content_type === 'card.thought_review') {
+        const payload = parseMessageCardPayload<{ thought_id?: string }>(message);
+        return (!selectedThoughtNode || selectedThoughtNode.is_root)
+          && (!activeThought?.id || payload?.thought_id === activeThought.id);
+      }
+      if (message.content_type && message.content_type !== 'text') return false;
+      return !selectedThoughtNode?.id || message.subject_id === selectedThoughtNode.id;
+    })
+  ), [activeThought?.id, scopedMessages.messages, selectedThoughtNode?.id, selectedThoughtNode?.is_root]);
+
+  const taskConversationMessages = useMemo(() => (
+    scopedMessages.messages.filter((message) => {
+      if (message.content_type === 'card.task_review') {
+        const payload = parseMessageCardPayload<{ task_id?: string }>(message);
+        return !selectedTask?.id || payload?.task_id === selectedTask.id;
+      }
+      if (message.content_type === 'card.tasks_created') {
+        return !selectedTask?.id || message.subject_id === selectedTask.id;
+      }
+      if (message.workspace_scope === 'task') {
+        return !selectedTask?.id || message.subject_id === selectedTask.id;
+      }
+      return false;
+    })
+  ), [scopedMessages.messages, selectedTask?.id]);
+
+  const workspaceTitle = useMemo(() => {
+    if (workspaceScope === 'thought') {
+      return [activeThought?.title ?? 'Thought', selectedThoughtNode?.title].filter(Boolean).join(' · ');
+    }
+    if (workspaceScope === 'task') {
+      return selectedTask?.title ?? 'Task';
+    }
+    return channel.name;
+  }, [activeThought?.title, channel.name, selectedTask?.title, selectedThoughtNode?.title, workspaceScope]);
+
+  const updateWorkspaceUrl = useCallback(
+    (patch: Partial<Omit<DashboardUrlState, 'channelId'>>) => {
+      router.push(buildDashboardHref(channel.id, { ...dashboardUrlState, ...patch }));
     },
-    [channel.id, channelViewTab, router, searchParams, taskFilterAssignee, taskFilterCreator, taskFilterNumber],
+    [channel.id, dashboardUrlState, router],
   );
 
-  const filteredChannelTasks = useMemo(
-    () => filterTaskTree(channelTasks, {
-      assignee: taskFilterAssignee,
-      creator: taskFilterCreator,
-      taskNumber: taskFilterNumber,
-    }),
-    [channelTasks, taskFilterAssignee, taskFilterCreator, taskFilterNumber],
-  );
-
-  const taskAssigneeOptions = useMemo(() => {
-    const seen = new Map<string, { id: string; name: string }>();
-    for (const task of channelTasks) {
-      const id = task.claimer_id || task.assignee_id;
-      const name = task.claimer_name || task.assignee_name || (id ? id.slice(0, 8) : '');
-      if (id && !seen.has(id)) seen.set(id, { id, name });
-    }
-    return Array.from(seen.values());
-  }, [channelTasks]);
-
-  const taskCreatorOptions = useMemo(() => {
-    const seen = new Map<string, { id: string; name: string }>();
-    for (const task of channelTasks) {
-      const name = task.creator_name || task.creator_id.slice(0, 8);
-      if (!seen.has(task.creator_id)) seen.set(task.creator_id, { id: task.creator_id, name });
-    }
-    return Array.from(seen.values());
-  }, [channelTasks]);
-
-  const taskNumberOptions = useMemo(() => {
-    return channelTasks
-      .filter((task) => task.task_number != null)
-      .sort((a, b) => (a.task_number ?? 0) - (b.task_number ?? 0))
-      .map((task) => ({
-        value: String(task.task_number),
-        label: `#${task.task_number} ${task.title}`,
-      }));
-  }, [channelTasks]);
-
-  const hasChannelTaskFilters = !!(taskFilterAssignee || taskFilterCreator || taskFilterNumber);
-  const clearChannelTaskFilters = useCallback(() => {
-    setTaskFilterAssignee('');
-    setTaskFilterCreator('');
-    setTaskFilterNumber('');
-    pushDashboardTaskUrl({ tab: 'tasks', assignee: '', creator: '', task: '' });
-  }, [pushDashboardTaskUrl]);
-
-  // Refetch tasks when switching to tasks tab
   useEffect(() => {
-    if (channelViewTab === 'tasks') refetchTasks();
-  }, [channelViewTab]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (dashboardUrlState.panel === 'thread' || dashboardUrlState.panel === 'agent' || dashboardUrlState.panel === 'relationship') {
+      return;
+    }
+    if (dashboardUrlState.panel === 'thought') {
+      setMainPanel('thought');
+      return;
+    }
+    setThreadMessage(null);
+    setThreadTask(null);
+    setWorkspaceDetail(null);
+    setMainPanel(null);
+  }, [dashboardUrlState.panel]);
+
+  useEffect(() => {
+    if (dashboardUrlState.panel === 'agent') {
+      const memberAgent = agents.find((agent) => agent.member_id === dashboardUrlState.agentId);
+      const teamAgent = channelTeam?.agents.find((agent) => agent.id === dashboardUrlState.agentId);
+      const agent = teamAgent
+        ? { id: teamAgent.id, name: teamAgent.name, is_active: teamAgent.status !== 'offline' }
+        : memberAgent
+          ? { id: memberAgent.member_id, name: memberAgent.display_name, is_active: memberAgent.status !== 'offline' }
+          : null;
+      if (!agent) return;
+      setWorkspaceDetail({ relationship: null, agent });
+      setMainPanel('detail');
+      return;
+    }
+
+    if (dashboardUrlState.panel === 'relationship') {
+      const relationship = channelTeam?.relationships.find((item) => item.id === dashboardUrlState.relationshipId);
+      if (!relationship?.id) return;
+      const agentsById = new Map((channelTeam?.agents ?? []).map((agent) => [agent.id, agent]));
+      const fromAgent = agentsById.get(relationship.from_agent_id);
+      const toAgent = agentsById.get(relationship.to_agent_id);
+      setWorkspaceDetail({
+        relationship: {
+          id: relationship.id,
+          from_agent_id: relationship.from_agent_id,
+          from_agent_name: fromAgent?.name,
+          from_agent_active: fromAgent?.status !== 'offline',
+          to_agent_id: relationship.to_agent_id,
+          to_agent_name: toAgent?.name,
+          to_agent_active: toAgent?.status !== 'offline',
+          rel_type: relationship.rel_type === 'collaborates_with' ? 'collaborates_with' : 'assigns_to',
+          channel_id: channel.id,
+        },
+        agent: null,
+      });
+      setMainPanel('detail');
+    }
+  }, [
+    agents,
+    channel.id,
+    channelTeam?.agents,
+    channelTeam?.relationships,
+    dashboardUrlState.agentId,
+    dashboardUrlState.panel,
+    dashboardUrlState.relationshipId,
+  ]);
+
+  const setWorkspacePanelTab = useCallback(
+    (tab: WorkspacePanelTab) => {
+      setThreadMessage(null);
+      setThreadTask(null);
+      setWorkspaceDetail(null);
+      setMainPanel(null);
+      updateWorkspaceUrl({
+        view: tabToView(tab),
+        panel: 'conversation',
+        taskId: tab === 'task' ? dashboardUrlState.taskId : null,
+        threadId: null,
+        nodeId: tab === 'thought' ? dashboardUrlState.nodeId : null,
+        messageId: null,
+      });
+    },
+    [dashboardUrlState.nodeId, dashboardUrlState.taskId, updateWorkspaceUrl],
+  );
+
+  const setWorkspaceRightMode = useCallback(
+    (mode: RightMode) => {
+      if (workspacePanelTab === 'thought') {
+        updateWorkspaceUrl({
+          view: mode === 'board' ? 'thought.board' : 'thought.map',
+          nodeId: mode === 'board' ? null : dashboardUrlState.nodeId,
+        });
+        return;
+      }
+      if (workspacePanelTab === 'task') {
+        updateWorkspaceUrl({
+          view: mode === 'graph' ? 'task.graph' : 'task.board',
+          taskId: mode === 'graph' ? dashboardUrlState.taskId : null,
+        });
+        return;
+      }
+    },
+    [dashboardUrlState.nodeId, dashboardUrlState.taskId, updateWorkspaceUrl, workspacePanelTab],
+  );
+
+  const [taskArtifactRecords, setTaskArtifactRecords] = useState<ContextRecord[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (
+      workspaceScope !== 'task' ||
+      workspaceLeftTab !== 'artifact' ||
+      !selectedTask ||
+      selectedTask.artifact_status !== 'available'
+    ) {
+      setTaskArtifactRecords([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+    listArtifacts(selectedTask.id)
+      .then((artifacts) => {
+        if (!cancelled) setTaskArtifactRecords(artifacts.map(taskArtifactToRecord));
+      })
+      .catch(() => {
+        if (!cancelled) setTaskArtifactRecords([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [listArtifacts, selectedTask, workspaceLeftTab, workspaceScope]);
+
+  const leftRecordView = useMemo((): { title: string; records: ContextRecord[] } => {
+    if (workspaceScope === 'thought') {
+      const scopedRecords = (records: ContextRecord[]) => selectedThoughtNode?.is_root
+        ? records
+        : records.filter((record) => record.subject_id === selectedThoughtNode?.id);
+      if (workspaceLeftTab === 'insight') {
+        return { title: 'Thought 洞察', records: scopedRecords(activeThought?.insight_records ?? []) };
+      }
+      if (workspaceLeftTab === 'artifact') {
+        return { title: 'Thought 产物', records: scopedRecords(activeThought?.artifact_records ?? []) };
+      }
+      return { title: 'Thought 摘要', records: scopedRecords(activeThought?.summary_records ?? []) };
+    }
+    if (workspaceScope === 'task') {
+      if (workspaceLeftTab === 'artifact') {
+        return { title: 'Task 产物', records: taskArtifactRecords };
+      }
+      return {
+        title: 'Task 摘要',
+        records: (channelContext?.latest_summary_records ?? []).filter((record) => record.subject_type === 'task'),
+      };
+    }
+    return {
+      title: 'Channel 摘要',
+      records: channelContext?.latest_summary_records ?? [],
+    };
+  }, [
+    activeThought?.artifact_records,
+    activeThought?.insight_records,
+    activeThought?.summary_records,
+    channelContext?.latest_summary_records,
+    selectedThoughtNode?.id,
+    selectedThoughtNode?.is_root,
+    taskArtifactRecords,
+    workspaceLeftTab,
+    workspaceScope,
+  ]);
+
+  // Refetch tasks when opening the right-side task workspace.
+  useEffect(() => {
+    if (workspacePanelTab === 'task') refetchTasks();
+  }, [refetchTasks, workspacePanelTab]);
 
   // ---- Agent member status tracking (SOLO-47-F) ----
   // SOLO-island PR2: removed thinkingAgentNames/typingAgentNames state and
@@ -451,19 +1683,19 @@ export function ChannelView({
 
   // ---- Handle initialThreadMessageId: watch messages list for the target ----
   useEffect(() => {
-    if (!initialThreadMessageId || !channel) return;
+    if (dashboardUrlState.panel !== 'thread' || !initialThreadMessageId || !channel) return;
 
     // Check if the message is already in the loaded list
     const found = messages.find((m) => m.id === initialThreadMessageId);
     if (found) {
+      const task = channelTasks.find((t) => t.message_id === initialThreadMessageId) ?? null;
       setThreadMessage(found);
-      setActiveRightPanel('thread');
-      // Try to find the associated task for the metadata bar
-      const task = channelTasks.find((t) => t.message_id === initialThreadMessageId);
-      if (task) setThreadTask(task);
+      setThreadTask(task);
+      setWorkspaceDetail(null);
+      setMainPanel('thread');
     }
     // If not found yet, it will be caught when messages load (via the next effect)
-  }, [initialThreadMessageId, channel, messages, channelTasks]);
+  }, [dashboardUrlState.panel, initialThreadMessageId, channel, messages, channelTasks]);
 
   // Handle initialScrollToMessageId: scroll to a specific message on mount or URL change.
   // Waits for isLoading to become false so the message DOM exists.
@@ -495,6 +1727,14 @@ export function ChannelView({
   const handleTaskClickInTab = useCallback(
     (task: Task) => {
       if (!task.message_id) return;
+      const openTaskGraph = () => updateWorkspaceUrl({
+        view: 'task.graph',
+        panel: 'thread',
+        taskId: task.id,
+        threadId: task.message_id!,
+        messageId: null,
+        nodeId: null,
+      });
 
       // Find message in the already-loaded channel messages
       const existingMsg = messages.find((m) => m.id === task.message_id);
@@ -504,8 +1744,9 @@ export function ChannelView({
           display_name: task.creator_name || existingMsg.display_name,
         });
         setThreadTask(task);
-        setActiveRightPanel('thread');
-        onThreadChange?.(task.message_id);
+        setWorkspaceDetail(null);
+        setMainPanel('thread');
+        openTaskGraph();
         return;
       }
 
@@ -525,34 +1766,73 @@ export function ChannelView({
         task_status: task.status,
         task_claimer_name: task.claimer_name || task.assignee_name,
       });
-      setActiveRightPanel('thread');
-      onThreadChange?.(task.message_id);
+      setWorkspaceDetail(null);
+      setMainPanel('thread');
+      openTaskGraph();
     },
-    [channel.id, messages, onThreadChange],
+    [channel.id, messages, updateWorkspaceUrl],
   );
+
+  const handleThoughtNodeSelect = useCallback((nodeId: string) => {
+    setThreadMessage(null);
+    setThreadTask(null);
+    setWorkspaceDetail(null);
+    setMainPanel('thought');
+    updateWorkspaceUrl({
+      view: workspaceRightMode === 'board' ? 'thought.board' : 'thought.map',
+      panel: 'thought',
+      nodeId,
+      taskId: null,
+      threadId: null,
+      messageId: null,
+    });
+  }, [updateWorkspaceUrl, workspaceRightMode]);
+
+  const handleTaskNodeSelect = useCallback((task: Task) => {
+    handleTaskClickInTab(task);
+  }, [handleTaskClickInTab]);
 
   const handleThreadClose = useCallback(() => {
     setThreadMessage(null);
     setThreadTask(null);
-    onThreadChange?.(null);
-    setActiveRightPanel(selectedAgentDetail ? 'agent' : null);
-  }, [onThreadChange, selectedAgentDetail]);
+    setMainPanel(null);
+    updateWorkspaceUrl({ panel: 'conversation', threadId: null });
+  }, [updateWorkspaceUrl]);
 
   const handleAgentDetailClose = useCallback(() => {
-    setSelectedAgentDetail(null);
-    setActiveRightPanel(threadMessage ? 'thread' : null);
+    setWorkspaceDetail(null);
+    setMainPanel(threadMessage ? 'thread' : null);
   }, [threadMessage]);
+
+  const handleAgentDeleted = useCallback(() => {
+    handleAgentDetailClose();
+    void refetchWorkspace();
+  }, [handleAgentDetailClose, refetchWorkspace]);
+
+  const handleRemoveAgentFromChannel = useCallback(async (memberId: string) => {
+    await removeMember('agent', memberId);
+    await refetchWorkspace();
+  }, [refetchWorkspace, removeMember]);
 
   // v1.5: Wrap onReply to also sync thread state to URL + pull latest task data
   const handleReply = useCallback(
     (message: Message) => {
+      const task = channelTasks.find((item) => item.message_id === message.id) ?? null;
       refetchTasks();
-      setThreadTask(null);
+      setThreadTask(task);
       setThreadMessage(message);
-      setActiveRightPanel('thread');
-      onThreadChange?.(message.id);
+      setWorkspaceDetail(null);
+      setMainPanel('thread');
+      updateWorkspaceUrl({
+        view: 'task.graph',
+        panel: 'thread',
+        taskId: task?.id ?? null,
+        threadId: message.id,
+        messageId: null,
+        nodeId: null,
+      });
     },
-    [refetchTasks, onThreadChange],
+    [channelTasks, refetchTasks, updateWorkspaceUrl],
   );
 
   // P25-08-F: Called by ThreadPanel after successfully marking thread as read
@@ -564,19 +1844,26 @@ export function ChannelView({
 
   const handleViewThreadInChannel = useCallback(() => {
     if (!threadMessage) return;
-    setChannelViewTab('messages');
     setScrollToMessageId(threadMessage.id);
     setScrollMsgKey((k) => k + 1);
-    router.push(`/dashboard?channel=${channel.id}&message=${threadMessage.id}`);
-  }, [channel.id, router, threadMessage]);
+    updateWorkspaceUrl({
+      panel: 'conversation',
+      threadId: null,
+      messageId: threadMessage.id,
+    });
+  }, [threadMessage, updateWorkspaceUrl]);
 
   const handleViewThreadTask = useCallback(() => {
     const taskNumber = threadTask?.task_number ?? threadMessage?.task_number;
     if (!threadMessage || taskNumber == null) return;
-    setChannelViewTab('tasks');
-    setTaskFilterNumber(String(taskNumber));
-    router.push(`/dashboard?channel=${channel.id}&tab=tasks&task=${taskNumber}&thread=${threadMessage.id}`);
-  }, [channel.id, router, threadMessage, threadTask]);
+    updateWorkspaceUrl({
+      view: 'task.graph',
+      panel: 'thread',
+      taskId: threadTask?.id ?? null,
+      nodeId: null,
+      threadId: threadMessage.id,
+    });
+  }, [threadMessage, threadTask, updateWorkspaceUrl]);
 
   const existingAgentIds = agents.map((a) => a.member_id);
   const canAddAgents = !channel.name.startsWith('all-');
@@ -600,6 +1887,100 @@ export function ChannelView({
     },
     [convertMessageToTask, showToast],
   );
+
+  const handleCreateChannelFromCard = useCallback(
+    async (message: Message, input: { channel_name: string; template: string }) => {
+      try {
+        const created = await apiClient.post<{ id: string }>(
+          `/api/v1/channels/${channel.id}/messages/${message.id}/create-channel`,
+          input,
+        );
+        await onChannelCreated?.();
+        router.push(`/dashboard?channel=${created.id}`);
+      } catch {
+        showToast('Could not create channel from card.', 'error');
+      }
+    },
+    [channel.id, onChannelCreated, router, showToast],
+  );
+
+  const handleStartWorkFromCard = useCallback(
+    async (message: Message) => {
+      try {
+        await apiClient.post(`/api/v1/channels/${channel.id}/tasks/from-context`, {
+          source_message_id: message.id,
+        });
+        setWorkspacePanelTab('task');
+        await refetchMessages();
+        await refetchTasks();
+      } catch {
+        showToast('Could not create tasks from context.', 'error');
+      }
+    },
+    [channel.id, refetchMessages, refetchTasks, setWorkspacePanelTab, showToast],
+  );
+
+  const handleRequestThoughtReview = useCallback(
+    async (thoughtId: string) => {
+      try {
+        await requestThoughtReview(thoughtId);
+        await refetchMessages();
+        await scopedMessages.refetch();
+        await refetchThoughts();
+        updateWorkspaceUrl({ view: 'thought.map', panel: 'thought' });
+      } catch {
+        showToast('Could not request thought review.', 'error');
+      }
+    },
+    [refetchMessages, refetchThoughts, requestThoughtReview, scopedMessages, showToast, updateWorkspaceUrl],
+  );
+
+  const handleCompleteThoughtFromCard = useCallback(
+    async (message: Message, thoughtId: string) => {
+      try {
+        await completeThought(thoughtId, { message_id: message.id });
+        await apiClient.post(`/api/v1/channels/${channel.id}/tasks/from-context`, {
+          source_message_id: message.id,
+          source_thought_id: thoughtId,
+        });
+        setWorkspacePanelTab('task');
+        await refetchMessages();
+        await scopedMessages.refetch();
+        await refetchWorkspace();
+        await refetchThoughts();
+        await refetchTasks();
+      } catch {
+        showToast('Could not finish thought review.', 'error');
+      }
+    },
+    [channel.id, completeThought, refetchMessages, refetchTasks, refetchThoughts, refetchWorkspace, scopedMessages, setWorkspacePanelTab, showToast],
+  );
+
+  const handleTaskReviewAction = useCallback(async () => {
+    setWorkspacePanelTab('task');
+    await refetchMessages();
+    await scopedMessages.refetch();
+    await refetchTasks();
+    await refetchWorkspace();
+  }, [refetchMessages, refetchTasks, refetchWorkspace, scopedMessages, setWorkspacePanelTab]);
+
+  const handleThoughtConversationSubmit = useCallback((content: string) => {
+    if (!selectedThoughtNode) return;
+    void scopedMessages.sendMessage(content, undefined, false, undefined, {
+      workspaceScope: 'thought',
+      subjectType: 'thought_node',
+      subjectId: selectedThoughtNode.id,
+    });
+  }, [scopedMessages, selectedThoughtNode]);
+
+  const handleTaskConversationSubmit = useCallback((content: string) => {
+    if (!selectedTask) return;
+    void scopedMessages.sendMessage(content, undefined, false, undefined, {
+      workspaceScope: 'task',
+      subjectType: 'task',
+      subjectId: selectedTask.id,
+    });
+  }, [scopedMessages, selectedTask]);
 
   const handleTaskActionComplete = useCallback((updated: Task) => {
     setThreadTask((prev) => (prev?.id === updated.id ? updated : prev));
@@ -694,87 +2075,136 @@ export function ChannelView({
   // SOLO-island PR2: removed agentActivities aggregation — the
   // TypingIndicator it fed is now replaced by AgentIsland, which
   // subscribes to agent.activity events directly.
+  const leftHeaderLabel = mainPanel === 'thread'
+    ? t('thread')
+    : mainPanel === 'detail'
+      ? (workspaceDetail?.agent ? t('agentDetailTitle') : t('relationshipEditorEdgeDetail'))
+      : mainPanel === 'thought'
+        ? 'Thought'
+        : workspaceScope;
+  const leftHeaderTitle = mainPanel === 'thread'
+    ? (threadTask?.title ?? threadMessage?.content.slice(0, 80) ?? t('thread'))
+    : mainPanel === 'detail'
+      ? (workspaceDetail?.agent?.name ?? t('relationshipEditorEdgeDetail'))
+      : mainPanel === 'thought'
+        ? (selectedThoughtNode?.title ?? activeThought?.title ?? 'Thought')
+        : workspaceTitle;
+  const showOuterHeader = mainPanel !== 'thread' && mainPanel !== 'detail';
 
   return (
     <div className="flex flex-1 overflow-hidden">
       {/* Left: message area */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Channel header */}
-        <div className="flex h-14 flex-shrink-0 items-center border-b-2 border-black px-4">
+        {showOuterHeader && (
+        <div className="sidebar-collapse-offset flex h-14 flex-shrink-0 items-center border-b-2 border-black px-4">
           <div className="flex items-center gap-2 flex-1 min-w-0">
-            <span className="font-mono text-base font-bold text-black flex-shrink-0">#</span>
-            <h2 className="font-bold text-foreground truncate">{channel.name}</h2>
-            <div className="mx-2 h-4 w-px bg-border flex-shrink-0" />
-            {/* Channel tab bar (SOLO-128-F) */}
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setChannelViewTab('messages');
-                  pushDashboardTaskUrl({ tab: 'messages', assignee: '', creator: '', task: '' });
-                }}
-                className={tabButtonClass(channelViewTab === 'messages')}
-              >
-                <MessageSquare className="h-3.5 w-3.5" />
-                {t('messages')}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setChannelViewTab('tasks');
-                  pushDashboardTaskUrl({ tab: 'tasks' });
-                }}
-                className={tabButtonClass(channelViewTab === 'tasks')}
-              >
-                <SquareCheckBig className="h-3.5 w-3.5" />
-                {t('tasks')}
-              </button>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground flex-shrink-0">
-            {canAddAgents && (
-              <Button
-                type="button"
-                onClick={() => setIsAddAgentModalOpen(true)}
-                variant="outline"
-                size="sm"
-                className="h-8 w-8 p-0"
-                aria-label={t('addAgentToChannel')}
-                title={t('addAgentToChannel')}
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
+            <span className="font-mono text-[10px] font-black uppercase text-muted-foreground flex-shrink-0">
+              {leftHeaderLabel}
+            </span>
+            <h2 className="font-bold text-foreground truncate">{leftHeaderTitle}</h2>
+            {!mainPanel && (
+              <>
+                <div className="mx-2 h-4 w-px bg-border flex-shrink-0" />
+                <div className="flex items-center gap-1">
+                  {workspaceLeftTabs.map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => {
+                        updateWorkspaceUrl({ panel: tab.key as DashboardPanel, threadId: null });
+                      }}
+                      className={tabButtonClass(workspaceLeftTab === tab.key)}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
-            <Button
-              type="button"
-              onClick={() => setIsMemberPopoverOpen(true)}
-              variant="outline"
-              size="sm"
-              className="h-8 w-8 p-0"
-              aria-label={t('channelMembers')}
-              title={t('channelMembers')}
-            >
-              <Users className="h-4 w-4" />
-            </Button>
           </div>
         </div>
+        )}
 
-        {/* Messages tab (SOLO-128-F) */}
-        {channelViewTab === 'messages' && (
+        {mainPanel === 'detail' && workspaceDetail && (
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <RelationshipDetailPanel
+              relationship={workspaceDetail.relationship}
+              agent={workspaceDetail.agent}
+              onClose={handleAgentDetailClose}
+              onUpdate={() => {
+                void refetchWorkspace();
+              }}
+              onDelete={() => {
+                setWorkspaceDetail(null);
+                setMainPanel(null);
+                void refetchWorkspace();
+              }}
+              onAgentDeleted={handleAgentDeleted}
+              embedded
+            />
+          </div>
+        )}
+
+        {mainPanel === 'thread' && threadMessage && (
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              }
+            >
+              <ThreadPanel
+                parentMessage={threadMessage}
+                onClose={handleThreadClose}
+                members={members}
+                replyCount={threadMessage.reply_count ?? 0}
+                task={threadTask ?? undefined}
+                onMarkRead={handleThreadMarkRead}
+                onViewInChannel={handleViewThreadInChannel}
+                onViewTask={handleViewThreadTask}
+                onOpenArtifactReference={handleOpenArtifactReference}
+                onAgentClick={openAgentDetail}
+              />
+            </Suspense>
+          </div>
+        )}
+
+        {mainPanel === 'thought' && (
+          <ThoughtConversationPanel
+            thought={activeThought}
+            node={selectedThoughtNode}
+            messages={thoughtConversationMessages}
+            members={members}
+            onRetry={scopedMessages.retryMessage}
+            onCompleteThoughtFromCard={handleCompleteThoughtFromCard}
+            onSubmit={handleThoughtConversationSubmit}
+          />
+        )}
+
+        {!mainPanel && workspaceLeftTab === 'conversation' && workspaceScope === 'channel' && (
           <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream">
-            {showOnboardingWizard && (
-              <div className="px-4 pt-4">
-                <WizardCard channelId={channel.id} />
-              </div>
-            )}
             <MessageList
               messages={messages}
+              beforeItems={
+                showOnboardingWizard ? (
+                  <div role="listitem" className="px-6">
+                    <WizardCard channelId={channel.id} />
+                  </div>
+                ) : null
+              }
               isLoading={isLoading}
               error={error}
               onRetry={(id, content) => retryMessage(id, content)}
               onCancel={(id) => cancelMessage(id)}
               onReply={handleReply}
               onAsTask={handleAsTaskOpen}
+              onCreateChannelFromCard={handleCreateChannelFromCard}
+              onStartWorkFromCard={handleStartWorkFromCard}
+              onCompleteThoughtFromCard={handleCompleteThoughtFromCard}
+              onTaskReviewAction={handleTaskReviewAction}
+              onViewTaskGraph={() => setWorkspacePanelTab('task')}
               hasMore={hasMore}
               isLoadingMore={isLoadingMore}
               loadMoreError={loadMoreError}
@@ -791,7 +2221,14 @@ export function ChannelView({
                   const result = await sendMessage(content, _mentionedAgentIds, true, attachmentIds);
                   if (result && result.task_number !== undefined) {
                     showToast(t('taskCreatedToast', { n: result.task_number }), 'success');
-                    router.push(`/dashboard?channel=${channel.id}&tab=tasks&task=${result.task_number}&thread=${result.id}`);
+                    updateWorkspaceUrl({
+                      view: 'task.board',
+                      panel: 'thread',
+                      taskId: null,
+                      nodeId: null,
+                      threadId: result.id,
+                      messageId: null,
+                    });
                   }
                 } else {
                   const result = await sendMessage(content, _mentionedAgentIds, undefined, attachmentIds);
@@ -806,141 +2243,87 @@ export function ChannelView({
           </div>
         )}
 
-        {/* Tasks tab (SOLO-128-F) */}
-        {channelViewTab === 'tasks' && (
-          <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream">
-            <div className="border-b-2 border-black bg-brutal-cream px-4 py-3">
-              <div className="flex items-center gap-2">
-                <Select
-                  value={taskFilterAssignee}
-                  onChange={(value) => {
-                    setTaskFilterAssignee(value);
-                    pushDashboardTaskUrl({ tab: 'tasks', assignee: value });
-                  }}
-                  options={[
-                    { value: '', label: t('allAssignees') },
-                    ...taskAssigneeOptions.map((a) => ({ value: a.id, label: a.name })),
-                  ]}
-                  size="sm"
-                  className="w-36"
-                  aria-label={t('filterByClaimer')}
-                />
-                <Select
-                  value={taskFilterCreator}
-                  onChange={(value) => {
-                    setTaskFilterCreator(value);
-                    pushDashboardTaskUrl({ tab: 'tasks', creator: value });
-                  }}
-                  options={[
-                    { value: '', label: t('allCreators') },
-                    ...taskCreatorOptions.map((c) => ({ value: c.id, label: c.name })),
-                  ]}
-                  size="sm"
-                  className="w-36"
-                  aria-label={t('filterByCreator')}
-                />
-                <Select
-                  value={taskFilterNumber}
-                  onChange={(value) => {
-                    setTaskFilterNumber(value);
-                    pushDashboardTaskUrl({ tab: 'tasks', task: value });
-                  }}
-                  options={[
-                    { value: '', label: t('taskFilterAll') },
-                    ...taskNumberOptions,
-                  ]}
-                  size="sm"
-                  className="w-40"
-                  aria-label={t('taskFilterByNumber')}
-                />
-                {hasChannelTaskFilters && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={clearChannelTaskFilters}
-                    className="flex items-center gap-1"
-                  >
-                    <X className="h-3 w-3" />
-                    {t('clearFilter')}
-                  </Button>
-                )}
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto px-4 py-4">
-              <TaskBoard
-                tasks={filteredChannelTasks}
-                isLoading={tasksLoading}
-                error={tasksError}
-                onTaskClick={handleTaskClickInTab}
-                onRefetch={refetchTasks}
-                onActionComplete={handleTaskActionComplete}
-                onGenerateArtifact={handleGenerateArtifact}
-                isArtifactGenerating={(task) => isGeneratingTask(task.id)}
-              />
-            </div>
-          </div>
+        {!mainPanel && workspaceLeftTab === 'conversation' && workspaceScope === 'thought' && (
+          <ThoughtConversationPanel
+            thought={activeThought}
+            node={selectedThoughtNode}
+            messages={thoughtConversationMessages}
+            members={members}
+            onRetry={scopedMessages.retryMessage}
+            onCompleteThoughtFromCard={handleCompleteThoughtFromCard}
+            onSubmit={handleThoughtConversationSubmit}
+          />
         )}
+
+        {!mainPanel && workspaceLeftTab === 'conversation' && workspaceScope === 'task' && (
+          <TaskConversationPanel
+            task={selectedTask}
+            parentMessage={selectedTaskParentMessage}
+            cardMessages={taskConversationMessages}
+            members={members}
+            onRetry={retryMessage}
+            onClose={() => updateWorkspaceUrl({ view: 'overview', panel: 'conversation', taskId: null })}
+            onMarkRead={() => {
+              if (selectedTaskParentMessage) markMessageThreadRead(selectedTaskParentMessage.id);
+            }}
+            onViewInChannel={() => {
+              if (!selectedTaskParentMessage) return;
+              setScrollToMessageId(selectedTaskParentMessage.id);
+              setScrollMsgKey((k) => k + 1);
+              updateWorkspaceUrl({ view: 'overview', panel: 'conversation', taskId: null, messageId: selectedTaskParentMessage.id });
+            }}
+            onViewTaskGraph={() => setWorkspacePanelTab('task')}
+            onTaskReviewAction={handleTaskReviewAction}
+            onOpenArtifactReference={handleOpenArtifactReference}
+            onAgentClick={openAgentDetail}
+            onSubmitFallback={handleTaskConversationSubmit}
+          />
+        )}
+
+        {!mainPanel && workspaceLeftTab !== 'conversation' && (
+          <RecordTimelinePanel title={leftRecordView.title} records={leftRecordView.records} />
+        )}
+
       </div>
 
-      {/* Thread panel (lazy-loaded, SOLO-63-F) — always mounted for smooth width transition */}
+      {/* Right workspace */}
       <div
-        className="flex-shrink-0 bg-brutal-cream overflow-hidden relative transition-[width] duration-100 ease-linear border-l-2 border-transparent"
-        style={{ width: rightPanelOpen ? threadPanelWidth : 0, borderLeftColor: rightPanelOpen ? 'var(--color-border, #000)' : 'transparent' }}
+        className="relative w-1/2 flex-shrink-0 overflow-hidden border-l-2 border-black bg-brutal-cream"
       >
-        {/* Resize handle — only interactive when panel is open */}
-        {rightPanelOpen && (
-          <div
-            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-brutal-primary/50 transition-colors z-10"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              const startX = e.clientX;
-              const startWidth = threadPanelWidth;
-              const onMove = (ev: MouseEvent) => {
-                const newWidth = Math.max(280, Math.min(800, startWidth + startX - ev.clientX));
-                setThreadPanelWidth(newWidth);
-              };
-              const onUp = () => {
-                document.removeEventListener('mousemove', onMove);
-                document.removeEventListener('mouseup', onUp);
-              };
-              document.addEventListener('mousemove', onMove);
-              document.addEventListener('mouseup', onUp);
-            }}
-          />
-        )}
-        {activeRightPanel === 'thread' && threadMessage && (
-          <Suspense
-            fallback={
-              <div className="flex h-full items-center justify-center">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
-            }
-          >
-            <ThreadPanel
-              parentMessage={threadMessage}
-              onClose={handleThreadClose}
-              members={members}
-              replyCount={threadMessage.reply_count ?? 0}
-              task={threadTask ?? undefined}
-              onMarkRead={handleThreadMarkRead}
-              onViewInChannel={handleViewThreadInChannel}
-              onViewTask={handleViewThreadTask}
-              onOpenArtifactReference={handleOpenArtifactReference}
-              onAgentClick={openAgentDetail}
-            />
-          </Suspense>
-        )}
-        {activeRightPanel === 'agent' && selectedAgentDetail && (
-          <RelationshipDetailPanel
-            relationship={null}
-            agent={selectedAgentDetail}
-            onClose={handleAgentDetailClose}
-            onUpdate={() => {}}
-            onDelete={() => {}}
-            onAgentDeleted={handleAgentDetailClose}
-            embedded
-          />
-        )}
+        <ChannelWorkspacePanel
+          activeTab={workspacePanelTab}
+          mode={workspaceRightMode}
+          channelId={channel.id}
+          onTabChange={setWorkspacePanelTab}
+          onModeChange={setWorkspaceRightMode}
+          context={channelContext}
+          team={channelTeam}
+          tasks={channelTasks}
+          tasksLoading={tasksLoading}
+          tasksError={tasksError}
+          selectedTask={selectedTask}
+          selectedThoughtNodeId={selectedThoughtNode?.id}
+          thought={activeThought}
+          thoughts={thoughts}
+          thoughtsLoading={thoughtsLoading}
+          thoughtsError={thoughtsError}
+          onThoughtRetry={refetchThoughts}
+          onCompleteThought={handleRequestThoughtReview}
+          onThoughtNodeSelect={handleThoughtNodeSelect}
+          onTaskSelect={handleTaskNodeSelect}
+          onTaskRetry={refetchTasks}
+          onTaskActionComplete={handleTaskActionComplete}
+          onGenerateTaskArtifact={handleGenerateArtifact}
+          isTaskArtifactGenerating={(task) => isGeneratingTask(task.id)}
+          onTeamDetailOpen={openWorkspaceDetail}
+          onTeamDetailClose={handleAgentDetailClose}
+          canAddAgents={canAddAgents}
+          onAddAgent={() => setIsAddAgentModalOpen(true)}
+          onOpenMembers={() => setIsMemberPopoverOpen(true)}
+          isLoading={workspaceLoading}
+          error={workspaceError}
+          onRetry={refetchWorkspace}
+        />
       </div>
 
       {artifactPreview && (
@@ -992,6 +2375,7 @@ export function ChannelView({
         onOpenChange={setIsAddAgentModalOpen}
         existingAgentIds={existingAgentIds}
         onAdd={addAgentToChannel}
+        onChanged={refetchWorkspace}
       />
 
 
@@ -1035,7 +2419,7 @@ export function ChannelView({
               setIsMemberPopoverOpen(false);
               setIsAddAgentModalOpen(true);
             }}
-            onRemoveAgent={(memberId) => removeMember('agent', memberId)}
+            onRemoveAgent={handleRemoveAgentFromChannel}
             onAgentClick={openAgentDetail}
             showHeader={false}
             canAddAgent={canAddAgents}

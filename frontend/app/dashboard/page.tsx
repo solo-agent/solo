@@ -11,7 +11,6 @@ import { useChannelMembers } from "@/lib/hooks/use-channel-members";
 import { useDM } from "@/lib/hooks/use-dm";
 import { useDMTasks } from "@/lib/hooks/use-tasks";
 import { Sidebar } from "@/components/dashboard/sidebar";
-import { NavBar } from "@/components/ui/navbar";
 import { CreateChannelModal } from "@/components/dashboard/create-channel-modal";
 import { CreateDMModal } from "@/components/dashboard/create-dm-modal";
 import { DeleteChannelDialog } from "@/components/dashboard/delete-channel-dialog";
@@ -120,22 +119,7 @@ function DashboardContent() {
     refetch: dmRefetchTasks,
   } = useDMTasks(selectedDmId);
 
-  // ---- SOLO-island PR3: AgentViewPanel state lives at the dashboard
-  // level so the AgentIsland (also mounted here) can summon it on click.
-  // ChannelView consumes these as controlled props.
-  const [agentViewVisible, setAgentViewVisible] = useState(false);
-  const [agentViewWidth, setAgentViewWidth] = useState(320);
-  const [agentViewFocusedAgentId, setAgentViewFocusedAgentId] = useState<string | null>(null);
-
-  // Toggling to false should also clear the focused-agent highlight so
-  // a later reopen starts from a clean state. Forwarded to ChannelView as
-  // the onAgentViewVisibleChange callback.
-  const handleAgentViewVisibleChange = useCallback((visible: boolean) => {
-    setAgentViewVisible(visible);
-    if (!visible) {
-      setAgentViewFocusedAgentId(null);
-    }
-  }, []);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // ---- DM AsTask handler (SOLO-232-F) ----
   const handleDMAsTask = useCallback(
@@ -202,19 +186,6 @@ function DashboardContent() {
   const handleSelectInbox = useCallback(() => {
     router.push('/dashboard?inbox');
   }, [router]);
-
-  // ---- Thread URL management ----
-  const handleChannelThreadChange = useCallback(
-    (threadId: string | null) => {
-      if (!channelFromUrl) return;
-      const params = new URLSearchParams(searchParams.toString());
-      params.set('channel', channelFromUrl);
-      if (threadId) params.set('thread', threadId);
-      else params.delete('thread');
-      router.push(`/dashboard?${params.toString()}`);
-    },
-    [router, channelFromUrl, searchParams],
-  );
 
   const handleDMThreadChange = useCallback(
     (threadId: string | null) => {
@@ -310,12 +281,7 @@ function DashboardContent() {
           showOnboardingWizard={showOnboardingWizard}
           initialThreadMessageId={threadFromUrl ?? undefined}
           initialScrollToMessageId={messageFromUrl ?? undefined}
-          onThreadChange={handleChannelThreadChange}
-          agentViewVisible={agentViewVisible}
-          onAgentViewVisibleChange={handleAgentViewVisibleChange}
-          agentViewWidth={agentViewWidth}
-          onAgentViewWidthChange={setAgentViewWidth}
-          agentViewFocusedAgentId={agentViewFocusedAgentId}
+          onChannelCreated={refetchChannels}
         />
       );
     }
@@ -405,9 +371,10 @@ function DashboardContent() {
 
   return (
     <div className="flex h-screen min-w-[1024px] overflow-hidden bg-brutal-cream">
-      <NavBar />
       <Sidebar
         routeTitle={t('navChannels')}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapsed={() => setIsSidebarCollapsed((value) => !value)}
         channels={channels}
         isLoading={channelsLoading}
         selectedChannelId={selectedChannelId}
@@ -425,8 +392,10 @@ function DashboardContent() {
       <AgentIsland />
 
       {/* Main content area */}
-      <main className="flex flex-1 flex-col overflow-hidden">
-        {renderMainContent()}
+      <main className="relative flex flex-1 flex-col overflow-hidden">
+        <div className={`flex min-h-0 flex-1 overflow-hidden ${isSidebarCollapsed ? '[&_.sidebar-collapse-offset]:pl-20' : ''}`}>
+          {renderMainContent()}
+        </div>
       </main>
 
       {/* Modals */}

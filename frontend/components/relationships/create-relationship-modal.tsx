@@ -16,7 +16,7 @@ import { Select, type SelectOption } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { apiClient } from '@/lib/api-client';
 import { t } from '@/lib/i18n';
-import type { RelationshipType, Agent } from '@/lib/types';
+import type { RelationshipType, AgentDetailTarget } from '@/lib/types';
 
 const TYPE_OPTIONS: { type: RelationshipType; labelKey: string; color: string; dash: string }[] = [
   { type: 'assigns_to', labelKey: 'assignsTo', color: '#4A90D9', dash: '' },
@@ -32,7 +32,7 @@ interface CreateRelationshipModalProps {
   /** Preselect a source agent (e.g., from the graph editor) */
   preselectedFrom?: string;
   preselectedTo?: string;
-  agents: Agent[];
+  agents: Array<AgentDetailTarget & { is_active?: boolean }>;
 }
 
 export function CreateRelationshipModal({

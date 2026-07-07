@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -31,9 +32,9 @@ func NewAuthHandler(pool *pgxpool.Pool, agentSvc *service.AgentService) *AuthHan
 // --- Request/Response types ---
 
 type RegisterRequest struct {
-	Email           string `json:"email"`
-	Password        string `json:"password"`
-	DisplayName     string `json:"display_name,omitempty"`
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+	DisplayName string `json:"display_name,omitempty"`
 }
 
 type LoginRequest struct {
@@ -46,11 +47,11 @@ type RefreshRequest struct {
 }
 
 type AuthResponse struct {
-	AccessToken          string       `json:"access_token"`
-	RefreshToken         string       `json:"refresh_token"`
-	ExpiresIn            int64        `json:"expires_in"`
-	User                 UserResponse `json:"user"`
-	OnboardingChannelID  string       `json:"onboarding_channel_id,omitempty"`
+	AccessToken         string       `json:"access_token"`
+	RefreshToken        string       `json:"refresh_token"`
+	ExpiresIn           int64        `json:"expires_in"`
+	User                UserResponse `json:"user"`
+	OnboardingChannelID string       `json:"onboarding_channel_id,omitempty"`
 }
 
 type UserResponse struct {
@@ -349,6 +350,18 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func onboardingUniqueName(base, userID string) string {
+	suffix := userID
+	if len(suffix) > 8 {
+		suffix = suffix[:8]
+	}
+	name := strings.TrimSpace(base)
+	if len([]rune(name)) > 91 {
+		name = string([]rune(name)[:91])
+	}
+	return name + "-" + suffix
+}
+
 // bootstrapOnboarding creates the onboarding channel for a newly registered user
 // and inserts a wizard welcome message. Lucy agent creation is deferred to the
 // onboarding wizard (POST /api/v1/onboarding/create-lucy) so the user can select
@@ -361,6 +374,10 @@ func (h *AuthHandler) bootstrapOnboarding(ctx context.Context, userID, displayNa
 
 	// Step 1: Create the onboarding channel.
 	channelID, err := h.svc.CreateChannel(ctx, channelName, channelDesc, "channel", userID)
+	if errors.Is(err, service.ErrChannelNameExists) {
+		channelName = onboardingUniqueName(channelName, userID)
+		channelID, err = h.svc.CreateChannel(ctx, channelName, channelDesc, "channel", userID)
+	}
 	if err != nil {
 		slog.Warn("onboarding: failed to create channel",
 			"user_id", userID, "channel_name", channelName, "error", err)
@@ -396,6 +413,10 @@ func (h *AuthHandler) bootstrapOnboarding(ctx context.Context, userID, displayNa
 func (h *AuthHandler) ensureAllChannel(ctx context.Context, userID, displayName string) {
 	channelName := "all-" + onboarding.SanitizeDisplayName(displayName)
 	_, err := h.svc.CreateChannel(ctx, channelName, "All your agents and members", "channel", userID)
+	if errors.Is(err, service.ErrChannelNameExists) {
+		channelName = onboardingUniqueName(channelName, userID)
+		_, err = h.svc.CreateChannel(ctx, channelName, "All your agents and members", "channel", userID)
+	}
 	if err != nil {
 		slog.Debug("onboarding: #all channel exists", "user_id", userID, "channel", channelName, "error", err)
 	} else {

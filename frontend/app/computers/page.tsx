@@ -45,7 +45,7 @@ import {
 } from '@/components/ui/detail-section';
 import { useAgents } from '@/lib/hooks/use-agents';
 import { AgentForm, type AgentFormValues } from '@/components/agents/agent-form';
-import { NavBar } from '@/components/ui/navbar';
+import { AppFrame } from '@/components/layout/app-frame';
 import { ComputersLeftColumn } from '@/components/computers/computers-left-column';
 import { relativeTime, formatDateTime } from '@/lib/utils/time';
 import { cn } from '@/lib/utils';
@@ -217,8 +217,8 @@ export default function ComputersPage() {
   }
 
   return (
-    <div className="flex h-screen min-w-[1024px] overflow-hidden bg-brutal-cream">
-      <NavBar />
+    <AppFrame>
+      <div className="flex min-h-0 flex-1 overflow-hidden">
       <div className="w-[220px] flex-shrink-0">
         <ComputersLeftColumn
           computers={computers}
@@ -333,7 +333,8 @@ export default function ComputersPage() {
         />
       </Dialog>
 
-    </div>
+      </div>
+    </AppFrame>
   );
 }
 

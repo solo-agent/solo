@@ -548,7 +548,7 @@ export function DMView({
     <div className="flex flex-1 overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Header — full-width attached bar, same skeleton as Channel */}
-        <div className="flex h-14 flex-shrink-0 items-center border-b-2 border-black px-4">
+        <div className="sidebar-collapse-offset flex h-14 flex-shrink-0 items-center border-b-2 border-black px-4">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             {/* Avatar */}
             <PixelAvatar

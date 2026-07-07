@@ -27,12 +27,20 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { t } from '@/lib/i18n';
 import type { Agent } from '@/lib/types';
 
+// ponytail: fallback for old server responses; remove when applyTemplate always returns agent_ids.
+const OFFICIAL_TEMPLATE_AGENT_NAMES: Record<string, string[]> = {
+  'dev-team': ['Lead', 'FE', 'BE', 'QA'],
+  'content-team': ['Editor', 'Researcher', 'Writer'],
+  'research-team': ['ResearchLead', 'Analyst', 'Writer'],
+};
+
 interface AddAgentModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Already added agent IDs (to filter out) */
   existingAgentIds: string[];
   onAdd: (agentId: string, agentName: string) => Promise<void>;
+  onChanged?: () => Promise<void> | void;
 }
 
 export function AddAgentModal({
@@ -40,6 +48,7 @@ export function AddAgentModal({
   onOpenChange,
   existingAgentIds,
   onAdd,
+  onChanged,
 }: AddAgentModalProps) {
   const { agents, isLoading, error: agentsError, refetch, createAgent } = useAgents();
   const detection = useCliDetection();
@@ -89,12 +98,13 @@ export function AddAgentModal({
       setAddingId(agent.id);
       try {
         await onAdd(agent.id, agent.name);
+        await onChanged?.();
         onOpenChange(false);
       } finally {
         setAddingId(null);
       }
     },
-    [onAdd, onOpenChange],
+    [onAdd, onChanged, onOpenChange],
   );
 
   const handleCreate = useCallback(
@@ -105,6 +115,7 @@ export function AddAgentModal({
         const agent = await createAgent(values);
         await onAdd(agent.id, agent.name);
         await refetch();
+        await onChanged?.();
         onOpenChange(false);
       } catch (err) {
         setCreateError(err instanceof Error ? err.message : t('teamsAgentCreateError'));
@@ -112,7 +123,7 @@ export function AddAgentModal({
         setIsCreating(false);
       }
     },
-    [createAgent, onAdd, onOpenChange, refetch],
+    [createAgent, onAdd, onChanged, onOpenChange, refetch],
   );
 
   const handleOpenTemplates = useCallback(async () => {
@@ -138,8 +149,19 @@ export function AddAgentModal({
       setTemplateError(null);
       try {
         const result = await applyTemplate(templateId, selectedModelProvider);
-        await Promise.all(result.created_agent_ids.map((id) => onAdd(id, id)));
+        const agentIds = [
+          ...(result.agent_ids?.length ? result.agent_ids : result.created_agent_ids),
+          ...(OFFICIAL_TEMPLATE_AGENT_NAMES[templateId] ?? [])
+            .map((name) => agents.find((agent) => agent.name === name)?.id)
+            .filter((id): id is string => Boolean(id)),
+        ].filter((id, index, ids) => !existingAgentIds.includes(id) && ids.indexOf(id) === index);
+        if (agentIds.length === 0) {
+          setTemplateError(t('relationshipTemplateApplyError'));
+          return;
+        }
+        await Promise.all(agentIds.map((id) => onAdd(id, id)));
         await refetch();
+        await onChanged?.();
         onOpenChange(false);
       } catch (err) {
         setTemplateError(err instanceof Error ? err.message : t('relationshipTemplateApplyError'));
@@ -147,7 +169,7 @@ export function AddAgentModal({
         setApplyingTemplate(null);
       }
     },
-    [onAdd, onOpenChange, refetch, selectedModelProvider],
+    [agents, existingAgentIds, onAdd, onChanged, onOpenChange, refetch, selectedModelProvider],
   );
 
   const createModeButtons = (

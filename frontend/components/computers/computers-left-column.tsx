@@ -61,7 +61,7 @@ export function ComputersLeftColumn({
   return (
     <div className="flex h-full flex-col overflow-hidden border-r-2 border-black bg-brutal-cream">
       {/* Page label — matches Sidebar / Tasks / Teams top label style */}
-      <div className="flex items-center h-14 border-b-2 border-black px-4">
+      <div className="sidebar-collapse-offset flex items-center h-14 border-b-2 border-black px-4">
         <span className="font-heading text-lg font-bold">{t('computersTitle')}</span>
       </div>
 

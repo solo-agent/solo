@@ -31,6 +31,7 @@ type AgentTemplate struct {
 }
 
 type ApplyTemplateResult struct {
+	AgentIDs               []string `json:"agent_ids"`
 	CreatedAgentIDs        []string `json:"created_agent_ids"`
 	CreatedRelationshipIDs []string `json:"created_relationship_ids"`
 	TemplateID             string   `json:"template_id"`
@@ -181,7 +182,15 @@ func (s *TemplateService) Apply(ctx context.Context, templateID, ownerID, modelP
 		}
 	}
 
+	agentIDs := make([]string, 0, len(members))
+	for _, member := range members {
+		if id := nameToID[member.Name]; id != "" {
+			agentIDs = append(agentIDs, id)
+		}
+	}
+
 	return &ApplyTemplateResult{
+		AgentIDs:               agentIDs,
 		CreatedAgentIDs:        createdAgents,
 		CreatedRelationshipIDs: createdRelationships,
 		TemplateID:             templateID,

@@ -663,9 +663,6 @@ export function MessageInput({
           </button>
         </div>
       </div>
-      <p className="mt-1.5 text-center font-mono text-[10px] text-muted-foreground">
-        {asTask ? t('taskInputHint') : t('messageInputHint')}
-      </p>
     </div>
   );
 }

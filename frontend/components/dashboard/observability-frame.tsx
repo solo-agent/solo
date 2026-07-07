@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import { NavBar } from '@/components/ui/navbar';
+import { AppFrame } from '@/components/layout/app-frame';
 import { Spinner } from '@/components/ui/spinner';
 import { t } from '@/lib/i18n';
 
@@ -29,11 +29,6 @@ export function ObservabilityFrame({ children }: { children: React.ReactNode }) 
   }
 
   return (
-    <div className="flex h-screen min-w-[1024px] overflow-hidden bg-brutal-cream">
-      <NavBar />
-      <main className="flex flex-1 flex-col overflow-hidden">
-        {children}
-      </main>
-    </div>
+    <AppFrame>{children}</AppFrame>
   );
 }

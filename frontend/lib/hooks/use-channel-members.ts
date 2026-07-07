@@ -7,7 +7,7 @@
 'use client';
 
 import { t } from '@/lib/i18n';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
 import type { ChannelMember } from '@/lib/types';
@@ -134,10 +134,13 @@ export function useChannelMembers(channelId: string | null) {
     [],
   );
 
+  const users = useMemo(() => members.filter((m) => m.member_type === 'user'), [members]);
+  const agents = useMemo(() => members.filter((m) => m.member_type === 'agent'), [members]);
+
   return {
     members,
-    users: members.filter((m) => m.member_type === 'user'),
-    agents: members.filter((m) => m.member_type === 'agent'),
+    users,
+    agents,
     isLoading,
     error,
     addAgentToChannel,

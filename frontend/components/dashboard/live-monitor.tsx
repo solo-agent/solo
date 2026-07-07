@@ -271,7 +271,7 @@ export function LiveMonitor({ selectedRunId }: { selectedRunId?: string | null }
 
 export function DashboardTopTabs({ active }: { active: 'live' | 'insight' }) {
   return (
-    <div className="flex h-14 items-center gap-2 border-b-2 border-black bg-brutal-cream px-5">
+    <div className="sidebar-collapse-offset flex h-14 items-center gap-2 border-b-2 border-black bg-brutal-cream px-5">
       <Link
         href="/observability/live"
         className={tabButtonClass(active === 'live', 'h-9 text-sm')}

@@ -5,7 +5,6 @@ import { t } from '@/lib/i18n';
 import { usePathname } from 'next/navigation';
 import {
   Gauge,
-  MessageSquare,
   Users,
   Monitor,
 } from 'lucide-react';
@@ -13,27 +12,44 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 
-const NAV_ITEMS = [
-  { href: '/dashboard', icon: MessageSquare, label: t('navChannels'), key: 'chat' },
+export const NAV_ITEMS = [
   { href: '/teams', icon: Users, label: t('navTeams'), key: 'teams' },
   { href: '/observability/live', icon: Gauge, label: t('observabilityDashboard'), key: 'dashboard' },
   { href: '/computers', icon: Monitor, label: t('navComputers'), key: 'computers' },
 ] as const;
 
-export function NavBar() {
+interface NavBarProps {
+  onLogoClick?: () => void;
+  logoLabel?: string;
+}
+
+export function NavBar({ onLogoClick, logoLabel }: NavBarProps = {}) {
   const pathname = usePathname();
   const { user } = useAuth();
+  const logoClassName = 'mb-2 flex h-9 w-9 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm';
 
   return (
     <nav className="navbar-brutal flex w-14 flex-shrink-0 flex-col items-center gap-1 border-r-2 border-black py-3">
       {/* Workspace logo */}
-      <Link
-        href="/dashboard"
-        className="mb-2 flex h-9 w-9 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm"
-        aria-label={t('navSoloWorkspace')}
-      >
-        <span className="font-heading text-sm font-black text-black">S</span>
-      </Link>
+      {onLogoClick ? (
+        <button
+          type="button"
+          onClick={onLogoClick}
+          className={logoClassName}
+          aria-label={logoLabel ?? t('navSoloWorkspace')}
+          title={logoLabel ?? t('navSoloWorkspace')}
+        >
+          <span className="font-heading text-sm font-black text-black">S</span>
+        </button>
+      ) : (
+        <Link
+          href="/dashboard"
+          className={logoClassName}
+          aria-label={t('navSoloWorkspace')}
+        >
+          <span className="font-heading text-sm font-black text-black">S</span>
+        </Link>
+      )}
 
       {/* Divider */}
       <div className="mb-1 h-px w-8 bg-black/20" />
@@ -42,9 +58,7 @@ export function NavBar() {
       {NAV_ITEMS.map((item) => {
         const isActive = item.key === 'dashboard'
           ? pathname.startsWith('/observability')
-          : item.key === 'chat'
-            ? pathname === '/dashboard'
-            : pathname === item.href || pathname.startsWith(item.href + '/');
+          : pathname === item.href || pathname.startsWith(item.href + '/');
         return (
           <Link
             key={item.href}

@@ -26,6 +26,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { cn } from '@/lib/utils';
 import { highlightSpecials, buildValidNames } from '@/lib/utils/highlight';
+import { buildDashboardHref } from '@/lib/dashboard-url';
 import { displayAgentErrorReason } from '@/lib/agent-activity';
 import { Avatar } from '@/components/ui/avatar';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
@@ -839,7 +840,7 @@ export function ThreadPanel({
       onViewInChannel();
       return;
     }
-    router.push(`/dashboard?channel=${parentMessage.channel_id}&message=${parentMessage.id}`);
+    router.push(buildDashboardHref(parentMessage.channel_id, { messageId: parentMessage.id }));
   }, [onViewInChannel, parentMessage.channel_id, parentMessage.id, router]);
 
   const taskNumber = task?.task_number ?? parentMessage.task_number;
@@ -849,8 +850,13 @@ export function ThreadPanel({
       return;
     }
     if (taskNumber == null) return;
-    router.push(`/dashboard?channel=${parentMessage.channel_id}&tab=tasks&task=${taskNumber}&thread=${parentMessage.id}`);
-  }, [onViewTask, parentMessage.channel_id, parentMessage.id, router, taskNumber]);
+    router.push(buildDashboardHref(parentMessage.channel_id, {
+      view: 'task.graph',
+      panel: 'thread',
+      taskId: task?.id ?? null,
+      threadId: parentMessage.id,
+    }));
+  }, [onViewTask, parentMessage.channel_id, parentMessage.id, router, task?.id, taskNumber]);
 
   return (
     <div

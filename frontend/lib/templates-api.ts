@@ -10,6 +10,7 @@ export interface Template {
 }
 
 export interface ApplyTemplateResult {
+  agent_ids?: string[];
   created_agent_ids: string[];
   created_relationship_ids: string[];
   template_id: string;

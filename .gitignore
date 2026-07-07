@@ -9,6 +9,9 @@ CLAUDE.md
 # codex
 .codex
 
+.codegraph/
+graphify-out/
+
 # Environment
 .env
 # .env.production is tracked — it's a template with placeholders, no real secrets

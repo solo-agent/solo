@@ -62,6 +62,11 @@ type ConvertToTaskRequest struct {
 	Title string `json:"title,omitempty"`
 }
 
+type CreateTasksFromContextRequest struct {
+	SourceMessageID string `json:"source_message_id,omitempty"`
+	SourceThoughtID string `json:"source_thought_id,omitempty"`
+}
+
 type TaskResponse struct {
 	ID               string  `json:"id"`
 	TaskNumber       int     `json:"task_number"`
@@ -83,6 +88,22 @@ type TaskResponse struct {
 	ArtifactStatus   string  `json:"artifact_status,omitempty"`
 	CreatedAt        string  `json:"created_at"`
 	UpdatedAt        string  `json:"updated_at"`
+}
+
+type TasksFromContextResponse struct {
+	Tasks []TaskResponse `json:"tasks"`
+}
+
+type taskAgendaItem struct {
+	ID       string           `json:"id"`
+	Title    string           `json:"title"`
+	Status   string           `json:"status"`
+	Children []taskAgendaItem `json:"children,omitempty"`
+}
+
+type taskDraft struct {
+	title string
+	desc  string
 }
 
 func toTaskResponse(t *service.Task) TaskResponse {
@@ -324,6 +345,463 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, toTaskResponseList(tasks))
+}
+
+// CreateFromContext handles POST /api/v1/channels/{channelID}/tasks/from-context.
+func (h *TaskHandler) CreateFromContext(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	channelID := chi.URLParam(r, "channelID")
+	if channelID == "" {
+		writeError(w, http.StatusBadRequest, "channel ID is required")
+		return
+	}
+
+	var req CreateTasksFromContextRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.SourceMessageID != "" {
+		tasks, ok, err := h.tasksFromSourceCard(r.Context(), channelID, userID, req.SourceMessageID)
+		if err != nil {
+			slog.Warn("failed to read source card tasks", "message_id", req.SourceMessageID, "error", err)
+		}
+		if ok {
+			resp := make([]TaskResponse, 0, len(tasks))
+			for _, task := range tasks {
+				resp = append(resp, toTaskResponse(task))
+			}
+			writeJSON(w, http.StatusOK, TasksFromContextResponse{Tasks: resp})
+			return
+		}
+	}
+
+	target := "复制 Solo MVP"
+	agendaRaw := "[]"
+	_ = h.pool.QueryRow(r.Context(),
+		`SELECT target, COALESCE(agenda_json, '[]'::jsonb)::text FROM channel_contexts WHERE channel_id = $1`,
+		channelID,
+	).Scan(&target, &agendaRaw)
+	parentTitle := workTitleFromTarget(target)
+
+	parent, err := h.svc.CreateTask(r.Context(), channelID, userID, service.TaskCreateRequest{
+		Title:       parentTitle,
+		Description: target,
+		Priority:    "normal",
+	})
+	if err != nil {
+		h.writeCreateFromContextError(w, err)
+		return
+	}
+
+	children := h.taskDraftsFromContext(r.Context(), channelID, req.SourceThoughtID, parentTitle, target, agendaRaw)
+	tasks := []*service.Task{parent}
+	for _, child := range children {
+		task, err := h.svc.CreateTask(r.Context(), channelID, userID, service.TaskCreateRequest{
+			Title:        child.title,
+			Description:  child.desc,
+			Priority:     "normal",
+			ParentTaskID: parent.ID,
+		})
+		if err != nil {
+			h.writeCreateFromContextError(w, err)
+			return
+		}
+		tasks = append(tasks, task)
+	}
+
+	for _, task := range tasks {
+		if err := h.ensureTaskThread(r.Context(), channelID, task); err != nil {
+			slog.Warn("failed to attach task thread", "task_id", task.ID, "error", err)
+		}
+	}
+
+	if req.SourceMessageID != "" {
+		if err := h.markSourceCardTasks(r.Context(), req.SourceMessageID, tasks); err != nil {
+			slog.Warn("failed to mark source card for tasks", "message_id", req.SourceMessageID, "error", err)
+		}
+	}
+	h.emitTasksCreatedCard(r.Context(), channelID, parentTitle, tasks)
+
+	resp := make([]TaskResponse, 0, len(tasks))
+	for _, task := range tasks {
+		resp = append(resp, toTaskResponse(task))
+		ws.BroadcastTaskCreated(h.hub, ws.TaskCreatedPayload{
+			ID:             task.ID,
+			TaskNumber:     task.TaskNumber,
+			ChannelID:      task.ChannelID,
+			CreatorID:      task.CreatorID,
+			CreatorName:    task.CreatorName,
+			Title:          task.Title,
+			Description:    task.Description,
+			Status:         task.Status,
+			Priority:       task.Priority,
+			MessageID:      task.MessageID,
+			ArtifactStatus: task.ArtifactStatus,
+			CreatedAt:      task.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:      task.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+	if h.agentSvc != nil {
+		for _, task := range tasks {
+			go h.agentSvc.TriggerAllAgentsForTask(context.Background(), task.ChannelID, task.ID, task.TaskNumber, task.Title, nil, nil)
+		}
+	}
+	writeJSON(w, http.StatusCreated, TasksFromContextResponse{Tasks: resp})
+}
+
+func (h *TaskHandler) ensureTaskThread(ctx context.Context, channelID string, task *service.Task) error {
+	if task == nil || task.MessageID != "" {
+		return nil
+	}
+	msgID := uuid.New().String()
+	now := time.Now()
+	sysContent := formatSystemMessage(task.TaskNumber, task.Title, i18n.Active.SysTaskCreated)
+	if _, err := h.pool.Exec(ctx,
+		`INSERT INTO messages (id, channel_id, workspace_scope, subject_type, subject_id, sender_type, sender_id, content, content_type, created_at, updated_at)
+		 VALUES ($1, $2, 'task', 'task', $3, 'system', '00000000-0000-0000-0000-000000000000', $4, 'system', $5, $5)`,
+		msgID, channelID, task.ID, sysContent, now,
+	); err != nil {
+		return err
+	}
+	threadSvc := service.NewThreadService(h.pool)
+	if _, _, err := threadSvc.GetOrCreateThread(ctx, channelID, msgID); err != nil {
+		return err
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE tasks SET message_id = $1 WHERE id = $2`, msgID, task.ID); err != nil {
+		return err
+	}
+	task.MessageID = msgID
+	return nil
+}
+
+func (h *TaskHandler) writeCreateFromContextError(w http.ResponseWriter, err error) {
+	switch {
+	case err == service.ErrTaskNotChannelMember:
+		writeError(w, http.StatusForbidden, "not a channel member")
+	default:
+		slog.Error("failed to create tasks from context", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create tasks")
+	}
+}
+
+func workTitleFromTarget(target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return "复制 Solo MVP"
+	}
+	if strings.Contains(strings.ToLower(target), "solo") || strings.Contains(target, "复制") {
+		return "复制 Solo MVP"
+	}
+	runes := []rune(target)
+	if len(runes) > 40 {
+		target = string(runes[:40])
+	}
+	return target
+}
+
+func truncateTaskTitle(title string) string {
+	title = strings.TrimSpace(title)
+	runes := []rune(title)
+	if len(runes) > 80 {
+		return string(runes[:80])
+	}
+	return title
+}
+
+func addTaskDraft(drafts *[]taskDraft, seen map[string]bool, title, desc string) {
+	title = truncateTaskTitle(title)
+	desc = strings.TrimSpace(desc)
+	if title == "" || seen[title] {
+		return
+	}
+	seen[title] = true
+	*drafts = append(*drafts, taskDraft{title: title, desc: desc})
+}
+
+func collectAgendaLeaves(items []taskAgendaItem, out *[]taskAgendaItem) {
+	for _, item := range items {
+		if len(item.Children) > 0 {
+			collectAgendaLeaves(item.Children, out)
+			continue
+		}
+		*out = append(*out, item)
+	}
+}
+
+func agendaTaskDrafts(agendaRaw string) []taskDraft {
+	var agenda []taskAgendaItem
+	if err := json.Unmarshal([]byte(agendaRaw), &agenda); err != nil {
+		return nil
+	}
+
+	var source []taskAgendaItem
+	for _, item := range agenda {
+		id := strings.ToLower(strings.TrimSpace(item.ID))
+		title := strings.TrimSpace(item.Title)
+		if strings.Contains(id, "work") || strings.Contains(title, "开始行动") {
+			collectAgendaLeaves(item.Children, &source)
+			break
+		}
+	}
+	if len(source) == 0 {
+		collectAgendaLeaves(agenda, &source)
+	}
+
+	drafts := []taskDraft{}
+	seen := map[string]bool{}
+	for _, item := range source {
+		status := strings.ToLower(strings.TrimSpace(item.Status))
+		if status == "done" || strings.EqualFold(item.ID, "explore") || strings.Contains(item.Title, "探索") {
+			continue
+		}
+		addTaskDraft(&drafts, seen, item.Title, "来自 Channel Agenda: "+item.Title)
+	}
+	return drafts
+}
+
+func fallbackTaskDrafts(parentTitle, target string) []taskDraft {
+	base := strings.TrimSpace(parentTitle)
+	if base == "" {
+		base = workTitleFromTarget(target)
+	}
+	return []taskDraft{
+		{title: truncateTaskTitle("明确 " + base + " 交付范围"), desc: "从当前 channel context 梳理目标、边界和验收标准。"},
+		{title: truncateTaskTitle("实现 " + base + " 核心路径"), desc: "围绕主目标完成最小可验证实现。"},
+		{title: truncateTaskTitle("验证 " + base + " 结果"), desc: "检查产物、风险和后续改进项。"},
+	}
+}
+
+func (h *TaskHandler) taskDraftsFromContext(ctx context.Context, channelID, sourceThoughtID, parentTitle, target, agendaRaw string) []taskDraft {
+	drafts := []taskDraft{}
+	seen := map[string]bool{}
+
+	query := `SELECT title, body
+	            FROM context_records
+	           WHERE channel_id = $1
+	             AND record_type = 'summary'
+	             AND subject_type = 'thought'`
+	args := []any{channelID}
+	if strings.TrimSpace(sourceThoughtID) != "" {
+		query += ` AND subject_id = $2::uuid`
+		args = append(args, sourceThoughtID)
+	}
+	query += ` ORDER BY created_at DESC LIMIT 3`
+
+	rows, err := h.pool.Query(ctx, query, args...)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var title, body string
+			if rows.Scan(&title, &body) != nil {
+				continue
+			}
+			title = strings.TrimSpace(strings.TrimPrefix(title, "Thought done:"))
+			if title == "" {
+				title = "落地探索结论"
+			}
+			addTaskDraft(&drafts, seen, title+"落地", body)
+		}
+	}
+
+	for _, draft := range agendaTaskDrafts(agendaRaw) {
+		addTaskDraft(&drafts, seen, draft.title, draft.desc)
+	}
+	if len(drafts) == 0 {
+		for _, draft := range fallbackTaskDrafts(parentTitle, target) {
+			addTaskDraft(&drafts, seen, draft.title, draft.desc)
+		}
+	}
+	if len(drafts) > 5 {
+		return drafts[:5]
+	}
+	return drafts
+}
+
+func (h *TaskHandler) markSourceCardTasks(ctx context.Context, messageID string, tasks []*service.Task) error {
+	var raw string
+	if err := h.pool.QueryRow(ctx, `SELECT content FROM messages WHERE id = $1`, messageID).Scan(&raw); err != nil {
+		return err
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return err
+	}
+	taskIDs := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		taskIDs = append(taskIDs, task.ID)
+	}
+	payload["status"] = "accepted"
+	payload["task_ids"] = taskIDs
+	updated, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = h.pool.Exec(ctx, `UPDATE messages SET content = $1, updated_at = now() WHERE id = $2`, string(updated), messageID)
+	return err
+}
+
+func taskIDsFromCardContent(raw string) []string {
+	var payload struct {
+		TaskIDs []string `json:"task_ids"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return nil
+	}
+	ids := make([]string, 0, len(payload.TaskIDs))
+	for _, id := range payload.TaskIDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func (h *TaskHandler) tasksFromSourceCard(ctx context.Context, channelID, userID, messageID string) ([]*service.Task, bool, error) {
+	var raw string
+	if err := h.pool.QueryRow(ctx, `SELECT content FROM messages WHERE id = $1`, messageID).Scan(&raw); err != nil {
+		return nil, false, err
+	}
+	ids := taskIDsFromCardContent(raw)
+	if len(ids) == 0 {
+		return nil, false, nil
+	}
+	tasks := make([]*service.Task, 0, len(ids))
+	for _, id := range ids {
+		task, err := h.svc.GetTask(ctx, channelID, id, userID)
+		if err != nil {
+			return nil, false, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, true, nil
+}
+
+func (h *TaskHandler) emitTasksCreatedCard(ctx context.Context, channelID, title string, tasks []*service.Task) {
+	subjectID := ""
+	cardTasks := make([]map[string]any, 0, len(tasks))
+	for _, task := range tasks {
+		if subjectID == "" && task.ParentTaskID == nil {
+			subjectID = task.ID
+		}
+		cardTasks = append(cardTasks, map[string]any{
+			"id":             task.ID,
+			"task_number":    task.TaskNumber,
+			"title":          task.Title,
+			"status":         task.Status,
+			"parent_task_id": task.ParentTaskID,
+		})
+	}
+	payload := map[string]any{
+		"card_type": "tasks_created",
+		"status":    "open",
+		"title":     title,
+		"tasks":     cardTasks,
+	}
+	content, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	messageID := uuid.New().String()
+	if subjectID == "" && len(tasks) > 0 {
+		subjectID = tasks[0].ID
+	}
+	if _, err := h.pool.Exec(ctx,
+		`INSERT INTO messages (id, channel_id, workspace_scope, subject_type, subject_id, sender_type, sender_id, content, content_type, created_at, updated_at)
+		 VALUES ($1, $2, 'task', 'task', NULLIF($3, '')::uuid, 'system', '00000000-0000-0000-0000-000000000000', $4, 'card.tasks_created', $5, $5)`,
+		messageID, channelID, subjectID, string(content), now,
+	); err != nil {
+		slog.Warn("failed to emit tasks created card", "channel_id", channelID, "error", err)
+		return
+	}
+	if h.hub != nil {
+		h.hub.BroadcastToChannel(channelID, ws.Envelope(ws.EventMessageNew, ws.MessageNewPayload{
+			ID:             messageID,
+			ChannelID:      channelID,
+			WorkspaceScope: "task",
+			SubjectType:    "task",
+			SubjectID:      subjectID,
+			SenderType:     "system",
+			SenderID:       "00000000-0000-0000-0000-000000000000",
+			SenderName:     "Solo",
+			Content:        string(content),
+			ContentType:    "card.tasks_created",
+			CreatedAt:      now.Format(time.RFC3339),
+		}))
+	}
+}
+
+func (h *TaskHandler) emitTaskReviewCard(ctx context.Context, task *service.Task) {
+	if task == nil || task.ChannelID == "" {
+		return
+	}
+	payload := map[string]any{
+		"card_type":       "task_review",
+		"status":          "open",
+		"task_id":         task.ID,
+		"task_number":     task.TaskNumber,
+		"title":           task.Title,
+		"task_status":     task.Status,
+		"artifact_status": task.ArtifactStatus,
+	}
+	content, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	messageID := uuid.New().String()
+	if _, err := h.pool.Exec(ctx,
+		`INSERT INTO messages (id, channel_id, workspace_scope, subject_type, subject_id, sender_type, sender_id, content, content_type, created_at, updated_at)
+		 VALUES ($1, $2, 'task', 'task', $3, 'system', '00000000-0000-0000-0000-000000000000', $4, 'card.task_review', $5, $5)`,
+		messageID, task.ChannelID, task.ID, string(content), now,
+	); err != nil {
+		slog.Warn("failed to emit task review card", "task_id", task.ID, "error", err)
+		return
+	}
+	if h.hub != nil {
+		h.hub.BroadcastToChannel(task.ChannelID, ws.Envelope(ws.EventMessageNew, ws.MessageNewPayload{
+			ID:             messageID,
+			ChannelID:      task.ChannelID,
+			WorkspaceScope: "task",
+			SubjectType:    "task",
+			SubjectID:      task.ID,
+			SenderType:     "system",
+			SenderID:       "00000000-0000-0000-0000-000000000000",
+			SenderName:     "Solo",
+			Content:        string(content),
+			ContentType:    "card.task_review",
+			CreatedAt:      now.Format(time.RFC3339),
+		}))
+	}
+}
+
+func (h *TaskHandler) appendTaskAcceptedRecord(ctx context.Context, task *service.Task) {
+	if task == nil || task.ChannelID == "" {
+		return
+	}
+	title := fmt.Sprintf("Task accepted: %s", task.Title)
+	body := fmt.Sprintf("#%d %s 已验收完成，进入 Done。", task.TaskNumber, task.Title)
+	if _, err := h.pool.Exec(ctx,
+		`INSERT INTO context_records (channel_id, scope, subject_type, subject_id, record_type, title, body, author_type)
+		 VALUES ($1, 'channel', 'task', $2, 'summary', $3, $4, 'system')`,
+		task.ChannelID, task.ID, title, body,
+	); err != nil {
+		slog.Warn("failed to append task accepted record", "task_id", task.ID, "error", err)
+		return
+	}
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE channel_contexts SET context_version = context_version + 1, updated_at = now() WHERE channel_id = $1`,
+		task.ChannelID,
+	); err != nil {
+		slog.Warn("failed to bump channel context after task accept", "task_id", task.ID, "error", err)
+	}
 }
 
 // Get handles GET /api/v1/channels/{channelID}/tasks/{taskID}
@@ -688,11 +1166,11 @@ func (h *TaskHandler) Unclaim(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) Submit(w http.ResponseWriter, r *http.Request) {
-	h.lifecycleAction(w, r, h.svc.SubmitTask)
+	h.lifecycleActionWithAfter(w, r, h.svc.SubmitTask, h.emitTaskReviewCard)
 }
 
 func (h *TaskHandler) Accept(w http.ResponseWriter, r *http.Request) {
-	h.lifecycleAction(w, r, h.svc.AcceptTask)
+	h.lifecycleActionWithAfter(w, r, h.svc.AcceptTask, h.appendTaskAcceptedRecord)
 }
 
 func (h *TaskHandler) Reject(w http.ResponseWriter, r *http.Request) {
@@ -731,7 +1209,7 @@ func (h *TaskHandler) Reopen(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) AcceptGlobal(w http.ResponseWriter, r *http.Request) {
-	h.lifecycleActionGlobal(w, r, h.svc.AcceptTask)
+	h.lifecycleActionGlobalWithAfter(w, r, h.svc.AcceptTask, h.appendTaskAcceptedRecord)
 }
 
 func (h *TaskHandler) RejectGlobal(w http.ResponseWriter, r *http.Request) {
@@ -767,6 +1245,15 @@ func (h *TaskHandler) lifecycleAction(
 	r *http.Request,
 	action func(context.Context, string, string, string) (*service.Task, error),
 ) {
+	h.lifecycleActionWithAfter(w, r, action, nil)
+}
+
+func (h *TaskHandler) lifecycleActionWithAfter(
+	w http.ResponseWriter,
+	r *http.Request,
+	action func(context.Context, string, string, string) (*service.Task, error),
+	after func(context.Context, *service.Task),
+) {
 	userID, ok := requireUserID(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
@@ -785,6 +1272,9 @@ func (h *TaskHandler) lifecycleAction(
 		return
 	}
 
+	if after != nil {
+		after(r.Context(), task)
+	}
 	h.writeTaskUpdate(w, task)
 }
 
@@ -792,6 +1282,15 @@ func (h *TaskHandler) lifecycleActionGlobal(
 	w http.ResponseWriter,
 	r *http.Request,
 	action func(context.Context, string, string, string) (*service.Task, error),
+) {
+	h.lifecycleActionGlobalWithAfter(w, r, action, nil)
+}
+
+func (h *TaskHandler) lifecycleActionGlobalWithAfter(
+	w http.ResponseWriter,
+	r *http.Request,
+	action func(context.Context, string, string, string) (*service.Task, error),
+	after func(context.Context, *service.Task),
 ) {
 	userID, task, ok := h.globalLifecycleTask(w, r)
 	if !ok {
@@ -801,6 +1300,9 @@ func (h *TaskHandler) lifecycleActionGlobal(
 	if err != nil {
 		h.writeTaskLifecycleError(w, err)
 		return
+	}
+	if after != nil {
+		after(r.Context(), updated)
 	}
 	h.writeTaskUpdate(w, updated)
 }

@@ -141,6 +141,9 @@ type TaskCancelPayload struct {
 type MessageNewPayload struct {
 	ID                 string   `json:"id"`
 	ChannelID          string   `json:"channel_id"`
+	WorkspaceScope     string   `json:"workspace_scope,omitempty"`
+	SubjectType        string   `json:"subject_type,omitempty"`
+	SubjectID          string   `json:"subject_id,omitempty"`
 	SenderType         string   `json:"sender_type"`
 	SenderID           string   `json:"sender_id"`
 	SenderName         string   `json:"sender_name,omitempty"`

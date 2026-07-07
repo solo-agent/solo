@@ -1,25 +1,26 @@
 'use client';
 
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { t } from '@/lib/i18n';
-import { NavBar } from '@/components/ui/navbar';
 import { Sidebar } from '@/components/dashboard/sidebar';
 import { AgentIsland } from '@/components/agents/agent-island';
 import { useChannels } from '@/lib/hooks/use-channels';
 import { useDM } from '@/lib/hooks/use-dm';
 
 /**
- * AppFrame — persistent 3-column layout (NavBar + Sidebar + Content).
+ * AppFrame — persistent layout (Sidebar + Content).
  *
  * Wraps standalone app pages (/tasks, /teams, /agents, /computers) so that
- * clicking NavBar icons does not cause layout jumps. The dashboard page
- * renders its own NavBar+Sidebar due to complex modal state management.
+ * navigation does not cause layout jumps. The dashboard page renders its own
+ * Sidebar due to complex modal state management.
  *
  * Channels/DMs are fetched for the Sidebar list; clicking one navigates
  * to the dashboard with the appropriate query param.
  */
 export function AppFrame({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const { channels, isLoading: channelsLoading, createChannel, deleteChannel } = useChannels();
   const { dmChannels, isLoadingDMs } = useDM();
 
@@ -42,9 +43,10 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen min-w-[1024px] overflow-hidden bg-brutal-cream">
-      <NavBar />
       <Sidebar
         channels={channels}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapsed={() => setIsSidebarCollapsed((value) => !value)}
         isLoading={channelsLoading}
         selectedChannelId={null}
         onSelectChannel={handleSelectChannel}
@@ -58,7 +60,7 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
         onSelectInbox={() => router.push('/dashboard?inbox')}
       />
       <AgentIsland />
-      <main className="flex flex-1 flex-col overflow-hidden">
+      <main className={`flex flex-1 flex-col overflow-hidden ${isSidebarCollapsed ? '[&_.sidebar-collapse-offset]:pl-20' : ''}`}>
         {children}
       </main>
     </div>
