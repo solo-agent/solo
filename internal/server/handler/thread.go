@@ -75,7 +75,6 @@ type ThreadMessageListResponse struct {
 	ThreadID string                `json:"thread_id,omitempty"`
 }
 
-
 // isChannelOrDMMember checks membership for both regular channels and DMs.
 func (h *ThreadHandler) isChannelOrDMMember(ctx context.Context, channelID, userID string) (bool, error) {
 	var channelType string
@@ -122,8 +121,9 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 	}
 
 	content := strings.TrimSpace(req.Content)
-	if content == "" {
-		writeError(w, http.StatusBadRequest, "reply content is required")
+	attachmentIDs := req.AttachmentIDs
+	if !hasMessageBody(content, attachmentIDs) {
+		writeError(w, http.StatusBadRequest, "reply content or attachment is required")
 		return
 	}
 	if len(content) > 10000 {
@@ -227,7 +227,6 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 	}
 
 	// Validate attachment ownership (before INSERT since tx is for message only)
-	attachmentIDs := req.AttachmentIDs
 	if len(attachmentIDs) > 0 {
 		var ownedCount int
 		err := h.pool.QueryRow(r.Context(),
@@ -328,7 +327,7 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 	// Broadcast WS events for real-time thread updates
 	if h.hub != nil {
 		slog.Info("ws: broadcasting thread.reply and thread.message.new",
-		"thread_id", threadID, "channel_id", channelID, "reply_count", replyCount,
+			"thread_id", threadID, "channel_id", channelID, "reply_count", replyCount,
 		)
 		// Update parent message reply_count via thread.reply notification
 		h.hub.BroadcastToChannel(channelID, ws.Envelope("thread.reply", map[string]interface{}{
@@ -342,18 +341,20 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 		// Broadcast thread.message.new for Thread Panel subscribers
 		threadMsg := ws.ThreadMessageNewPayload{
 			Message: ws.ThreadMessageItem{
-				ID:          replyID,
-				ChannelID:   channelID,
-			ThreadID:    threadID,
-				SenderType:  senderType,
-				SenderID:    userID,
-				SenderName:  displayName,
-				Content:     content,
-				ContentType: "text",
-				CreatedAt:   now.UTC().Format(time.RFC3339),
+				ID:            replyID,
+				ChannelID:     channelID,
+				ThreadID:      threadID,
+				SenderType:    senderType,
+				SenderID:      userID,
+				SenderName:    displayName,
+				Content:       content,
+				ContentType:   "text",
+				AttachmentIDs: attachmentIDs,
+				Attachments:   toWSAttachmentMeta(attachments),
+				CreatedAt:     now.UTC().Format(time.RFC3339),
 			},
 			Thread: ws.ThreadMetadataItem{
-			ThreadID:    threadID,
+				ThreadID:    threadID,
 				ReplyCount:  replyCount,
 				LastReplyAt: now.UTC().Format(time.RFC3339),
 			},
@@ -682,6 +683,7 @@ func (h *ThreadHandler) UnfollowThread(w http.ResponseWriter, r *http.Request) {
 	slog.Info("thread unfollowed", "user_id", userID, "thread_id", threadID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "unfollowed", "thread_id": threadID})
 }
+
 // collectThreadAttachmentIDs gathers all attachment IDs from a slice of thread reply responses.
 func collectThreadAttachmentIDs(messages []ThreadReplyResponse) []string {
 	seen := make(map[string]bool)
@@ -696,4 +698,3 @@ func collectThreadAttachmentIDs(messages []ThreadReplyResponse) []string {
 	}
 	return ids
 }
-

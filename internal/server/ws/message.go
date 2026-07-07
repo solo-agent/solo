@@ -138,22 +138,33 @@ type TaskCancelPayload struct {
 
 // ----- Server -> Client payloads -----
 
+type AttachmentMeta struct {
+	ID           string `json:"id"`
+	Filename     string `json:"filename"`
+	MimeType     string `json:"mime_type"`
+	Size         int64  `json:"size"`
+	URL          string `json:"url"`
+	ThumbnailURL string `json:"thumbnail_url,omitempty"`
+	CreatedAt    string `json:"created_at,omitempty"`
+}
+
 type MessageNewPayload struct {
-	ID                 string   `json:"id"`
-	ChannelID          string   `json:"channel_id"`
-	SenderType         string   `json:"sender_type"`
-	SenderID           string   `json:"sender_id"`
-	SenderName         string   `json:"sender_name,omitempty"`
-	Content            string   `json:"content"`
-	ContentType        string   `json:"content_type"`
-	ThreadID           string   `json:"thread_id,omitempty"`
-	MentionedAgentIDs  []string `json:"mentioned_agent_ids,omitempty"`
-	AttachmentIDs      []string `json:"attachment_ids,omitempty"`
-	CreatedAt          string   `json:"created_at"`
-	TaskNumber         int      `json:"task_number,omitempty"`
-	TaskStatus         string   `json:"task_status,omitempty"`
-	TaskClaimerName    string   `json:"task_claimer_name,omitempty"`
-	TaskClaimerDeleted bool     `json:"task_claimer_deleted"`
+	ID                 string           `json:"id"`
+	ChannelID          string           `json:"channel_id"`
+	SenderType         string           `json:"sender_type"`
+	SenderID           string           `json:"sender_id"`
+	SenderName         string           `json:"sender_name,omitempty"`
+	Content            string           `json:"content"`
+	ContentType        string           `json:"content_type"`
+	ThreadID           string           `json:"thread_id,omitempty"`
+	MentionedAgentIDs  []string         `json:"mentioned_agent_ids,omitempty"`
+	AttachmentIDs      []string         `json:"attachment_ids,omitempty"`
+	Attachments        []AttachmentMeta `json:"attachments,omitempty"`
+	CreatedAt          string           `json:"created_at"`
+	TaskNumber         int              `json:"task_number,omitempty"`
+	TaskStatus         string           `json:"task_status,omitempty"`
+	TaskClaimerName    string           `json:"task_claimer_name,omitempty"`
+	TaskClaimerDeleted bool             `json:"task_claimer_deleted"`
 }
 
 // AgentStreamTokenPayload is broadcast on message.agent_typing for streaming tokens.
@@ -250,16 +261,17 @@ type ToolRef struct {
 
 // ThreadMessageItem is the message portion of a thread.message.new payload.
 type ThreadMessageItem struct {
-	ID            string   `json:"id"`
-	ChannelID     string   `json:"channel_id"`
-	ThreadID      string   `json:"thread_id"`
-	SenderType    string   `json:"sender_type"`
-	SenderID      string   `json:"sender_id"`
-	SenderName    string   `json:"sender_name,omitempty"`
-	Content       string   `json:"content"`
-	ContentType   string   `json:"content_type"`
-	AttachmentIDs []string `json:"attachment_ids,omitempty"`
-	CreatedAt     string   `json:"created_at"`
+	ID            string           `json:"id"`
+	ChannelID     string           `json:"channel_id"`
+	ThreadID      string           `json:"thread_id"`
+	SenderType    string           `json:"sender_type"`
+	SenderID      string           `json:"sender_id"`
+	SenderName    string           `json:"sender_name,omitempty"`
+	Content       string           `json:"content"`
+	ContentType   string           `json:"content_type"`
+	AttachmentIDs []string         `json:"attachment_ids,omitempty"`
+	Attachments   []AttachmentMeta `json:"attachments,omitempty"`
+	CreatedAt     string           `json:"created_at"`
 }
 
 // ThreadMetadataItem is the thread metadata portion of a thread.message.new payload.
@@ -327,17 +339,18 @@ type MessageDeletedPayload struct {
 // DMMessageNewPayload is broadcast on dm.message.new.
 // Fields are flat (not nested) to match frontend WSServerEvent dm.message.new type.
 type DMMessageNewPayload struct {
-	DMID          string   `json:"dm_id"`
-	ID            string   `json:"id"`
-	ChannelID     string   `json:"channel_id"`
-	SenderType    string   `json:"sender_type"`
-	SenderID      string   `json:"sender_id"`
-	SenderName    string   `json:"sender_name,omitempty"`
-	Content       string   `json:"content"`
-	ContentType   string   `json:"content_type"`
-	AttachmentIDs []string `json:"attachment_ids,omitempty"`
-	ThreadID      string   `json:"thread_id,omitempty"`
-	CreatedAt     string   `json:"created_at"`
+	DMID          string           `json:"dm_id"`
+	ID            string           `json:"id"`
+	ChannelID     string           `json:"channel_id"`
+	SenderType    string           `json:"sender_type"`
+	SenderID      string           `json:"sender_id"`
+	SenderName    string           `json:"sender_name,omitempty"`
+	Content       string           `json:"content"`
+	ContentType   string           `json:"content_type"`
+	AttachmentIDs []string         `json:"attachment_ids,omitempty"`
+	Attachments   []AttachmentMeta `json:"attachments,omitempty"`
+	ThreadID      string           `json:"thread_id,omitempty"`
+	CreatedAt     string           `json:"created_at"`
 }
 
 // TaskCreatedPayload is broadcast on task.created.

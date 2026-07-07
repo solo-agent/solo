@@ -12,7 +12,6 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
 import { t } from '@/lib/i18n';
-import type { WSMessage } from '@/lib/ws-types';
 import type { Attachment, Message } from '@/lib/types';
 
 // ---- Constants ----
@@ -70,21 +69,6 @@ function mapMessageResponse(resp: MessageResponse): Message {
     task_claimer_deleted: resp.task_claimer_deleted,
     has_unread_thread: resp.has_unread_thread,
     attachments: resp.attachments,
-  };
-}
-
-function mapWSMessage(ws: WSMessage): Message {
-  return {
-    id: ws.id,
-    channel_id: ws.channel_id,
-    user_id: ws.sender_id || ws.user_id || '',
-    display_name: ws.sender_name || ws.display_name || ws.sender_id || '',
-    content: ws.content,
-    created_at: ws.created_at,
-    status: 'sent',
-    thread_parent_id: ws.thread_parent_id,
-    sender_type: ws.sender_type as 'user' | 'agent' | 'system' | undefined,
-    attachments: ws.attachments,
   };
 }
 
@@ -485,7 +469,9 @@ export function useMessages(channelId: string | null) {
       attachmentIds?: string[],
     ): Promise<{ id: string; task_number?: number } | null> => {
       const id = channelRef.current;
-      if (!id || !content.trim()) return null;
+      const trimmedContent = content.trim();
+      const hasAttachments = Boolean(attachmentIds && attachmentIds.length > 0);
+      if (!id || (!trimmedContent && !hasAttachments) || (asTask && !trimmedContent)) return null;
 
       const tempId = `temp-${Date.now()}`;
       const optimisticMessage: Message = {
@@ -493,7 +479,7 @@ export function useMessages(channelId: string | null) {
         channel_id: id,
         user_id: 'user-1',
         display_name: 'You',
-        content: content.trim(),
+        content: trimmedContent,
         created_at: new Date().toISOString(),
         status: 'sending',
       };
@@ -501,7 +487,7 @@ export function useMessages(channelId: string | null) {
       setMessages((prev) => [...prev, optimisticMessage]);
 
       try {
-        const body: Record<string, unknown> = { content: content.trim() };
+        const body: Record<string, unknown> = { content: trimmedContent };
         if (mentionedAgentIds && mentionedAgentIds.length > 0) {
           body.mentioned_agent_ids = mentionedAgentIds;
         }

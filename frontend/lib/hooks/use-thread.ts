@@ -12,6 +12,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
 import { t } from '@/lib/i18n';
+import type { Attachment } from '@/lib/types';
 import type { WSMessage, WSMessageSource } from '@/lib/ws-types';
 
 // ---- API 响应类型（与后端 handler/thread.go 对齐） ----
@@ -26,6 +27,7 @@ interface ThreadReplyResponse {
   sender_active?: boolean;
   content: string;
   content_type: string;
+  attachments?: Attachment[];
   created_at: string;
 }
 
@@ -49,6 +51,7 @@ function toWSMessage(r: ThreadReplyResponse): WSMessage {
     content: r.content,
     content_type: r.content_type,
     thread_parent_id: r.thread_id,
+    attachments: r.attachments,
     created_at: r.created_at,
   };
 }
@@ -195,6 +198,7 @@ export function useThread(): UseThreadReturn {
             content: event.message.content,
             content_type: event.message.content_type,
             thread_parent_id: event.message.thread_id,
+            attachments: event.message.attachments,
             created_at: event.message.created_at,
           };
           const result = prev.map((m) =>

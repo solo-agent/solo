@@ -17,12 +17,14 @@ import {
   type KeyboardEvent,
   type DragEvent,
   type ClipboardEvent,
+  type ChangeEvent,
 } from 'react';
 import {
   Send,
   MessageSquare,
   SquareCheckBig,
   Upload,
+  Paperclip,
   X,
   Check,
   AlertTriangle,
@@ -33,6 +35,7 @@ import { MentionDropdown, type DropdownAnchor } from './mention-dropdown';
 import { useToast } from '@/components/ui/toast';
 import { Spinner } from '@/components/ui/spinner';
 import { t } from '@/lib/i18n';
+import { resolveAttachmentUrl } from '@/lib/attachment-url';
 import type { ChannelMember } from '@/lib/types';
 
 // ---- Types ----
@@ -67,8 +70,6 @@ interface MessageInputProps {
 let uploadCounter = 0;
 
 async function uploadSingleFile(file: File): Promise<UploadItem> {
-  const id = `upload-${++uploadCounter}-${Date.now()}`;
-
   // Validate size (max 50MB)
   if (file.size > 50 * 1024 * 1024) {
     throw new Error(t('fileSizeExceeded', { name: file.name }));
@@ -89,7 +90,7 @@ async function uploadSingleFile(file: File): Promise<UploadItem> {
   return {
     id: res.id,
     filename: file.name,
-    url: res.url,
+    url: resolveAttachmentUrl(res.url),
     mimeType: res.mime_type,
     size: file.size,
     status: 'done' as const,
@@ -109,12 +110,12 @@ export function MessageInput({
   const [cursorPosition, setCursorPosition] = useState(0);
   const [asTask, setAsTask] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const isSendingRef = useRef(false);
 
   // ---- Upload state ----
   const [isDragging, setIsDragging] = useState(false);
   const [uploads, setUploads] = useState<UploadItem[]>([]);
-  const [uploading, setUploading] = useState(false);
   const dragCounterRef = useRef(0);
   const { showToast } = useToast();
 
@@ -209,8 +210,6 @@ export function MessageInput({
   const uploadFiles = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
 
-    setUploading(true);
-
     // Add placeholder entries for each file
     const placeholders: UploadItem[] = files.map((file) => ({
       id: `upload-${++uploadCounter}-${Date.now()}`,
@@ -260,8 +259,22 @@ export function MessageInput({
       }
     }
 
-    setUploading(false);
   }, [showToast]);
+
+  const openFilePicker = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileInputChange = useCallback(
+    async (e: ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (files && files.length > 0) {
+        await uploadFiles(Array.from(files));
+      }
+      e.target.value = '';
+    },
+    [uploadFiles],
+  );
 
   // ---- Drag & drop handlers ----
 
@@ -336,7 +349,7 @@ export function MessageInput({
   const trimmed = content.trim();
   const doneUploads = uploads.filter((u) => u.status === 'done');
   const hasUploading = uploads.some((u) => u.status === 'uploading');
-  const canSend = (trimmed.length > 0 || doneUploads.length > 0) && !isSending && !hasUploading;
+  const canSend = (trimmed.length > 0 || (!asTask && doneUploads.length > 0)) && !isSending && !hasUploading;
 
   const handleSend = useCallback(async () => {
     if (!canSend || isSendingRef.current) return;
@@ -483,10 +496,10 @@ export function MessageInput({
         >
           <Upload className="h-8 w-8 text-brutal-black opacity-60" aria-hidden />
           <p className="font-heading text-base font-bold text-foreground">
-            Drop files here to upload
+            {t('dragDropHint')}
           </p>
           <p className="font-mono text-xs text-muted-foreground">
-            Max 50MB
+            {t('maxFileSize')}
           </p>
         </div>
       )}
@@ -539,7 +552,7 @@ export function MessageInput({
                   /* Status icon for non-image files */
                   <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center">
                     {upload.status === 'uploading' && (
-                      <Spinner size="sm" className="text-muted-foreground" label="Uploading" />
+                      <Spinner size="sm" className="text-muted-foreground" label={t('uploading')} />
                     )}
                     {upload.status === 'done' && (
                       <Check className="h-3.5 w-3.5 text-brutal-success" aria-label={t('uploadedDone')} />
@@ -557,10 +570,10 @@ export function MessageInput({
                   </span>
                   <span className="font-mono text-[10px] text-muted-foreground">
                     {upload.status === 'uploading'
-                      ? 'Uploading...'
+                      ? t('uploading')
                       : upload.status === 'done'
                         ? formatSize(upload.size)
-                        : 'Upload failed'}
+                        : t('uploadFailed')}
                   </span>
                 </div>
 
@@ -613,6 +626,15 @@ export function MessageInput({
         )}
 
         <div className="relative flex items-end gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleFileInputChange}
+            aria-hidden="true"
+            tabIndex={-1}
+          />
           <textarea
             ref={textareaRef}
             value={content}
@@ -631,12 +653,28 @@ export function MessageInput({
             aria-expanded={mentionActive}
             aria-haspopup="listbox"
             className={cn(
-              'input-brutal min-h-[44px] resize-none pr-24 font-mono text-sm leading-relaxed',
+              'input-brutal min-h-[44px] resize-none font-mono text-sm leading-relaxed',
               'placeholder:font-mono placeholder:text-muted-foreground/60',
               'disabled:opacity-50',
+              asTask ? 'pr-36' : 'pr-24',
               asTask && 'border-brutal-primary',
             )}
           />
+          <button
+            type="button"
+            onClick={openFilePicker}
+            disabled={isSending || hasUploading}
+            className={cn(
+              'absolute bottom-2 flex h-8 w-8 items-center justify-center',
+              'btn-brutal bg-white text-foreground hover:bg-brutal-primary-light',
+              'disabled:opacity-40 disabled:pointer-events-none',
+              asTask ? 'right-[112px]' : 'right-12',
+            )}
+            aria-label={t('attachFiles')}
+            title={t('attachFiles')}
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
           <button
             type="button"
             onClick={handleSend}
