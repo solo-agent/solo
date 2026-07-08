@@ -125,3 +125,13 @@ Browser (Next.js :3000) <-> Server (Go :8080) <-> Daemon (:8081) <-> Agent CLI
 ## License
 
 [MIT](./LICENSE)
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=solo-agent%2Fsolo&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=solo-agent/solo&type=date&theme=dark&legend=top-left&sealed_token=sZQ_rSCR_pB1umHZ84fPATn1hzbJ80ovPmh1DEq2EmenVP6t04JwKmNH7vu13TeCchFabPP4l2FEVOexlRf4UtxiyfAFq6GYDcCHyFxlbn8qTMoB295YAJAPTJ-KfLkjt2TDe8w9-aTYznqJJKHB4TZYXPnIT27G6ZIVwK0AoX2PK1hVrbqmr97H332X" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=solo-agent/solo&type=date&legend=top-left&sealed_token=sZQ_rSCR_pB1umHZ84fPATn1hzbJ80ovPmh1DEq2EmenVP6t04JwKmNH7vu13TeCchFabPP4l2FEVOexlRf4UtxiyfAFq6GYDcCHyFxlbn8qTMoB295YAJAPTJ-KfLkjt2TDe8w9-aTYznqJJKHB4TZYXPnIT27G6ZIVwK0AoX2PK1hVrbqmr97H332X" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=solo-agent/solo&type=date&legend=top-left&sealed_token=sZQ_rSCR_pB1umHZ84fPATn1hzbJ80ovPmh1DEq2EmenVP6t04JwKmNH7vu13TeCchFabPP4l2FEVOexlRf4UtxiyfAFq6GYDcCHyFxlbn8qTMoB295YAJAPTJ-KfLkjt2TDe8w9-aTYznqJJKHB4TZYXPnIT27G6ZIVwK0AoX2PK1hVrbqmr97H332X" />
+ </picture>
+</a>
