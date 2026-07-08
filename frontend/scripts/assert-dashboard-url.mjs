@@ -23,6 +23,11 @@ assert.equal(
   '/dashboard?channel=c1&view=task',
 );
 
+assert.equal(
+  buildDashboardHref('c1', { view: 'task', panel: 'thread', taskId: 't1', threadId: 'm1' }),
+  '/dashboard?channel=c1&view=task&panel=thread&task=t1&thread=m1',
+);
+
 assert.deepEqual(parseDashboardParams(new URLSearchParams('channel=c1')), {
   channelId: 'c1',
   view: 'team',

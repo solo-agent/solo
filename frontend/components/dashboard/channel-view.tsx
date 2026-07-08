@@ -118,6 +118,7 @@ export function ChannelView({
   agentsRef.current = agents;
 
   const dashboardState = useMemo(() => parseDashboardParams(searchParams), [searchParams]);
+  const hasViewParam = searchParams.has('view');
   const workspaceView = dashboardState.view;
   const mainPanel = dashboardState.panel;
   const pushDashboardState = useCallback(
@@ -492,9 +493,10 @@ export function ChannelView({
       setThreadMessage(found);
       // Try to find the associated task for the metadata bar
       const task = channelTasks.find((t) => t.message_id === targetThreadId);
-      if (task) setThreadTask(task);
+      setThreadTask(task ?? null);
       return;
     }
+    setThreadTask(null);
     setThreadMessage({
       id: targetThreadId,
       channel_id: channel.id,
@@ -523,16 +525,30 @@ export function ChannelView({
   useEffect(() => {
     if (!threadMessage) return;
     const task = channelTasks.find((t) => t.message_id === threadMessage.id);
-    if (task) {
-      setThreadTask((prev) => {
-        // Only update if actually changed to avoid re-render loops
-        if (!prev || prev.status !== task.status || prev.claimer_id !== task.claimer_id) {
-          return task;
-        }
-        return prev;
-      });
+    if (!task) {
+      setThreadTask(null);
+      return;
     }
+    setThreadTask((prev) => {
+      // Only update if actually changed to avoid re-render loops
+      if (!prev || prev.status !== task.status || prev.claimer_id !== task.claimer_id) {
+        return task;
+      }
+      return prev;
+    });
   }, [channelTasks, threadMessage]);
+
+  useEffect(() => {
+    if (hasViewParam || mainPanel !== 'thread' || workspaceView !== 'team' || !threadMessage) return;
+    const task = channelTasks.find((t) => t.message_id === threadMessage.id);
+    if (!task) return;
+    router.replace(buildDashboardHref(channel.id, {
+      view: 'task',
+      panel: 'thread',
+      taskId: task.id,
+      threadId: threadMessage.id,
+    }));
+  }, [channel.id, channelTasks, hasViewParam, mainPanel, router, threadMessage, workspaceView]);
 
   // ---- Task click in tasks tab: open ThreadPanel with the parent message ----
   const handleTaskClickInTab = useCallback(
