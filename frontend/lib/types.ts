@@ -25,13 +25,9 @@ export interface Channel {
 export interface Message {
   id: string;
   channel_id: string;
-  workspace_scope?: 'channel' | 'team' | 'thought' | 'task';
-  subject_type?: string;
-  subject_id?: string;
   user_id: string;
   display_name: string;
   content: string;
-  content_type?: string;
   created_at: string;
   status: 'sending' | 'sent' | 'failed' | 'streaming';
   thread_parent_id?: string;
@@ -62,83 +58,6 @@ export interface Message {
 export interface CreateChannelInput {
   name: string;
   description?: string;
-}
-
-// ---- Channel workspace/context types ----
-
-export interface ChannelAgendaItem {
-  id?: string;
-  title: string;
-  status?: TaskStatus;
-  children?: ChannelAgendaItem[];
-}
-
-export interface ContextRecord {
-  id: string;
-  channel_id: string;
-  scope: 'channel' | 'team' | 'thought' | 'task';
-  subject_type?: string;
-  subject_id?: string;
-  record_type: 'summary' | 'insight' | 'artifact' | 'team_summary';
-  title: string;
-  body: string;
-  author_type: 'user' | 'agent' | 'system';
-  author_id?: string;
-  artifact_ref?: unknown;
-  created_at: string;
-}
-
-export interface ChannelContext {
-  channel_id: string;
-  target: string;
-  agenda: ChannelAgendaItem[];
-  context_version: number;
-  latest_summary_records: ContextRecord[];
-}
-
-export interface WorkspaceViewDefaults {
-  channel_id: string;
-  scope: 'channel' | 'team' | 'thought' | 'task';
-  left_tab: string;
-  right_panel: 'overview' | 'team' | 'thought' | 'task';
-}
-
-export interface TeamSurface {
-  agents: Array<{ id: string; name: string; role?: string; status?: string }>;
-  relationships: Array<{ id?: string; from_agent_id: string; to_agent_id: string; rel_type: string; label?: string }>;
-  summary_records: ContextRecord[];
-}
-
-export interface ChannelWorkspace {
-  channel: Channel;
-  view_defaults: WorkspaceViewDefaults;
-  context: ChannelContext;
-  team: TeamSurface;
-}
-
-export interface ThoughtNode {
-  id: string;
-  thought_id: string;
-  parent_id?: string;
-  title: string;
-  status: Exclude<TaskStatus, 'closed'>;
-  is_root: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ThoughtSession {
-  id: string;
-  channel_id: string;
-  title: string;
-  status: Exclude<TaskStatus, 'closed'>;
-  selected_node_id?: string;
-  nodes: ThoughtNode[];
-  summary_records: ContextRecord[];
-  insight_records: ContextRecord[];
-  artifact_records: ContextRecord[];
-  created_at: string;
-  updated_at: string;
 }
 
 // ---- Agent types ----

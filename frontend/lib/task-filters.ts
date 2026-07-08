@@ -4,6 +4,7 @@ export interface TaskTreeFilters {
   channelId?: string | null;
   assignee?: string;
   creator?: string;
+  taskId?: string | null;
   taskNumber?: string;
 }
 
@@ -16,6 +17,15 @@ function parseTaskNumber(value?: string): number | null | undefined {
 }
 
 function matchesTask(task: Task, filters: TaskTreeFilters): boolean {
+  const taskId = filters.taskId?.trim();
+  if (taskId) {
+    const taskNumber = parseTaskNumber(taskId);
+    if (
+      task.id !== taskId &&
+      task.message_id !== taskId &&
+      (taskNumber == null || task.task_number !== taskNumber)
+    ) return false;
+  }
   if (filters.assignee) {
     const claimerVal = task.claimer_id || task.assignee_id || '';
     const claimerName = (task.claimer_name || task.assignee_name || '').toLowerCase();
@@ -37,7 +47,7 @@ export function filterTaskTree(tasks: Task[], filters: TaskTreeFilters): Task[] 
   const scoped = filters.channelId
     ? tasks.filter((task) => task.channel_id === filters.channelId)
     : tasks;
-  const hasTreeFilter = !!(filters.assignee || filters.creator || filters.taskNumber?.trim());
+  const hasTreeFilter = !!(filters.assignee || filters.creator || filters.taskId?.trim() || filters.taskNumber?.trim());
   if (!hasTreeFilter) return scoped;
 
   const taskById = new Map(scoped.map((task) => [task.id, task]));

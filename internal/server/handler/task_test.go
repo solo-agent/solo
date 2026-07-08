@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -50,78 +49,6 @@ func newTestTaskHandler() *TaskHandler {
 		svc:      service.NewTaskService(nil),
 		hub:      &testBroadcaster{},
 		agentSvc: nil,
-	}
-}
-
-func TestWorkTitleFromTarget(t *testing.T) {
-	if got := workTitleFromTarget("我想复制一个 Solo MVP"); got != "复制 Solo MVP" {
-		t.Fatalf("expected Solo title, got %q", got)
-	}
-	if got := workTitleFromTarget("  "); got != "复制 Solo MVP" {
-		t.Fatalf("expected fallback title, got %q", got)
-	}
-}
-
-func TestTaskIDsFromCardContent(t *testing.T) {
-	got := taskIDsFromCardContent(`{"card_type":"next_step","task_ids":[" task-1 ","","task-2"]}`)
-	want := []string{"task-1", "task-2"}
-	if len(got) != len(want) {
-		t.Fatalf("expected %d task IDs, got %d: %#v", len(want), len(got), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("task ID %d: expected %q, got %q", i, want[i], got[i])
-		}
-	}
-	if got := taskIDsFromCardContent(`not-json`); got != nil {
-		t.Fatalf("expected nil for invalid JSON, got %#v", got)
-	}
-}
-
-func TestAgendaTaskDraftsUsesWorkAgenda(t *testing.T) {
-	got := agendaTaskDrafts(`[
-		{"id":"explore","title":"探索你的想法","status":"todo"},
-		{"id":"work","title":"开始行动","status":"todo","children":[
-			{"id":"plan","title":"生成工作计划","status":"todo"},
-			{"id":"tasks","title":"拆分任务","status":"todo"}
-		]}
-	]`)
-	if len(got) != 2 {
-		t.Fatalf("expected 2 agenda drafts, got %#v", got)
-	}
-	if got[0].title != "生成工作计划" || got[1].title != "拆分任务" {
-		t.Fatalf("unexpected agenda task titles: %#v", got)
-	}
-}
-
-func TestAgendaTaskDraftsUsesSimplifiedAgenda(t *testing.T) {
-	got := agendaTaskDrafts(`[
-		{"id":"understand","title":"理解目标与边界","status":"done"},
-		{"id":"team","title":"组建 Agent Team","status":"done"},
-		{"id":"plan","title":"生成工作计划","status":"todo"},
-		{"id":"tasks","title":"拆分 tasks 并分配 agents","status":"todo"},
-		{"id":"review","title":"验收产物并更新 memory","status":"todo"}
-	]`)
-	if len(got) != 3 {
-		t.Fatalf("expected 3 unfinished agenda drafts, got %#v", got)
-	}
-	if got[0].title != "生成工作计划" || strings.Contains(got[0].title, "组建") {
-		t.Fatalf("unexpected simplified agenda task titles: %#v", got)
-	}
-}
-
-func TestFallbackTaskDraftsAreTargetBased(t *testing.T) {
-	got := fallbackTaskDrafts("复制 Solo MVP", "复制 Solo MVP")
-	if len(got) != 3 {
-		t.Fatalf("expected 3 fallback drafts, got %#v", got)
-	}
-	for _, draft := range got {
-		if draft.title == "PRD Draft" || draft.title == "Tech Plan" || draft.title == "QA Report" {
-			t.Fatalf("fallback should not use fixed storyboard task title: %#v", got)
-		}
-		if !strings.Contains(draft.title, "复制 Solo MVP") {
-			t.Fatalf("expected target in fallback title, got %q", draft.title)
-		}
 	}
 }
 

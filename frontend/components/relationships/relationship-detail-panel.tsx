@@ -198,7 +198,7 @@ export function RelationshipDetailPanel({
           />
         )}
         {/* Header */}
-        <div className={panelHeaderClass(embedded ? 'h-14 flex-shrink-0' : undefined)}>
+        <div className={panelHeaderClass(embedded ? 'sidebar-collapse-offset h-14 flex-shrink-0' : undefined)}>
           <h3 className={panelTitleClass()}>
             {t('agentDetailTitle')}
           </h3>
@@ -319,7 +319,7 @@ export function RelationshipDetailPanel({
         />
       )}
       {/* Header */}
-      <div className={panelHeaderClass(embedded ? 'h-14 flex-shrink-0' : undefined)}>
+      <div className={panelHeaderClass(embedded ? 'sidebar-collapse-offset h-14 flex-shrink-0' : undefined)}>
         <h3 className={panelTitleClass()}>
           {t('relationshipEditorEdgeDetail')}
         </h3>

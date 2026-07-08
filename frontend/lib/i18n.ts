@@ -59,6 +59,10 @@ const en = {
   navCollapseComputers: 'Expand or collapse computer list',
   navCollapseChannels: 'Expand or collapse channels',
   navCollapseDMs: 'Expand or collapse direct messages',
+  workspaceCollapsePanel: 'Collapse workspace',
+  workspaceExpandPanel: 'Expand workspace',
+  workspaceFullscreenPanel: 'Fullscreen workspace',
+  workspaceExitFullscreenPanel: 'Exit fullscreen workspace',
 
   // ── Channel Management ──
   deleteChannelTitle: 'Delete Channel',
@@ -845,6 +849,10 @@ const zhCN = {
   navCollapseComputers: '展开或收起电脑列表',
   navCollapseChannels: '展开或收起频道',
   navCollapseDMs: '展开或收起私信',
+  workspaceCollapsePanel: '收起工作区',
+  workspaceExpandPanel: '展开工作区',
+  workspaceFullscreenPanel: '全屏工作区',
+  workspaceExitFullscreenPanel: '退出全屏工作区',
   deleteChannelTitle: '删除频道',
   deleteChannelDesc: '确定要删除 #{name} 吗？该频道中的所有消息都会被永久删除。',
   createChannelTitle: '创建频道',

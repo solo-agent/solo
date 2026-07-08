@@ -15,9 +15,6 @@ export type WSMessageSource = 'user' | 'agent' | 'system';
 export interface WSMessage {
   id: string;
   channel_id: string;
-  workspace_scope?: 'channel' | 'team' | 'thought' | 'task';
-  subject_type?: string;
-  subject_id?: string;
   sender_type: WSMessageSource;
   sender_id: string;
   sender_name?: string;
@@ -49,7 +46,7 @@ export type WSServerEvent =
   | { type: 'connected'; user_id: string }
   | { type: 'error'; code: string; message: string }
   // ---- 消息事件 ----
-  | { type: 'message.new'; id: string; channel_id: string; workspace_scope?: 'channel' | 'team' | 'thought' | 'task'; subject_type?: string; subject_id?: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; thread_id?: string; created_at: string; attachments?: Attachment[] }
+  | { type: 'message.new'; id: string; channel_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; thread_id?: string; created_at: string; attachments?: Attachment[] }
   | { type: 'message.updated'; id: string; channel_id: string; content: string; sender_type?: string; sender_id?: string; updated_at: string; task_number?: number; task_title?: string; task_status?: string; task_claimer_name?: string; task_claimer_deleted?: boolean; reply_count?: number }
   | { type: 'message.deleted'; channel_id: string; message_id: string }
   // ---- 线程事件 ----

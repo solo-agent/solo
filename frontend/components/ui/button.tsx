@@ -56,6 +56,35 @@ export function iconActionClass(className?: string) {
   );
 }
 
+export function panelToggleButtonClass(_active = false, className?: string) {
+  return cn(
+    "inline-flex h-7 w-7 cursor-pointer items-center justify-center border-2 border-black bg-white text-black shadow-brutal-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-primary focus-visible:ring-offset-2",
+    className,
+  );
+}
+
+export function PanelToggleIcon({
+  side,
+  className,
+}: {
+  side: 'left' | 'right';
+  className?: string;
+}) {
+  const dividerX = side === 'left' ? 9 : 15;
+
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      className={cn('h-5 w-5', className)}
+      shapeRendering="geometricPrecision"
+    >
+      <path d={`M${dividerX} 4v16`} stroke="currentColor" strokeWidth="2" strokeLinecap="square" />
+    </svg>
+  );
+}
+
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, ...props }, ref) => {
     return (

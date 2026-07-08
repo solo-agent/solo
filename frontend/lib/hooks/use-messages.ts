@@ -24,9 +24,6 @@ const PAGE_SIZE = 50;
 interface MessageResponse {
   id: string;
   channel_id: string;
-  workspace_scope?: 'channel' | 'team' | 'thought' | 'task';
-  subject_type?: string;
-  subject_id?: string;
   sender_type: string;
   sender_id: string;
   sender_name: string;
@@ -51,25 +48,15 @@ interface MessageListResponse {
   has_more: boolean;
 }
 
-export interface MessageScopeOptions {
-  workspaceScope?: 'channel' | 'team' | 'thought' | 'task';
-  subjectType?: string;
-  subjectId?: string;
-}
-
 // ---- Mapping helpers ----
 
 function mapMessageResponse(resp: MessageResponse): Message {
   return {
     id: resp.id,
     channel_id: resp.channel_id,
-    workspace_scope: resp.workspace_scope,
-    subject_type: resp.subject_type,
-    subject_id: resp.subject_id,
     user_id: resp.sender_id,
     display_name: resp.sender_name || resp.sender_id,
     content: resp.content,
-    content_type: resp.content_type,
     created_at: resp.created_at,
     status: 'sent',
     thread_id: resp.thread_id,
@@ -90,13 +77,9 @@ function mapWSMessage(ws: WSMessage): Message {
   return {
     id: ws.id,
     channel_id: ws.channel_id,
-    workspace_scope: ws.workspace_scope,
-    subject_type: ws.subject_type,
-    subject_id: ws.subject_id,
     user_id: ws.sender_id || ws.user_id || '',
     display_name: ws.sender_name || ws.display_name || ws.sender_id || '',
     content: ws.content,
-    content_type: ws.content_type,
     created_at: ws.created_at,
     status: 'sent',
     thread_parent_id: ws.thread_parent_id,
@@ -109,14 +92,10 @@ function mapWSMessage(ws: WSMessage): Message {
 function flatToMessage(event: {
   id: string;
   channel_id: string;
-  workspace_scope?: 'channel' | 'team' | 'thought' | 'task';
-  subject_type?: string;
-  subject_id?: string;
   sender_type: string;
   sender_id: string;
   sender_name?: string;
   content: string;
-  content_type?: string;
   thread_id?: string;
   reply_count?: number;
   task_number?: number;
@@ -131,13 +110,9 @@ function flatToMessage(event: {
   return {
     id: event.id,
     channel_id: event.channel_id,
-    workspace_scope: event.workspace_scope,
-    subject_type: event.subject_type,
-    subject_id: event.subject_id,
     user_id: event.sender_id,
     display_name: event.sender_name || event.sender_id,
     content: event.content,
-    content_type: event.content_type,
     created_at: event.created_at,
     status: 'sent',
     thread_parent_id: event.thread_id,
@@ -156,11 +131,8 @@ function flatToMessage(event: {
 
 // ---- Hook ----
 
-export function useMessages(channelId: string | null, scopeOptions: MessageScopeOptions = {}) {
+export function useMessages(channelId: string | null) {
   const { subscribe, unsubscribe, onEvent, isConnected } = useWebSocket();
-  const workspaceScope = scopeOptions.workspaceScope ?? 'channel';
-  const subjectType = scopeOptions.subjectType ?? '';
-  const subjectId = scopeOptions.subjectId ?? '';
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -177,8 +149,6 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
 
   const channelIdRef = useRef(channelId);
   channelIdRef.current = channelId;
-  const scopeRef = useRef({ workspaceScope, subjectType, subjectId });
-  scopeRef.current = { workspaceScope, subjectType, subjectId };
 
   // Keep channelRef immediately in sync so sendMessage and other operations
   // can use it before the first async loadMessages completes.
@@ -186,32 +156,6 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
 
   // Track previous connected state for detecting reconnection
   const prevConnectedRef = useRef(false);
-
-  const scopeQuery = useCallback(() => {
-    const params: Record<string, string> = {
-      limit: String(PAGE_SIZE),
-      workspace_scope: scopeRef.current.workspaceScope,
-    };
-    if (scopeRef.current.subjectType && scopeRef.current.subjectId) {
-      params.subject_type = scopeRef.current.subjectType;
-      params.subject_id = scopeRef.current.subjectId;
-    }
-    return params;
-  }, []);
-
-  const eventInScope = useCallback((event: { workspace_scope?: string; subject_type?: string; subject_id?: string }) => {
-    const scope = event.workspace_scope ?? 'channel';
-    const current = scopeRef.current;
-    if (scope !== current.workspaceScope) return false;
-    if (!current.subjectType && !current.subjectId) return true;
-    return event.subject_type === current.subjectType && event.subject_id === current.subjectId;
-  }, []);
-
-  const resolveScope = useCallback((override?: MessageScopeOptions) => ({
-    workspaceScope: override?.workspaceScope ?? scopeRef.current.workspaceScope,
-    subjectType: override?.subjectType ?? scopeRef.current.subjectType,
-    subjectId: override?.subjectId ?? scopeRef.current.subjectId,
-  }), []);
 
   // ---- Thread reply tracking (SOLO-67-FS) ----
   // Maps thread_id → message_id for updating reply counts in real-time
@@ -237,7 +181,7 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
       if (lastMsg.id && !lastMsg.id.startsWith('temp-')) {
         apiClient
           .get<MessageListResponse>(`/api/v1/channels/${cid}/messages`, {
-            ...scopeQuery(),
+            limit: '50',
             after: lastMsg.id,
           })
           .then((res) => {
@@ -257,7 +201,7 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
           });
       }
     }
-  }, [isConnected, scopeQuery]);
+  }, [isConnected]);
 
   // ---- WebSocket subscription ----
 
@@ -271,7 +215,7 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
     return () => {
       unsubscribe(channelId);
     };
-  }, [channelId, subscribe, subjectId, subjectType, unsubscribe, workspaceScope]);
+  }, [channelId, subscribe, unsubscribe]);
 
   // Listen for message events (new + streaming + update + delete)
   useEffect(() => {
@@ -284,7 +228,6 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
       if (event.type === 'message.new') {
         if (event.channel_id !== cid) return;
         if (event.thread_id) return;
-        if (!eventInScope(event)) return;
 
         setMessages((prev) => {
           const existing = prev.find((m) => m.id === event.id);
@@ -333,7 +276,6 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
       if (event.type === 'message.agent_typing') {
         if (event.channel_id !== cid) return;
         if (event.thread_id) return;
-        if (scopeRef.current.workspaceScope !== 'channel') return;
 
         setMessages((prev) => {
           const existing = prev.find((m) => m.id === event.id);
@@ -434,7 +376,7 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
     });
 
     return unsub;
-  }, [channelId, eventInScope, onEvent]);
+  }, [channelId, onEvent]);
 
   // ---- Initial load ----
 
@@ -447,7 +389,7 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
     try {
       const res = await apiClient.get<MessageListResponse>(
         `/api/v1/channels/${id}/messages`,
-        scopeQuery(),
+        { limit: String(PAGE_SIZE) },
       );
       if (channelRef.current === null || channelRef.current === id) {
         const parsed = res.messages.map(mapMessageResponse);
@@ -476,7 +418,7 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
       setIsLoading(false);
       loadingRef.current = false;
     }
-  }, [scopeQuery]);
+  }, []);
 
   useEffect(() => {
     if (channelId) {
@@ -486,7 +428,7 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
       setHasMore(true);
       channelRef.current = null;
     }
-  }, [channelId, loadMessages, subjectId, subjectType, workspaceScope]);
+  }, [channelId, loadMessages]);
 
   // ---- Load older messages (cursor-based pagination) ----
 
@@ -509,7 +451,7 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
       const oldestId = currentMsgs[0].id;
       const res = await apiClient.get<MessageListResponse>(
         `/api/v1/channels/${id}/messages`,
-        { ...scopeQuery(), before: oldestId },
+        { limit: String(PAGE_SIZE), before: oldestId },
       );
 
       const older = res.messages.map(mapMessageResponse);
@@ -531,7 +473,7 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
       setIsLoadingMore(false);
       loadingMoreRef.current = false;
     }
-  }, [hasMore, scopeQuery]);
+  }, [hasMore]);
 
   // ---- Send message (optimistic update) ----
 
@@ -541,19 +483,14 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
       mentionedAgentIds?: string[],
       asTask?: boolean,
       attachmentIds?: string[],
-      scopeOverride?: MessageScopeOptions,
     ): Promise<{ id: string; task_number?: number } | null> => {
       const id = channelRef.current;
       if (!id || !content.trim()) return null;
-      const targetScope = resolveScope(scopeOverride);
 
       const tempId = `temp-${Date.now()}`;
       const optimisticMessage: Message = {
         id: tempId,
         channel_id: id,
-        workspace_scope: targetScope.workspaceScope,
-        subject_type: targetScope.subjectType || undefined,
-        subject_id: targetScope.subjectId || undefined,
         user_id: 'user-1',
         display_name: 'You',
         content: content.trim(),
@@ -564,14 +501,7 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
       setMessages((prev) => [...prev, optimisticMessage]);
 
       try {
-        const body: Record<string, unknown> = {
-          content: content.trim(),
-          workspace_scope: targetScope.workspaceScope,
-        };
-        if (targetScope.subjectType && targetScope.subjectId) {
-          body.subject_type = targetScope.subjectType;
-          body.subject_id = targetScope.subjectId;
-        }
+        const body: Record<string, unknown> = { content: content.trim() };
         if (mentionedAgentIds && mentionedAgentIds.length > 0) {
           body.mentioned_agent_ids = mentionedAgentIds;
         }
@@ -664,7 +594,7 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
         return null;
       }
     },
-    [resolveScope],
+    [],
   );
 
   // ---- Retry failed message ----
@@ -673,12 +603,6 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
     async (messageId: string, content: string) => {
       const id = channelRef.current;
       if (!id) return;
-      const failed = messagesRef.current.find((message) => message.id === messageId);
-      const targetScope = resolveScope(failed ? {
-        workspaceScope: failed.workspace_scope,
-        subjectType: failed.subject_type,
-        subjectId: failed.subject_id,
-      } : undefined);
 
       setMessages((prev) =>
         prev.map((m) =>
@@ -687,17 +611,9 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
       );
 
       try {
-        const body: Record<string, unknown> = {
-          content,
-          workspace_scope: targetScope.workspaceScope,
-        };
-        if (targetScope.subjectType && targetScope.subjectId) {
-          body.subject_type = targetScope.subjectType;
-          body.subject_id = targetScope.subjectId;
-        }
         const confirmed = await apiClient.post<MessageResponse>(
           `/api/v1/channels/${id}/messages`,
-          body,
+          { content },
         );
 
         setMessages((prev) => {
@@ -712,7 +628,7 @@ export function useMessages(channelId: string | null, scopeOptions: MessageScope
         );
       }
     },
-    [resolveScope],
+    [],
   );
 
   // ---- Active streaming IDs ----

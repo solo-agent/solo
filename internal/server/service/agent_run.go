@@ -454,6 +454,37 @@ func (s *AgentRunService) ListActiveRuns(ctx context.Context) ([]AgentRun, error
 	))
 }
 
+func (s *AgentRunService) ListActiveRunsForUser(ctx context.Context, userID string) ([]AgentRun, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id is required")
+	}
+	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
+		 WHERE r.status = ANY($1)
+		   AND (
+		     a.owner_id = $2
+		     OR EXISTS (
+		       SELECT 1
+		         FROM channel_members cm
+		        WHERE cm.channel_id = r.channel_id
+		          AND cm.member_type = 'user'
+		          AND cm.member_id = $2
+		     )
+		   )
+		 ORDER BY r.updated_at DESC
+		 LIMIT 100`,
+		[]string{
+			string(AgentRunStatusQueued),
+			string(AgentRunStatusThinking),
+			string(AgentRunStatusRunning),
+			string(AgentRunStatusStreaming),
+			string(AgentRunStatusWaitingInput),
+			string(AgentRunStatusWaitingApproval),
+		},
+		userID,
+	))
+}
+
 func (s *AgentRunService) ListRecentRuns(ctx context.Context) ([]AgentRun, error) {
 	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
 		 ORDER BY r.updated_at DESC

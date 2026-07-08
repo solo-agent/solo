@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -163,45 +162,6 @@ func TestMessageHandler_List_LimitBoundaries(t *testing.T) {
 				t.Errorf("unexpected 5xx for limit=%q: %d", tt.limit, rr.Code)
 			}
 		})
-	}
-}
-
-func TestBuildChannelCreateCardPayload(t *testing.T) {
-	payload := buildChannelCreateCardPayload("我想做一个语音聊天机器人")
-
-	if payload.CardType != "channel_create" {
-		t.Fatalf("expected channel_create, got %q", payload.CardType)
-	}
-	if payload.ChannelName != "chatbot-project" {
-		t.Fatalf("expected chatbot-project, got %q", payload.ChannelName)
-	}
-	if len(payload.Agenda) != 5 {
-		t.Fatalf("expected simplified agenda, got %#v", payload.Agenda)
-	}
-	if payload.Agenda[0].Status != "done" || payload.Agenda[1].Status != "done" {
-		t.Fatalf("expected context/team agenda to be done, got %#v", payload.Agenda)
-	}
-	for _, item := range payload.Agenda {
-		if item.ID == "explore" || strings.Contains(item.Title, "探索") {
-			t.Fatalf("thought/explore agenda should stay out of simplified flow: %#v", payload.Agenda)
-		}
-	}
-	if len(payload.Agents) == 0 {
-		t.Fatal("expected matched agents")
-	}
-	if got := buildChannelCreateCardPayload("做一份行业调研").Template; got != "Research Project" {
-		t.Fatalf("expected research template, got %q", got)
-	}
-}
-
-func TestChannelCardAgentHelpers(t *testing.T) {
-	agent := channelCreateCardAgent{Name: "leader", Role: "implementation-owner-with-extra-text"}
-	if got := channelCardMemberRole(agent.Role); len([]rune(got)) > 20 {
-		t.Fatalf("expected member role to be truncated, got %q", got)
-	}
-	prompt := channelCardAgentPrompt(agent, "复制 Solo MVP", "Solo Project")
-	if !strings.Contains(prompt, "leader") || !strings.Contains(prompt, "复制 Solo MVP") || !strings.Contains(prompt, "Solo Project") {
-		t.Fatalf("prompt did not include matched agent context: %q", prompt)
 	}
 }
 

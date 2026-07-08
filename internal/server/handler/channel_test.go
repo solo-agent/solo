@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/go-chi/chi/v5"
 )
 
 func TestChannelHandler_Create_Validation(t *testing.T) {
@@ -129,36 +127,5 @@ func TestChannelHandler_ResponseFormat(t *testing.T) {
 	}
 	if decoded.Type != "channel" {
 		t.Errorf("expected type channel, got %s", decoded.Type)
-	}
-}
-
-func TestChannelHandler_PatchContext_Validation(t *testing.T) {
-	h := &ChannelHandler{}
-	r := chi.NewRouter()
-	r.Patch("/api/v1/channels/{channelID}/context", h.PatchContext)
-
-	tests := []struct {
-		name string
-		body string
-	}{
-		{name: "missing fields", body: `{}`},
-		{name: "agenda object", body: `{"agenda":{}}`},
-		{name: "invalid json", body: `{"agenda":[}`},
-		{name: "target too long", body: `{"target":"` + string(make([]byte, 10001)) + `"}`},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("PATCH", "/api/v1/channels/ch-1/context", bytes.NewBufferString(tt.body))
-			req.Header.Set("X-User-ID", "user-1")
-			req.Header.Set("Content-Type", "application/json")
-
-			rr := httptest.NewRecorder()
-			r.ServeHTTP(rr, req)
-
-			if rr.Code != http.StatusBadRequest {
-				t.Errorf("expected 400, got %d", rr.Code)
-			}
-		})
 	}
 }

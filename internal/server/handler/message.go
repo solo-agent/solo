@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/solo-ai/solo/internal/server/service"
@@ -24,8 +22,6 @@ const maxMessageLimit = 100
 
 // defaultMessageLimit is the default page size when no limit is specified.
 const defaultMessageLimit = 50
-
-var errInvalidMessageScope = errors.New("invalid message workspace scope")
 
 // formatUUIDArray formats a []string of UUIDs as a PostgreSQL array literal.
 func formatUUIDArray(ids []string) string {
@@ -58,13 +54,10 @@ func NewMessageHandler(pool *pgxpool.Pool, hub *ws.Hub, agentSvc *service.AgentS
 // --- Request/Response types ---
 
 type CreateMessageRequest struct {
-	Content        string   `json:"content"`
-	AsTask         bool     `json:"as_task,omitempty"`
-	AttachmentIDs  []string `json:"attachment_ids,omitempty"`
-	ThreadID       string   `json:"thread_id,omitempty"`
-	WorkspaceScope string   `json:"workspace_scope,omitempty"`
-	SubjectType    string   `json:"subject_type,omitempty"`
-	SubjectID      string   `json:"subject_id,omitempty"`
+	Content       string   `json:"content"`
+	AsTask        bool     `json:"as_task,omitempty"`
+	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	ThreadID      string   `json:"thread_id,omitempty"`
 }
 
 // AttachmentMeta is the attachment metadata included in message responses.
@@ -79,150 +72,29 @@ type AttachmentMeta struct {
 }
 
 type MessageResponse struct {
-	ID                 string           `json:"id"`
-	TaskNumber         int              `json:"task_number,omitempty"`
-	ChannelID          string           `json:"channel_id"`
-	WorkspaceScope     string           `json:"workspace_scope,omitempty"`
-	SubjectType        string           `json:"subject_type,omitempty"`
-	SubjectID          string           `json:"subject_id,omitempty"`
-	SenderType         string           `json:"sender_type"`
-	SenderID           string           `json:"sender_id"`
-	SenderName         string           `json:"sender_name,omitempty"`
-	SenderActive       bool             `json:"sender_active"`
-	Content            string           `json:"content"`
-	ContentType        string           `json:"content_type"`
-	MentionedAgentIDs  []string         `json:"mentioned_agent_ids,omitempty"`
-	AttachmentIDs      []string         `json:"attachment_ids,omitempty"`
-	Attachments        []AttachmentMeta `json:"attachments,omitempty"`
-	CreatedAt          string           `json:"created_at"`
-	ReplyCount         int              `json:"reply_count,omitempty"`
-	TaskStatus         string           `json:"task_status,omitempty"`
-	TaskClaimerName    string           `json:"task_claimer_name,omitempty"`
-	TaskClaimerDeleted bool             `json:"task_claimer_deleted"`
-	HasUnreadThread    bool             `json:"has_unread_thread,omitempty"`
+	ID                string   `json:"id"`
+	TaskNumber        int      `json:"task_number,omitempty"`
+	ChannelID         string   `json:"channel_id"`
+	SenderType        string   `json:"sender_type"`
+	SenderID          string   `json:"sender_id"`
+	SenderName        string   `json:"sender_name,omitempty"`
+		SenderActive      bool     `json:"sender_active"`
+	Content           string   `json:"content"`
+	ContentType       string   `json:"content_type"`
+	MentionedAgentIDs []string         `json:"mentioned_agent_ids,omitempty"`
+	AttachmentIDs     []string         `json:"attachment_ids,omitempty"`
+	Attachments       []AttachmentMeta `json:"attachments,omitempty"`
+	CreatedAt         string           `json:"created_at"`
+	ReplyCount        int      `json:"reply_count,omitempty"`
+	TaskStatus        string   `json:"task_status,omitempty"`
+	TaskClaimerName      string `json:"task_claimer_name,omitempty"`
+	TaskClaimerDeleted   bool   `json:"task_claimer_deleted"`
+	HasUnreadThread   bool     `json:"has_unread_thread,omitempty"`
 }
 
 type MessageListResponse struct {
 	Messages []MessageResponse `json:"messages"`
 	HasMore  bool              `json:"has_more"`
-}
-
-func normalizeMessageScope(scope, subjectType, subjectID string) (string, string, string, error) {
-	scope = strings.TrimSpace(scope)
-	if scope == "" {
-		scope = "channel"
-	}
-	if scope != "channel" && scope != "team" && scope != "thought" && scope != "task" {
-		return "", "", "", errInvalidMessageScope
-	}
-	if scope == "channel" {
-		return scope, "", "", nil
-	}
-	subjectType = strings.TrimSpace(subjectType)
-	subjectID = strings.TrimSpace(subjectID)
-	if subjectType == "" || subjectID == "" {
-		return "", "", "", errInvalidMessageScope
-	}
-	if _, err := uuid.Parse(subjectID); err != nil {
-		return "", "", "", errInvalidMessageScope
-	}
-	return scope, subjectType, subjectID, nil
-}
-
-func normalizeMessageListScope(scope, subjectType, subjectID string) (string, string, string, error) {
-	scope = strings.TrimSpace(scope)
-	if scope == "" {
-		scope = "channel"
-	}
-	if scope != "channel" && scope != "team" && scope != "thought" && scope != "task" {
-		return "", "", "", errInvalidMessageScope
-	}
-	subjectType = strings.TrimSpace(subjectType)
-	subjectID = strings.TrimSpace(subjectID)
-	if subjectType == "" && subjectID == "" {
-		return scope, "", "", nil
-	}
-	if subjectType == "" || subjectID == "" {
-		return "", "", "", errInvalidMessageScope
-	}
-	if _, err := uuid.Parse(subjectID); err != nil {
-		return "", "", "", errInvalidMessageScope
-	}
-	return scope, subjectType, subjectID, nil
-}
-
-func (h *MessageHandler) validateMessageScopeSubject(ctx context.Context, channelID, scope, subjectType, subjectID string) error {
-	if scope == "channel" {
-		return nil
-	}
-	if scope == "team" {
-		if subjectType == "channel" && subjectID == channelID {
-			return nil
-		}
-		return errInvalidMessageScope
-	}
-	var exists bool
-	var err error
-	switch {
-	case scope == "thought" && subjectType == "thought":
-		err = h.pool.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM thought_sessions WHERE id = $1 AND channel_id = $2)`,
-			subjectID, channelID,
-		).Scan(&exists)
-	case scope == "thought" && subjectType == "thought_node":
-		err = h.pool.QueryRow(ctx,
-			`SELECT EXISTS(
-				SELECT 1 FROM thought_nodes n
-				JOIN thought_sessions s ON s.id = n.thought_id
-				WHERE n.id = $1 AND s.channel_id = $2
-			)`,
-			subjectID, channelID,
-		).Scan(&exists)
-	case scope == "task" && subjectType == "task":
-		err = h.pool.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM tasks WHERE id = $1 AND channel_id = $2)`,
-			subjectID, channelID,
-		).Scan(&exists)
-	default:
-		return errInvalidMessageScope
-	}
-	if err != nil || !exists {
-		return errInvalidMessageScope
-	}
-	return nil
-}
-
-type channelCreateCardAgent struct {
-	Name string `json:"name"`
-	Role string `json:"role"`
-}
-
-type channelCreateCardAgendaItem struct {
-	ID       string                        `json:"id"`
-	Title    string                        `json:"title"`
-	Status   string                        `json:"status"`
-	Children []channelCreateCardAgendaItem `json:"children,omitempty"`
-}
-
-type channelCreateCardPayload struct {
-	CardType    string                        `json:"card_type"`
-	ChannelName string                        `json:"channel_name"`
-	Template    string                        `json:"template"`
-	Target      string                        `json:"target"`
-	Agents      []channelCreateCardAgent      `json:"agents"`
-	Agenda      []channelCreateCardAgendaItem `json:"agenda"`
-	Status      string                        `json:"status"`
-}
-
-type nextStepCardPayload struct {
-	CardType string `json:"card_type"`
-	Target   string `json:"target"`
-	Status   string `json:"status"`
-}
-
-type CreateChannelFromCardRequest struct {
-	ChannelName string `json:"channel_name"`
-	Template    string `json:"template"`
 }
 
 // Create handles POST /api/v1/channels/{channelID}/messages
@@ -254,16 +126,11 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "message content exceeds maximum length of 10000 characters")
 		return
 	}
-	workspaceScope, subjectType, subjectID, err := normalizeMessageScope(req.WorkspaceScope, req.SubjectType, req.SubjectID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid message scope")
-		return
-	}
 
 	// Verify sender is a member of the channel and channel is not archived
 	var isMember bool
 	var isArchived bool
-	err = h.pool.QueryRow(r.Context(),
+	err := h.pool.QueryRow(r.Context(),
 		`SELECT EXISTS(
 			SELECT 1 FROM channel_members
 			WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2
@@ -285,10 +152,6 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	).Scan(&isArchived)
 	if err == nil && isArchived {
 		writeError(w, http.StatusGone, "channel is archived")
-		return
-	}
-	if err := h.validateMessageScopeSubject(r.Context(), channelID, workspaceScope, subjectType, subjectID); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid message scope")
 		return
 	}
 
@@ -328,9 +191,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 					threadID = ""
 				}
 			}
-			if tid != "" {
-				threadID = tid
-			}
+			if tid != "" { threadID = tid }
 		} else {
 			// Full UUID not a thread — check if message is already in a thread first.
 			var existingThreadID string
@@ -385,9 +246,9 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		nullableThreadID = threadID
 	}
 	_, err = h.pool.Exec(r.Context(),
-		`INSERT INTO messages (id, channel_id, workspace_scope, subject_type, subject_id, thread_id, sender_type, sender_id, content, mentioned_agent_ids, attachment_ids, created_at, updated_at)
-		 VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, '')::uuid, $6, $7, $8, $9, $10::uuid[], $11::uuid[], $12, $12)`,
-		messageID, channelID, workspaceScope, subjectType, subjectID, nullableThreadID, senderType, userID, content, formatUUIDArray(mentionedAgentIDs), formatUUIDArray(attachmentIDs), now,
+		`INSERT INTO messages (id, channel_id, thread_id, sender_type, sender_id, content, mentioned_agent_ids, attachment_ids, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7::uuid[], $8::uuid[], $9, $9)`,
+		messageID, channelID, nullableThreadID, senderType, userID, content, formatUUIDArray(mentionedAgentIDs), formatUUIDArray(attachmentIDs), now,
 	)
 	if err != nil {
 		slog.Error("failed to persist message", "error", err)
@@ -511,9 +372,6 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		msgData := ws.MessageNewPayload{
 			ID:                messageID,
 			ChannelID:         channelID,
-			WorkspaceScope:    workspaceScope,
-			SubjectType:       subjectType,
-			SubjectID:         subjectID,
 			SenderType:        senderType,
 			SenderID:          userID,
 			SenderName:        displayName,
@@ -531,15 +389,6 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 		// Also broadcast dm.message.new if this channel is a DM
 		go h.broadcastDMIfNeeded(channelID, msgData)
-	}
-
-	if !req.AsTask && threadID == "" && workspaceScope == "channel" {
-		if err := h.maybeCreateChannelCreateCard(r.Context(), channelID, content); err != nil {
-			slog.Warn("failed to create channel create card", "channel_id", channelID, "error", err)
-		}
-		if err := h.maybeCreateNextStepCard(r.Context(), channelID); err != nil {
-			slog.Warn("failed to create next step card", "channel_id", channelID, "error", err)
-		}
 	}
 
 	// Broadcast inbox.updated to thread participants (v1.5).
@@ -570,7 +419,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		hasMentions := len(mentionedAgentIDs) > 0
 		if threadID != "" {
 			go h.agentSvc.TriggerAgentResponseInThread(context.Background(), channelID, threadID, senderType, userID, mentionedAgentIDs, hasMentions, nil)
-		} else if workspaceScope == "channel" {
+		} else {
 			go h.agentSvc.TriggerAgentResponse(context.Background(), channelID, messageID, senderType, userID, mentionedAgentIDs, hasMentions, nil)
 		}
 	}
@@ -578,9 +427,6 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	resp := MessageResponse{
 		ID:                messageID,
 		ChannelID:         channelID,
-		WorkspaceScope:    workspaceScope,
-		SubjectType:       subjectType,
-		SubjectID:         subjectID,
 		SenderType:        "user",
 		SenderID:          userID,
 		SenderName:        displayName,
@@ -598,513 +444,6 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	} else {
 		writeJSON(w, http.StatusCreated, resp)
 	}
-}
-
-func (h *MessageHandler) maybeCreateChannelCreateCard(ctx context.Context, channelID, idea string) error {
-	var channelName string
-	err := h.pool.QueryRow(ctx,
-		`SELECT name FROM channels WHERE id = $1 AND is_archived = false`,
-		channelID,
-	).Scan(&channelName)
-	if err != nil || !strings.HasPrefix(channelName, "welcome-") {
-		return err
-	}
-
-	var exists bool
-	if err := h.pool.QueryRow(ctx,
-		`SELECT EXISTS(
-			SELECT 1 FROM messages
-			WHERE channel_id = $1 AND content_type = 'card.channel_create'
-		)`,
-		channelID,
-	).Scan(&exists); err != nil || exists {
-		return err
-	}
-
-	payload := buildChannelCreateCardPayload(idea)
-	content, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	now := time.Now()
-	messageID := uuid.New().String()
-	if _, err := h.pool.Exec(ctx,
-		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, created_at, updated_at)
-		 VALUES ($1, $2, 'system', '00000000-0000-0000-0000-000000000000', $3, 'card.channel_create', $4, $4)`,
-		messageID, channelID, string(content), now,
-	); err != nil {
-		return err
-	}
-
-	if h.hub != nil {
-		h.hub.BroadcastToChannel(channelID, ws.Envelope(ws.EventMessageNew, ws.MessageNewPayload{
-			ID:          messageID,
-			ChannelID:   channelID,
-			SenderType:  "system",
-			SenderID:    "00000000-0000-0000-0000-000000000000",
-			SenderName:  "Solo",
-			Content:     string(content),
-			ContentType: "card.channel_create",
-			CreatedAt:   now.Format(time.RFC3339),
-		}))
-	}
-	return nil
-}
-
-func buildChannelCreateCardPayload(idea string) channelCreateCardPayload {
-	template := "Solo Project"
-	name := "solo-project"
-	lower := strings.ToLower(idea)
-	if strings.Contains(lower, "chat") || strings.Contains(idea, "聊天") {
-		template = "Conversation Bot"
-		name = "chatbot-project"
-	}
-	if strings.Contains(lower, "research") || strings.Contains(idea, "研究") || strings.Contains(idea, "调研") {
-		template = "Research Project"
-		name = "research-project"
-	}
-
-	return channelCreateCardPayload{
-		CardType:    "channel_create",
-		ChannelName: name,
-		Template:    template,
-		Target:      idea,
-		Status:      "open",
-		Agents:      channelCardAgentsForTemplate(template),
-		Agenda:      channelCardAgenda(),
-	}
-}
-
-func channelCardAgentsForTemplate(template string) []channelCreateCardAgent {
-	switch strings.TrimSpace(template) {
-	case "Conversation Bot":
-		return []channelCreateCardAgent{
-			{Name: "leader", Role: "lead"},
-			{Name: "pm", Role: "product"},
-			{Name: "dev", Role: "implementation"},
-			{Name: "qa", Role: "quality"},
-		}
-	case "Research Project":
-		return []channelCreateCardAgent{
-			{Name: "leader", Role: "lead"},
-			{Name: "researcher", Role: "research"},
-			{Name: "analyst", Role: "analysis"},
-			{Name: "writer", Role: "synthesis"},
-			{Name: "qa", Role: "quality"},
-		}
-	default:
-		return []channelCreateCardAgent{
-			{Name: "leader", Role: "lead"},
-			{Name: "researcher", Role: "research"},
-			{Name: "pm", Role: "product"},
-			{Name: "dev", Role: "implementation"},
-			{Name: "qa", Role: "quality"},
-		}
-	}
-}
-
-func channelCardAgenda() []channelCreateCardAgendaItem {
-	return []channelCreateCardAgendaItem{
-		{ID: "understand", Title: "理解目标与边界", Status: "done"},
-		{ID: "team", Title: "组建 Agent Team", Status: "done"},
-		{ID: "plan", Title: "生成工作计划", Status: "todo"},
-		{ID: "tasks", Title: "拆分 tasks 并分配 agents", Status: "todo"},
-		{ID: "review", Title: "验收产物并更新 memory", Status: "todo"},
-	}
-}
-
-func uniqueChannelName(ctx context.Context, tx pgx.Tx, desired string) (string, error) {
-	base := strings.TrimSpace(desired)
-	if base == "" {
-		base = "solo-project"
-	}
-	if chars := []rune(base); len(chars) > 90 {
-		base = string(chars[:90])
-	}
-	for i := 0; i < 20; i++ {
-		name := base
-		if i > 0 {
-			name = base + "-" + strconv.Itoa(i+1)
-		}
-		var exists bool
-		if err := tx.QueryRow(ctx,
-			`SELECT EXISTS(
-				SELECT 1 FROM channels
-				WHERE name = $1 AND type = 'channel' AND is_archived = false
-			)`, name,
-		).Scan(&exists); err != nil {
-			return "", err
-		}
-		if !exists {
-			return name, nil
-		}
-	}
-	return base + "-" + uuid.New().String()[:8], nil
-}
-
-func channelCardAgentPrompt(agent channelCreateCardAgent, target, template string) string {
-	role := strings.TrimSpace(agent.Role)
-	if role == "" {
-		role = "project collaborator"
-	}
-	target = strings.TrimSpace(target)
-	if target == "" {
-		target = "this channel's project"
-	}
-	template = strings.TrimSpace(template)
-	if template == "" {
-		template = "matched project template"
-	}
-	return "You are " + strings.TrimSpace(agent.Name) + ", the " + role + " for " + target + ". Work inside the " + template + " team, collaborate with other channel agents, and keep outputs concise and reviewable."
-}
-
-func channelCardMemberRole(role string) string {
-	role = strings.ToLower(strings.TrimSpace(role))
-	if role == "" {
-		return "member"
-	}
-	runes := []rune(role)
-	if len(runes) > 20 {
-		return string(runes[:20])
-	}
-	return role
-}
-
-func ensureChannelCardAgents(ctx context.Context, tx pgx.Tx, channelID, ownerID string, payload channelCreateCardPayload) error {
-	type createdAgent struct {
-		id   string
-		role string
-	}
-	created := make([]createdAgent, 0, len(payload.Agents))
-	leaderID := ""
-
-	for _, agent := range payload.Agents {
-		name := strings.TrimSpace(agent.Name)
-		if name == "" {
-			continue
-		}
-
-		var agentID string
-		err := tx.QueryRow(ctx,
-			`SELECT id::text FROM agents WHERE owner_id = $1 AND name = $2 AND is_active = true`,
-			ownerID, name,
-		).Scan(&agentID)
-		if err != nil {
-			if !errors.Is(err, pgx.ErrNoRows) {
-				return err
-			}
-			description := strings.TrimSpace(agent.Role)
-			if description == "" {
-				description = "Project agent"
-			}
-			err = tx.QueryRow(ctx,
-				`INSERT INTO agents (name, description, owner_id, model_provider, model_name, system_prompt, custom_env, custom_args)
-				 VALUES ($1, $2, $3, 'anthropic', '', $4, '{}'::jsonb, '[]'::jsonb)
-				 RETURNING id::text`,
-				name, description, ownerID, channelCardAgentPrompt(agent, payload.Target, payload.Template),
-			).Scan(&agentID)
-			if err != nil {
-				return err
-			}
-		}
-		role := channelCardMemberRole(agent.Role)
-		if leaderID == "" && (role == "lead" || role == "leader") {
-			leaderID = agentID
-		}
-		created = append(created, createdAgent{id: agentID, role: role})
-
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO channel_members (channel_id, member_type, member_id, role)
-			 VALUES ($1, 'agent', $2, $3)
-			 ON CONFLICT DO NOTHING`,
-			channelID, agentID, role,
-		); err != nil {
-			return err
-		}
-	}
-	if leaderID == "" && len(created) > 0 {
-		leaderID = created[0].id
-	}
-	for _, agent := range created {
-		if leaderID == "" || agent.id == leaderID {
-			continue
-		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO agent_relationships (from_agent_id, to_agent_id, rel_type, weight, instruction)
-			VALUES ($1, $2, 'assigns_to', 1, $3)
-			ON CONFLICT (from_agent_id, to_agent_id) WHERE rel_type = 'assigns_to' DO NOTHING
-		`, leaderID, agent.id, "Delegate "+agent.role+" work for "+strings.TrimSpace(payload.Target)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// CreateChannelFromCard handles POST /api/v1/channels/{channelID}/messages/{messageID}/create-channel.
-func (h *MessageHandler) CreateChannelFromCard(w http.ResponseWriter, r *http.Request) {
-	userID, ok := requireUserID(r)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "not authenticated")
-		return
-	}
-
-	channelID := chi.URLParam(r, "channelID")
-	messageID := chi.URLParam(r, "messageID")
-	if channelID == "" || messageID == "" {
-		writeError(w, http.StatusBadRequest, "channel ID and message ID are required")
-		return
-	}
-
-	var req CreateChannelFromCardRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	var raw string
-	err := h.pool.QueryRow(r.Context(),
-		`SELECT m.content
-		   FROM messages m
-		   JOIN channel_members cm ON cm.channel_id = m.channel_id
-		  WHERE m.id = $1 AND m.channel_id = $2
-		    AND m.content_type = 'card.channel_create'
-		    AND cm.member_type = 'user' AND cm.member_id = $3`,
-		messageID, channelID, userID,
-	).Scan(&raw)
-	if err != nil {
-		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "card not found")
-			return
-		}
-		slog.Error("failed to query channel create card", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to create channel")
-		return
-	}
-
-	var payload channelCreateCardPayload
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid card payload")
-		return
-	}
-	if strings.TrimSpace(req.ChannelName) != "" {
-		payload.ChannelName = strings.TrimSpace(req.ChannelName)
-	}
-	if strings.TrimSpace(req.Template) != "" {
-		payload.Template = strings.TrimSpace(req.Template)
-	}
-	payload.Agents = channelCardAgentsForTemplate(payload.Template)
-	payload.Agenda = channelCardAgenda()
-	if payload.ChannelName == "" {
-		writeError(w, http.StatusBadRequest, "channel name is required")
-		return
-	}
-
-	tx, err := h.pool.Begin(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create channel")
-		return
-	}
-	defer tx.Rollback(r.Context())
-
-	name, err := uniqueChannelName(r.Context(), tx, payload.ChannelName)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create channel")
-		return
-	}
-
-	var ch ChannelResponse
-	var createdAt, updatedAt time.Time
-	err = tx.QueryRow(r.Context(),
-		`INSERT INTO channels (name, description, type, created_by)
-		 VALUES ($1, $2, 'channel', $3)
-		 RETURNING id, name, COALESCE(description, ''), type, created_by, is_archived, created_at, updated_at`,
-		name, "Created from Lucy's channel brief.", userID,
-	).Scan(&ch.ID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy, &ch.IsArchived, &createdAt, &updatedAt)
-	if err != nil {
-		slog.Error("failed to create channel from card", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to create channel")
-		return
-	}
-
-	if _, err := tx.Exec(r.Context(),
-		`INSERT INTO channel_members (channel_id, member_type, member_id, role)
-		 VALUES ($1, 'user', $2, 'owner')`,
-		ch.ID, userID,
-	); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create channel")
-		return
-	}
-
-	if _, err := tx.Exec(r.Context(),
-		`INSERT INTO channel_members (channel_id, member_type, member_id, role)
-		 SELECT $1, member_type, member_id, role
-		   FROM channel_members
-		  WHERE channel_id = $2 AND member_type = 'agent'
-		  ON CONFLICT DO NOTHING`,
-		ch.ID, channelID,
-	); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create channel")
-		return
-	}
-
-	if err := ensureChannelCardAgents(r.Context(), tx, ch.ID, userID, payload); err != nil {
-		slog.Error("failed to create channel card agents", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to create channel")
-		return
-	}
-
-	agendaJSON, _ := json.Marshal(payload.Agenda)
-	if _, err := tx.Exec(r.Context(),
-		`INSERT INTO channel_contexts (channel_id, target, agenda_json)
-		 VALUES ($1, $2, $3::jsonb)
-		 ON CONFLICT (channel_id) DO UPDATE SET
-			target = EXCLUDED.target,
-			agenda_json = EXCLUDED.agenda_json,
-			context_version = channel_contexts.context_version + 1,
-			updated_at = now()`,
-		ch.ID, payload.Target, string(agendaJSON),
-	); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create channel")
-		return
-	}
-
-	if err := insertProjectCreatedMessage(r.Context(), tx, ch.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create channel")
-		return
-	}
-	if err := insertNextStepCard(r.Context(), tx, ch.ID, payload.Target); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create channel")
-		return
-	}
-
-	payload.Status = "accepted"
-	updatedCard, _ := json.Marshal(payload)
-	if _, err := tx.Exec(r.Context(),
-		`UPDATE messages SET content = $1, updated_at = now() WHERE id = $2`,
-		string(updatedCard), messageID,
-	); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create channel")
-		return
-	}
-
-	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create channel")
-		return
-	}
-
-	ch.CreatedAt = createdAt.Format(time.RFC3339)
-	ch.UpdatedAt = updatedAt.Format(time.RFC3339)
-	writeJSON(w, http.StatusCreated, ch)
-}
-
-func (h *MessageHandler) maybeCreateNextStepCard(ctx context.Context, channelID string) error {
-	var target string
-	if err := h.pool.QueryRow(ctx,
-		`SELECT target FROM channel_contexts WHERE channel_id = $1`,
-		channelID,
-	).Scan(&target); err != nil {
-		if isNotFound(err) {
-			return nil
-		}
-		return err
-	}
-	if strings.TrimSpace(target) == "" {
-		return nil
-	}
-
-	var userMessages int
-	if err := h.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM messages
-		  WHERE channel_id = $1 AND sender_type = 'user' AND thread_id IS NULL`,
-		channelID,
-	).Scan(&userMessages); err != nil {
-		return err
-	}
-	if userMessages == 0 {
-		return nil
-	}
-
-	var alreadyMoved bool
-	if err := h.pool.QueryRow(ctx,
-		`SELECT EXISTS(
-			SELECT 1 FROM messages WHERE channel_id = $1 AND content_type = 'card.next_step'
-			UNION ALL
-			SELECT 1 FROM thought_sessions WHERE channel_id = $1
-			UNION ALL
-			SELECT 1 FROM tasks WHERE channel_id = $1
-		)`,
-		channelID,
-	).Scan(&alreadyMoved); err != nil {
-		return err
-	}
-	if alreadyMoved {
-		return nil
-	}
-
-	payload := nextStepCardPayload{
-		CardType: "next_step",
-		Target:   target,
-		Status:   "open",
-	}
-	content, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	now := time.Now()
-	messageID := uuid.New().String()
-	if _, err := h.pool.Exec(ctx,
-		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, created_at, updated_at)
-		 VALUES ($1, $2, 'system', '00000000-0000-0000-0000-000000000000', $3, 'card.next_step', $4, $4)`,
-		messageID, channelID, string(content), now,
-	); err != nil {
-		return err
-	}
-	if h.hub != nil {
-		h.hub.BroadcastToChannel(channelID, ws.Envelope(ws.EventMessageNew, ws.MessageNewPayload{
-			ID:          messageID,
-			ChannelID:   channelID,
-			SenderType:  "system",
-			SenderID:    "00000000-0000-0000-0000-000000000000",
-			SenderName:  "Solo",
-			Content:     string(content),
-			ContentType: "card.next_step",
-			CreatedAt:   now.Format(time.RFC3339),
-		}))
-	}
-	return nil
-}
-
-func insertProjectCreatedMessage(ctx context.Context, tx pgx.Tx, channelID string) error {
-	now := time.Now()
-	_, err := tx.Exec(ctx,
-		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, created_at, updated_at)
-		 VALUES ($1, $2, 'system', '00000000-0000-0000-0000-000000000000', $3, 'text', $4, $4)`,
-		uuid.New().String(),
-		channelID,
-		"频道、Agent Team 和 Agenda 已创建。你可以继续聊，也可以开始行动。",
-		now,
-	)
-	return err
-}
-
-func insertNextStepCard(ctx context.Context, tx pgx.Tx, channelID, target string) error {
-	payload := nextStepCardPayload{
-		CardType: "next_step",
-		Target:   target,
-		Status:   "open",
-	}
-	content, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	now := time.Now()
-	_, err = tx.Exec(ctx,
-		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, created_at, updated_at)
-		 VALUES ($1, $2, 'system', '00000000-0000-0000-0000-000000000000', $3, 'card.next_step', $4, $4)`,
-		uuid.New().String(), channelID, string(content), now,
-	)
-	return err
 }
 
 // List handles GET /api/v1/channels/{channelID}/messages
@@ -1152,15 +491,6 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	workspaceScope, subjectType, subjectID, err := normalizeMessageListScope(
-		r.URL.Query().Get("workspace_scope"),
-		r.URL.Query().Get("subject_type"),
-		r.URL.Query().Get("subject_id"),
-	)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid message scope")
-		return
-	}
 
 	// Check user is a member and channel is not archived
 	var isMember bool
@@ -1173,7 +503,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.pool.QueryRow(r.Context(),
+	err := h.pool.QueryRow(r.Context(),
 		`SELECT EXISTS(
 			SELECT 1 FROM channel_members
 			WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2
@@ -1196,15 +526,9 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusGone, "channel is archived")
 		return
 	}
-	if subjectID != "" {
-		if err := h.validateMessageScopeSubject(r.Context(), channelID, workspaceScope, subjectType, subjectID); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid message scope")
-			return
-		}
-	}
 
 	// Build query with cursor using tuple comparison for deterministic pagination.
-	query := `SELECT m.id, m.channel_id, COALESCE(m.workspace_scope, 'channel'), COALESCE(m.subject_type, ''), COALESCE(m.subject_id::text, ''), m.sender_type, m.sender_id,
+	query := `SELECT m.id, m.channel_id, m.sender_type, m.sender_id,
 	                 CASE
 		                   WHEN m.sender_type = 'system' THEN 'Solo'
 		                   ELSE COALESCE(u.display_name, a.name, m.sender_id::text)
@@ -1225,17 +549,12 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		          LEFT JOIN tasks ON tasks.message_id = m.id
 		          LEFT JOIN users u_claimer ON tasks.claimer_id = u_claimer.id
 		          LEFT JOIN agents a_claimer ON tasks.claimer_id = a_claimer.id
-	          WHERE m.channel_id = $1 AND m.thread_id IS NULL AND COALESCE(m.workspace_scope, 'channel') = $3`
+	          WHERE m.channel_id = $1 AND m.thread_id IS NULL`
 
-	args := []any{channelID, userID, workspaceScope}
-
-	if subjectID != "" {
-		query += ` AND m.subject_type = $4 AND m.subject_id = $5::uuid`
-		args = append(args, subjectType, subjectID)
-	}
+	args := []any{channelID, userID}
 
 	if before != "" {
-		query += ` AND (m.created_at, m.id) < (SELECT c.created_at, c.id FROM messages c WHERE c.id = $` + strconv.Itoa(len(args)+1) + `)`
+		query += ` AND (m.created_at, m.id) < (SELECT c.created_at, c.id FROM messages c WHERE c.id = $3)`
 		args = append(args, before)
 	}
 
@@ -1254,7 +573,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var msg MessageResponse
 		var createdAt time.Time
-		err := rows.Scan(&msg.ID, &msg.ChannelID, &msg.WorkspaceScope, &msg.SubjectType, &msg.SubjectID, &msg.SenderType, &msg.SenderID,
+		err := rows.Scan(&msg.ID, &msg.ChannelID, &msg.SenderType, &msg.SenderID,
 			&msg.SenderName, &msg.SenderActive, &msg.Content, &msg.ContentType, &msg.AttachmentIDs, &createdAt,
 			&msg.ReplyCount, &msg.TaskNumber, &msg.TaskStatus, &msg.TaskClaimerName, &msg.TaskClaimerDeleted, &msg.HasUnreadThread)
 		if err != nil {
@@ -1658,7 +977,7 @@ func (h *MessageHandler) Check(w http.ResponseWriter, r *http.Request) {
 		SenderType string  `json:"sender_type"`
 		SenderID   string  `json:"sender_id"`
 		Content    string  `json:"content"`
-		ReplyTo    *string `json:"reply_to,omitempty"`
+		ReplyTo   *string `json:"reply_to,omitempty"`
 		CreatedAt  string  `json:"created_at"`
 		UpdatedAt  string  `json:"updated_at"`
 	}

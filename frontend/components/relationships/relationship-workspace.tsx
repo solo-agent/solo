@@ -25,7 +25,6 @@ import '@xyflow/react/dist/style.css';
 import dagre from 'dagre';
 import { ArrowLeft, Loader2, Plus, LayoutGrid, Undo2, Redo2, Layers } from 'lucide-react';
 import { AppFrame } from '@/components/layout/app-frame';
-import { Select } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { RelationshipNode } from '@/components/relationships/relationship-node';
 import { RelationshipEdge } from '@/components/relationships/relationship-edge';
@@ -38,13 +37,13 @@ import {
   DialogTitle,
   DialogCloseButton,
 } from '@/components/ui/dialog';
+import { Select } from '@/components/ui/select';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
 import { useToast } from '@/components/ui/toast';
 import { t } from '@/lib/i18n';
-import type { Agent, AgentBackendDetectItem, AgentDetailTarget, AgentRelationship, ChannelWorkspace, RelationshipType, TeamSurface } from '@/lib/types';
+import type { Agent, AgentBackendDetectItem, AgentDetailTarget, AgentRelationship, RelationshipType } from '@/lib/types';
 import { useAgents } from '@/lib/hooks/use-agents';
-import { useChannels } from '@/lib/hooks/use-channels';
 import { listTemplates, applyTemplate, type Template } from '@/lib/templates-api';
 import { useCliDetection } from '@/lib/hooks/use-cli-detection';
 
@@ -62,10 +61,6 @@ function relationshipTypeLabel(type: RelationshipType | string) {
   return type === 'assigns_to' ? t('assignsTo') : t('collaboratesWith');
 }
 
-function normalizeRelationshipType(type: string): RelationshipType {
-  return type === 'assigns_to' ? 'assigns_to' : 'collaborates_with';
-}
-
 // ---- Helpers ----
 
 interface UndoEntry {
@@ -74,6 +69,9 @@ interface UndoEntry {
 }
 
 type GraphAgent = AgentDetailTarget & { is_active?: boolean };
+type ChannelTeam = {
+  agents: Array<{ id: string; name: string; status?: string }>;
+};
 
 // ---- Component ----
 
@@ -81,7 +79,7 @@ interface RelationshipWorkspaceProps {
   title?: string;
   embedded?: boolean;
   channelFilterId?: string;
-  channelTeam?: TeamSurface | null;
+  channelTeam?: ChannelTeam | null;
   onChannelTeamRefresh?: () => void;
   onDetailOpen?: (detail: { relationship: AgentRelationship | null; agent: GraphAgent | null }) => void;
   onDetailClose?: () => void;
@@ -99,16 +97,11 @@ export function RelationshipWorkspace({
   embeddedActions,
 }: RelationshipWorkspaceProps = {}) {
   const { agents, isLoading: agentsLoading, refetch: refetchAgents, createAgent } = useAgents();
-  const { channels } = useChannels();
   const { showToast } = useToast();
   const { results: detection, isLoading: detectionLoading } = useCliDetection();
   const [relationships, setRelationships] = useState<AgentRelationship[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedChannelFilterId, setSelectedChannelFilterId] = useState(channelFilterId ?? '');
-  const [filterWorkspace, setFilterWorkspace] = useState<ChannelWorkspace | null>(null);
-  const [filterLoading, setFilterLoading] = useState(false);
-  const [filterError, setFilterError] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showChoiceDialog, setShowChoiceDialog] = useState(false);
   const [showCreateAgentModal, setShowCreateAgentModal] = useState(false);
@@ -129,7 +122,7 @@ export function RelationshipWorkspace({
   const [redoStack, setRedoStack] = useState<UndoEntry[]>([]);
   const edgeToRelationshipMap = useRef<Map<string, AgentRelationship>>(new Map());
   const detailPanelOpen = !!detailRel || !!detailAgent;
-  const activeChannelFilterId = channelFilterId ?? selectedChannelFilterId;
+  const activeChannelFilterId = channelFilterId ?? '';
 
   // ---- Fetch data ----
 
@@ -147,37 +140,6 @@ export function RelationshipWorkspace({
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
-
-  useEffect(() => {
-    if (channelFilterId !== undefined) {
-      setSelectedChannelFilterId(channelFilterId);
-    }
-  }, [channelFilterId]);
-
-  const loadFilterWorkspace = useCallback(async (id: string, silent = false) => {
-    if (!silent) setFilterLoading(true);
-    setFilterError(null);
-    try {
-      const workspace = await apiClient.get<ChannelWorkspace>(`/api/v1/channels/${id}/workspace`);
-      setFilterWorkspace(workspace);
-      return workspace;
-    } catch (err) {
-      setFilterError(err instanceof ApiError ? err.message : t('relationshipEditorLoading'));
-      return null;
-    } finally {
-      if (!silent) setFilterLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!activeChannelFilterId || channelTeam !== undefined) {
-      setFilterWorkspace(null);
-      setFilterLoading(false);
-      setFilterError(null);
-      return;
-    }
-    void loadFilterWorkspace(activeChannelFilterId);
-  }, [activeChannelFilterId, channelTeam, loadFilterWorkspace]);
 
   // ---- Position persistence ----
 
@@ -200,11 +162,7 @@ export function RelationshipWorkspace({
 
   // ---- Build initial nodes/edges ----
 
-  const activeChannelTeam = channelTeam !== undefined ? channelTeam : filterWorkspace?.team ?? null;
-  const activeChannelName = useMemo(
-    () => filterWorkspace?.channel.name ?? channels.find((channel) => channel.id === activeChannelFilterId)?.name,
-    [activeChannelFilterId, channels, filterWorkspace],
-  );
+  const activeChannelTeam = channelTeam ?? null;
 
   const visibleAgents = useMemo<GraphAgent[]>(() => {
     if (!activeChannelFilterId) return agents;
@@ -224,16 +182,11 @@ export function RelationshipWorkspace({
   const visibleRelationships = useMemo(() => {
     if (!activeChannelFilterId) return relationships;
     if (!activeChannelTeam) return [];
-    return activeChannelTeam.relationships.map((relationship, index): AgentRelationship => ({
-      id: relationship.id ?? `${relationship.from_agent_id}-${relationship.to_agent_id}-${index}`,
-      from_agent_id: relationship.from_agent_id,
-      to_agent_id: relationship.to_agent_id,
-      rel_type: normalizeRelationshipType(relationship.rel_type),
-      instruction: relationship.label,
-      channel_id: activeChannelFilterId,
-      channel_name: activeChannelName,
-    }));
-  }, [activeChannelFilterId, activeChannelName, activeChannelTeam, relationships]);
+    const visibleIds = new Set(activeChannelTeam.agents.map((agent) => agent.id));
+    return relationships.filter((relationship) => (
+      visibleIds.has(relationship.from_agent_id) && visibleIds.has(relationship.to_agent_id)
+    ));
+  }, [activeChannelFilterId, activeChannelTeam, relationships]);
 
   const initialNodes: Node[] = useMemo(() => {
     const saved = loadPositions();
@@ -474,10 +427,7 @@ export function RelationshipWorkspace({
   const refreshChannelFilter = useCallback(() => {
     if (!activeChannelFilterId) return;
     onChannelTeamRefresh?.();
-    if (channelTeam === undefined) {
-      void loadFilterWorkspace(activeChannelFilterId, true);
-    }
-  }, [activeChannelFilterId, channelTeam, loadFilterWorkspace, onChannelTeamRefresh]);
+  }, [activeChannelFilterId, onChannelTeamRefresh]);
 
   const handleRelationshipCreated = useCallback(() => {
     loadData();
@@ -746,8 +696,8 @@ export function RelationshipWorkspace({
 
   // ---- Loading ----
 
-  const loading = isLoading || agentsLoading || filterLoading;
-  const workspaceError = error || filterError;
+  const loading = isLoading || agentsLoading;
+  const workspaceError = error;
 
   if (loading) {
     const content = (
@@ -769,9 +719,6 @@ export function RelationshipWorkspace({
           type="button"
           onClick={() => {
             void loadData();
-            if (activeChannelFilterId && channelTeam === undefined) {
-              void loadFilterWorkspace(activeChannelFilterId);
-            }
           }}
           className="btn-brutal px-4 py-2"
         >
@@ -794,18 +741,6 @@ export function RelationshipWorkspace({
             <h1 className="font-heading text-lg font-bold uppercase tracking-wider mr-auto">
               {title}
             </h1>
-
-            <Select
-              value={selectedChannelFilterId}
-              onChange={setSelectedChannelFilterId}
-              options={[
-                { value: '', label: t('relationshipAllChannels') },
-                ...channels.map((channel) => ({ value: channel.id, label: channel.name })),
-              ]}
-              placeholder={t('relationshipEditorChannelPlaceholder')}
-              size="sm"
-              className="w-44"
-            />
 
             {/* Undo/Redo */}
             <Button

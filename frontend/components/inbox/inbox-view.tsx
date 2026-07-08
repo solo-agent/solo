@@ -40,14 +40,6 @@ function typeFilterToKey(tf: string[]) {
   return tf[0];
 }
 
-async function resolveThreadTask(source: { type: 'channel' | 'dm'; id: string }, messageId: string) {
-  const path = source.type === 'dm'
-    ? `/api/v1/dm/${source.id}/tasks`
-    : `/api/v1/tasks?channel_id=${source.id}`;
-  const tasks = await apiClient.get<Array<{ id?: string; message_id?: string; task_number?: number }>>(path);
-  return tasks.find((task) => task.message_id === messageId);
-}
-
 export function InboxView() {
   const router = useRouter();
   const { showToast } = useToast();
@@ -146,24 +138,6 @@ export function InboxView() {
     }
     const key = threadSource.type === 'dm' ? 'dm' : 'channel';
     router.push(`/dashboard?${key}=${threadSource.id}&message=${threadMessage.id}&thread=${threadMessage.id}`);
-  }, [router, threadMessage, threadSource]);
-
-  const handleViewTaskInSource = useCallback(async () => {
-    if (!threadMessage || !threadSource) return;
-    const threadTask = await resolveThreadTask(threadSource, threadMessage.id);
-    if (threadSource.type === 'channel') {
-      router.push(buildDashboardHref(threadSource.id, {
-        view: 'task.graph',
-        panel: 'thread',
-        taskId: threadTask?.id ?? null,
-        threadId: threadMessage.id,
-      }));
-      return;
-    }
-    const key = threadSource.type === 'dm' ? 'dm' : 'channel';
-    const taskNumber = threadMessage.task_number ?? threadTask?.task_number;
-    const task = taskNumber ? `&task=${taskNumber}` : '';
-    router.push(`/dashboard?${key}=${threadSource.id}&tab=tasks${task}&thread=${threadMessage.id}`);
   }, [router, threadMessage, threadSource]);
 
   const handleOpenArtifactReference = useCallback(async (ref: string) => {
@@ -366,8 +340,6 @@ export function InboxView() {
               targetMessageId={threadTargetMessageId}
               replyCount={0}
               onViewInChannel={handleViewThreadInSource}
-              onViewTask={handleViewTaskInSource}
-              showViewTask
               onOpenArtifactReference={handleOpenArtifactReference}
             />
           </Suspense>

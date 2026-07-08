@@ -17,7 +17,6 @@ import {
   useLayoutEffect,
   memo,
   useCallback,
-  type ReactNode,
 } from 'react';
 import {
   AlertCircle,
@@ -28,12 +27,8 @@ import {
   Pencil,
   Trash2,
   SquareCheckBig,
-  Sparkles,
-  Check,
-  RotateCcw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { apiClient } from '@/lib/api-client';
 import { buildValidNames } from '@/lib/utils/highlight';
 import { Avatar } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -57,8 +52,6 @@ import { t } from '@/lib/i18n';
 // along with the agentActivities prop and the inline <TypingIndicator />.
 interface MessageListProps {
   messages: Message[];
-  beforeItems?: ReactNode;
-  showBeginningMarker?: boolean;
   isLoading: boolean;
   error: string | null;
   onRetry: (messageId: string, content: string) => void;
@@ -67,11 +60,6 @@ interface MessageListProps {
   onEdit?: (messageId: string, content: string) => void;
   onDelete?: (messageId: string) => void;
   onAsTask?: (message: Message) => void;
-  onCreateChannelFromCard?: (message: Message, input: { channel_name: string; template: string }) => Promise<void>;
-  onStartWorkFromCard?: (message: Message) => Promise<void>;
-  onCompleteThoughtFromCard?: (message: Message, thoughtId: string) => Promise<void>;
-  onTaskReviewAction?: () => Promise<void> | void;
-  onViewTaskGraph?: () => void;
   hasMore: boolean;
   isLoadingMore: boolean;
   loadMoreError: string | null;
@@ -130,416 +118,6 @@ interface MessageItemProps {
   onEdit?: (id: string, content: string) => void;
   onDelete?: (id: string) => void;
   onAsTask?: (message: Message) => void;
-  onCreateChannelFromCard?: (message: Message, input: { channel_name: string; template: string }) => Promise<void>;
-  onStartWorkFromCard?: (message: Message) => Promise<void>;
-  onCompleteThoughtFromCard?: (message: Message, thoughtId: string) => Promise<void>;
-  onTaskReviewAction?: () => Promise<void> | void;
-  onViewTaskGraph?: () => void;
-}
-
-interface ChannelCreateCardPayload {
-  card_type: 'channel_create';
-  channel_name: string;
-  template: string;
-  target: string;
-  status?: string;
-  agents?: Array<{ name: string; role: string }>;
-  agenda?: Array<{ id: string; title: string; status: string; children?: Array<{ id: string; title: string; status: string }> }>;
-}
-
-function parseChannelCreateCard(message: Message): ChannelCreateCardPayload | null {
-  if (message.content_type !== 'card.channel_create') return null;
-  try {
-    const payload = JSON.parse(message.content) as ChannelCreateCardPayload;
-    return payload.card_type === 'channel_create' ? payload : null;
-  } catch {
-    return null;
-  }
-}
-
-interface NextStepCardPayload {
-  card_type: 'next_step';
-  target: string;
-  status?: string;
-}
-
-interface ThoughtReviewCardPayload {
-  card_type: 'thought_review';
-  thought_id: string;
-  title: string;
-  summary?: string;
-  status?: string;
-}
-
-interface TasksCreatedCardPayload {
-  card_type: 'tasks_created';
-  title: string;
-  status?: string;
-  tasks?: Array<{ id: string; task_number?: number; title: string; status: string; parent_task_id?: string | null }>;
-}
-
-interface TaskReviewCardPayload {
-  card_type: 'task_review';
-  task_id: string;
-  task_number?: number;
-  title: string;
-  task_status?: string;
-  artifact_status?: string;
-  status?: string;
-}
-
-function parseNextStepCard(message: Message): NextStepCardPayload | null {
-  if (message.content_type !== 'card.next_step') return null;
-  try {
-    const payload = JSON.parse(message.content) as NextStepCardPayload;
-    return payload.card_type === 'next_step' ? payload : null;
-  } catch {
-    return null;
-  }
-}
-
-function parseThoughtReviewCard(message: Message): ThoughtReviewCardPayload | null {
-  if (message.content_type !== 'card.thought_review') return null;
-  try {
-    const payload = JSON.parse(message.content) as ThoughtReviewCardPayload;
-    return payload.card_type === 'thought_review' ? payload : null;
-  } catch {
-    return null;
-  }
-}
-
-function parseTasksCreatedCard(message: Message): TasksCreatedCardPayload | null {
-  if (message.content_type !== 'card.tasks_created') return null;
-  try {
-    const payload = JSON.parse(message.content) as TasksCreatedCardPayload;
-    return payload.card_type === 'tasks_created' ? payload : null;
-  } catch {
-    return null;
-  }
-}
-
-function parseTaskReviewCard(message: Message): TaskReviewCardPayload | null {
-  if (message.content_type !== 'card.task_review') return null;
-  try {
-    const payload = JSON.parse(message.content) as TaskReviewCardPayload;
-    return payload.card_type === 'task_review' ? payload : null;
-  } catch {
-    return null;
-  }
-}
-
-function ChannelCreateCard({
-  message,
-  payload,
-  onCreate,
-}: {
-  message: Message;
-  payload: ChannelCreateCardPayload;
-  onCreate?: (message: Message, input: { channel_name: string; template: string }) => Promise<void>;
-}) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [channelName, setChannelName] = useState(payload.channel_name);
-  const [template, setTemplate] = useState(payload.template);
-  const [busy, setBusy] = useState(false);
-  const accepted = payload.status === 'accepted';
-
-  const submit = async () => {
-    if (!onCreate || busy || accepted) return;
-    setBusy(true);
-    try {
-      await onCreate(message, {
-        channel_name: channelName.trim() || payload.channel_name,
-        template: template.trim() || payload.template,
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="mt-2 max-w-2xl border-2 border-black bg-white shadow-brutal">
-      <div className="flex items-center justify-between border-b-2 border-black bg-brutal-primary px-3 py-2">
-        <div className="flex items-center gap-2 font-heading text-sm font-black">
-          <Sparkles className="h-4 w-4" />
-          Channel Create
-        </div>
-        <span className="border-2 border-black bg-white px-2 py-0.5 font-mono text-[10px] font-bold uppercase">
-          {accepted ? 'created' : 'matched'}
-        </span>
-      </div>
-      <div className="space-y-3 p-3">
-        <p className="font-body text-sm leading-6 text-foreground">{payload.target}</p>
-
-        <div className="grid gap-2 sm:grid-cols-2">
-          <label className="space-y-1">
-            <span className="font-heading text-[10px] font-black uppercase text-muted-foreground">Channel</span>
-            {isEditing ? (
-              <input
-                value={channelName}
-                onChange={(e) => setChannelName(e.target.value)}
-                className="input-brutal h-9 text-sm"
-              />
-            ) : (
-              <div className="border-2 border-black bg-brutal-cream px-2 py-1.5 font-mono text-sm font-bold">
-                #{channelName}
-              </div>
-            )}
-          </label>
-          <label className="space-y-1">
-            <span className="font-heading text-[10px] font-black uppercase text-muted-foreground">Template</span>
-            {isEditing ? (
-              <select
-                value={template}
-                onChange={(e) => setTemplate(e.target.value)}
-                className="input-brutal h-9 text-sm"
-              >
-                <option>Solo Project</option>
-                <option>Research Project</option>
-                <option>Conversation Bot</option>
-              </select>
-            ) : (
-              <div className="border-2 border-black bg-brutal-cream px-2 py-1.5 font-mono text-sm font-bold">
-                {template}
-              </div>
-            )}
-          </label>
-        </div>
-
-        <div className="flex flex-wrap gap-1.5">
-          {(payload.agents ?? []).map((agent) => (
-            <span key={`${agent.name}-${agent.role}`} className="border-2 border-black bg-brutal-info-light px-2 py-1 font-mono text-[10px] font-bold uppercase shadow-brutal-sm">
-              {agent.name} · {agent.role}
-            </span>
-          ))}
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button data-testid="channel-create-card-submit" size="sm" variant="default" disabled={!onCreate || busy || accepted} onClick={submit}>
-            {busy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-            {accepted ? 'Channel created' : 'Create channel'}
-          </Button>
-          {!accepted && (
-            <Button size="sm" variant="outline" onClick={() => setIsEditing((v) => !v)}>
-              {isEditing ? 'Done editing' : 'Edit channel'}
-            </Button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function NextStepCard({
-  message,
-  payload,
-  onStartWork,
-}: {
-  message: Message;
-  payload: NextStepCardPayload;
-  onStartWork?: (message: Message) => Promise<void>;
-}) {
-  const [busy, setBusy] = useState(false);
-  const accepted = payload.status === 'accepted';
-
-  const startWork = async () => {
-    if (!onStartWork || busy || accepted) return;
-    setBusy(true);
-    try {
-      await onStartWork(message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="mt-2 max-w-2xl border-2 border-black bg-white shadow-brutal">
-      <div className="flex items-center justify-between border-b-2 border-black bg-brutal-info-light px-3 py-2">
-        <div className="flex items-center gap-2 font-heading text-sm font-black">
-          <SquareCheckBig className="h-4 w-4" />
-          Next Step
-        </div>
-        <span className="border-2 border-black bg-white px-2 py-0.5 font-mono text-[10px] font-bold uppercase">
-          {accepted ? 'started' : 'ready'}
-        </span>
-      </div>
-      <div className="space-y-3 p-3">
-        <p className="font-body text-sm leading-6 text-foreground">
-          Lucy 已经有足够上下文。下一步可以直接开工，生成 tasks 并分配给 team agents。
-        </p>
-        <div className="border-2 border-black bg-brutal-cream px-3 py-2 font-body text-sm">
-          {payload.target}
-        </div>
-        <div className="flex items-center gap-2">
-          <Button data-testid="next-step-start-work" size="sm" variant="default" disabled={!onStartWork || busy || accepted} onClick={startWork}>
-            {busy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-            {accepted ? 'Started' : '开始行动'}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ThoughtReviewCard({
-  message,
-  payload,
-  onComplete,
-}: {
-  message: Message;
-  payload: ThoughtReviewCardPayload;
-  onComplete?: (message: Message, thoughtId: string) => Promise<void>;
-}) {
-  const [busy, setBusy] = useState(false);
-  const accepted = payload.status === 'accepted';
-
-  const complete = async () => {
-    if (!onComplete || busy || accepted) return;
-    setBusy(true);
-    try {
-      await onComplete(message, payload.thought_id);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="mt-2 max-w-2xl border-2 border-black bg-white shadow-brutal">
-      <div className="flex items-center justify-between border-b-2 border-black bg-brutal-success-light px-3 py-2">
-        <div className="flex items-center gap-2 font-heading text-sm font-black">
-          <SquareCheckBig className="h-4 w-4" />
-          Thought Review
-        </div>
-        <span className="border-2 border-black bg-white px-2 py-0.5 font-mono text-[10px] font-bold uppercase">
-          {accepted ? 'done' : 'review'}
-        </span>
-      </div>
-      <div className="space-y-3 p-3">
-        <div>
-          <div className="font-heading text-sm font-black">{payload.title}</div>
-          {payload.summary && (
-            <p className="mt-1 font-body text-sm leading-6 text-muted-foreground">{payload.summary}</p>
-          )}
-        </div>
-        <Button data-testid="thought-review-done" size="sm" variant="success" disabled={!onComplete || busy || accepted} onClick={complete}>
-          {busy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-          {accepted ? 'Done' : 'Done'}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function TasksCreatedCard({
-  payload,
-  onViewTaskGraph,
-}: {
-  payload: TasksCreatedCardPayload;
-  onViewTaskGraph?: () => void;
-}) {
-  const tasks = payload.tasks ?? [];
-
-  return (
-    <div className="mt-2 max-w-2xl border-2 border-black bg-white shadow-brutal">
-      <div className="flex items-center justify-between border-b-2 border-black bg-brutal-warning px-3 py-2">
-        <div className="flex items-center gap-2 font-heading text-sm font-black">
-          <SquareCheckBig className="h-4 w-4" />
-          Tasks Created
-        </div>
-        <span className="border-2 border-black bg-white px-2 py-0.5 font-mono text-[10px] font-bold uppercase">
-          {tasks.length} tasks
-        </span>
-      </div>
-      <div className="space-y-3 p-3">
-        <div className="font-heading text-sm font-black">{payload.title}</div>
-        <div className="space-y-1.5">
-          {tasks.map((task) => (
-            <div key={task.id} className="flex items-center justify-between gap-2 border-2 border-black bg-brutal-cream px-2 py-1.5 shadow-brutal-sm">
-              <span className="truncate font-body text-sm font-bold">
-                {task.task_number ? `#${task.task_number} ` : ''}{task.title}
-              </span>
-              <span className="shrink-0 font-mono text-[10px] font-bold uppercase text-muted-foreground">
-                {task.status.replace('_', ' ')}
-              </span>
-            </div>
-          ))}
-        </div>
-        <Button data-testid="tasks-created-view-graph" size="sm" variant="default" onClick={onViewTaskGraph}>
-          View Task graph
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function TaskReviewCard({
-  payload,
-  onAction,
-}: {
-  payload: TaskReviewCardPayload;
-  onAction?: () => Promise<void> | void;
-}) {
-  const [busy, setBusy] = useState<'accept' | 'reject' | null>(null);
-  const [localStatus, setLocalStatus] = useState(payload.task_status ?? 'in_review');
-  const [error, setError] = useState<string | null>(null);
-  const canReview = localStatus === 'in_review';
-
-  const run = async (action: 'accept' | 'reject') => {
-    if (busy || !canReview) return;
-    setBusy(action);
-    setError(null);
-    try {
-      await apiClient.post(
-        `/api/v1/tasks/${payload.task_id}/${action}`,
-        action === 'reject' ? { reason: 'Needs refinement from review card.' } : undefined,
-      );
-      setLocalStatus(action === 'accept' ? 'done' : 'in_progress');
-      await onAction?.();
-    } catch {
-      setError('Review action failed.');
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  return (
-    <div className="mt-2 max-w-2xl border-2 border-black bg-white shadow-brutal">
-      <div className="flex items-center justify-between border-b-2 border-black bg-brutal-violet-light px-3 py-2">
-        <div className="flex items-center gap-2 font-heading text-sm font-black">
-          <SquareCheckBig className="h-4 w-4" />
-          Review Task
-        </div>
-        <span className="border-2 border-black bg-white px-2 py-0.5 font-mono text-[10px] font-bold uppercase">
-          {localStatus.replace('_', ' ')}
-        </span>
-      </div>
-      <div className="space-y-3 p-3">
-        <div>
-          <div className="font-heading text-sm font-black">
-            {payload.task_number ? `#${payload.task_number} ` : ''}{payload.title}
-          </div>
-          <p className="mt-1 font-body text-sm leading-6 text-muted-foreground">
-            验收后 task 进入 Done，并更新 project memory。
-          </p>
-        </div>
-        {payload.artifact_status && payload.artifact_status !== 'none' ? (
-          <div className="inline-flex border-2 border-black bg-brutal-cream px-2 py-1 font-mono text-[10px] font-bold uppercase">
-            artifact {payload.artifact_status}
-          </div>
-        ) : null}
-        <div className="flex items-center gap-2">
-          <Button data-testid="task-review-accept" size="sm" variant="success" disabled={!canReview || Boolean(busy)} onClick={() => run('accept')}>
-            {busy === 'accept' ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Check className="mr-1 h-3.5 w-3.5" />}
-            Accept
-          </Button>
-          <Button data-testid="task-review-reject" size="sm" variant="danger" disabled={!canReview || Boolean(busy)} onClick={() => run('reject')}>
-            {busy === 'reject' ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="mr-1 h-3.5 w-3.5" />}
-            Reject
-          </Button>
-        </div>
-        {error ? <div className="font-mono text-[10px] font-bold uppercase text-brutal-danger">{error}</div> : null}
-      </div>
-    </div>
-  );
 }
 
 const MessageItem = memo(function MessageItem({
@@ -551,11 +129,6 @@ const MessageItem = memo(function MessageItem({
   onEdit,
   onDelete,
   onAsTask,
-  onCreateChannelFromCard,
-  onStartWorkFromCard,
-  onCompleteThoughtFromCard,
-  onTaskReviewAction,
-  onViewTaskGraph,
 }: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content || '');
@@ -570,11 +143,6 @@ const MessageItem = memo(function MessageItem({
   const taskStatus = message.task_status as string | undefined;
   const isTaskMessage = message.task_number != null && taskStatus != null;
   const headerConfig = isTaskMessage && taskStatus ? TASK_HEADER_CONFIG[taskStatus] : null;
-  const channelCreateCard = parseChannelCreateCard(message);
-  const nextStepCard = parseNextStepCard(message);
-  const thoughtReviewCard = parseThoughtReviewCard(message);
-  const tasksCreatedCard = parseTasksCreatedCard(message);
-  const taskReviewCard = parseTaskReviewCard(message);
 
   // P25-08-F: unread thread dot condition
   const hasUnreadThread = message.has_unread_thread === true && (message.reply_count ?? 0) > 0;
@@ -787,34 +355,6 @@ const MessageItem = memo(function MessageItem({
               </button>
             </div>
           </div>
-        ) : channelCreateCard ? (
-          <ChannelCreateCard
-            message={message}
-            payload={channelCreateCard}
-            onCreate={onCreateChannelFromCard}
-          />
-        ) : nextStepCard ? (
-          <NextStepCard
-            message={message}
-            payload={nextStepCard}
-            onStartWork={onStartWorkFromCard}
-          />
-        ) : thoughtReviewCard ? (
-          <ThoughtReviewCard
-            message={message}
-            payload={thoughtReviewCard}
-            onComplete={onCompleteThoughtFromCard}
-          />
-        ) : tasksCreatedCard ? (
-          <TasksCreatedCard
-            payload={tasksCreatedCard}
-            onViewTaskGraph={onViewTaskGraph}
-          />
-        ) : taskReviewCard ? (
-          <TaskReviewCard
-            payload={taskReviewCard}
-            onAction={onTaskReviewAction}
-          />
         ) : (
           <p
             className={cn(
@@ -1111,12 +651,32 @@ function LoadMoreFailed({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+// ---- Keyboard shortcuts help tip ----
+
+const SHORTCUTS_HELP_KEY = 'solo-keyboard-shortcuts-dismissed';
+
+function KeyboardShortcutsHelp({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div className="mx-6 mb-2 flex items-center justify-between border-2 border-black bg-brutal-primary-light px-3 py-1.5">
+      <span className="font-mono text-[11px] text-muted-foreground">
+        {t('keyboardShortcutHint')}
+      </span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="ml-2 font-mono text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+        aria-label={t('closeShortcutHint')}
+      >
+        x
+      </button>
+    </div>
+  );
+}
+
 // ---- Main component ----
 
 export function MessageList({
   messages,
-  beforeItems,
-  showBeginningMarker = true,
   isLoading,
   error,
   onRetry,
@@ -1125,11 +685,6 @@ export function MessageList({
   onEdit,
   onDelete,
   onAsTask,
-  onCreateChannelFromCard,
-  onStartWorkFromCard,
-  onCompleteThoughtFromCard,
-  onTaskReviewAction,
-  onViewTaskGraph,
   hasMore,
   isLoadingMore,
   loadMoreError,
@@ -1154,6 +709,19 @@ export function MessageList({
     id: string;
     displayName: string;
   } | null>(null);
+
+  // Keyboard shortcuts help tip — show once per browser
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return !localStorage.getItem(SHORTCUTS_HELP_KEY);
+  });
+
+  const dismissShortcutsHelp = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(SHORTCUTS_HELP_KEY, '1');
+    }
+    setShowShortcutsHelp(false);
+  }, []);
 
   const handleDeleteConfirm = useCallback(() => {
     if (deleteTarget) {
@@ -1290,7 +858,7 @@ export function MessageList({
   }
 
   // Empty state
-  if (messages.length === 0 && !beforeItems) {
+  if (messages.length === 0) {
     return <MessageListEmpty />;
   }
 
@@ -1315,13 +883,11 @@ export function MessageList({
           <LoadMoreFailed onRetry={() => onLoadMore()} />
         )}
 
-        {showBeginningMarker && !hasMore && !isLoadingMore && !loadMoreError && (
+        {!hasMore && !isLoadingMore && !loadMoreError && (
           <ChannelBeginning />
         )}
 
         <div className="py-4 space-y-1">
-          {beforeItems}
-
           {messages.map((message) =>
             message.status === 'streaming' ? (
               <StreamingMessage
@@ -1349,11 +915,6 @@ export function MessageList({
                 onReply={onReply}
                 onEdit={onEdit}
                 onAsTask={onAsTask}
-                onCreateChannelFromCard={onCreateChannelFromCard}
-                onStartWorkFromCard={onStartWorkFromCard}
-                onCompleteThoughtFromCard={onCompleteThoughtFromCard}
-                onTaskReviewAction={onTaskReviewAction}
-                onViewTaskGraph={onViewTaskGraph}
                 onDelete={
                   onDelete
                     ? (id) => {
@@ -1373,6 +934,10 @@ export function MessageList({
         {/* SOLO-island PR2: TypingIndicator removed — AgentIsland
             (mounted at the dashboard root) is the new home for
             "agent is working" status. */}
+
+        {showShortcutsHelp && messages.length > 0 && (
+          <KeyboardShortcutsHelp onDismiss={dismissShortcutsHelp} />
+        )}
 
         <div ref={bottomRef} />
       </div>

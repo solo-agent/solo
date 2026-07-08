@@ -537,13 +537,6 @@ export function DMView({
     router.push(`/dashboard?dm=${dm.id}&message=${threadMessage.id}`);
   }, [dm.id, router, threadMessage]);
 
-  const handleViewThreadTask = useCallback(() => {
-    const taskNumber = threadTask?.task_number ?? threadMessage?.task_number;
-    if (!threadMessage || taskNumber == null) return;
-    setViewTab('tasks');
-    router.push(`/dashboard?dm=${dm.id}&tab=tasks&task=${taskNumber}&thread=${threadMessage.id}`);
-  }, [dm.id, router, threadMessage, threadTask]);
-
   return (
     <div className="flex flex-1 overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -745,7 +738,6 @@ export function DMView({
               onClose={handleThreadClose}
               replyCount={threadMessage.reply_count ?? 0}
               onViewInChannel={handleViewThreadInDM}
-              onViewTask={handleViewThreadTask}
               onOpenArtifactReference={handleOpenArtifactReference}
               onAgentClick={openAgentDetail}
             />

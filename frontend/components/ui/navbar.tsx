@@ -13,9 +13,9 @@ import { useAuth } from '@/lib/auth-context';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 
 export const NAV_ITEMS = [
-  { href: '/teams', icon: Users, label: t('navTeams'), key: 'teams' },
-  { href: '/observability/live', icon: Gauge, label: t('observabilityDashboard'), key: 'dashboard' },
-  { href: '/computers', icon: Monitor, label: t('navComputers'), key: 'computers' },
+  { href: '/teams', icon: Users, labelKey: 'navTeams', key: 'teams' },
+  { href: '/observability/live', icon: Gauge, labelKey: 'observabilityDashboard', key: 'dashboard' },
+  { href: '/computers', icon: Monitor, labelKey: 'navComputers', key: 'computers' },
 ] as const;
 
 interface NavBarProps {
@@ -59,6 +59,7 @@ export function NavBar({ onLogoClick, logoLabel }: NavBarProps = {}) {
         const isActive = item.key === 'dashboard'
           ? pathname.startsWith('/observability')
           : pathname === item.href || pathname.startsWith(item.href + '/');
+        const label = t(item.labelKey);
         return (
           <Link
             key={item.href}
@@ -67,8 +68,8 @@ export function NavBar({ onLogoClick, logoLabel }: NavBarProps = {}) {
               'navbar-icon',
               isActive && 'navbar-icon-active',
             )}
-            aria-label={item.label}
-            title={item.label}
+            aria-label={label}
+            title={label}
           >
             <item.icon className="h-4 w-4" />
           </Link>

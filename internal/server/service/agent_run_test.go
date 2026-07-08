@@ -310,6 +310,56 @@ func TestAgentRunServiceLifecycle(t *testing.T) {
 	}
 }
 
+func TestListActiveRunsForUserFiltersVisibility(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	otherID := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, ownerID)
+	otherAgentID := agentRunAgent(t, pool, otherID)
+	channelID := agentRunChannel(t, pool, ownerID)
+	otherChannelID := agentRunChannel(t, pool, otherID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = ANY($1)`, []string{agentID, otherAgentID})
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE id = ANY($1)`, []string{channelID, otherChannelID})
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = ANY($1)`, []string{agentID, otherAgentID})
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = ANY($1)`, []string{ownerID, otherID})
+	})
+
+	svc := NewAgentRunService(pool)
+	visible, err := svc.StartRun(ctx, StartRunInput{
+		AgentID:      agentID,
+		TriggerType:  AgentRunTriggerMessage,
+		ChannelID:    channelID,
+		Status:       AgentRunStatusThinking,
+		ActivityText: "visible",
+	})
+	if err != nil {
+		t.Fatalf("StartRun visible: %v", err)
+	}
+	hidden, err := svc.StartRun(ctx, StartRunInput{
+		AgentID:      otherAgentID,
+		TriggerType:  AgentRunTriggerMessage,
+		ChannelID:    otherChannelID,
+		Status:       AgentRunStatusThinking,
+		ActivityText: "hidden",
+	})
+	if err != nil {
+		t.Fatalf("StartRun hidden: %v", err)
+	}
+
+	runs, err := svc.ListActiveRunsForUser(ctx, ownerID)
+	if err != nil {
+		t.Fatalf("ListActiveRunsForUser: %v", err)
+	}
+	if !agentRunListContains(runs, visible.ID) {
+		t.Fatalf("visible run %s missing from %+v", visible.ID, runs)
+	}
+	if agentRunListContains(runs, hidden.ID) {
+		t.Fatalf("hidden run %s leaked into %+v", hidden.ID, runs)
+	}
+}
+
 func TestParseOpenClawMessageTranscriptLine(t *testing.T) {
 	entries := parseTranscriptLine(json.RawMessage(`{"type":"message","timestamp":"2026-06-28T08:56:32Z","message":{"role":"user","content":"hello from openclaw"}}`))
 	if len(entries) != 1 || entries[0].Role != "user" || entries[0].Text != "hello from openclaw" {

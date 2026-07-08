@@ -18,7 +18,12 @@ func NewAgentRunHandler(pool *pgxpool.Pool) *AgentRunHandler {
 }
 
 func (h *AgentRunHandler) Active(w http.ResponseWriter, r *http.Request) {
-	runs, err := h.svc.ListActiveRuns(r.Context())
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	runs, err := h.svc.ListActiveRunsForUser(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list active runs")
 		return

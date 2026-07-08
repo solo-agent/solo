@@ -6,10 +6,11 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { ChannelList } from './channel-list';
 import { NAV_ITEMS } from '@/components/ui/navbar';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
+import { PanelToggleIcon, panelToggleButtonClass } from '@/components/ui/button';
 import { selectableRowClass, selectableRowIconClass } from '@/components/ui/selectable-row';
 import { t } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -59,11 +60,11 @@ export function Sidebar({
         <button
           type="button"
           onClick={onToggleCollapsed}
-          className="absolute left-4 top-3 z-30 flex h-8 w-8 items-center justify-center border-2 border-black bg-white shadow-brutal-sm transition-[transform,box-shadow] hover:-translate-y-px hover:shadow-brutal"
-          aria-label="Expand channels"
-          title="Expand channels"
+          className={panelToggleButtonClass(false, 'absolute left-3 top-3 z-30')}
+          aria-label={t('navCollapseChannels')}
+          title={t('navCollapseChannels')}
         >
-          <ChevronRight className="h-4 w-4" />
+          <PanelToggleIcon side="left" />
         </button>
       </div>
     );
@@ -91,11 +92,11 @@ export function Sidebar({
           <button
             type="button"
             onClick={onToggleCollapsed}
-            className="flex h-9 w-9 shrink-0 items-center justify-center border-2 border-black bg-white shadow-brutal-sm transition-[transform,box-shadow] hover:-translate-y-px hover:shadow-brutal"
-            aria-label="Collapse channels"
-            title="Collapse channels"
+            className={panelToggleButtonClass(true, 'shrink-0')}
+            aria-label={t('navCollapseChannels')}
+            title={t('navCollapseChannels')}
           >
-            <ChevronLeft className="h-4 w-4" />
+            <PanelToggleIcon side="left" />
           </button>
         </div>
 
@@ -106,6 +107,7 @@ export function Sidebar({
             const isActive = item.key === 'dashboard'
               ? pathname.startsWith('/observability')
               : pathname === item.href || pathname.startsWith(item.href + '/');
+            const label = t(item.labelKey);
             return (
               <Link
                 key={item.href}
@@ -117,13 +119,13 @@ export function Sidebar({
                     isActive ? 'bg-white' : 'hover:bg-white/50',
                   ),
                 )}
-                aria-label={item.label}
+                aria-label={label}
                 aria-current={isActive ? 'page' : undefined}
               >
                 <span className={selectableRowIconClass('bg-white')}>
                   <item.icon className="h-4 w-4" />
                 </span>
-                <span className="truncate font-body">{item.label}</span>
+                <span className="truncate font-body">{label}</span>
               </Link>
             );
           })}

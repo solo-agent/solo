@@ -331,7 +331,10 @@ func (s *AgentService) broadcastAgentError(threadID, channelID, agentID, agentNa
 	}
 }
 
-const agentTaskStreamTimeout = 20 * time.Minute
+const (
+	agentTaskStreamTimeout = 20 * time.Minute
+	agentRunStaleAfter     = agentTaskStreamTimeout + agentRunWatchdogInterval
+)
 
 // handleStreamingAgentTask dispatches a task to a daemon via SSE streaming
 // and forwards events to WebSocket subscribers.
@@ -803,6 +806,16 @@ func (s *AgentService) StartAgentRunWatchdogLoop(ctx context.Context) {
 
 func (s *AgentService) CheckAgentRunWatchdogs(ctx context.Context, now time.Time) error {
 	runSvc := NewAgentRunService(s.pool)
+	staleRuns, err := s.listStaleActiveRuns(ctx, now.Add(-agentRunStaleAfter))
+	if err != nil {
+		return err
+	}
+	for i := range staleRuns {
+		if err := s.timeoutStaleAgentRun(ctx, runSvc, &staleRuns[i]); err != nil {
+			return err
+		}
+	}
+
 	noVisibleRuns, err := s.listRunsWithoutVisibleReply(ctx, now.Add(-agentNoVisibleReplyAfter))
 	if err != nil {
 		return err
@@ -823,6 +836,17 @@ func (s *AgentService) CheckAgentRunWatchdogs(ctx context.Context, now time.Time
 		}
 	}
 	return nil
+}
+
+func (s *AgentService) listStaleActiveRuns(ctx context.Context, before time.Time) ([]AgentRun, error) {
+	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
+		 WHERE r.status = ANY($1)
+		   AND r.started_at <= $2
+		 ORDER BY r.started_at ASC
+		 LIMIT 100`,
+		activeAgentRunStatuses(),
+		before,
+	))
 }
 
 func (s *AgentService) listRunsWithoutVisibleReply(ctx context.Context, before time.Time) ([]AgentRun, error) {
@@ -871,6 +895,22 @@ func activeAgentRunStatuses() []string {
 		string(AgentRunStatusWaitingInput),
 		string(AgentRunStatusWaitingApproval),
 	}
+}
+
+func (s *AgentService) timeoutStaleAgentRun(ctx context.Context, runSvc *AgentRunService, run *AgentRun) error {
+	finished, err := runSvc.FinishRun(ctx, FinishRunInput{
+		RunID:        run.ID,
+		Status:       AgentRunStatusTimeout,
+		ActivityText: agentActivityTimeout,
+	})
+	if err != nil {
+		return err
+	}
+	s.appendAndBroadcastRunEvent(ctx, runSvc, finished, finished.AgentID, finished.AgentName, AgentRunEventError, agentActivityTimeout, "", map[string]any{
+		"status": AgentRunStatusTimeout,
+	})
+	s.broadcastAgentRun(finished.ChannelID, "agent.run.finished", runPayload(finished, finished.AgentID, finished.AgentName, ""))
+	return nil
 }
 
 func (s *AgentService) warnAgentRun(ctx context.Context, runSvc *AgentRunService, run *AgentRun, eventType, message string) error {

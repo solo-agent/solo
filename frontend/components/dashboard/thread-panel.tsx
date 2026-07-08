@@ -19,7 +19,7 @@ import {
   useState,
   useCallback,
 } from 'react';
-import { X, AlertCircle, RefreshCw, Send, MessageSquare, SquareCheckBig } from 'lucide-react';
+import { X, AlertCircle, RefreshCw, Send, MessageSquare } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -29,6 +29,7 @@ import { highlightSpecials, buildValidNames } from '@/lib/utils/highlight';
 import { buildDashboardHref } from '@/lib/dashboard-url';
 import { displayAgentErrorReason } from '@/lib/agent-activity';
 import { Avatar } from '@/components/ui/avatar';
+import { panelToggleButtonClass } from '@/components/ui/button';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useThread } from '@/lib/hooks/use-thread';
@@ -52,8 +53,6 @@ interface ThreadPanelProps {
   /** Callback after the thread has been marked as read (P25-08-F) */
   onMarkRead?: () => void;
   onViewInChannel?: () => void;
-  onViewTask?: () => void;
-  showViewTask?: boolean;
   onOpenArtifactReference?: (ref: string) => void;
   onAgentClick?: (agent: AgentDetailTarget) => void;
 }
@@ -724,8 +723,6 @@ export function ThreadPanel({
   task,
   onMarkRead,
   onViewInChannel,
-  onViewTask,
-  showViewTask,
   onOpenArtifactReference,
   onAgentClick,
 }: ThreadPanelProps) {
@@ -843,21 +840,6 @@ export function ThreadPanel({
     router.push(buildDashboardHref(parentMessage.channel_id, { messageId: parentMessage.id }));
   }, [onViewInChannel, parentMessage.channel_id, parentMessage.id, router]);
 
-  const taskNumber = task?.task_number ?? parentMessage.task_number;
-  const handleViewTask = useCallback(() => {
-    if (onViewTask) {
-      onViewTask();
-      return;
-    }
-    if (taskNumber == null) return;
-    router.push(buildDashboardHref(parentMessage.channel_id, {
-      view: 'task.graph',
-      panel: 'thread',
-      taskId: task?.id ?? null,
-      threadId: parentMessage.id,
-    }));
-  }, [onViewTask, parentMessage.channel_id, parentMessage.id, router, task?.id, taskNumber]);
-
   return (
     <div
       className={cn(
@@ -866,7 +848,7 @@ export function ThreadPanel({
       )}
     >
       {/* Header */}
-      <div className="flex h-14 flex-shrink-0 items-center justify-between border-b-2 border-black px-4">
+      <div className="sidebar-collapse-offset flex h-14 flex-shrink-0 items-center justify-between border-b-2 border-black px-4">
         <h3 className="font-heading text-base font-bold text-foreground">
           {t('thread')}{replyCount > 0 && (
             <span className="ml-1.5 font-mono text-sm text-muted-foreground">
@@ -875,21 +857,10 @@ export function ThreadPanel({
           )}
         </h3>
         <div className="flex items-center gap-2">
-          {(taskNumber != null || showViewTask) && (
-            <button
-              type="button"
-              onClick={handleViewTask}
-              className="btn-brutal btn-brutal-sm flex h-8 w-8 items-center justify-center p-0"
-              aria-label={t('observabilityTask')}
-              title={t('observabilityTask')}
-            >
-              <SquareCheckBig className="h-3.5 w-3.5" />
-            </button>
-          )}
           <button
             type="button"
             onClick={handleViewInChannel}
-            className="btn-brutal btn-brutal-sm flex h-8 w-8 items-center justify-center p-0"
+            className={panelToggleButtonClass()}
             aria-label={t('navChannels')}
             title={t('navChannels')}
           >
@@ -898,7 +869,7 @@ export function ThreadPanel({
           <button
             type="button"
             onClick={onClose}
-            className="btn-brutal btn-brutal-sm flex h-8 w-8 items-center justify-center p-0"
+            className={panelToggleButtonClass()}
             aria-label={t('closeThreadPanel')}
           >
             <X className="h-4 w-4" />

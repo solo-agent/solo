@@ -180,6 +180,58 @@ func TestAgentRunProgressWatchdogWarnsOnce(t *testing.T) {
 	}
 }
 
+func TestAgentRunWatchdogTimesOutStaleActiveRun(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, ownerID)
+	channelID := agentRunChannel(t, pool, ownerID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	runSvc := NewAgentRunService(pool)
+	run, err := runSvc.StartRun(ctx, StartRunInput{
+		AgentID:      agentID,
+		TriggerType:  AgentRunTriggerMessage,
+		ChannelID:    channelID,
+		Status:       AgentRunStatusThinking,
+		ActivityText: agentActivityNoProgress,
+	})
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+	old := time.Now().Add(-agentTaskStreamTimeout - agentRunWatchdogInterval - time.Second)
+	_, err = pool.Exec(ctx, `UPDATE agent_runs SET started_at = $2, updated_at = $2 WHERE id = $1`, run.ID, old)
+	if err != nil {
+		t.Fatalf("age run: %v", err)
+	}
+
+	rec := newRecordingBroadcaster()
+	svc := NewAgentService(pool, NewDaemonManager(pool, rec), rec, nil)
+	if err := svc.CheckAgentRunWatchdogs(ctx, time.Now()); err != nil {
+		t.Fatalf("CheckAgentRunWatchdogs: %v", err)
+	}
+
+	var status string
+	var finishedAt *time.Time
+	if err := pool.QueryRow(ctx, `SELECT status, finished_at FROM agent_runs WHERE id = $1`, run.ID).Scan(&status, &finishedAt); err != nil {
+		t.Fatalf("query run: %v", err)
+	}
+	if status != string(AgentRunStatusTimeout) {
+		t.Fatalf("status = %q, want timeout", status)
+	}
+	if finishedAt == nil {
+		t.Fatal("finished_at is nil")
+	}
+	if !rec.hasBroadcastEvent("agent.run.finished", agentActivityTimeout) {
+		t.Fatalf("timeout finish not broadcast: %q", rec.broadcastMessages)
+	}
+}
+
 func assertRunEventCount(t *testing.T, pool *pgxpool.Pool, runID, eventType string, want int) {
 	t.Helper()
 	var count int
