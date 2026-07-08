@@ -9,9 +9,9 @@ type StreamEventType string
 
 const (
 	StreamEventToken    StreamEventType = "token"     // A single token of generated text
-	StreamEventToolCall StreamEventType = "tool_call"  // Agent is calling a tool
-	StreamEventError    StreamEventType = "error"      // An error occurred during generation
-	StreamEventDone     StreamEventType = "done"       // Generation completed successfully
+	StreamEventToolCall StreamEventType = "tool_call" // Agent is calling a tool
+	StreamEventError    StreamEventType = "error"     // An error occurred during generation
+	StreamEventDone     StreamEventType = "done"      // Generation completed successfully
 )
 
 // Role represents the sender role in a conversation message.
@@ -25,32 +25,33 @@ const (
 
 // Message represents a single message in the conversation context.
 type Message struct {
-	Role     Role   `json:"role"`
-	Content  string `json:"content"`
-	SenderID string `json:"sender_id,omitempty"`
+	Role        Role         `json:"role"`
+	Content     string       `json:"content"`
+	SenderID    string       `json:"sender_id,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
 // ModelConfig represents the LLM model configuration for an agent run.
 type ModelConfig struct {
-	Provider    string  `json:"provider"`
-	Model       string  `json:"model"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
 }
 
 // RunRequest contains all parameters needed to invoke an agent.
 type RunRequest struct {
-	AgentID      string       `json:"agent_id"`
-	ChannelID    string       `json:"channel_id"`
-	ThreadID     string       `json:"thread_id,omitempty"`
-	Messages     []Message    `json:"messages"`
-	SystemPrompt string       `json:"system_prompt"`
-	ModelConfig  ModelConfig  `json:"model_config"`
+	AgentID      string      `json:"agent_id"`
+	ChannelID    string      `json:"channel_id"`
+	ThreadID     string      `json:"thread_id,omitempty"`
+	Messages     []Message   `json:"messages"`
+	SystemPrompt string      `json:"system_prompt"`
+	ModelConfig  ModelConfig `json:"model_config"`
 }
 
 // RunResponse contains the result of a non-streaming agent run.
 type RunResponse struct {
-	AgentID   string `json:"agent_id"`
-	Content   string `json:"content"`
-	Usage     Usage  `json:"usage,omitempty"`
+	AgentID string `json:"agent_id"`
+	Content string `json:"content"`
+	Usage   Usage  `json:"usage,omitempty"`
 }
 
 // Usage contains token usage information from the LLM call.

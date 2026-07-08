@@ -21,13 +21,14 @@ func NewThreadService(pool *pgxpool.Pool) *ThreadService {
 
 // ThreadMessage represents a message in a thread for agent context.
 type ThreadMessage struct {
-	ID         string    `json:"id"`
-	ThreadID   string    `json:"thread_id"`
-	SenderType string    `json:"sender_type"`
-	SenderID   string    `json:"sender_id"`
-	SenderName string    `json:"sender_name"`
-	Content    string    `json:"content"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	ThreadID      string    `json:"thread_id"`
+	SenderType    string    `json:"sender_type"`
+	SenderID      string    `json:"sender_id"`
+	SenderName    string    `json:"sender_name"`
+	Content       string    `json:"content"`
+	AttachmentIDs []string  `json:"attachment_ids,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // GetThreadContextMessages returns all messages in a thread, ordered chronologically,
@@ -50,7 +51,7 @@ func (s *ThreadService) GetThreadContextMessages(ctx context.Context, threadID s
 	rows, err := s.pool.Query(ctx,
 		`SELECT m.id, COALESCE(m.thread_id::text, ''), m.sender_type, m.sender_id,
 		        COALESCE(u.display_name, a.name, m.sender_id::text) AS sender_name,
-		        m.content, m.created_at
+			m.content, COALESCE(m.attachment_ids, '{}') as attachment_ids, m.created_at
 		 FROM messages m
 		 LEFT JOIN users u ON m.sender_id = u.id
 		 LEFT JOIN agents a ON m.sender_id = a.id
@@ -66,7 +67,7 @@ func (s *ThreadService) GetThreadContextMessages(ctx context.Context, threadID s
 	var messages []ThreadMessage
 	for rows.Next() {
 		var msg ThreadMessage
-		if err := rows.Scan(&msg.ID, &msg.ThreadID, &msg.SenderType, &msg.SenderID, &msg.SenderName, &msg.Content, &msg.CreatedAt); err != nil {
+		if err := rows.Scan(&msg.ID, &msg.ThreadID, &msg.SenderType, &msg.SenderID, &msg.SenderName, &msg.Content, &msg.AttachmentIDs, &msg.CreatedAt); err != nil {
 			return nil, err
 		}
 		messages = append(messages, msg)

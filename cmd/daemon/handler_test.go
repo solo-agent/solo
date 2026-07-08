@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -108,6 +110,60 @@ func TestReadBackendFinalResultReturnsCancelledOnContextDone(t *testing.T) {
 	}
 	if result == nil || result.Status != "cancelled" {
 		t.Fatalf("result = %+v, want cancelled", result)
+	}
+}
+
+func TestMaterializeMessageAttachmentsCopiesFilesIntoWorkspace(t *testing.T) {
+	root := t.TempDir()
+	workDir := t.TempDir()
+	t.Setenv("ATTACHMENTS_DIR", root)
+	storagePath := filepath.Join("2026-07", "note.txt")
+	fullPath := filepath.Join(root, storagePath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fullPath, []byte("hello from attachment"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newDaemonHandler(nil, newTaskManager(), fakeStreamProvider{}, "http://127.0.0.1:8080", "")
+	messages := h.materializeMessageAttachments(context.Background(), []llmMessage{
+		{
+			Role:    "user",
+			Content: "please read it",
+			Attachments: []agent.Attachment{
+				{
+					ID:          "550e8400-e29b-41d4-a716-446655440000",
+					Filename:    "note.txt",
+					MIMEType:    "text/plain",
+					Size:        21,
+					URL:         "/api/v1/attachments/550e8400-e29b-41d4-a716-446655440000",
+					StoragePath: storagePath,
+					LocalPath:   agent.AttachmentLocalPath("550e8400-e29b-41d4-a716-446655440000", "note.txt"),
+				},
+			},
+		},
+	}, workDir)
+
+	if len(messages) != 1 || len(messages[0].Attachments) != 1 {
+		t.Fatalf("messages = %+v", messages)
+	}
+	localPath := messages[0].Attachments[0].LocalPath
+	if localPath == "" {
+		t.Fatal("materialized LocalPath is empty")
+	}
+	data, err := os.ReadFile(filepath.Join(workDir, filepath.FromSlash(localPath)))
+	if err != nil {
+		t.Fatalf("read materialized attachment: %v", err)
+	}
+	if string(data) != "hello from attachment" {
+		t.Fatalf("materialized data = %q", string(data))
+	}
+	if !strings.Contains(messages[0].Content, "Materialized attachment files in this workspace") {
+		t.Fatalf("content missing materialized paths: %s", messages[0].Content)
+	}
+	if !strings.Contains(messages[0].Content, localPath) {
+		t.Fatalf("content missing local path %q: %s", localPath, messages[0].Content)
 	}
 }
 

@@ -597,8 +597,13 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	content := strings.TrimSpace(req.Content)
-	if content == "" {
-		writeError(w, http.StatusBadRequest, "message content is required")
+	attachmentIDs := req.AttachmentIDs
+	if !hasMessageBody(content, attachmentIDs) {
+		writeError(w, http.StatusBadRequest, "message content or attachment is required")
+		return
+	}
+	if req.AsTask && content == "" {
+		writeError(w, http.StatusBadRequest, "task content is required")
 		return
 	}
 	if len(content) > 10000 {
@@ -650,7 +655,6 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate attachment ownership
-	attachmentIDs := req.AttachmentIDs
 	if len(attachmentIDs) > 0 {
 		var ownedCount int
 		err := h.pool.QueryRow(r.Context(),
@@ -701,6 +705,12 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		displayName = "Unknown"
 	}
 
+	// Fetch attachment metadata for the response and realtime payloads.
+	var attachments []AttachmentMeta
+	if len(attachmentIDs) > 0 {
+		attachments, _ = queryAttachments(r.Context(), h.pool, attachmentIDs)
+	}
+
 	slog.Info("DM message sent",
 		"message_id", messageID,
 		"dm_id", dmID,
@@ -712,14 +722,16 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		// Broadcast message.new first so other DM participants see the message
 		if h.hub != nil {
 			msgPayload := ws.Envelope(ws.EventMessageNew, ws.MessageNewPayload{
-				ID:          messageID,
-				ChannelID:   dmID,
-				SenderType:  senderType,
-				SenderID:    userID,
-				SenderName:  displayName,
-				Content:     content,
-				ContentType: "text",
-				CreatedAt:   now.Format(time.RFC3339),
+				ID:            messageID,
+				ChannelID:     dmID,
+				SenderType:    senderType,
+				SenderID:      userID,
+				SenderName:    displayName,
+				Content:       content,
+				ContentType:   "text",
+				AttachmentIDs: attachmentIDs,
+				Attachments:   toWSAttachmentMeta(attachments),
+				CreatedAt:     now.Format(time.RFC3339),
 			})
 			h.hub.BroadcastToChannel(dmID, msgPayload)
 		}
@@ -775,22 +787,18 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch attachment metadata for the response
-	var attachments []AttachmentMeta
-	if len(attachmentIDs) > 0 {
-		attachments, _ = queryAttachments(r.Context(), h.pool, attachmentIDs)
-	}
-
 	// Broadcast message.new to DM channel subscribers
 	msgPayload := ws.Envelope(ws.EventMessageNew, ws.MessageNewPayload{
-		ID:          messageID,
-		ChannelID:   dmID,
-		SenderType:  senderType,
-		SenderID:    userID,
-		SenderName:  displayName,
-		Content:     content,
-		ContentType: "text",
-		CreatedAt:   now.Format(time.RFC3339),
+		ID:            messageID,
+		ChannelID:     dmID,
+		SenderType:    senderType,
+		SenderID:      userID,
+		SenderName:    displayName,
+		Content:       content,
+		ContentType:   "text",
+		AttachmentIDs: attachmentIDs,
+		Attachments:   toWSAttachmentMeta(attachments),
+		CreatedAt:     now.Format(time.RFC3339),
 	})
 	h.hub.BroadcastToChannel(dmID, msgPayload)
 
@@ -805,6 +813,7 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		Content:       content,
 		ContentType:   "text",
 		AttachmentIDs: attachmentIDs,
+		Attachments:   toWSAttachmentMeta(attachments),
 		CreatedAt:     now.Format(time.RFC3339),
 	})
 	h.hub.BroadcastToChannel(dmID, dmMsgPayload)

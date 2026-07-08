@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -19,25 +20,41 @@ import (
 // AllowedMIMETypes is the set of permitted MIME types for uploads.
 var AllowedMIMETypes = map[string]bool{
 	// Images
-	"image/jpeg":      true,
-	"image/png":       true,
-	"image/gif":       true,
-	"image/webp":      true,
-	"image/svg+xml":   true,
+	"image/jpeg":    true,
+	"image/png":     true,
+	"image/gif":     true,
+	"image/webp":    true,
+	"image/svg+xml": true,
 	// Documents
-	"application/pdf": true,
-	"text/plain":      true,
-	"text/csv":        true,
-	"text/markdown":   true,
+	"application/pdf":    true,
+	"text/plain":         true,
+	"text/csv":           true,
+	"text/markdown":      true,
+	"application/rtf":    true,
+	"application/msword": true,
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
+	"application/vnd.ms-excel": true,
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         true,
+	"application/vnd.ms-powerpoint":                                             true,
+	"application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
+	"application/vnd.oasis.opendocument.text":                                   true,
+	"application/vnd.oasis.opendocument.spreadsheet":                            true,
+	"application/vnd.oasis.opendocument.presentation":                           true,
 	// Common
-	"application/json": true,
-	"application/zip":  true,
-	"application/gzip": true,
+	"application/json":             true,
+	"application/zip":              true,
+	"application/x-zip-compressed": true,
+	"application/gzip":             true,
+	"application/x-gzip":           true,
+	"application/x-tar":            true,
+	"application/x-7z-compressed":  true,
+	"application/vnd.rar":          true,
+	"application/x-rar-compressed": true,
 }
 
 // MaxAllowedMIMETypes is the cap on the number of distinct types in the
 // whitelist (prevents accidental unbounded growth).
-const MaxAllowedMIMETypes = 20
+const MaxAllowedMIMETypes = 40
 
 // MaxUploadSize is the maximum upload size (50 MB).
 const MaxUploadSize = 50 << 20
@@ -89,12 +106,10 @@ func (h *AttachmentHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Validate MIME type
-	mimeType := header.Header.Get("Content-Type")
-	if mimeType == "" {
-		// Try to detect from extension
-		mimeType = detectMIMEType(header.Filename)
-	}
+	// Validate MIME type. Some browsers send application/octet-stream for
+	// office/archive uploads, so fall back to extension detection when the
+	// multipart header is not specific enough.
+	mimeType := normalizeMIMEType(header.Header.Get("Content-Type"), header.Filename)
 	if !isAllowedMIMEType(mimeType) {
 		slog.Warn("attachment upload: disallowed MIME type",
 			"filename", header.Filename,
@@ -270,6 +285,24 @@ func isAllowedMIMEType(mimeType string) bool {
 	return AllowedMIMETypes[mimeType]
 }
 
+func normalizeMIMEType(raw, filename string) string {
+	mimeType := strings.TrimSpace(strings.ToLower(raw))
+	if mimeType != "" {
+		if parsed, _, err := mime.ParseMediaType(mimeType); err == nil {
+			mimeType = parsed
+		}
+	}
+
+	detected := detectMIMEType(filename)
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		return detected
+	}
+	if !isAllowedMIMEType(mimeType) && detected != "application/octet-stream" && isAllowedMIMEType(detected) {
+		return detected
+	}
+	return mimeType
+}
+
 // detectMIMEType infers a MIME type from a filename extension.
 func detectMIMEType(filename string) string {
 	ext := strings.ToLower(filepath.Ext(filename))
@@ -292,12 +325,38 @@ func detectMIMEType(filename string) string {
 		return "text/csv"
 	case ".md":
 		return "text/markdown"
+	case ".rtf":
+		return "application/rtf"
+	case ".doc":
+		return "application/msword"
+	case ".docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case ".xls":
+		return "application/vnd.ms-excel"
+	case ".xlsx":
+		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	case ".ppt":
+		return "application/vnd.ms-powerpoint"
+	case ".pptx":
+		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	case ".odt":
+		return "application/vnd.oasis.opendocument.text"
+	case ".ods":
+		return "application/vnd.oasis.opendocument.spreadsheet"
+	case ".odp":
+		return "application/vnd.oasis.opendocument.presentation"
 	case ".json":
 		return "application/json"
 	case ".zip":
 		return "application/zip"
 	case ".gz":
 		return "application/gzip"
+	case ".tar":
+		return "application/x-tar"
+	case ".7z":
+		return "application/x-7z-compressed"
+	case ".rar":
+		return "application/vnd.rar"
 	default:
 		return "application/octet-stream"
 	}

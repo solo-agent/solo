@@ -72,24 +72,24 @@ type AttachmentMeta struct {
 }
 
 type MessageResponse struct {
-	ID                string   `json:"id"`
-	TaskNumber        int      `json:"task_number,omitempty"`
-	ChannelID         string   `json:"channel_id"`
-	SenderType        string   `json:"sender_type"`
-	SenderID          string   `json:"sender_id"`
-	SenderName        string   `json:"sender_name,omitempty"`
-		SenderActive      bool     `json:"sender_active"`
-	Content           string   `json:"content"`
-	ContentType       string   `json:"content_type"`
-	MentionedAgentIDs []string         `json:"mentioned_agent_ids,omitempty"`
-	AttachmentIDs     []string         `json:"attachment_ids,omitempty"`
-	Attachments       []AttachmentMeta `json:"attachments,omitempty"`
-	CreatedAt         string           `json:"created_at"`
-	ReplyCount        int      `json:"reply_count,omitempty"`
-	TaskStatus        string   `json:"task_status,omitempty"`
-	TaskClaimerName      string `json:"task_claimer_name,omitempty"`
-	TaskClaimerDeleted   bool   `json:"task_claimer_deleted"`
-	HasUnreadThread   bool     `json:"has_unread_thread,omitempty"`
+	ID                 string           `json:"id"`
+	TaskNumber         int              `json:"task_number,omitempty"`
+	ChannelID          string           `json:"channel_id"`
+	SenderType         string           `json:"sender_type"`
+	SenderID           string           `json:"sender_id"`
+	SenderName         string           `json:"sender_name,omitempty"`
+	SenderActive       bool             `json:"sender_active"`
+	Content            string           `json:"content"`
+	ContentType        string           `json:"content_type"`
+	MentionedAgentIDs  []string         `json:"mentioned_agent_ids,omitempty"`
+	AttachmentIDs      []string         `json:"attachment_ids,omitempty"`
+	Attachments        []AttachmentMeta `json:"attachments,omitempty"`
+	CreatedAt          string           `json:"created_at"`
+	ReplyCount         int              `json:"reply_count,omitempty"`
+	TaskStatus         string           `json:"task_status,omitempty"`
+	TaskClaimerName    string           `json:"task_claimer_name,omitempty"`
+	TaskClaimerDeleted bool             `json:"task_claimer_deleted"`
+	HasUnreadThread    bool             `json:"has_unread_thread,omitempty"`
 }
 
 type MessageListResponse struct {
@@ -118,8 +118,13 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	content := strings.TrimSpace(req.Content)
-	if content == "" {
-		writeError(w, http.StatusBadRequest, "message content is required")
+	attachmentIDs := req.AttachmentIDs
+	if !hasMessageBody(content, attachmentIDs) {
+		writeError(w, http.StatusBadRequest, "message content or attachment is required")
+		return
+	}
+	if req.AsTask && content == "" {
+		writeError(w, http.StatusBadRequest, "task content is required")
 		return
 	}
 	if len(content) > 10000 {
@@ -191,7 +196,9 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 					threadID = ""
 				}
 			}
-			if tid != "" { threadID = tid }
+			if tid != "" {
+				threadID = tid
+			}
 		} else {
 			// Full UUID not a thread — check if message is already in a thread first.
 			var existingThreadID string
@@ -214,7 +221,6 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Validate attachment ownership
-	attachmentIDs := req.AttachmentIDs
 	if len(attachmentIDs) > 0 {
 		var ownedCount int
 		err := h.pool.QueryRow(r.Context(),
@@ -283,6 +289,12 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		displayName = "Unknown"
 	}
 
+	// Fetch attachment metadata for the response and realtime payloads.
+	var attachments []AttachmentMeta
+	if len(attachmentIDs) > 0 {
+		attachments, _ = queryAttachments(r.Context(), h.pool, attachmentIDs)
+	}
+
 	// Broadcast thread reply_count update and thread.message.new
 	if threadRootMsgID != "" && h.hub != nil {
 		msgUpdated := ws.Envelope(ws.EventMessageUpdated, ws.MessageUpdatedPayload{
@@ -294,15 +306,17 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 		threadMsg := ws.ThreadMessageNewPayload{
 			Message: ws.ThreadMessageItem{
-				ID:          messageID,
-				ChannelID:   channelID,
-				ThreadID:    threadID,
-				SenderType:  senderType,
-				SenderID:    userID,
-				SenderName:  displayName,
-				Content:     content,
-				ContentType: "text",
-				CreatedAt:   now.UTC().Format(time.RFC3339),
+				ID:            messageID,
+				ChannelID:     channelID,
+				ThreadID:      threadID,
+				SenderType:    senderType,
+				SenderID:      userID,
+				SenderName:    displayName,
+				Content:       content,
+				ContentType:   "text",
+				AttachmentIDs: attachmentIDs,
+				Attachments:   toWSAttachmentMeta(attachments),
+				CreatedAt:     now.UTC().Format(time.RFC3339),
 			},
 			Thread: ws.ThreadMetadataItem{
 				ThreadID:    threadID,
@@ -314,12 +328,6 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("message created (REST)", "message_id", messageID, "channel_id", channelID, "user_id", userID, "mentions", mentionedAgentIDs)
-
-	// Fetch attachment metadata for the response
-	var attachments []AttachmentMeta
-	if len(attachmentIDs) > 0 {
-		attachments, _ = queryAttachments(r.Context(), h.pool, attachmentIDs)
-	}
 
 	// If as_task, convert to task FIRST so task metadata is available
 	// for the initial message.new broadcast (one step, no timing gap).
@@ -380,6 +388,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 			ThreadID:          threadID,
 			MentionedAgentIDs: mentionedAgentIDs,
 			AttachmentIDs:     attachmentIDs,
+			Attachments:       toWSAttachmentMeta(attachments),
 			TaskNumber:        taskNumber,
 			TaskStatus:        taskStatus,
 			CreatedAt:         now.Format(time.RFC3339),
@@ -843,6 +852,25 @@ func queryAttachmentMap(ctx context.Context, pool *pgxpool.Pool, ids []string) (
 	return metaMap, nil
 }
 
+func toWSAttachmentMeta(attachments []AttachmentMeta) []ws.AttachmentMeta {
+	if len(attachments) == 0 {
+		return nil
+	}
+	out := make([]ws.AttachmentMeta, 0, len(attachments))
+	for _, a := range attachments {
+		out = append(out, ws.AttachmentMeta{
+			ID:           a.ID,
+			Filename:     a.Filename,
+			MimeType:     a.MimeType,
+			Size:         a.Size,
+			URL:          a.URL,
+			ThumbnailURL: a.ThumbnailURL,
+			CreatedAt:    a.CreatedAt,
+		})
+	}
+	return out
+}
+
 // broadcastDMIfNeeded checks if the channel is a DM and broadcasts dm.message.new.
 func (h *MessageHandler) broadcastDMIfNeeded(channelID string, msg ws.MessageNewPayload) {
 	var channelType string
@@ -863,6 +891,7 @@ func (h *MessageHandler) broadcastDMIfNeeded(channelID string, msg ws.MessageNew
 		Content:       msg.Content,
 		ContentType:   msg.ContentType,
 		AttachmentIDs: msg.AttachmentIDs,
+		Attachments:   msg.Attachments,
 		ThreadID:      msg.ThreadID,
 		CreatedAt:     msg.CreatedAt,
 	}
@@ -910,6 +939,10 @@ func collectAttachmentIDs(messages []MessageResponse) []string {
 		}
 	}
 	return ids
+}
+
+func hasMessageBody(content string, attachmentIDs []string) bool {
+	return strings.TrimSpace(content) != "" || len(attachmentIDs) > 0
 }
 
 // Check handles GET /api/v1/messages/check — a lightweight polling endpoint for
@@ -977,7 +1010,7 @@ func (h *MessageHandler) Check(w http.ResponseWriter, r *http.Request) {
 		SenderType string  `json:"sender_type"`
 		SenderID   string  `json:"sender_id"`
 		Content    string  `json:"content"`
-		ReplyTo   *string `json:"reply_to,omitempty"`
+		ReplyTo    *string `json:"reply_to,omitempty"`
 		CreatedAt  string  `json:"created_at"`
 		UpdatedAt  string  `json:"updated_at"`
 	}

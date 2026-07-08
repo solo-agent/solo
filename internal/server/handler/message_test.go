@@ -59,6 +59,29 @@ func TestMessageHandler_Create_Validation(t *testing.T) {
 	}
 }
 
+func TestHasMessageBody(t *testing.T) {
+	tests := []struct {
+		name          string
+		content       string
+		attachmentIDs []string
+		want          bool
+	}{
+		{name: "empty", content: "", want: false},
+		{name: "whitespace only", content: "   \n\t", want: false},
+		{name: "text", content: "hello", want: true},
+		{name: "attachment only", content: "", attachmentIDs: []string{"550e8400-e29b-41d4-a716-446655440000"}, want: true},
+		{name: "text and attachment", content: "hello", attachmentIDs: []string{"550e8400-e29b-41d4-a716-446655440000"}, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasMessageBody(tt.content, tt.attachmentIDs); got != tt.want {
+				t.Fatalf("hasMessageBody() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMessageHandler_List_MissingAuth(t *testing.T) {
 	h := &MessageHandler{}
 	r := setupChiRouterForMessage(h)

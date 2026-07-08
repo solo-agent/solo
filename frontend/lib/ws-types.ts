@@ -6,7 +6,7 @@
 // 前端在 ws-client.ts 中解包服务端事件: payload 字段展开到顶层
 // 前端在 ws-client.ts 中打包客户端命令: 非 type 字段包裹到 payload
 
-import type { Attachment, Thread } from './types';
+import type { Attachment } from './types';
 
 /** 消息来源（与后端 sender_type 对齐） */
 export type WSMessageSource = 'user' | 'agent' | 'system';
@@ -51,7 +51,7 @@ export type WSServerEvent =
   | { type: 'message.deleted'; channel_id: string; message_id: string }
   // ---- 线程事件 ----
   // thread.message.new: 后端 ThreadMessageNewPayload 为 {message:{...}, thread:{...}} 嵌套结构
-  | { type: 'thread.message.new'; message: { id: string; channel_id: string; thread_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; created_at: string }; thread: { thread_id: string; reply_count: number; last_reply_at: string } }
+  | { type: 'thread.message.new'; message: { id: string; channel_id: string; thread_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; created_at: string; attachments?: Attachment[] }; thread: { thread_id: string; reply_count: number; last_reply_at: string } }
   // thread.reply: 后端 ThreadReplyNotifyPayload 包含 latest_reply 子对象
   | { type: 'thread.reply'; channel_id: string; thread_id: string; root_message_id?: string; reply_count: number; last_reply_at: string; latest_reply?: { id: string; sender_id: string; sender_name: string; content: string; created_at: string } }
   // ---- 输入状态 ----

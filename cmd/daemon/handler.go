@@ -483,9 +483,10 @@ type runTaskRequest struct {
 }
 
 type llmMessage struct {
-	Role     string `json:"role"`
-	Content  string `json:"content"`
-	SenderID string `json:"sender_id,omitempty"`
+	Role        string             `json:"role"`
+	Content     string             `json:"content"`
+	SenderID    string             `json:"sender_id,omitempty"`
+	Attachments []agent.Attachment `json:"attachments,omitempty"`
 }
 
 type modelConfigPayload struct {
@@ -847,13 +848,16 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		slog.Warn("task: sync solo skills failed (non-fatal)", "task_id", req.TaskID, "error", err)
 	}
 
+	materializedMessages := h.materializeMessageAttachments(ctx, req.Messages, ws.WorkDir)
+
 	// Convert messages to agent.Message format
-	msgs := make([]agent.Message, len(req.Messages))
-	for i, m := range req.Messages {
+	msgs := make([]agent.Message, len(materializedMessages))
+	for i, m := range materializedMessages {
 		msgs[i] = agent.Message{
-			Role:     agent.Role(m.Role),
-			Content:  m.Content,
-			SenderID: m.SenderID,
+			Role:        agent.Role(m.Role),
+			Content:     m.Content,
+			SenderID:    m.SenderID,
+			Attachments: m.Attachments,
 		}
 	}
 
@@ -1119,6 +1123,186 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	// subscribers in order, eliminating the need for a delay.
 	h.pushEventJSON(req.TaskID, "done", map[string]interface{}{})
 	h.taskManager.CloseAllSubscribers(req.TaskID)
+}
+
+func (h *daemonHandler) materializeMessageAttachments(ctx context.Context, messages []llmMessage, workDir string) []llmMessage {
+	if len(messages) == 0 || workDir == "" {
+		return messages
+	}
+
+	out := make([]llmMessage, len(messages))
+	for i, msg := range messages {
+		out[i] = msg
+		if len(msg.Attachments) == 0 {
+			continue
+		}
+
+		attachments := make([]agent.Attachment, len(msg.Attachments))
+		copy(attachments, msg.Attachments)
+		for j := range attachments {
+			localPath, err := h.materializeAttachment(ctx, workDir, &attachments[j])
+			if err != nil {
+				slog.Warn("task: failed to materialize attachment", "attachment_id", attachments[j].ID, "filename", attachments[j].Filename, "error", err)
+				continue
+			}
+			attachments[j].LocalPath = localPath
+		}
+		out[i].Attachments = attachments
+		out[i].Content = appendMaterializedAttachmentPaths(out[i].Content, attachments)
+	}
+	return out
+}
+
+func (h *daemonHandler) materializeAttachment(ctx context.Context, workDir string, attachment *agent.Attachment) (string, error) {
+	localPath := attachment.LocalPath
+	if localPath == "" {
+		localPath = agent.AttachmentLocalPath(attachment.ID, attachment.Filename)
+	}
+	if filepath.IsAbs(localPath) {
+		return "", fmt.Errorf("attachment local path must be relative")
+	}
+
+	dst := filepath.Join(workDir, filepath.FromSlash(localPath))
+	rel, err := filepath.Rel(workDir, dst)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("attachment local path escapes workspace")
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return "", err
+	}
+
+	if attachment.StoragePath != "" {
+		if err := copyAttachmentFromStorage(attachment.StoragePath, dst); err == nil {
+			return filepath.ToSlash(localPath), nil
+		} else {
+			slog.Warn("task: failed to copy attachment from storage, trying URL", "attachment_id", attachment.ID, "error", err)
+		}
+	}
+
+	if attachment.URL == "" {
+		return "", fmt.Errorf("attachment has neither storage_path nor url")
+	}
+	if err := h.downloadAttachment(ctx, attachment.URL, dst); err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(localPath), nil
+}
+
+func copyAttachmentFromStorage(storagePath, dst string) error {
+	src, err := resolveDaemonAttachmentPath(storagePath)
+	if err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
+}
+
+func resolveDaemonAttachmentPath(storagePath string) (string, error) {
+	if filepath.IsAbs(storagePath) {
+		return "", fmt.Errorf("invalid attachment storage path")
+	}
+	root := daemonAttachmentsRoot()
+	fullPath := filepath.Join(root, filepath.Clean(storagePath))
+	rel, err := filepath.Rel(root, fullPath)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("invalid attachment storage path")
+	}
+	return fullPath, nil
+}
+
+func daemonAttachmentsRoot() string {
+	if dir := os.Getenv("ATTACHMENTS_DIR"); dir != "" {
+		return dir
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".solo", "attachments")
+	}
+	return filepath.Join(".", "attachments")
+}
+
+func (h *daemonHandler) downloadAttachment(ctx context.Context, rawURL, dst string) error {
+	downloadURL, err := h.resolveAttachmentURL(rawURL)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return err
+	}
+	if h.internalToken != "" {
+		req.Header.Set("X-Internal-Token", h.internalToken)
+	}
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("download attachment: status %d", resp.StatusCode)
+	}
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		return err
+	}
+	return out.Close()
+}
+
+func (h *daemonHandler) resolveAttachmentURL(rawURL string) (string, error) {
+	if strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://") {
+		return rawURL, nil
+	}
+	if !strings.HasPrefix(rawURL, "/") {
+		return "", fmt.Errorf("attachment url must be absolute or server-relative")
+	}
+	if h.serverURL == "" {
+		return "", fmt.Errorf("server url is not configured")
+	}
+	return strings.TrimRight(h.serverURL, "/") + rawURL, nil
+}
+
+func appendMaterializedAttachmentPaths(content string, attachments []agent.Attachment) string {
+	paths := make([]string, 0, len(attachments))
+	for _, attachment := range attachments {
+		if attachment.LocalPath == "" {
+			continue
+		}
+		paths = append(paths, fmt.Sprintf("- %s -> %s", attachment.Filename, attachment.LocalPath))
+	}
+	if len(paths) == 0 {
+		return content
+	}
+	var b strings.Builder
+	b.WriteString(content)
+	b.WriteString("\n\nMaterialized attachment files in this workspace:\n")
+	for _, path := range paths {
+		b.WriteString(path)
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 func backendFinalStatus(result *agent.Result) string {

@@ -609,7 +609,9 @@ export function useDM(dmId: string | null = null) {
       attachmentIds?: string[],
     ): Promise<{ id: string; task_number?: number } | null> => {
       const id = dmIdRef.current;
-      if (!id || !content.trim()) return null;
+      const trimmedContent = content.trim();
+      const hasAttachments = Boolean(attachmentIds && attachmentIds.length > 0);
+      if (!id || (!trimmedContent && !hasAttachments) || (asTask && !trimmedContent)) return null;
 
       const tempId = `dm-temp-${Date.now()}`;
       const optimisticMessage: Message = {
@@ -617,7 +619,7 @@ export function useDM(dmId: string | null = null) {
         channel_id: id,
         user_id: 'user-1',
         display_name: 'You',
-        content: content.trim(),
+        content: trimmedContent,
         created_at: new Date().toISOString(),
         status: 'sending',
       };
@@ -625,7 +627,7 @@ export function useDM(dmId: string | null = null) {
       setMessages((prev) => [...prev, optimisticMessage]);
 
       try {
-        const body: Record<string, unknown> = { content: content.trim() };
+        const body: Record<string, unknown> = { content: trimmedContent };
         if (_mentionedAgentIds && _mentionedAgentIds.length > 0) {
           body.mentioned_agent_ids = _mentionedAgentIds;
         }

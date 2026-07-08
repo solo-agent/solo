@@ -12,6 +12,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { File, Download, ImageOff, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
+import { resolveAttachmentUrl } from '@/lib/attachment-url';
 import type { Attachment } from '@/lib/types';
 
 // ---- Helpers ----
@@ -43,6 +44,7 @@ interface ImageLightboxProps {
 
 export function ImageLightbox({ attachment, onClose }: ImageLightboxProps) {
   const [loadState, setLoadState] = useState<'loading' | 'loaded' | 'error'>('loading');
+  const imageUrl = resolveAttachmentUrl(attachment.url);
 
   // Close on Escape
   useEffect(() => {
@@ -106,7 +108,7 @@ export function ImageLightbox({ attachment, onClose }: ImageLightboxProps) {
         )}
 
         <img
-          src={attachment.url}
+          src={imageUrl}
           alt={attachment.filename}
           onLoad={() => setLoadState('loaded')}
           onError={() => setLoadState('error')}
@@ -136,6 +138,7 @@ interface InlineImageProps {
 
 function InlineImage({ attachment, onClick }: InlineImageProps) {
   const [loadState, setLoadState] = useState<'loading' | 'loaded' | 'error'>('loading');
+  const imageUrl = resolveAttachmentUrl(attachment.thumbnail_url || attachment.url);
 
   return (
     <div
@@ -169,7 +172,7 @@ function InlineImage({ attachment, onClick }: InlineImageProps) {
       )}
 
       <img
-        src={attachment.url}
+        src={imageUrl}
         alt={attachment.filename}
         onLoad={() => setLoadState('loaded')}
         onError={() => setLoadState('error')}
@@ -177,7 +180,6 @@ function InlineImage({ attachment, onClick }: InlineImageProps) {
           'w-full max-w-[300px] object-cover',
           loadState === 'loaded' ? 'block' : 'hidden',
         )}
-        loading="lazy"
       />
     </div>
   );
@@ -190,7 +192,7 @@ interface FileCardProps {
 }
 
 function FileCard({ attachment }: FileCardProps) {
-  const downloadUrl = attachment.url;
+  const downloadUrl = resolveAttachmentUrl(attachment.url);
   const filename = attachment.filename;
   // Truncate long filenames — show first N chars + extension
   const extIndex = filename.lastIndexOf('.');
