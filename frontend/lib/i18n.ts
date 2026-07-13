@@ -440,7 +440,7 @@ const en = {
   teamsMessage: 'Message',
   teamsJumping: 'Jumping...',
 
-  // ── Agent Island / Activity ──
+  // ── Agent Run Activity ──
   agentIdle: 'Idle',
   agentThinkingShort: 'Thinking',
   agentExecuting: 'Executing',

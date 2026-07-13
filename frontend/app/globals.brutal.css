@@ -198,6 +198,35 @@
   animation: pulse-brutal 2s ease-in-out infinite;
 }
 
+.team-agent-active-halo {
+  isolation: isolate;
+}
+
+.team-agent-active-halo::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  z-index: -1;
+  border: 2px solid var(--team-agent-status-color);
+  box-shadow: 0 0 0 4px var(--team-agent-status-color);
+  pointer-events: none;
+  animation: team-agent-halo-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes team-agent-halo-pulse {
+  0%, 100% { opacity: 0.18; transform: scale(1); }
+  50% { opacity: 0.42; transform: scale(1.06); }
+}
+
+.team-agent-running-dot {
+  animation: team-agent-dot-hop 0.9s ease-in-out infinite;
+}
+
+@keyframes team-agent-dot-hop {
+  0%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-3px); }
+}
+
 /* ============================================================
    Base Layer — shadcn/ui conventions with black borders
    ============================================================ */
@@ -763,6 +792,8 @@
   .animate-slide-in-from-left,
   .animate-slide-in-from-right,
   .animate-indeterminate-progress,
+  .team-agent-active-halo::before,
+  .team-agent-running-dot,
   .cursor-blink,
   .cursor-blink-pink {
     animation: none !important;

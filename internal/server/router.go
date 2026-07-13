@@ -82,7 +82,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	channelHandler := handler.NewChannelHandler(pool)
 	memberHandler := handler.NewMemberHandler(pool, agentSvc)
 	messageHandler := handler.NewMessageHandler(pool, hub, agentSvc, taskSvc)
-	agentHandler := handler.NewAgentHandler(pool, dm)
+	agentHandler := handler.NewAgentHandler(pool, dm, hub)
 	agentRunHandler := handler.NewAgentRunHandler(pool)
 	dashboardHandler := handler.NewDashboardHandler(pool)
 	threadHandler := handler.NewThreadHandler(pool, hub, agentSvc)

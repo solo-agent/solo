@@ -232,6 +232,109 @@ func TestAgentRunWatchdogTimesOutStaleActiveRun(t *testing.T) {
 	}
 }
 
+func TestDaemonOfflineTimesOutTrackedAgentRun(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, ownerID)
+	channelID := agentRunChannel(t, pool, ownerID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	runSvc := NewAgentRunService(pool)
+	run, err := runSvc.StartRun(ctx, StartRunInput{
+		AgentID:      agentID,
+		TriggerType:  AgentRunTriggerMessage,
+		ChannelID:    channelID,
+		Status:       AgentRunStatusThinking,
+		ActivityText: agentActivityAccepted,
+	})
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+
+	rec := newRecordingBroadcaster()
+	dm := NewDaemonManager(pool, rec)
+	daemonID := "daemon-" + agentID[:8]
+	dm.Register(&DaemonInfo{ID: daemonID, Host: "127.0.0.1", Port: 1, Capabilities: []string{"agent"}})
+	taskID := uuid.NewString()
+	dm.TrackTask(taskID, daemonID, agentID)
+	dm.AttachTaskRun(taskID, run.ID)
+
+	dm.mu.Lock()
+	dm.daemons[daemonID].LastHeartbeat = time.Now().Add(-dm.heartbeatInterval - time.Second)
+	dm.daemons[daemonID].MissedHeartbeats = dm.maxMissedHB - 1
+	dm.mu.Unlock()
+
+	dm.checkHealth()
+
+	var status string
+	var finishedAt *time.Time
+	if err := pool.QueryRow(ctx, `SELECT status, finished_at FROM agent_runs WHERE id = $1`, run.ID).Scan(&status, &finishedAt); err != nil {
+		t.Fatalf("query run: %v", err)
+	}
+	if status != string(AgentRunStatusTimeout) {
+		t.Fatalf("status = %q, want timeout", status)
+	}
+	if finishedAt == nil {
+		t.Fatal("finished_at is nil")
+	}
+	if !rec.hasBroadcastEvent("agent.run.finished", agentActivityTimeout) {
+		t.Fatalf("offline timeout finish not broadcast: %q", rec.broadcastMessages)
+	}
+}
+
+func TestDaemonUnregisterTimesOutTrackedAgentRun(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, ownerID)
+	channelID := agentRunChannel(t, pool, ownerID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	runSvc := NewAgentRunService(pool)
+	run, err := runSvc.StartRun(ctx, StartRunInput{
+		AgentID:      agentID,
+		TriggerType:  AgentRunTriggerMessage,
+		ChannelID:    channelID,
+		Status:       AgentRunStatusThinking,
+		ActivityText: agentActivityAccepted,
+	})
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+
+	rec := newRecordingBroadcaster()
+	dm := NewDaemonManager(pool, rec)
+	daemonID := "daemon-" + agentID[:8]
+	dm.Register(&DaemonInfo{ID: daemonID, Host: "127.0.0.1", Port: 1, Capabilities: []string{"agent"}})
+	taskID := uuid.NewString()
+	dm.TrackTask(taskID, daemonID, agentID)
+	dm.AttachTaskRun(taskID, run.ID)
+
+	dm.Unregister(daemonID)
+
+	var status string
+	if err := pool.QueryRow(ctx, `SELECT status FROM agent_runs WHERE id = $1`, run.ID).Scan(&status); err != nil {
+		t.Fatalf("query run: %v", err)
+	}
+	if status != string(AgentRunStatusTimeout) {
+		t.Fatalf("status = %q, want timeout", status)
+	}
+	if !rec.hasBroadcastEvent("agent.run.finished", agentActivityTimeout) {
+		t.Fatalf("unregister timeout finish not broadcast: %q", rec.broadcastMessages)
+	}
+}
+
 func assertRunEventCount(t *testing.T, pool *pgxpool.Pool, runID, eventType string, want int) {
 	t.Helper()
 	var count int

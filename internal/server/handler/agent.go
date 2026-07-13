@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/solo-ai/solo/internal/realtime"
 	"github.com/solo-ai/solo/internal/server/workspace"
 	"github.com/solo-ai/solo/pkg/agent"
 )
@@ -29,13 +30,14 @@ const (
 // AgentHandler handles agent-related HTTP requests.
 type AgentHandler struct {
 	pool          *pgxpool.Pool
-	workspaceRoot string             // base path for agent workspaces, defaults to ~/.solo/agents
-	proxy         workspace.Proxy    // optional proxy for workspace requests (nil = local FS only)
-	httpClient    *http.Client       // for daemon cleanup callbacks
+	workspaceRoot string          // base path for agent workspaces, defaults to ~/.solo/agents
+	proxy         workspace.Proxy // optional proxy for workspace requests (nil = local FS only)
+	httpClient    *http.Client    // for daemon cleanup callbacks
+	hub           realtime.Broadcaster
 }
 
 // NewAgentHandler creates a new AgentHandler.
-func NewAgentHandler(pool *pgxpool.Pool, proxy workspace.Proxy) *AgentHandler {
+func NewAgentHandler(pool *pgxpool.Pool, proxy workspace.Proxy, hub realtime.Broadcaster) *AgentHandler {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
@@ -49,6 +51,7 @@ func NewAgentHandler(pool *pgxpool.Pool, proxy workspace.Proxy) *AgentHandler {
 		workspaceRoot: workspaceRoot,
 		proxy:         proxy,
 		httpClient:    &http.Client{Timeout: 10 * time.Second},
+		hub:           hub,
 	}
 }
 
@@ -407,7 +410,6 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a)
 }
 
-
 // Delete handles DELETE /api/v1/agents/{id} (soft delete: sets is_active=false).
 // Side-effects (cascaded, not atomic with the soft-delete tx):
 //   - Remove agent from any computer's connected agent_ids array.
@@ -504,6 +506,12 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("agent deactivated", "agent_id", agentID, "user_id", userID)
+
+	if h.hub != nil {
+		h.hub.Broadcast(realtime.Envelope("agent_deleted", map[string]any{
+			"agent_id": agentID,
+		}))
+	}
 
 	// Async daemon cleanup (best-effort, daemon may be offline).
 	// Use a detached context so the request returning doesn't cancel it.
@@ -658,12 +666,12 @@ func unmarshalStringSlice(b []byte) []string {
 
 // workspaceNode represents a file or directory in the agent workspace tree.
 type workspaceNode struct {
-	Type     string           `json:"type"` // "file" or "directory"
-	Name     string           `json:"name"`
-	Path     string           `json:"path,omitempty"`
-	Content  string           `json:"content,omitempty"`
-	Size     int64            `json:"size,omitempty"`
-	Children []workspaceNode  `json:"children,omitempty"`
+	Type     string          `json:"type"` // "file" or "directory"
+	Name     string          `json:"name"`
+	Path     string          `json:"path,omitempty"`
+	Content  string          `json:"content,omitempty"`
+	Size     int64           `json:"size,omitempty"`
+	Children []workspaceNode `json:"children,omitempty"`
 }
 
 // Workspace handles GET /api/v1/agents/{agentID}/workspace
@@ -711,8 +719,10 @@ func (h *AgentHandler) Workspace(w http.ResponseWriter, r *http.Request) {
 
 	// Parse query params.
 	relPath := r.URL.Query().Get("path")
-	if relPath == "" {
-		relPath = "."
+	relPath, ok = normalizeWorkspaceRelPath(workspaceDir, relPath)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "path traversal not allowed")
+		return
 	}
 	includeContent := r.URL.Query().Get("content") == "true"
 
@@ -739,10 +749,9 @@ func (h *AgentHandler) Workspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fallback: local filesystem reading
-	// Prevent path traversal: resolve and verify it stays within workspaceDir.
 	fullPath := filepath.Clean(filepath.Join(workspaceDir, relPath))
-	if !strings.HasPrefix(fullPath, workspaceDir) {
+	rel, err := filepath.Rel(workspaceDir, fullPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		writeError(w, http.StatusBadRequest, "path traversal not allowed")
 		return
 	}
@@ -792,7 +801,7 @@ func (h *AgentHandler) buildFileTree(dirPath, basePath string, depth int, includ
 	node := workspaceNode{
 		Type:     "directory",
 		Name:     name,
-		Path:     dirPath,
+		Path:     workspaceNodePath(basePath, dirPath),
 		Children: []workspaceNode{},
 	}
 
@@ -838,7 +847,7 @@ func (h *AgentHandler) buildFileNode(filePath, basePath string, includeContent b
 	node := workspaceNode{
 		Type: "file",
 		Name: info.Name(),
-		Path: filePath,
+		Path: workspaceNodePath(basePath, filePath),
 		Size: info.Size(),
 	}
 
@@ -860,6 +869,35 @@ func (h *AgentHandler) buildFileNode(filePath, basePath string, includeContent b
 	}
 
 	return node, nil
+}
+
+func normalizeWorkspaceRelPath(workspaceDir, relPath string) (string, bool) {
+	if relPath == "" {
+		return ".", true
+	}
+	if filepath.IsAbs(relPath) {
+		rel, err := filepath.Rel(workspaceDir, filepath.Clean(relPath))
+		if err != nil {
+			return "", false
+		}
+		relPath = rel
+	}
+	relPath = filepath.Clean(relPath)
+	if relPath == "." {
+		return ".", true
+	}
+	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) {
+		return "", false
+	}
+	return relPath, true
+}
+
+func workspaceNodePath(basePath, path string) string {
+	rel, err := filepath.Rel(basePath, path)
+	if err != nil {
+		return filepath.ToSlash(filepath.Base(path))
+	}
+	return filepath.ToSlash(rel)
 }
 
 // isTextFile detects whether byte data represents text content by checking

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { displayAgentActivity } from '@/lib/agent-activity';
-import type { AgentRunStatus } from '@/lib/hooks/use-agent-island';
+import type { AgentRunStatus } from '@/lib/agent-run-types';
 import { useWebSocket } from '@/lib/ws-context';
 import { cn } from '@/lib/utils';
 import { detailSectionTitleClass } from '@/components/ui/detail-section';

@@ -17,7 +17,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { tabButtonClass } from '@/components/ui/tab-bar';
 import { agentRunStatusText, displayAgentActivity } from '@/lib/agent-activity';
 import { apiClient } from '@/lib/api-client';
-import type { AgentRunStatus } from '@/lib/hooks/use-agent-island';
+import type { AgentRunStatus } from '@/lib/agent-run-types';
 import { useWebSocket } from '@/lib/ws-context';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
@@ -565,11 +565,20 @@ function TimelineViewer({ timeline }: { timeline: AgentTimeline }) {
     questions.forEach((question, index) => map.set(question.seq, index));
     return map;
   }, [questions]);
-  const [activeQuestionSeq, setActiveQuestionSeq] = useState<number | null>(questions[0]?.seq ?? null);
+  const latestQuestionSeq = questions[questions.length - 1]?.seq ?? null;
+  const [activeQuestionSeq, setActiveQuestionSeq] = useState<number | null>(latestQuestionSeq);
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setActiveQuestionSeq(questions[0]?.seq ?? null);
-  }, [questions]);
+    setActiveQuestionSeq(latestQuestionSeq);
+    requestAnimationFrame(() => {
+      const transcript = transcriptScrollRef.current;
+      if (transcript) transcript.scrollTop = transcript.scrollHeight;
+      if (latestQuestionSeq !== null) {
+        document.getElementById(`timeline-question-${latestQuestionSeq}`)?.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  }, [latestQuestionSeq, timeline.id, timeline.entries.length]);
 
   const scrollToSeq = (seq: number) => {
     setActiveQuestionSeq(seq);
@@ -590,6 +599,7 @@ function TimelineViewer({ timeline }: { timeline: AgentTimeline }) {
             return (
               <button
                 key={`${question.seq}-${index}`}
+                id={`timeline-question-${question.seq}`}
                 type="button"
                 onClick={() => scrollToSeq(question.seq)}
                 className={cn(
@@ -610,7 +620,7 @@ function TimelineViewer({ timeline }: { timeline: AgentTimeline }) {
         </div>
       </div>
 
-      <div className="min-h-0 overflow-auto bg-brutal-cream">
+      <div ref={transcriptScrollRef} className="min-h-0 overflow-auto bg-brutal-cream">
         <div className="sticky top-0 z-10 flex h-24 flex-col justify-center border-b-2 border-black bg-brutal-cream px-4">
           <div className="truncate font-heading text-lg font-black">{title}</div>
           <div className="mt-1 font-mono text-xs text-muted-foreground">{t('observabilityTranscriptViewer')}</div>

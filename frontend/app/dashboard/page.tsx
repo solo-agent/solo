@@ -14,7 +14,6 @@ import { Sidebar } from "@/components/dashboard/sidebar";
 import { CreateChannelModal } from "@/components/dashboard/create-channel-modal";
 import { CreateDMModal } from "@/components/dashboard/create-dm-modal";
 import { DeleteChannelDialog } from "@/components/dashboard/delete-channel-dialog";
-import { AgentIsland } from "@/components/agents/agent-island";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -389,8 +388,6 @@ function DashboardContent() {
         inboxSelected={inboxFromUrl}
         onSelectInbox={handleSelectInbox}
       />
-      <AgentIsland />
-
       {/* Main content area */}
       <main className="relative flex flex-1 flex-col overflow-hidden">
         <div className={`flex min-h-0 flex-1 overflow-hidden ${isSidebarCollapsed ? '[&_.sidebar-collapse-offset]:pl-14' : ''}`}>

@@ -487,9 +487,10 @@ func artifactFilename(mode string) string {
 
 func renderArtifactAgentPrompt(data artifactRenderData, mode string) string {
 	var b strings.Builder
-	b.WriteString("Generate a Solo artifact for this task.\n\n")
-	b.WriteString("Use the `solo-artifacts` skill from this workspace exactly like a Solo-brutal work-canvas fork: pick the artifact type, read the matching `references/<type>.md`, assemble from `assets/starter.html`, inline `assets/base.css`, and inline the needed `assets/interactions.js` modules.\n\n")
-	b.WriteString("Artifact type selection:\n")
+	b.WriteString("Publish or generate a Solo artifact for this task.\n\n")
+	b.WriteString("First look for a real deliverable from the current task/run. A real deliverable is a file explicitly declared in the current context, for example `Deliverable: ./path/to/result.html`, a path named in the task/thread, or a file you personally created for this task now. If several files are named, prefer the product/final deliverable over review/report/panel files unless the user explicitly asks for the review page. If it is already a self-contained HTML file, publish that file directly instead of summarizing it. Do not switch to review-decision just because the task is in_review. For markdown or other text/data deliverables, wrap the exact content in a small self-contained HTML viewer and publish that wrapper.\n\n")
+	b.WriteString("Do not guess from old workspace files, do not pick files by newest mtime, and do not replace a real deliverable with a conversation summary. If there is no explicit current deliverable, use the `solo-artifacts` skill from this workspace exactly like a Solo-brutal work-canvas fork: pick the artifact type, read the matching `references/<type>.md`, assemble from `assets/starter.html`, inline `assets/base.css`, and inline the needed `assets/interactions.js` modules.\n\n")
+	b.WriteString("Artifact type selection only applies when no real deliverable exists:\n")
 	b.WriteString("- Use `review-decision` whenever the task status is `in_review`; it must include accept/reject decision controls.\n")
 	b.WriteString("- Use `comparison` when the task/thread compares options, approaches, models, benchmarks, A/B variants, or vendors.\n")
 	b.WriteString("- Use `progress-report` when the task is not in review and is still in progress, blocked, long-running, multi-subtask, or mainly needs status/timeline/next commands.\n")

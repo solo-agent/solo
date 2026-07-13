@@ -9,11 +9,11 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   ReactFlow,
   Background,
   Controls,
-  MiniMap,
   useNodesState,
   useEdgesState,
   type Connection,
@@ -27,7 +27,7 @@ import dagre from 'dagre';
 import { ArrowLeft, Loader2, Plus, LayoutGrid, Undo2, Redo2, Layers } from 'lucide-react';
 import { AppFrame } from '@/components/layout/app-frame';
 import { Button } from '@/components/ui/button';
-import { RelationshipNode } from '@/components/relationships/relationship-node';
+import { RelationshipNode, type AgentNodeTask } from '@/components/relationships/relationship-node';
 import { RelationshipEdge } from '@/components/relationships/relationship-edge';
 import { CreateRelationshipModal } from '@/components/relationships/create-relationship-modal';
 import { RelationshipDetailPanel } from '@/components/relationships/relationship-detail-panel';
@@ -45,6 +45,7 @@ import { useToast } from '@/components/ui/toast';
 import { t } from '@/lib/i18n';
 import type { Agent, AgentBackendDetectItem, AgentDetailTarget, AgentRelationship, RelationshipType } from '@/lib/types';
 import { useAgents } from '@/lib/hooks/use-agents';
+import { useTeamAgentActivity } from '@/lib/hooks/use-team-agent-activity';
 import { listTemplates, applyTemplate, type Template } from '@/lib/templates-api';
 import { useCliDetection } from '@/lib/hooks/use-cli-detection';
 
@@ -73,6 +74,7 @@ type GraphAgent = AgentDetailTarget & { is_active?: boolean };
 type ChannelTeam = {
   agents: Array<{ id: string; name: string; status?: string }>;
 };
+type AgentRunListItem = { id: string };
 
 // ---- Component ----
 
@@ -81,6 +83,9 @@ interface RelationshipWorkspaceProps {
   embedded?: boolean;
   channelFilterId?: string;
   channelTeam?: ChannelTeam | null;
+  agentTasks?: Record<string, AgentNodeTask | undefined>;
+  onOpenTask?: (taskId: string) => void;
+  onOpenTaskArtifact?: (taskId: string) => void;
   onChannelTeamRefresh?: () => void;
   onDetailOpen?: (detail: { relationship: AgentRelationship | null; agent: GraphAgent | null }) => void;
   onDetailClose?: () => void;
@@ -92,12 +97,17 @@ export function RelationshipWorkspace({
   embedded = false,
   channelFilterId,
   channelTeam,
+  agentTasks,
+  onOpenTask,
+  onOpenTaskArtifact,
   onChannelTeamRefresh,
   onDetailOpen,
   onDetailClose,
   embeddedActions,
 }: RelationshipWorkspaceProps = {}) {
+  const router = useRouter();
   const { agents, isLoading: agentsLoading, refetch: refetchAgents, createAgent } = useAgents();
+  const { liveByAgent, getLatestRunId } = useTeamAgentActivity();
   const { showToast } = useToast();
   const { results: detection, isLoading: detectionLoading } = useCliDetection();
   const [relationships, setRelationships] = useState<AgentRelationship[]>([]);
@@ -131,6 +141,21 @@ export function RelationshipWorkspace({
       flowRef.current?.fitView({ padding: 0.25, maxZoom: 0.85, duration: 250 });
     });
   }, []);
+
+  const handleOpenLatestRun = useCallback(async (agentId: string) => {
+    const runId = getLatestRunId(agentId);
+    if (runId) {
+      router.push(`/observability/live?run_id=${encodeURIComponent(runId)}`);
+      return;
+    }
+    const runs = await apiClient.get<AgentRunListItem[]>(`/api/v1/agents/${agentId}/runs`).catch(() => []);
+    const fallbackRunId = Array.isArray(runs) ? runs[0]?.id : undefined;
+    if (fallbackRunId) {
+      router.push(`/observability/live?run_id=${encodeURIComponent(fallbackRunId)}`);
+      return;
+    }
+    showToast(t('observabilityNoRecord'), 'info');
+  }, [getLatestRunId, router, showToast]);
 
   // ---- Fetch data ----
 
@@ -232,9 +257,13 @@ export function RelationshipWorkspace({
         agentId: a.id,
         agentName: a.name,
         isActive: a.is_active,
+        task: agentTasks?.[a.id],
+        onOpenRun: handleOpenLatestRun,
+        onOpenTask,
+        onOpenTaskArtifact,
       },
     }));
-  }, [visibleAgents, loadPositions]);
+  }, [agentTasks, handleOpenLatestRun, onOpenTask, onOpenTaskArtifact, visibleAgents, loadPositions]);
 
   const initialEdges: Edge[] = useMemo(() => {
     const map = new Map<string, AgentRelationship>();
@@ -246,9 +275,11 @@ export function RelationshipWorkspace({
         source: r.from_agent_id,
         target: r.to_agent_id,
         type: 'relationship',
-        // Collaboration is bidirectional: pin it to side handles so the line
-        // stays horizontal between same-rank peers instead of arcing top/bottom.
-        ...(isCollab ? { sourceHandle: 'right', targetHandle: 'left' } : {}),
+        // Collaboration is horizontal; assignment is vertical and starts below
+        // any mounted task card.
+        ...(isCollab
+          ? { sourceHandle: 'right', targetHandle: 'left' }
+          : { sourceHandle: 'bottom', targetHandle: 'top' }),
         data: {
           relType: r.rel_type,
           channelName: r.channel_name,
@@ -276,6 +307,20 @@ export function RelationshipWorkspace({
     setEdges(initialEdges);
     fitGraph();
   }, [initialNodes, initialEdges, posStorageKey, setNodes, setEdges, fitGraph]);
+
+  useEffect(() => {
+    setNodes((prev) => prev.map((node) => ({
+      ...node,
+      data: {
+        ...node.data,
+        liveActivity: liveByAgent.get(node.id),
+        task: agentTasks?.[node.id],
+        onOpenRun: handleOpenLatestRun,
+        onOpenTask,
+        onOpenTaskArtifact,
+      },
+    })));
+  }, [agentTasks, handleOpenLatestRun, liveByAgent, onOpenTask, onOpenTaskArtifact, setNodes]);
 
   // Save positions when nodes change (drag via ReactFlow onNodesChange)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout>>(null);
@@ -317,7 +362,9 @@ export function RelationshipWorkspace({
             source: event.from_agent_id,
             target: event.to_agent_id,
             type: 'relationship',
-            ...(isCollab ? { sourceHandle: 'right', targetHandle: 'left' } : {}),
+            ...(isCollab
+              ? { sourceHandle: 'right', targetHandle: 'left' }
+              : { sourceHandle: 'bottom', targetHandle: 'top' }),
             data: { relType: event.rel_type as RelationshipType, channelName: (event as { channel_name?: string }).channel_name },
           }];
         });
@@ -355,13 +402,10 @@ export function RelationshipWorkspace({
       // referenced it locally so the graph doesn't show ghost nodes, then
       // refetch agents to keep the agents list in sync.
       if (event.type === 'agent_deleted') {
-        const removedIds = new Set(event.deleted_relationship_ids ?? []);
         setEdges((prev) => {
           const toDrop = new Set<string>();
           for (const e of prev) {
             if (e.source === event.agent_id || e.target === event.agent_id) {
-              toDrop.add(e.id);
-            } else if (removedIds.has(e.id)) {
               toDrop.add(e.id);
             }
           }
@@ -376,8 +420,7 @@ export function RelationshipWorkspace({
             .filter((r) =>
               r.from_agent_id !== event.agent_id &&
               r.to_agent_id !== event.agent_id,
-            )
-            .filter((r) => !removedIds.has(r.id)),
+            ),
         );
         // Close any detail panel showing data about the deleted agent.
         setDetailRel((prev) =>
@@ -630,14 +673,16 @@ export function RelationshipWorkspace({
     if (recordUndo) pushUndo();
     try { localStorage.removeItem(posStorageKey); } catch { /* noop */ }
     setNodes((prev) => {
-      const NODE_W = 180;
-      const NODE_H = 100;
+      const nodeSize = (node: Node) => {
+        const hasTask = !!(node.data as { task?: unknown }).task;
+        return hasTask ? { width: 280, height: 220 } : { width: 180, height: 100 };
+      };
       const g = new dagre.graphlib.Graph({ compound: true });
       g.setGraph({ rankdir: 'TB', nodesep: 100, ranksep: 140, marginx: 80, marginy: 80 });
       g.setDefaultEdgeLabel(() => ({}));
 
       for (const n of prev) {
-        g.setNode(n.id, { width: NODE_W, height: NODE_H });
+        g.setNode(n.id, nodeSize(n));
       }
 
       const pairKey = (a: string, b: string) => a < b ? `${a}|${b}` : `${b}|${a}`;
@@ -703,16 +748,17 @@ export function RelationshipWorkspace({
       const laidOut = prev.map((n) => {
         const pos = g.node(n.id);
         if (!pos) return n;
+        const size = nodeSize(n);
         return {
           ...n,
-          position: { x: pos.x - NODE_W / 2, y: pos.y - NODE_H / 2 },
+          position: { x: pos.x - size.width / 2, y: pos.y - size.height / 2 },
         };
       });
       const connectedBottom = Math.max(
         0,
         ...laidOut
           .filter((n) => connectedIds.has(n.id))
-          .map((n) => n.position.y + NODE_H),
+          .map((n) => n.position.y + nodeSize(n).height),
       );
       let isolatedIndex = 0;
       const next = laidOut.map((n) => {
@@ -721,8 +767,8 @@ export function RelationshipWorkspace({
         return {
           ...n,
           position: {
-            x: (i % 4) * 240,
-            y: connectedIds.size ? connectedBottom + 140 + Math.floor(i / 4) * 140 : Math.floor(i / 4) * 140,
+            x: (i % 4) * 300,
+            y: connectedIds.size ? connectedBottom + 160 + Math.floor(i / 4) * 240 : Math.floor(i / 4) * 240,
           },
         };
       });
@@ -732,14 +778,27 @@ export function RelationshipWorkspace({
     fitGraph();
   }, [pushUndo, posStorageKey, setNodes, savePositions, fitGraph, edges]);
 
-  const autoLayoutKey = `${posStorageKey}:${nodes.map((n) => n.id).sort().join(',')}:${edges.map((e) => e.id).sort().join(',')}`;
+  const taskLayoutKey = nodes
+    .map((n) => {
+      const task = (n.data as { task?: AgentNodeTask }).task;
+      return task ? `${n.id}:${task.id}` : '';
+    })
+    .filter(Boolean)
+    .sort()
+    .join(',');
+  const autoLayoutKey = `${posStorageKey}:${nodes.map((n) => n.id).sort().join(',')}:${edges.map((e) => e.id).sort().join(',')}:${taskLayoutKey}`;
   const autoLayoutKeyRef = useRef('');
+  const taskLayoutKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (nodes.length === 0 || autoLayoutKeyRef.current === autoLayoutKey) return;
-    if (Object.keys(loadPositions()).length > 0) return;
+    const previousTaskLayoutKey = taskLayoutKeyRef.current;
+    const taskLayoutChanged = previousTaskLayoutKey !== null && previousTaskLayoutKey !== taskLayoutKey;
+    const hasTaskCards = taskLayoutKey.length > 0;
+    taskLayoutKeyRef.current = taskLayoutKey;
     autoLayoutKeyRef.current = autoLayoutKey;
+    if (Object.keys(loadPositions()).length > 0 && !hasTaskCards && !taskLayoutChanged) return;
     autoLayout(false);
-  }, [autoLayout, autoLayoutKey, loadPositions, nodes.length]);
+  }, [autoLayout, autoLayoutKey, loadPositions, nodes.length, taskLayoutKey]);
 
   // ---- Loading ----
 
@@ -893,14 +952,6 @@ export function RelationshipWorkspace({
             <Controls
               className="!border-2 !border-black !shadow-brutal-sm"
               position="bottom-right"
-            />
-            <MiniMap
-              className="!border-2 !border-black !shadow-brutal"
-              nodeColor={(n) => {
-                const data = n.data as { isActive?: boolean } | undefined;
-                return data?.isActive ? '#88D498' : '#c0b9b1';
-              }}
-              position="bottom-left"
             />
           </ReactFlow>
 

@@ -102,7 +102,6 @@ const sourceChecks = [
   ['components/dashboard/dm-list.tsx', ['>Direct Messages<']],
   ['components/dashboard/message-input.tsx', ['aria-label="Message mode"', '>Message<', '>Task<']],
   ['components/dashboard/message-list.tsx', ['REPLIES']],
-  ['components/agents/agent-island.tsx', ['label: t(']],
 ];
 
 for (const [path, needles] of sourceChecks) {

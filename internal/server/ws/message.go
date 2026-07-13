@@ -54,11 +54,6 @@ const (
 	// Agent chunk events (SOLO-agent-view)
 	EventAgentChunk = "agent.chunk"
 
-	// Agent activity event (SOLO-island PR1) — derived from OutputChunk
-	// events, carries the island-facing status and a short activity_text
-	// summary. Powers the AgentIsland floating UI.
-	EventAgentActivity = "agent.activity"
-
 	EventAgentRunStarted  = "agent.run.started"
 	EventAgentRunUpdated  = "agent.run.updated"
 	EventAgentRunEvent    = "agent.run.event"
@@ -201,23 +196,6 @@ type AgentChunkPayload struct {
 	ChunkType string   `json:"chunk_type"` // thinking, tool_use, tool_result, text, error
 	Content   string   `json:"content"`
 	Tool      *ToolRef `json:"tool,omitempty"`
-}
-
-// AgentActivityPayload is broadcast on agent.activity. It carries the
-// island-facing status and a one-line activity_text summary, derived by
-// the daemon from agent.OutputChunk events. Powers the AgentIsland
-// floating UI; replaces the previous chunk-based heuristic in
-// useAgentChunks for the island pill state.
-type AgentActivityPayload struct {
-	ChannelID        string `json:"channel_id"`
-	AgentID          string `json:"agent_id"`
-	AgentName        string `json:"agent_name,omitempty"`
-	Status           string `json:"status"`        // island status: idle | thinking | running | streaming | waiting_approval | error
-	ActivityText     string `json:"activity_text"` // one-line summary in zh-CN
-	ToolName         string `json:"tool_name,omitempty"`
-	ToolInputSummary string `json:"tool_input_summary,omitempty"` // e.g. "Bash: npm test"
-	Source           string `json:"source,omitempty"`             // claude | codex | gemini | kiro | ...; metadata only, not shown in UI
-	Timestamp        string `json:"timestamp"`
 }
 
 type AgentRunPayload struct {

@@ -51,10 +51,17 @@ export function useChannelMembers(channelId: string | null) {
   const loadMembersRef = useRef<(() => Promise<void>) | null>(null);
   const { onEvent } = useWebSocket();
 
-  // Listen for member.added events and refetch in real time.
+  // Keep channel membership in sync when another surface adds/removes agents.
   useEffect(() => {
     return onEvent((event) => {
-      if (event.type === 'member.added' && event.channel_id === channelIdRef.current) {
+      if (
+        (event.type === 'member.added' || event.type === 'member.removed') &&
+        event.channel_id === channelIdRef.current
+      ) {
+        loadMembersRef.current?.();
+      }
+      if (event.type === 'agent_deleted') {
+        setMembers((prev) => prev.filter((member) => member.member_id !== event.agent_id));
         loadMembersRef.current?.();
       }
     });
