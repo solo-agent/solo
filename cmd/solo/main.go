@@ -19,6 +19,7 @@
 //	solo artifact publish --task <task_id> --file <artifact.html> [--mode latest|final]
 //	solo channel members -c <channel_id> [--output json]
 //	solo channel join  --target <#channel-name>
+//	solo team form     -c <channel_id> -m <message_id> [--plan <file>] [--output json]
 //	solo thread unfollow --target <#channel:shortid>
 //
 //	--target format: '#channel' | 'dm:@peer' | '#channel:shortid' | 'dm:@peer:shortid'
@@ -93,6 +94,8 @@ func runCLI(args []string) int {
 		handleMessage(args[1:], baseURL, token)
 	case "channel":
 		handleChannel(args[1:], baseURL, token)
+	case "team":
+		handleTeam(args[1:], baseURL, token)
 	case "artifact":
 		handleArtifact(args[1:], baseURL, token)
 	case "server":
@@ -106,6 +109,169 @@ func runCLI(args []string) int {
 	}
 	// Handlers call doExit internally; this return is a safety net.
 	return exitOK
+}
+
+// ---------------------------------------------------------------------------
+// team
+// ---------------------------------------------------------------------------
+
+func handleTeam(args []string, baseURL, token string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "solo: error: team subcommand required: form")
+		printUsage()
+		doExit(exitUsage)
+	}
+	switch args[0] {
+	case "form":
+		handleTeamForm(args[1:], baseURL, token)
+	default:
+		fmt.Fprintf(os.Stderr, "solo: error: unknown team subcommand %q\n", args[0])
+		printUsage()
+		doExit(exitUsage)
+	}
+}
+
+func handleTeamForm(args []string, baseURL, token string) {
+	var channel, messageID, planFile, output string
+	fs := flag.NewFlagSet("team form", flag.ExitOnError)
+	fs.StringVar(&channel, "c", "", "Source onboarding channel ID or name")
+	fs.StringVar(&channel, "source-channel", "", "Source onboarding channel ID or name")
+	fs.StringVar(&messageID, "m", "", "Source user message UUID or short ID")
+	fs.StringVar(&messageID, "source-message", "", "Source user message UUID or short ID")
+	fs.StringVar(&planFile, "plan", "", "Path to a JSON team plan (defaults to stdin)")
+	fs.StringVar(&output, "output", "", "Output format: json")
+	fs.Parse(args)
+
+	if strings.TrimSpace(channel) == "" || strings.TrimSpace(messageID) == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: --source-channel and --source-message are required")
+		doExit(exitUsage)
+	}
+
+	var planBytes []byte
+	var err error
+	if planFile != "" {
+		planBytes, err = os.ReadFile(planFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "solo: error: read team plan: %v\n", err)
+			doExit(exitUsage)
+		}
+	} else {
+		planBytes, err = io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "solo: error: read team plan from stdin: %v\n", err)
+			doExit(exitUsage)
+		}
+	}
+	planBytes = bytes.TrimSpace(planBytes)
+	if len(planBytes) == 0 || !json.Valid(planBytes) {
+		fmt.Fprintln(os.Stderr, "solo: error: team plan must be a valid JSON object from --plan or stdin")
+		doExit(exitUsage)
+	}
+	var planValue any
+	if err := json.Unmarshal(planBytes, &planValue); err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: parse team plan: %v\n", err)
+		doExit(exitUsage)
+	}
+	if _, ok := planValue.(map[string]any); !ok {
+		fmt.Fprintln(os.Stderr, "solo: error: team plan must be a JSON object")
+		doExit(exitUsage)
+	}
+
+	channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+	reqBody, _ := json.Marshal(struct {
+		SourceChannelID string          `json:"source_channel_id"`
+		SourceMessageID string          `json:"source_message_id"`
+		Plan            json.RawMessage `json:"plan"`
+	}{
+		SourceChannelID: strings.TrimSpace(strings.TrimPrefix(channelID, "#")),
+		SourceMessageID: strings.TrimSpace(messageID),
+		Plan:            json.RawMessage(planBytes),
+	})
+
+	statusCode, body, err := requestTeamFormation(baseURL, token, channelID, reqBody)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	if output == "json" {
+		fmt.Println(string(body))
+		doExit(exitOK)
+	}
+
+	var result struct {
+		ChannelName  string `json:"channel_name"`
+		ChannelID    string `json:"channel_id"`
+		DashboardURL string `json:"dashboard_url"`
+		Replayed     bool   `json:"replayed"`
+		Members      []struct {
+			Name string `json:"name"`
+			Role string `json:"role"`
+		} `json:"members"`
+		RelationshipTemplate  string   `json:"relationship_template"`
+		RelationshipOverrides int      `json:"relationship_override_count"`
+		RelationshipDocsReady bool     `json:"relationship_docs_ready"`
+		Warnings              []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		fmt.Println(string(body))
+		doExit(exitOK)
+	}
+	label := "Team formed"
+	if result.Replayed {
+		label = "Team already formed"
+	}
+	fmt.Printf("%s: #%s\n", label, result.ChannelName)
+	fmt.Printf("Channel ID: %s\n", result.ChannelID)
+	for _, member := range result.Members {
+		fmt.Printf("- @%s (%s)\n", member.Name, member.Role)
+	}
+	if result.RelationshipTemplate != "" {
+		fmt.Printf("Relationships: %s", result.RelationshipTemplate)
+		if result.RelationshipOverrides > 0 {
+			fmt.Printf(" (+%d Lucy adjustment(s))", result.RelationshipOverrides)
+		}
+		fmt.Println()
+	}
+	for _, warning := range result.Warnings {
+		fmt.Printf("Warning: %s\n", warning)
+	}
+	fmt.Printf("Open: %s\n", result.DashboardURL)
+	doExit(exitOK)
+}
+
+func requestTeamFormation(baseURL, token, channelID string, reqBody []byte) (int, []byte, error) {
+	statusCode, body, err := proxyRequest("team_form", channelID, string(reqBody), "", token, 0, "")
+	if err != nil || statusCode == http.StatusBadGateway || statusCode == http.StatusGatewayTimeout {
+		statusCode, body, err = doHTTPWithTimeout(http.MethodPost, baseURL+"/api/v1/team-formations", token, reqBody, teamFormationRequestTimeout)
+	}
+	if err != nil {
+		return statusCode, body, err
+	}
+
+	// A daemon timeout cancels the original Server request. The Server then
+	// records the provisioning attempt as failed with an independent context.
+	// Briefly retry the same idempotency key so the CLI observes either the
+	// committed result or safely reprovisions after that failure record lands.
+	deadline := time.Now().Add(10 * time.Second)
+	for isTeamFormationInProgress(statusCode, body) && time.Now().Before(deadline) {
+		time.Sleep(250 * time.Millisecond)
+		statusCode, body, err = doHTTPWithTimeout(http.MethodPost, baseURL+"/api/v1/team-formations", token, reqBody, teamFormationRequestTimeout)
+		if err != nil {
+			return statusCode, body, err
+		}
+	}
+	return statusCode, body, nil
+}
+
+func isTeamFormationInProgress(statusCode int, body []byte) bool {
+	return statusCode == http.StatusConflict && bytes.Contains(bytes.ToLower(body), []byte("already in progress"))
 }
 
 // ---------------------------------------------------------------------------
@@ -210,7 +376,7 @@ func proxyRequest(action, channelID, content, threadID, token string, taskNumber
 		return 0, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: proxyRequestTimeout(action)}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, err
@@ -969,6 +1135,19 @@ func handleThreadUnfollow(args []string, baseURL, token string) {
 // response status code, body, and any network-level error. The caller is
 // responsible for interpreting status codes and printing output.
 func doHTTP(method, url, token string, reqBody []byte) (int, []byte, error) {
+	return doHTTPWithTimeout(method, url, token, reqBody, 30*time.Second)
+}
+
+const teamFormationRequestTimeout = 60 * time.Second
+
+func proxyRequestTimeout(action string) time.Duration {
+	if action == "team_form" {
+		return teamFormationRequestTimeout
+	}
+	return 30 * time.Second
+}
+
+func doHTTPWithTimeout(method, url, token string, reqBody []byte, timeout time.Duration) (int, []byte, error) {
 	var bodyReader io.Reader
 	if reqBody != nil {
 		bodyReader = bytes.NewReader(reqBody)
@@ -983,7 +1162,7 @@ func doHTTP(method, url, token string, reqBody []byte) (int, []byte, error) {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, fmt.Errorf("http request: %w", err)
@@ -1275,6 +1454,7 @@ func printUsage() {
   solo artifact publish --task <task_id> --file <artifact.html> [--mode latest|final]
   solo channel members -c <channel_id> [--output json]
   solo channel join  --target <#channel-name>
+  solo team form     -c <channel_id> -m <message_id> [--plan <file>] [--output json]
   solo thread unfollow --target <#channel:shortid>
 
   --target formats: '#channel' | 'dm:@peer' | '#channel:shortid' | 'dm:@peer:shortid'

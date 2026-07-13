@@ -89,7 +89,9 @@ export type WSServerEvent =
   | { type: 'dm.message.new'; id: string; dm_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; created_at: string; attachments?: Attachment[]; thread_id?: string }
   | { type: 'dm.updated'; dm_id: string; last_message?: { content: string; sender_id: string; sender_name: string; created_at: string }; last_reply_at?: string; unread_count: number }
   // ---- Inbox events (v1.5) ----
-  | { type: 'inbox.updated'; };
+  | { type: 'inbox.updated'; }
+  // ---- Lucy automatic team formation ----
+  | { type: 'team.formed'; formation_id: string; source_channel_id: string; source_message_id: string; channel_id: string; channel_name: string; member_count: number; task_count: number; relationship_template?: string; relationship_overrides?: number; relationship_docs_ready: boolean; warnings?: string[]; dashboard_url: string; created_at: string };
 
 /** 客户端发送的 WebSocket 命令 */
 export type WSClientCommand =

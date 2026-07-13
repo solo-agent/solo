@@ -74,6 +74,9 @@ const (
 
 	// Inbox events (v1.5)
 	EventInboxUpdated = "inbox.updated"
+
+	// Lucy automatic team formation events.
+	EventTeamFormed = "team.formed"
 )
 
 // Envelope creates a JSON-encoded WSMessage for broadcasting.
@@ -399,4 +402,21 @@ type TaskDeletedPayload struct {
 	ID         string `json:"id"`
 	ChannelID  string `json:"channel_id"`
 	TaskNumber int    `json:"task_number"`
+}
+
+// TeamFormedPayload tells the owner's clients that Lucy atomically created a
+// new team channel. It is user-scoped because the target channel did not exist
+// when clients established their channel subscriptions.
+type TeamFormedPayload struct {
+	FormationID           string   `json:"formation_id"`
+	SourceChannelID       string   `json:"source_channel_id"`
+	SourceMessageID       string   `json:"source_message_id"`
+	ChannelID             string   `json:"channel_id"`
+	ChannelName           string   `json:"channel_name"`
+	MemberCount           int      `json:"member_count"`
+	TaskCount             int      `json:"task_count"`
+	RelationshipDocsReady bool     `json:"relationship_docs_ready"`
+	Warnings              []string `json:"warnings,omitempty"`
+	DashboardURL          string   `json:"dashboard_url"`
+	CreatedAt             string   `json:"created_at"`
 }

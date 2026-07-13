@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -1168,5 +1169,106 @@ func TestHandleChannelMembersMissingChannel(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "-c") {
 		t.Errorf("expected -c error, got %q", stderr)
+	}
+}
+
+func TestHandleTeamFormSendsDeclarativePlan(t *testing.T) {
+	const channelID = "550e8400-e29b-41d4-a716-446655440099"
+	const sourceMessageID = "a1b2c3d4"
+
+	var gotAuth string
+	var requestCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if r.URL.Path != "/api/v1/team-formations" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		gotAuth = r.Header.Get("Authorization")
+		var req struct {
+			SourceChannelID string          `json:"source_channel_id"`
+			SourceMessageID string          `json:"source_message_id"`
+			Plan            json.RawMessage `json:"plan"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.SourceChannelID != channelID || req.SourceMessageID != sourceMessageID {
+			t.Fatalf("unexpected source: channel=%q message=%q", req.SourceChannelID, req.SourceMessageID)
+		}
+		if !bytes.Contains(req.Plan, []byte(`"intent_summary":"Ship billing"`)) {
+			t.Fatalf("plan missing intent: %s", req.Plan)
+		}
+		if !bytes.Contains(req.Plan, []byte(`"relationship_template":"dev-team"`)) || bytes.Contains(req.Plan, []byte(`"tasks"`)) {
+			t.Fatalf("plan must select a relationship template without tasks: %s", req.Plan)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if requestCount == 1 {
+			w.WriteHeader(http.StatusConflict)
+			fmt.Fprint(w, `{"error":"team formation is already in progress"}`)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"formation_id":"formation-1","channel_id":"team-1","channel_name":"billing-team","dashboard_url":"/dashboard?channel=team-1","members":[{"name":"Lead","role":"leader"},{"name":"Engineer","role":"engineer"}],"tasks":[],"relationship_template":"dev-team","relationship_override_count":1,"relationship_docs_ready":false,"warnings":["relationship docs pending"]}`)
+	}))
+	defer server.Close()
+
+	planFile := filepath.Join(t.TempDir(), "plan.json")
+	plan := `{"intent_summary":"Ship billing","channel":{"name":"billing-team","description":""},"relationship_template":"dev-team","members":[{"ref":"lead","role":"leader","name":"Lead","description":"Lead","instructions":"Coordinate"},{"ref":"engineer","role":"engineer","name":"Engineer","description":"Build","instructions":"Implement"}],"relationship_overrides":[]}`
+	if err := os.WriteFile(planFile, []byte(plan), 0o600); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
+	t.Setenv("SOLO_AGENT_ID", "") // Exercise the direct API fallback.
+
+	code, stdout, stderr := captureAndRun(t, func() {
+		handleTeamForm([]string{"-c", channelID, "-m", sourceMessageID, "--plan", planFile}, server.URL, "test-token")
+	})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d: %s", code, stderr)
+	}
+	if gotAuth != "Bearer test-token" {
+		t.Fatalf("authorization = %q", gotAuth)
+	}
+	if requestCount != 2 {
+		t.Fatalf("request count = %d, want 2", requestCount)
+	}
+	for _, want := range []string{"Team formed: #billing-team", "@Lead (leader)", "Relationships: dev-team (+1 Lucy adjustment(s))", "Warning: relationship docs pending", "/dashboard?channel=team-1"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout %q does not contain %q", stdout, want)
+		}
+	}
+}
+
+func TestHandleTeamFormRejectsInvalidPlan(t *testing.T) {
+	planFile := filepath.Join(t.TempDir(), "plan.json")
+	if err := os.WriteFile(planFile, []byte(`[]`), 0o600); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
+	code, _, stderr := captureAndRun(t, func() {
+		handleTeamForm([]string{
+			"-c", "550e8400-e29b-41d4-a716-446655440099",
+			"-m", "a1b2c3d4",
+			"--plan", planFile,
+		}, "http://localhost", "test-token")
+	})
+	if code != exitUsage || !strings.Contains(stderr, "JSON object") {
+		t.Fatalf("expected JSON object usage error, code=%d stderr=%q", code, stderr)
+	}
+}
+
+func TestProxyRequestTimeoutAllowsTeamFormationToFinish(t *testing.T) {
+	if got := proxyRequestTimeout("team_form"); got != 60*time.Second {
+		t.Fatalf("team_form timeout = %s, want 60s", got)
+	}
+	if got := proxyRequestTimeout("message_send"); got != 30*time.Second {
+		t.Fatalf("message_send timeout = %s, want 30s", got)
+	}
+}
+
+func TestIsTeamFormationInProgress(t *testing.T) {
+	if !isTeamFormationInProgress(http.StatusConflict, []byte(`{"error":"team formation is already in progress"}`)) {
+		t.Fatal("expected in-progress response to be retryable")
+	}
+	if isTeamFormationInProgress(http.StatusBadRequest, []byte(`{"error":"already in progress"}`)) {
+		t.Fatal("bad request must not be retried")
 	}
 }

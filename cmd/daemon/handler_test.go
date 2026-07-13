@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -198,5 +199,17 @@ func TestRefreshTranscriptPathForProvider(t *testing.T) {
 
 	if got := refreshTranscriptPathForProvider("claude", "/tmp/workspace", "", ""); got != "" {
 		t.Fatalf("empty session transcript path = %q, want empty", got)
+	}
+}
+
+func TestCloneHTTPClientWithTimeoutPreservesTransport(t *testing.T) {
+	transport := &http.Transport{}
+	original := &http.Client{Transport: transport, Timeout: 10 * time.Second}
+	clone := cloneHTTPClientWithTimeout(original, 55*time.Second)
+	if clone == original || clone.Transport != transport || clone.Timeout != 55*time.Second {
+		t.Fatalf("unexpected cloned client: %#v", clone)
+	}
+	if original.Timeout != 10*time.Second {
+		t.Fatalf("original timeout changed to %s", original.Timeout)
 	}
 }
