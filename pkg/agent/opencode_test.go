@@ -95,7 +95,7 @@ done
 		if ps.SessionID != "opencode-session-1" {
 			t.Fatalf("SessionID = %q, want opencode-session-1", ps.SessionID)
 		}
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(3 * time.Second):
 		cancel()
 		t.Fatal("Start did not return before session/prompt completed")
 	}

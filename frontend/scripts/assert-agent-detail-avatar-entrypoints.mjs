@@ -21,15 +21,15 @@ assert(
   'PixelAvatar should become a button when an onClick handler is provided',
 );
 assert(
-  channelView.includes('selectedAgentDetail') &&
+  channelView.includes('workspaceDetail') &&
     channelView.includes('<RelationshipDetailPanel') &&
-    channelView.includes("useState<'thread' | 'agent' | null>(null)") &&
-    channelView.includes("setActiveRightPanel('agent')") &&
-    channelView.includes("setActiveRightPanel('thread')") &&
-    channelView.includes('style={{ width: rightPanelOpen ? threadPanelWidth : 0') &&
+    channelView.includes("mainPanel === 'thread'") &&
+    channelView.includes("mainPanel === 'agent' || mainPanel === 'relationship'") &&
+    channelView.includes("panel: 'agent'") &&
+    channelView.includes("panel: 'relationship'") &&
     channelView.includes('embedded') &&
     channelView.includes('onAgentClick={openAgentDetail}'),
-  'channel view should preserve thread and agent detail state while showing only the active right panel',
+  'channel view should preserve thread and agent detail state through URL-driven main panels',
 );
 assert(
   dmView.includes('selectedAgentDetail') &&
@@ -44,7 +44,7 @@ assert(
 );
 assert(
   relationshipDetailPanel.includes("'flex h-full flex-col border-l-2") &&
-    relationshipDetailPanel.includes("panelHeaderClass(embedded ? 'h-14 flex-shrink-0' : undefined)") &&
+    relationshipDetailPanel.includes("panelHeaderClass(embedded ? 'sidebar-collapse-offset h-14 flex-shrink-0' : undefined)") &&
     relationshipDetailPanel.includes('style={embedded ? undefined : { width: panelWidth }}'),
   'embedded relationship detail should align with dashboard panel height and let the parent own width',
 );

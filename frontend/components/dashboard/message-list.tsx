@@ -47,9 +47,7 @@ import { MessageAttachments } from './message-attachments';
 import type { AgentDetailTarget, ChannelMember, Message } from '@/lib/types';
 import { sanitizeHtml } from '@/lib/sanitize';
 import { t } from '@/lib/i18n';
-// SOLO-island PR2: TypingIndicator removed — AgentIsland (mounted at the
-// dashboard root) now surfaces agent status. The unused import is removed
-// along with the agentActivities prop and the inline <TypingIndicator />.
+// Agent activity now lives in team/observability surfaces, not inline typing badges.
 interface MessageListProps {
   messages: Message[];
   isLoading: boolean;
@@ -930,10 +928,6 @@ export function MessageList({
             ),
           )}
         </div>
-
-        {/* SOLO-island PR2: TypingIndicator removed — AgentIsland
-            (mounted at the dashboard root) is the new home for
-            "agent is working" status. */}
 
         {showShortcutsHelp && messages.length > 0 && (
           <KeyboardShortcutsHelp onDismiss={dismissShortcutsHelp} />

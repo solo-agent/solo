@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { t } from '@/lib/i18n';
 import { Sidebar } from '@/components/dashboard/sidebar';
-import { AgentIsland } from '@/components/agents/agent-island';
 import { useChannels } from '@/lib/hooks/use-channels';
 import { useDM } from '@/lib/hooks/use-dm';
 
@@ -59,7 +58,6 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
         inboxSelected={false}
         onSelectInbox={() => router.push('/dashboard?inbox')}
       />
-      <AgentIsland />
       <main className={`flex flex-1 flex-col overflow-hidden ${isSidebarCollapsed ? '[&_.sidebar-collapse-offset]:pl-20' : ''}`}>
         {children}
       </main>

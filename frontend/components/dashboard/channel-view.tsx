@@ -36,10 +36,11 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { WizardCard } from '@/components/onboarding/wizard-card';
 import { t } from '@/lib/i18n';
-import type { AgentDetailTarget, AgentRelationship, Channel, Message, Task, TaskArtifact } from '@/lib/types';
+import type { AgentDetailTarget, AgentRelationship, Channel, Message, Task, TaskArtifact, TaskStatus } from '@/lib/types';
 
 type ArtifactPreview = TaskArtifact & { previewUrl: string };
 type WorkspaceDetail = { relationship: AgentRelationship | null; agent: AgentDetailTarget | null };
+const TEAM_TASK_VISIBLE_STATUSES = new Set<TaskStatus>(['in_progress', 'in_review']);
 
 // SOLO-63-F: Lazy-load ThreadPanel (only rendered when a thread is open)
 const ThreadPanel = lazy(() =>
@@ -58,19 +59,15 @@ interface ChannelViewProps {
   /** v1.5: Called when thread opens/closes so the parent can sync to URL */
   onThreadChange?: (threadId: string | null) => void;
   onChannelCreated?: () => void;
-  /** SOLO-island PR3: whether the right-side AgentViewPanel is visible. */
+  /** Whether the right-side AgentViewPanel is visible. */
   agentViewVisible?: boolean;
-  /** SOLO-island PR3: toggle the AgentViewPanel. Called with `true` to
-   * open, `false` to close. */
+  /** Toggle the AgentViewPanel. Called with `true` to open, `false` to close. */
   onAgentViewVisibleChange?: (visible: boolean) => void;
-  /** SOLO-island PR3: width of the AgentViewPanel (controlled by parent
-   * so it can outlive unmounts). */
+  /** Width of the AgentViewPanel, controlled by parent so it can outlive unmounts. */
   agentViewWidth?: number;
-  /** SOLO-island PR3: called when the user drags the panel's resize
-   * handle. Parent should persist the new width. */
+  /** Called when the user drags the panel's resize handle. Parent should persist the new width. */
   onAgentViewWidthChange?: (width: number) => void;
-  /** SOLO-island PR3: when set, the panel scrolls/highlights this agent
-   * (driven by AgentIsland's "查看完整 trace" action). */
+  /** When set, the panel scrolls/highlights this agent. */
   agentViewFocusedAgentId?: string | null;
 }
 
@@ -118,7 +115,6 @@ export function ChannelView({
   agentsRef.current = agents;
 
   const dashboardState = useMemo(() => parseDashboardParams(searchParams), [searchParams]);
-  const hasViewParam = searchParams.has('view');
   const workspaceView = dashboardState.view;
   const mainPanel = dashboardState.panel;
   const pushDashboardState = useCallback(
@@ -327,6 +323,41 @@ export function ChannelView({
     return new Map(channelTeam.agents.map((agent) => [agent.id, agent]));
   }, [channelTeam]);
 
+  const latestTaskByAgent = useMemo(() => {
+    const result: Record<string, {
+      id: string;
+      taskNumber?: number;
+      title: string;
+      status: TaskStatus;
+      artifactStatus?: 'none' | 'pending' | 'available';
+      createdAt?: string;
+      updatedAt?: string;
+    }> = {};
+
+    for (const task of channelTasks) {
+      if (!TEAM_TASK_VISIBLE_STATUSES.has(task.status)) continue;
+      const agentId = task.claimer_id || task.assignee_id;
+      if (!agentId || !channelAgentMap.has(agentId)) continue;
+
+      const taskCreatedAt = Date.parse(task.created_at || task.updated_at || '');
+      const current = result[agentId];
+      const currentCreatedAt = current ? Date.parse(current.createdAt || current.updatedAt || '') : Number.NEGATIVE_INFINITY;
+      if (current && taskCreatedAt < currentCreatedAt) continue;
+
+      result[agentId] = {
+        id: task.id,
+        taskNumber: task.task_number,
+        title: task.title,
+        status: task.status,
+        artifactStatus: task.artifact_status,
+        createdAt: task.created_at,
+        updatedAt: task.updated_at,
+      };
+    }
+
+    return result;
+  }, [channelAgentMap, channelTasks]);
+
   const taskBoardTasks = useMemo(
     () => filterTaskTree(channelTasks, {
       taskId: workspaceView === 'task' && mainPanel === 'thread'
@@ -394,11 +425,8 @@ export function ChannelView({
   }, [workspaceView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Agent member status tracking (SOLO-47-F) ----
-  // SOLO-island PR2: removed thinkingAgentNames/typingAgentNames state and
-  // the TypingIndicator badge. AgentIsland (mounted at the dashboard root)
-  // is now the single source of truth for "agent is working". The member
-  // list (right column) still updates its dots to reflect thinking/typing
-  // /online so the avatar stays in sync, but with a much simpler model.
+  // The member list still updates dots to reflect thinking/typing/online so
+  // the avatar stays in sync, but with a simple channel-local model.
   //
   // PR-fix: the previous 5s inactivity heuristic was the same class of
   // bug as the 3s heuristic in useAgentChunks (fixed in PR0). It would
@@ -538,18 +566,6 @@ export function ChannelView({
     });
   }, [channelTasks, threadMessage]);
 
-  useEffect(() => {
-    if (hasViewParam || mainPanel !== 'thread' || workspaceView !== 'team' || !threadMessage) return;
-    const task = channelTasks.find((t) => t.message_id === threadMessage.id);
-    if (!task) return;
-    router.replace(buildDashboardHref(channel.id, {
-      view: 'task',
-      panel: 'thread',
-      taskId: task.id,
-      threadId: threadMessage.id,
-    }));
-  }, [channel.id, channelTasks, hasViewParam, mainPanel, router, threadMessage, workspaceView]);
-
   // ---- Task click in tasks tab: open ThreadPanel with the parent message ----
   const handleTaskClickInTab = useCallback(
     (task: Task) => {
@@ -564,7 +580,7 @@ export function ChannelView({
         });
         setThreadTask(task);
         pushDashboardState({
-          view: 'task',
+          view: workspaceView,
           panel: 'thread',
           taskId: task.id,
           threadId: task.message_id,
@@ -593,7 +609,7 @@ export function ChannelView({
         task_claimer_name: task.claimer_name || task.assignee_name,
       });
       pushDashboardState({
-        view: 'task',
+        view: workspaceView,
         panel: 'thread',
         taskId: task.id,
         threadId: task.message_id,
@@ -603,7 +619,7 @@ export function ChannelView({
       });
       onThreadChange?.(task.message_id);
     },
-    [channel.id, messages, onThreadChange, pushDashboardState],
+    [channel.id, messages, onThreadChange, pushDashboardState, workspaceView],
   );
 
   const handleThreadClose = useCallback(() => {
@@ -766,6 +782,16 @@ export function ChannelView({
     }
   }, [generateArtifact, isGeneratingTask, refreshArtifactHistory, showArtifactPreview, showExistingArtifact, showToast]);
 
+  const handleTeamTaskOpen = useCallback((taskId: string) => {
+    const task = channelTasks.find((item) => item.id === taskId);
+    if (task) handleTaskClickInTab(task);
+  }, [channelTasks, handleTaskClickInTab]);
+
+  const handleTeamTaskArtifactOpen = useCallback((taskId: string) => {
+    const task = channelTasks.find((item) => item.id === taskId);
+    if (task) void handleGenerateArtifact(task);
+  }, [channelTasks, handleGenerateArtifact]);
+
   const handleRegenerateArtifact = useCallback(async () => {
     if (!artifactPreview || isGeneratingTask(artifactPreview.task_id)) return;
 
@@ -781,10 +807,6 @@ export function ChannelView({
       showToast('Could not regenerate artifact. Please try again.', 'error');
     }
   }, [artifactPreview, regenerateArtifact, isGeneratingTask, refreshArtifactHistory, showArtifactPreview, showToast]);
-
-  // SOLO-island PR2: removed agentActivities aggregation — the
-  // TypingIndicator it fed is now replaced by AgentIsland, which
-  // subscribes to agent.activity events directly.
 
   return (
     <div className={cn(
@@ -872,7 +894,6 @@ export function ChannelView({
                   if (result && result.task_number !== undefined) {
                     showToast(t('taskCreatedToast', { n: result.task_number }), 'success');
                     pushDashboardState({
-                      view: 'task',
                       panel: 'thread',
                       threadId: result.id,
                       taskId: null,
@@ -964,6 +985,9 @@ export function ChannelView({
             title={t('navTeams')}
             channelFilterId={channel.id}
             channelTeam={channelTeam}
+            agentTasks={latestTaskByAgent}
+            onOpenTask={handleTeamTaskOpen}
+            onOpenTaskArtifact={handleTeamTaskArtifactOpen}
             onChannelTeamRefresh={() => {
               void refetchMembers();
               void loadRelationships();

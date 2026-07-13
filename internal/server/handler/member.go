@@ -96,9 +96,9 @@ func (h *MemberHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	// introduces itself — new-agent-in-channel behavior.
 	if req.MemberType == "agent" && h.agentSvc != nil {
 		go h.agentSvc.TriggerAgentGreeting(context.Background(), channelID, req.MemberID, "")
-		}
-		if h.agentSvc != nil {
-			h.agentSvc.BroadcastMemberEvent(channelID, "member.added", req.MemberType, req.MemberID, "")
+	}
+	if h.agentSvc != nil {
+		h.agentSvc.BroadcastMemberEvent(channelID, "member.added", req.MemberType, req.MemberID, "")
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{
@@ -140,6 +140,10 @@ func (h *MemberHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		"member_id", memberID,
 		"removed_by", requesterID,
 	)
+
+	if h.agentSvc != nil {
+		h.agentSvc.BroadcastMemberEvent(channelID, "member.removed", "", memberID, "")
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -50,6 +50,10 @@ assert(
   'relationship workspace should live as a reusable Teams component',
 );
 assert(
+  !relationshipWorkspace.includes('MiniMap'),
+  'embedded relationship workspace should not render the ReactFlow minimap',
+);
+assert(
   teamsPage.includes('<RelationshipWorkspace') && !teamsPage.includes('TeamsLeftColumn'),
   'teams page should render the relationship workspace directly instead of the old TeamsLeftColumn layout',
 );
@@ -64,13 +68,15 @@ assert(
   'agent detail message action should use the shared brutal Button primitive',
 );
 assert(
-  relationshipWorkspace.includes('AgentForm') && relationshipWorkspace.includes('Create from Template'),
+  relationshipWorkspace.includes('AgentForm') &&
+    relationshipWorkspace.includes('relationshipFromTemplate') &&
+    relationshipWorkspace.includes('relationshipCreateFromTemplate'),
   'relationship workspace should preserve single-agent and template creation',
 );
 assert(
   relationshipWorkspace.includes("import { Button } from '@/components/ui/button'") &&
     relationshipWorkspace.includes('variant="outline"') &&
-    relationshipWorkspace.includes('variant="primary"') &&
+    relationshipWorkspace.includes('variant="success"') &&
     !relationshipWorkspace.includes('className="flex items-center gap-1 h-8 px-2 border-2 border-black bg-white hover:bg-brutal-primary-light disabled:opacity-30"') &&
     !relationshipWorkspace.includes('className="flex items-center gap-1.5 h-8 px-3 border-2 border-black bg-white hover:bg-brutal-info-light font-heading text-xs font-bold uppercase tracking-wider"'),
   'relationship toolbar actions should use the shared brutal Button primitive instead of raw button classes',
@@ -214,6 +220,25 @@ assert(
     channelView.includes('tabButtonClass') &&
     dmView.includes('tabButtonClass'),
   'Dashboard message/task tabs should share the same tab-button primitive',
+);
+assert(
+  !channelView.includes("hasViewParam || mainPanel !== 'thread' || workspaceView !== 'team'") &&
+    !channelView.includes("router.replace(buildDashboardHref(channel.id, {\n      view: 'task'"),
+  'Opening a channel thread should not automatically switch the right workspace to the task board',
+);
+assert(
+  channelView.includes('view: workspaceView') &&
+    channelView.includes('[channel.id, messages, onThreadChange, pushDashboardState, workspaceView]'),
+  'Opening a task thread should preserve the current workspace tab',
+);
+assert(
+  channelView.includes('latestTaskByAgent') &&
+    channelView.includes("TEAM_TASK_VISIBLE_STATUSES = new Set<TaskStatus>(['in_progress', 'in_review'])") &&
+    channelView.includes('!TEAM_TASK_VISIBLE_STATUSES.has(task.status)') &&
+    channelView.includes('agentTasks={latestTaskByAgent}') &&
+    channelView.includes('onOpenTask={handleTeamTaskOpen}') &&
+    channelView.includes('onOpenTaskArtifact={handleTeamTaskArtifactOpen}'),
+  'Team view should attach each agent latest in-progress/in-review task without switching to the task board',
 );
 assert(
   channelSearch.includes("import { Button } from '@/components/ui/button'") &&

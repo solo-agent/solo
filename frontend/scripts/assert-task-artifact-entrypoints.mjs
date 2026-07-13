@@ -21,6 +21,10 @@ const dmView = read('components/dashboard/dm-view.tsx');
 const inboxView = read('components/inbox/inbox-view.tsx');
 const dialog = read('components/ui/dialog.tsx');
 const wsTypes = read('lib/ws-types.ts');
+const asTaskSendBlock = channelView.slice(
+  channelView.indexOf('if (asTask) {'),
+  channelView.indexOf('} else {', channelView.indexOf('if (asTask) {')),
+);
 
 assert(types.includes('export interface TaskArtifact'), 'TaskArtifact type should exist');
 assert(apiClient.includes('getText') && apiClient.includes('processTextResponse'), 'ApiClient should fetch protected artifact HTML as text');
@@ -40,6 +44,7 @@ assert(reviewDecision.includes('data-solo-action="accept"') && reviewDecision.in
 assert(reviewDecision.indexOf('textarea id="rejectReason"') < reviewDecision.indexOf('data-solo-action="accept"'), 'Review action buttons should appear after the reject comment field');
 assert(taskCard.includes('onGenerateArtifact?: (task: Task) => void') && taskCard.includes('FileText'), 'TaskCard should expose an artifact action');
 assert(taskCard.includes('getTaskArtifactAction') && taskCard.includes('bg-brutal-success') && taskCard.includes('bg-brutal-primary'), 'TaskCard should distinguish generate/read/pending artifact actions');
+assert(taskCard.includes("artifactAction === 'read' && 'bg-brutal-primary text-black animate-bounce-slow'"), 'TaskCard should draw attention to readable artifacts');
 assert(taskCard.includes("artifactAction !== 'hidden'"), 'TaskCard should hide artifact action when unsupported');
 assert(!taskCard.includes('{statusConf.label}'), 'TaskCard should not render a redundant status badge');
 assert(taskCard.includes('e.target !== e.currentTarget') && taskCard.includes('e.stopPropagation()'), 'TaskCard should not let nested artifact keydown trigger parent navigation');
@@ -48,6 +53,7 @@ assert(taskBoard.includes('isArtifactGenerating?: (task: Task) => boolean'), 'Ta
 assert(taskColumn.includes('onGenerateArtifact?: (task: Task) => void'), 'TaskColumn should pass artifact action');
 assert(taskColumn.includes('isArtifactGenerating?: (task: Task) => boolean'), 'TaskColumn should pass per-task artifact pending state');
 assert(taskColumn.includes('getTaskArtifactAction') && taskColumn.includes("artifactAction !== 'hidden'"), 'TaskColumn should hide unsupported artifact actions');
+assert(taskColumn.includes("artifactAction === 'read' && 'bg-brutal-primary text-black animate-bounce-slow'"), 'TaskColumn should draw attention to readable artifacts');
 assert(!taskColumn.includes("t('claimed')") && !taskColumn.includes('Decoration'), 'TaskColumn cards should not render claimed badges or corner decorations');
 assert(!taskColumn.includes('{statusConf.label}'), 'TaskColumn cards should not render redundant status badges');
 assert(taskColumn.includes('group card-brutal') && taskActionButtons.includes('group-hover:opacity-100') && taskActionButtons.includes('<X className='), 'TaskColumn cards should reveal a plain close action on hover');
@@ -61,6 +67,7 @@ assert(inboxView.includes('handleOpenArtifactReference') && inboxView.includes('
 assert(inboxView.includes('artifact.reviewAction') && inboxView.includes('apiClient.post(path'), 'Inbox artifact viewer should bridge review actions to task lifecycle APIs');
 assert(inboxView.includes('url.pathname.replace(/\\/meta$/, \'\')'), 'Inbox artifact API links should fetch artifact metadata before opening');
 assert(channelView.includes('useTaskArtifact') && channelView.includes('handleGenerateArtifact') && channelView.includes('<iframe'), 'Channel view should wire artifact generation into an iframe viewer');
+assert(!asTaskSendBlock.includes("view: 'task'"), 'Creating a task from message input should keep the current workspace tab');
 assert(channelView.includes('artifactHistory') && channelView.includes('showExistingArtifact') && channelView.includes('if (await showExistingArtifact(task.id)) return'), 'Channel view should open existing published artifacts before generating');
 assert(channelView.includes('showToast') && channelView.includes('catch'), 'Channel view should surface artifact generation errors');
 assert(channelView.includes('URL.createObjectURL') && channelView.includes('URL.revokeObjectURL') && channelView.includes('previewUrl'), 'Channel viewer should use revokable blob URLs for protected artifact HTML');

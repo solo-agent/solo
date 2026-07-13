@@ -373,6 +373,9 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 	if err != nil {
 		slog.Warn("failed to start agent run", "task_id", taskReq.TaskID, "agent_id", ag.ID, "error", err)
 	}
+	if run != nil {
+		s.dm.AttachTaskRun(taskReq.TaskID, run.ID)
+	}
 	if run != nil && taskReq.OriginTaskID != "" {
 		if err := runSvc.LinkTask(ctx, LinkRunTaskInput{RunID: run.ID, TaskID: taskReq.OriginTaskID, Role: AgentRunTaskRolePrimary, Confidence: 1}); err != nil {
 			slog.Warn("failed to link agent run task", "run_id", run.ID, "task_id", taskReq.OriginTaskID, "error", err)
@@ -442,6 +445,11 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 
 	finishRun := func(status AgentRunStatus) {
 		if run == nil {
+			return
+		}
+		current, err := runSvc.GetRun(ctx, run.ID)
+		if err == nil && !isActiveAgentRunStatus(current.Status) {
+			run = current
 			return
 		}
 		finished, err := runSvc.FinishRun(ctx, FinishRunInput{
@@ -789,6 +797,10 @@ func (s *AgentService) appendAndBroadcastRunEvent(ctx context.Context, runSvc *A
 }
 
 func (s *AgentService) StartAgentRunWatchdogLoop(ctx context.Context) {
+	if err := s.CheckAgentRunWatchdogs(ctx, time.Now()); err != nil {
+		slog.Warn("agent run watchdog failed", "error", err)
+	}
+
 	ticker := time.NewTicker(agentRunWatchdogInterval)
 	defer ticker.Stop()
 
@@ -895,6 +907,15 @@ func activeAgentRunStatuses() []string {
 		string(AgentRunStatusWaitingInput),
 		string(AgentRunStatusWaitingApproval),
 	}
+}
+
+func isActiveAgentRunStatus(status AgentRunStatus) bool {
+	for _, active := range activeAgentRunStatuses() {
+		if string(status) == active {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *AgentService) timeoutStaleAgentRun(ctx context.Context, runSvc *AgentRunService, run *AgentRun) error {

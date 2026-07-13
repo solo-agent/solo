@@ -399,7 +399,7 @@ export function AgentProfileTab({ agentId, showHeader = true }: AgentProfileTabP
               ID
             </span>
             <span className="font-mono text-xs text-foreground">
-              {agent.owner_id?.slice(0, 8) ?? '—'}
+              {agent.id?.slice(0, 8) ?? '—'}
             </span>
           </div>
           <div className="flex items-center gap-3 py-1.5">

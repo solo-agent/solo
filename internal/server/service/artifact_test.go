@@ -185,6 +185,11 @@ func TestRenderArtifactAgentPrompt_InstructsPublishWithContext(t *testing.T) {
 	prompt := renderArtifactAgentPrompt(data, "latest")
 	for _, want := range []string{
 		"solo-artifacts",
+		"Deliverable: ./path/to/result.html",
+		"Do not guess from old workspace files",
+		"publish that file directly instead of summarizing",
+		"prefer the product/final deliverable over review/report/panel files",
+		"Do not switch to review-decision just because the task is in_review",
 		"solo artifact publish --task task-1 --mode latest --file",
 		"Need a visual review decision.",
 		"Option A is safer; option B is faster.",

@@ -1,5 +1,5 @@
 import { t, type TranslationKey } from '@/lib/i18n';
-import type { AgentRunStatus } from '@/lib/hooks/use-agent-island';
+import type { AgentRunStatus } from '@/lib/agent-run-types';
 
 const ACTIVITY_TEXT_KEYS: Record<string, TranslationKey> = {
   'agent.activity.accepted': 'agentActivityAccepted',

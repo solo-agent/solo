@@ -191,6 +191,7 @@ func TestBuildSystemPrompt_Workspace(t *testing.T) {
 	assertHas(t, p, "Compaction safety")
 	assertHas(t, p, "What to memorize")
 	assertHas(t, p, "How to organize memory")
+	assertNotHas(t, p, "Deliverable: ./path/to/result.html")
 }
 
 func TestBuildSystemPrompt_AllTriggers(t *testing.T) {

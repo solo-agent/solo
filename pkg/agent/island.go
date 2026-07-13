@@ -11,8 +11,7 @@ import (
 // Run status inference
 //
 // Translates internal OutputChunk events into the canonical agent run status
-// used by agent_runs.status and agent.run.* WebSocket events. The Agent Island
-// is only a view of this run status; it does not own a separate status machine.
+// used by agent_runs.status and agent.run.* WebSocket events.
 // ============================================================================
 
 type RunStatus string
