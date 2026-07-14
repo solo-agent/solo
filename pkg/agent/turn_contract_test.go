@@ -200,6 +200,72 @@ func TestStableACPPersistentProviderTurnContract(t *testing.T) {
 	}
 }
 
+func TestCodexPersistentProcessExitFailsActiveTurn(t *testing.T) {
+	tempDir := t.TempDir()
+	fake := filepath.Join(tempDir, "codex")
+
+	script := `#!/bin/sh
+turn_count=0
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"id":1,"result":{}}\n'
+      ;;
+    *'"method":"thread/start"'*)
+      printf '{"id":2,"result":{"thread":{"id":"codex-session-1"}}}\n'
+      ;;
+    *'"method":"turn/start"'*)
+      turn_count=$((turn_count + 1))
+      if [ "$turn_count" -eq 1 ]; then
+        printf '{"id":3,"result":{}}\n'
+        printf '{"method":"turn/completed","params":{"threadId":"codex-session-1","turn":{"id":"turn-1","status":"completed"}}}\n'
+      else
+        printf '{"id":4,"result":{}}\n'
+        exit 0
+      fi
+      ;;
+  esac
+done
+`
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake Codex CLI: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	backend := NewCodexBackend(fake, slog.Default())
+	initial, err := backend.Start(ctx, &ExecuteRequest{
+		AgentID:  "agent-1",
+		Messages: []Message{{Role: RoleUser, Content: "first"}},
+	}, &ExecuteOptions{})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer backend.Close(initial)
+	if result := readTurnResult(t, initial.Result); result.Status != "completed" {
+		t.Fatalf("initial result = %+v, want completed", result)
+	}
+
+	crashed, err := backend.Send(ctx, initial, []Message{{Role: RoleUser, Content: "crash"}})
+	if err != nil {
+		t.Fatalf("crash Send: %v", err)
+	}
+	result := readTurnResult(t, crashed.Result)
+	if result.Status != "failed" || !strings.Contains(result.Error, "process exited unexpectedly") {
+		t.Fatalf("crash result = %+v, want failed process exit", result)
+	}
+
+	state := crashed.state.(SessionStater)
+	select {
+	case <-state.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("Codex process exit was not published")
+	}
+	if state.IsAlive() {
+		t.Fatal("Codex remained alive after process exit")
+	}
+}
+
 func runACPPersistentProviderTurnContract(t *testing.T, provider string, factory func(string) PersistentBackend) {
 	t.Helper()
 	tempDir := t.TempDir()

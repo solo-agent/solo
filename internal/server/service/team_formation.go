@@ -32,6 +32,7 @@ var (
 	ErrTeamFormationSourceNotFound = errors.New("source user message not found")
 	ErrTeamFormationInProgress     = errors.New("team formation is already in progress")
 	ErrInvalidTeamFormationPlan    = errors.New("invalid team formation plan")
+	errTeamFormationLeaseLost      = errors.New("team formation provisioning lease was lost")
 
 	teamRefPattern      = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 	teamTemplatePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,49}$`)
@@ -188,7 +189,7 @@ func (s *TeamFormationService) Form(ctx context.Context, callerID string, req Te
 		return nil, fmt.Errorf("marshal team plan: %w", err)
 	}
 
-	formationID, replay, err := s.claimFormation(ctx, caller, planJSON)
+	formationID, leaseUpdatedAt, replay, err := s.claimFormation(ctx, caller, planJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -198,15 +199,19 @@ func (s *TeamFormationService) Form(ctx context.Context, callerID string, req Te
 		return replay, nil
 	}
 
-	result, err := s.provision(ctx, formationID, caller, req.Plan)
+	result, err := s.provision(ctx, formationID, leaseUpdatedAt, caller, req.Plan)
 	if err != nil {
+		if errors.Is(err, errTeamFormationLeaseLost) {
+			return nil, ErrTeamFormationInProgress
+		}
 		failure := truncateRunes(err.Error(), 4000)
 		failureCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_, _ = s.pool.Exec(failureCtx, `
 			UPDATE team_formations
 			   SET status = 'failed', error = $2, updated_at = now()
-			 WHERE id = $1 AND status = 'provisioning' AND target_channel_id IS NULL`, formationID, failure)
+			 WHERE id = $1 AND status = 'provisioning'
+			   AND target_channel_id IS NULL AND updated_at = $3`, formationID, failure, leaseUpdatedAt)
 		return nil, err
 	}
 
@@ -363,20 +368,21 @@ func (s *TeamFormationService) authorizeCaller(ctx context.Context, callerID, ch
 	return &caller, nil
 }
 
-func (s *TeamFormationService) claimFormation(ctx context.Context, caller *teamFormationCaller, planJSON []byte) (string, *TeamFormationResult, error) {
+func (s *TeamFormationService) claimFormation(ctx context.Context, caller *teamFormationCaller, planJSON []byte) (string, time.Time, *TeamFormationResult, error) {
 	var formationID string
+	var leaseUpdatedAt time.Time
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO team_formations (
 			owner_id, requested_by_agent_id, source_channel_id,
 			source_message_id, status, plan
 		) VALUES ($1, $2, $3, $4, 'provisioning', $5)
 		ON CONFLICT (source_message_id) DO NOTHING
-		RETURNING id`, caller.OwnerID, caller.AgentID, caller.ChannelID, caller.SourceID, planJSON).Scan(&formationID)
+		RETURNING id, updated_at`, caller.OwnerID, caller.AgentID, caller.ChannelID, caller.SourceID, planJSON).Scan(&formationID, &leaseUpdatedAt)
 	if err == nil {
-		return formationID, nil, nil
+		return formationID, leaseUpdatedAt, nil, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return "", nil, fmt.Errorf("create team formation: %w", err)
+		return "", time.Time{}, nil, fmt.Errorf("create team formation: %w", err)
 	}
 
 	var status string
@@ -387,35 +393,38 @@ func (s *TeamFormationService) claimFormation(ctx context.Context, caller *teamF
 		  FROM team_formations
 		 WHERE source_message_id = $1`, caller.SourceID).Scan(&formationID, &status, &resultJSON, &updatedAt)
 	if err != nil {
-		return "", nil, fmt.Errorf("load team formation: %w", err)
+		return "", time.Time{}, nil, fmt.Errorf("load team formation: %w", err)
 	}
 	if status == "completed" && len(resultJSON) > 0 {
 		var result TeamFormationResult
 		if err := json.Unmarshal(resultJSON, &result); err != nil {
-			return "", nil, fmt.Errorf("decode stored team formation result: %w", err)
+			return "", time.Time{}, nil, fmt.Errorf("decode stored team formation result: %w", err)
 		}
 		result.Replayed = true
-		return formationID, &result, nil
+		return formationID, time.Time{}, &result, nil
 	}
 
 	if status == "failed" || (status == "provisioning" && time.Since(updatedAt) > 2*time.Minute) {
-		commandTag, updateErr := s.pool.Exec(ctx, `
+		updateErr := s.pool.QueryRow(ctx, `
 			UPDATE team_formations
 			   SET status = 'provisioning', plan = $2, result = NULL,
 			       target_channel_id = NULL, error = '', updated_at = now()
 			 WHERE id = $1
-			   AND (status = 'failed' OR updated_at < now() - interval '2 minutes')`, formationID, planJSON)
+			   AND status = $3 AND updated_at = $4
+			   AND ($3 = 'failed' OR updated_at < now() - interval '2 minutes')
+			RETURNING updated_at`, formationID, planJSON, status, updatedAt).Scan(&leaseUpdatedAt)
 		if updateErr != nil {
-			return "", nil, fmt.Errorf("retry team formation: %w", updateErr)
-		}
-		if commandTag.RowsAffected() == 1 {
-			return formationID, nil, nil
+			if !errors.Is(updateErr, pgx.ErrNoRows) {
+				return "", time.Time{}, nil, fmt.Errorf("retry team formation: %w", updateErr)
+			}
+		} else {
+			return formationID, leaseUpdatedAt, nil, nil
 		}
 	}
-	return "", nil, ErrTeamFormationInProgress
+	return "", time.Time{}, nil, ErrTeamFormationInProgress
 }
 
-func (s *TeamFormationService) provision(ctx context.Context, formationID string, caller *teamFormationCaller, plan TeamFormationPlan) (*TeamFormationResult, error) {
+func (s *TeamFormationService) provision(ctx context.Context, formationID string, leaseUpdatedAt time.Time, caller *teamFormationCaller, plan TeamFormationPlan) (*TeamFormationResult, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin team formation: %w", err)
@@ -426,6 +435,18 @@ func (s *TeamFormationService) provision(ctx context.Context, formationID string
 	// provisioning critical section so suffix selection cannot race.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('solo-team-formation'))`); err != nil {
 		return nil, fmt.Errorf("lock team formation: %w", err)
+	}
+	var currentStatus string
+	var currentUpdatedAt time.Time
+	if err := tx.QueryRow(ctx, `
+		SELECT status, updated_at
+		  FROM team_formations
+		 WHERE id = $1
+		 FOR UPDATE`, formationID).Scan(&currentStatus, &currentUpdatedAt); err != nil {
+		return nil, fmt.Errorf("lock team formation lease: %w", err)
+	}
+	if currentStatus != "provisioning" || !currentUpdatedAt.Equal(leaseUpdatedAt) {
+		return nil, errTeamFormationLeaseLost
 	}
 
 	channelName, err := uniqueChannelName(ctx, tx, plan.Channel.Name)
@@ -542,12 +563,16 @@ func (s *TeamFormationService) provision(ctx context.Context, formationID string
 	if err != nil {
 		return nil, fmt.Errorf("marshal team formation result: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `
+	commandTag, err := tx.Exec(ctx, `
 		UPDATE team_formations
 		   SET target_channel_id = $2, status = 'completed', result = $3,
 		       error = '', updated_at = now()
-		 WHERE id = $1`, formationID, channelID, resultJSON); err != nil {
+		 WHERE id = $1 AND status = 'provisioning' AND updated_at = $4`, formationID, channelID, resultJSON, leaseUpdatedAt)
+	if err != nil {
 		return nil, fmt.Errorf("complete team formation: %w", err)
+	}
+	if commandTag.RowsAffected() != 1 {
+		return nil, errTeamFormationLeaseLost
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit team formation: %w", err)
@@ -835,18 +860,20 @@ func applyRelationshipTemplate(plan *TeamFormationPlan, templateMembers []templa
 		}
 	}
 	relations := make(map[string]TeamFormationRelation, len(plan.Members)+len(plan.RelationshipOverrides))
-	ordinal := 0
+	roleOrdinals := make(map[string]int)
 	for _, member := range plan.Members {
 		if member.Ref == leaderRef {
 			continue
 		}
-		instruction := relationshipInstructionForMember(plan.RelationshipTemplate, member, ordinal, templateNonLeaders)
+		roleKey := strings.ToLower(member.Role)
+		roleOrdinal := roleOrdinals[roleKey]
+		instruction := relationshipInstructionForMember(plan.RelationshipTemplate, member, roleOrdinal, templateNonLeaders)
 		relation := TeamFormationRelation{
 			FromRef: leaderRef, ToRef: member.Ref, Type: "assigns_to", Weight: 1,
 			Instruction: instruction,
 		}
 		relations[relationshipKey(relation.FromRef, relation.ToRef, relation.Type)] = relation
-		ordinal++
+		roleOrdinals[roleKey] = roleOrdinal + 1
 	}
 
 	for _, override := range plan.RelationshipOverrides {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -103,6 +104,38 @@ func TestApplyRelationshipTemplatePreservesOrderedCriteriaForRepeatedRoles(t *te
 	}
 	if instructions["engineer"] != frontEnd || instructions["qa"] != backEnd {
 		t.Fatalf("ordered criteria were not preserved: %+v", instructions)
+	}
+}
+
+func TestApplyRelationshipTemplateCountsOrdinalsPerRole(t *testing.T) {
+	plan := validTeamPlanForTest()
+	plan.Members = []TeamFormationMember{
+		plan.Members[0],
+		plan.Members[2],
+		{Ref: "frontend", Role: "engineer", Name: "Frontend", Instructions: "Implement the frontend."},
+		{Ref: "backend", Role: "engineer", Name: "Backend", Instructions: "Implement the backend."},
+	}
+	frontEnd := "Frontend delegation criteria."
+	backEnd := "Backend delegation criteria."
+	review := "Review delegation criteria."
+	template := []templateMember{
+		{Role: "leader", Name: "Lead"},
+		{Role: "engineer", Name: "FE", Relationship: &frontEnd},
+		{Role: "engineer", Name: "BE", Relationship: &backEnd},
+		{Role: "reviewer", Name: "Reviewer", Relationship: &review},
+	}
+	if err := normalizeAndValidateTeamPlan(&plan); err != nil {
+		t.Fatalf("normalizeAndValidateTeamPlan: %v", err)
+	}
+	if err := applyRelationshipTemplate(&plan, template); err != nil {
+		t.Fatalf("applyRelationshipTemplate: %v", err)
+	}
+	instructions := map[string]string{}
+	for _, relation := range plan.Relationships {
+		instructions[relation.ToRef] = relation.Instruction
+	}
+	if instructions["qa"] != review || instructions["frontend"] != frontEnd || instructions["backend"] != backEnd {
+		t.Fatalf("per-role criteria were not preserved: %+v", instructions)
 	}
 }
 
@@ -428,5 +461,118 @@ func TestTeamFormationServiceIntegration(t *testing.T) {
 	}
 	if !replayed.Replayed || replayed.ChannelID != result.ChannelID || len(broadcaster.events) != 1 {
 		t.Fatalf("unexpected replay result: %+v broadcasts=%d", replayed, len(broadcaster.events))
+	}
+}
+
+func TestTeamFormationStaleLeaseCannotProvisionDuplicateTeam(t *testing.T) {
+	dsn := os.Getenv("TEAM_FORMATION_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEAM_FORMATION_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	defer pool.Close()
+
+	ownerID := uuid.New().String()
+	lucyID := uuid.New().String()
+	sourceChannelID := uuid.New().String()
+	sourceMessageID := uuid.New().String()
+	unique := strings.ReplaceAll(uuid.New().String()[:8], "-", "")
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO users (id, email, display_name, password_hash)
+		VALUES ($1, $2, 'Lease Test Owner', 'test')`, ownerID, "lease-"+unique+"@example.com"); err != nil {
+		t.Fatalf("insert owner: %v", err)
+	}
+	defer func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM channels WHERE created_by = $1`, ownerID)
+		_, _ = pool.Exec(ctx, `DELETE FROM agents WHERE owner_id = $1`, ownerID)
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, ownerID)
+	}()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO channels (id, name, description, created_by)
+		VALUES ($1, $2, 'Onboarding', $3)`, sourceChannelID, "welcome-lease-test-"+unique, ownerID); err != nil {
+		t.Fatalf("insert source channel: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO channel_members (channel_id, member_type, member_id, role)
+		VALUES ($1, 'user', $2, 'owner')`, sourceChannelID, ownerID); err != nil {
+		t.Fatalf("insert owner membership: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO agents (
+			id, name, description, owner_id, model_provider, model_name,
+			system_prompt, custom_env, custom_args
+		) VALUES ($1, 'Lucy', 'Onboarding lead', $2, 'codex', '', 'Onboard', '{}'::jsonb, '[]'::jsonb)`,
+		lucyID, ownerID); err != nil {
+		t.Fatalf("insert Lucy: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO channel_members (channel_id, member_type, member_id, role)
+		VALUES ($1, 'agent', $2, 'member')`, sourceChannelID, lucyID); err != nil {
+		t.Fatalf("insert Lucy membership: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO messages (id, channel_id, sender_type, sender_id, content)
+		VALUES ($1, $2, 'user', $3, 'Build a lease-safe team')`,
+		sourceMessageID, sourceChannelID, ownerID); err != nil {
+		t.Fatalf("insert source message: %v", err)
+	}
+
+	plan := validTeamPlanForTest()
+	plan.Channel.Name = "lease-team-" + unique
+	if err := normalizeAndValidateTeamPlan(&plan); err != nil {
+		t.Fatalf("normalize plan: %v", err)
+	}
+	if err := applyRelationshipTemplate(&plan, testRelationshipTemplateMembers()); err != nil {
+		t.Fatalf("resolve template: %v", err)
+	}
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal plan: %v", err)
+	}
+	caller := &teamFormationCaller{
+		AgentID: lucyID, OwnerID: ownerID, Provider: "codex",
+		ChannelID: sourceChannelID, SourceID: sourceMessageID, SourceText: "Build a lease-safe team",
+	}
+	svc := NewTeamFormationService(pool, nil, nil)
+	formationID, firstLease, replay, err := svc.claimFormation(ctx, caller, planJSON)
+	if err != nil || replay != nil {
+		t.Fatalf("first claim: id=%q replay=%+v err=%v", formationID, replay, err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE team_formations SET updated_at = now() - interval '3 minutes'
+		 WHERE id = $1`, formationID); err != nil {
+		t.Fatalf("age first lease: %v", err)
+	}
+	secondID, secondLease, replay, err := svc.claimFormation(ctx, caller, planJSON)
+	if err != nil || replay != nil || secondID != formationID || secondLease.Equal(firstLease) {
+		t.Fatalf("stale retry claim: id=%q lease=%v replay=%+v err=%v", secondID, secondLease, replay, err)
+	}
+
+	if _, err := svc.provision(ctx, formationID, firstLease, caller, plan); !errors.Is(err, errTeamFormationLeaseLost) {
+		t.Fatalf("stale provision error = %v, want lease lost", err)
+	}
+	result, err := svc.provision(ctx, formationID, secondLease, caller, plan)
+	if err != nil {
+		t.Fatalf("active provision: %v", err)
+	}
+	if result.ChannelID == "" {
+		t.Fatal("active provision returned no channel")
+	}
+
+	var channelCount, createdAgentCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM channels WHERE created_by = $1 AND id <> $2`, ownerID, sourceChannelID).Scan(&channelCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM agents WHERE owner_id = $1 AND id <> $2`, ownerID, lucyID).Scan(&createdAgentCount); err != nil {
+		t.Fatal(err)
+	}
+	if channelCount != 1 || createdAgentCount != len(plan.Members) {
+		t.Fatalf("duplicate resources created: channels=%d agents=%d", channelCount, createdAgentCount)
 	}
 }
