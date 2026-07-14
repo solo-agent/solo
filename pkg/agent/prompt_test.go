@@ -42,31 +42,14 @@ func TestBuildSystemPrompt_CRITICALRULES(t *testing.T) {
 	assertHas(t, p, "If you are coordinating others")
 }
 
-func TestBuildSystemPrompt_LucyAutomaticTeamFormation(t *testing.T) {
+func TestBuildSystemPrompt_DoesNotEmbedLucyOnboardingPolicy(t *testing.T) {
 	p := BuildSystemPrompt(
 		AgentConfig{Name: "Lucy"},
 		ChannelContext{ChannelID: "channel-1", ChannelName: "welcome-owner", TriggerType: TriggerChat},
 		"", nil,
 	)
-	assertHas(t, p, "Lucy-only automatic team formation")
-	assertHas(t, p, "solo team form --source-channel")
-	assertHas(t, p, "source-message <msg-short-id>")
-	assertHas(t, p, "`dev-team`")
-	assertHas(t, p, "`content-team`")
-	assertHas(t, p, "`research-team`")
-	assertHas(t, p, `"relationship_template":"dev-team"`)
-	assertHas(t, p, "Never include `tasks`")
-	assertHas(t, p, "creates no initial tasks")
-	assertNotHas(t, p, `"tasks":[`)
-}
-
-func TestBuildSystemPrompt_NonLucyDoesNotReceiveTeamFormationPolicy(t *testing.T) {
-	p := BuildSystemPrompt(
-		AgentConfig{Name: "Engineer"},
-		ChannelContext{ChannelName: "welcome-owner", TriggerType: TriggerChat},
-		"", nil,
-	)
-	assertNotHas(t, p, "## Lucy-only automatic team formation")
+	assertNotHas(t, p, "## Automatic Team Formation")
+	assertNotHas(t, p, `"relationship_template":"dev-team"`)
 }
 
 func TestBuildSystemPrompt_StartupSequence(t *testing.T) {

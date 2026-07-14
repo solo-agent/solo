@@ -114,8 +114,24 @@ func TestUpgradeLucyKnowledgeUpgradesV2AutomaticTeamRule(t *testing.T) {
 
 func TestKnowledgeFilesUseTemplateFirstRelationshipsWithoutInitialTasks(t *testing.T) {
 	files := KnowledgeFiles("Owner", "owner@example.com")
+	memory := files["MEMORY.md"]
 	playbook := files["notes/onboarding_playbook.md"]
 	faq := files["notes/onboarding_knowledge_faq.md"]
+	for _, want := range []string{
+		lucyMemoryVersionMarker,
+		"## Automatic Team Formation",
+		"solo team form --source-channel <current-channel-id>",
+		`"relationship_template":"dev-team"`,
+		"Never include tasks",
+		"creates no initial tasks",
+	} {
+		if !strings.Contains(memory, want) {
+			t.Fatalf("MEMORY.md does not contain %q", want)
+		}
+	}
+	if strings.Contains(memory, `"tasks":[`) {
+		t.Fatal("MEMORY.md team plan includes initial tasks")
+	}
 	for _, want := range []string{lucyPlaybookVersionMarker, "dev-team", "Do not create initial tasks automatically"} {
 		if !strings.Contains(playbook, want) {
 			t.Fatalf("playbook does not contain %q", want)
@@ -125,6 +141,52 @@ func TestKnowledgeFilesUseTemplateFirstRelationshipsWithoutInitialTasks(t *testi
 		if !strings.Contains(faq, want) {
 			t.Fatalf("FAQ does not contain %q", want)
 		}
+	}
+}
+
+func TestUpgradeLucyKnowledgeAddsAutomaticTeamPolicyToMemory(t *testing.T) {
+	root := t.TempDir()
+	agentID := "lucy-memory-v3"
+	path := filepath.Join(root, agentID, "workspace", "MEMORY.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := "# Lucy\n\n## Role\nOnboarding lead.\n\n## Knowledge Index\n- notes/custom.md\n\nCustom owner memory.\n"
+	if err := os.WriteFile(path, []byte(original), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := UpgradeLucyKnowledge(root, agentID)
+	if err != nil || !changed {
+		t.Fatalf("UpgradeLucyKnowledge() = %v, %v; want true, nil", changed, err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		lucyMemoryVersionMarker,
+		"## Automatic Team Formation",
+		"solo team form --source-channel <current-channel-id>",
+		"Custom owner memory.",
+		"- notes/custom.md",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("upgraded MEMORY.md does not contain %q: %s", want, got)
+		}
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o640 {
+		t.Fatalf("mode = %o, want 640", info.Mode().Perm())
+	}
+
+	changed, err = UpgradeLucyKnowledge(root, agentID)
+	if err != nil || changed {
+		t.Fatalf("second UpgradeLucyKnowledge() = %v, %v; want false, nil", changed, err)
 	}
 }
 

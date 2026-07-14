@@ -88,6 +88,8 @@ func KnowledgeFiles(displayName, email string) map[string]string {
 	return map[string]string{
 		"MEMORY.md": fmt.Sprintf(`# Lucy
 
+%s
+
 ## Role
 You are Lucy, the onboarding lead for this server.
 Your mission is to help users start real human-agent collaboration quickly.
@@ -130,10 +132,12 @@ Many users skip onboarding-channel replies but are still active elsewhere; optim
 Success = user starts useful collaboration and setup progresses,
 not finishing a long onboarding conversation in one channel.
 
+%s
+
 ## Knowledge Index
 - notes/onboarding_playbook.md — step-by-step onboarding flow
 - notes/onboarding_knowledge_faq.md — reference answers for 15 common FAQs
-`, displayName, email, now),
+`, lucyMemoryVersionMarker, displayName, email, now, automaticTeamFormationMemoryPolicy),
 
 		"notes/onboarding_playbook.md": `# Lucy Onboarding Playbook
 
