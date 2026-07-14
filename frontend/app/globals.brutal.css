@@ -51,7 +51,7 @@
 @source "../components/";
 @source "../lib/";
 
-@theme inline {
+@theme {
   /* ---- Typography ---- */
   /* --font-sans / --font-body: body and UI text.
      --font-heading: heavy display (Space Grotesk).
@@ -243,6 +243,271 @@
     --color-sidebar-muted-foreground: #b0a8a0;
     --color-sidebar-border: #ffffff;
   }
+}
+
+/* ============================================================
+   Light Skins — selected explicitly in Settings
+   Keep structural black/white fixed; only semantic color changes.
+   The preview selector lets Settings render each palette locally.
+   ============================================================ */
+
+:root[data-skin],
+[data-skin-preview] {
+  --skin-canvas: #fffaef;
+  --skin-primary: #ffd23f;
+  --skin-primary-light: #fff9e0;
+  --skin-accent: #ff6b6b;
+  --skin-accent-light: #ffd4d4;
+  --skin-info: #74b9ff;
+  --skin-info-light: #e0f0ff;
+  --skin-success: #88d498;
+  --skin-success-light: #e0f5e0;
+  --skin-warning: #f8a16f;
+  --skin-warning-light: #fff0e0;
+  --skin-danger: #f97264;
+  --skin-danger-light: #ffe0dc;
+  --skin-violet: #bbafe6;
+  --skin-violet-light: #f0ecff;
+  --skin-muted: #c0b9b1;
+  --skin-muted-light: #ece6df;
+
+  --color-brutal-bg: var(--skin-canvas);
+  --color-brutal-cream: var(--skin-canvas);
+  --color-brutal-black: #000000;
+  --color-brutal-white: #ffffff;
+  --color-brutal-primary: var(--skin-primary);
+  --color-brutal-primary-light: var(--skin-primary-light);
+  --color-brutal-accent: var(--skin-accent);
+  --color-brutal-accent-light: var(--skin-accent-light);
+  --color-brutal-info: var(--skin-info);
+  --color-brutal-info-light: var(--skin-info-light);
+  --color-brutal-success: var(--skin-success);
+  --color-brutal-success-light: var(--skin-success-light);
+  --color-brutal-warning: var(--skin-warning);
+  --color-brutal-warning-light: var(--skin-warning-light);
+  --color-brutal-danger: var(--skin-danger);
+  --color-brutal-danger-light: var(--skin-danger-light);
+  --color-brutal-violet: var(--skin-violet);
+  --color-brutal-violet-light: var(--skin-violet-light);
+  --color-brutal-muted: var(--skin-muted);
+  --color-brutal-muted-light: var(--skin-muted-light);
+  --color-brutal-shadow: #000000;
+
+  --color-background: var(--skin-canvas);
+  --color-foreground: #000000;
+  --color-card: #ffffff;
+  --color-card-foreground: #000000;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #000000;
+  --color-primary: var(--skin-primary);
+  --color-primary-foreground: #000000;
+  --color-secondary: #ffffff;
+  --color-secondary-foreground: #000000;
+  --color-muted: var(--skin-muted-light);
+  --color-muted-foreground: #666666;
+  --color-accent: var(--skin-accent);
+  --color-accent-foreground: #000000;
+  --color-destructive: var(--skin-danger);
+  --color-destructive-foreground: #000000;
+  --color-border: #000000;
+  --color-input: #000000;
+  --color-ring: var(--skin-info);
+  --color-sidebar: var(--skin-canvas);
+  --color-sidebar-foreground: #000000;
+  --color-sidebar-muted: var(--skin-muted-light);
+  --color-sidebar-muted-foreground: #666666;
+  --color-sidebar-border: #000000;
+  --color-sidebar-accent: var(--skin-accent-light);
+  --color-sidebar-accent-foreground: #000000;
+}
+
+:root[data-skin="classic"],
+[data-skin-preview="classic"] {
+  --skin-canvas: #fffaef;
+  --skin-primary: #ffd23f;
+  --skin-primary-light: #fff9e0;
+  --skin-accent: #ff6b6b;
+  --skin-accent-light: #ffd4d4;
+  --skin-info: #74b9ff;
+  --skin-info-light: #e0f0ff;
+  --skin-success: #88d498;
+  --skin-success-light: #e0f5e0;
+  --skin-warning: #f8a16f;
+  --skin-warning-light: #fff0e0;
+  --skin-danger: #f97264;
+  --skin-danger-light: #ffe0dc;
+  --skin-violet: #bbafe6;
+  --skin-violet-light: #f0ecff;
+  --skin-muted: #c0b9b1;
+  --skin-muted-light: #ece6df;
+}
+
+:root[data-skin="blueprint"],
+[data-skin-preview="blueprint"] {
+  --skin-canvas: #f3f7ff;
+  --skin-primary: #3b82f6;
+  --skin-primary-light: #dceaff;
+  --skin-accent: #ff5d8f;
+  --skin-accent-light: #ffd9e5;
+  --skin-info: #38cfe8;
+  --skin-info-light: #ddf8fc;
+  --skin-success: #79d58c;
+  --skin-success-light: #e3f7e7;
+  --skin-warning: #ffbc51;
+  --skin-warning-light: #fff0d5;
+  --skin-danger: #ff5f68;
+  --skin-danger-light: #ffe0e3;
+  --skin-violet: #a78bfa;
+  --skin-violet-light: #eee9ff;
+  --skin-muted: #b9c5d3;
+  --skin-muted-light: #edf1f5;
+}
+
+:root[data-skin="ultraviolet"],
+[data-skin-preview="ultraviolet"] {
+  --skin-canvas: #fbf6ff;
+  --skin-primary: #b47cff;
+  --skin-primary-light: #eee0ff;
+  --skin-accent: #51d6be;
+  --skin-accent-light: #ddf8f2;
+  --skin-info: #6ca8ff;
+  --skin-info-light: #e2eeff;
+  --skin-success: #82d38b;
+  --skin-success-light: #e4f6e8;
+  --skin-warning: #ffc857;
+  --skin-warning-light: #fff2d8;
+  --skin-danger: #ff6b75;
+  --skin-danger-light: #ffe3e5;
+  --skin-violet: #8d74d8;
+  --skin-violet-light: #ece7fa;
+  --skin-muted: #c9bdd6;
+  --skin-muted-light: #f0eaf5;
+}
+
+:root[data-skin="seasalt"],
+[data-skin-preview="seasalt"] {
+  --skin-canvas: #f1fff9;
+  --skin-primary: #36c9a5;
+  --skin-primary-light: #d7f8ec;
+  --skin-accent: #ff7a59;
+  --skin-accent-light: #ffe2db;
+  --skin-info: #5a8dee;
+  --skin-info-light: #e0e9ff;
+  --skin-success: #75c56b;
+  --skin-success-light: #e3f4e0;
+  --skin-warning: #ffcb57;
+  --skin-warning-light: #fff3d4;
+  --skin-danger: #f45b69;
+  --skin-danger-light: #ffdfe3;
+  --skin-violet: #8e7df2;
+  --skin-violet-light: #ece9ff;
+  --skin-muted: #adc9bf;
+  --skin-muted-light: #e7f2ee;
+}
+
+:root[data-skin="tomato"],
+[data-skin-preview="tomato"] {
+  --skin-canvas: #fff5ef;
+  --skin-primary: #ff624a;
+  --skin-primary-light: #ffe2db;
+  --skin-accent: #4f9dff;
+  --skin-accent-light: #ddebff;
+  --skin-info: #56d6c9;
+  --skin-info-light: #ddf8f3;
+  --skin-success: #75c76d;
+  --skin-success-light: #e3f4e0;
+  --skin-warning: #ffc24c;
+  --skin-warning-light: #fff0d1;
+  --skin-danger: #e9435c;
+  --skin-danger-light: #ffdbe1;
+  --skin-violet: #a889e8;
+  --skin-violet-light: #efe8fa;
+  --skin-muted: #c8b7af;
+  --skin-muted-light: #f0e9e5;
+}
+
+:root[data-skin="matcha"],
+[data-skin-preview="matcha"] {
+  --skin-canvas: #f6ffe9;
+  --skin-primary: #a4d936;
+  --skin-primary-light: #ecf8c9;
+  --skin-accent: #5577ff;
+  --skin-accent-light: #e0e6ff;
+  --skin-info: #4fc3d7;
+  --skin-info-light: #ddf6f9;
+  --skin-success: #60bf70;
+  --skin-success-light: #dff3e3;
+  --skin-warning: #ffc857;
+  --skin-warning-light: #fff2d8;
+  --skin-danger: #f25f5c;
+  --skin-danger-light: #ffe0df;
+  --skin-violet: #9b85e8;
+  --skin-violet-light: #ede9fa;
+  --skin-muted: #b8c39b;
+  --skin-muted-light: #eaf0dc;
+}
+
+:root[data-skin="bubblegum"],
+[data-skin-preview="bubblegum"] {
+  --skin-canvas: #fff2f8;
+  --skin-primary: #ff78b7;
+  --skin-primary-light: #ffdded;
+  --skin-accent: #4fd1c5;
+  --skin-accent-light: #dcf7f3;
+  --skin-info: #70a5ff;
+  --skin-info-light: #e3ecff;
+  --skin-success: #78ce86;
+  --skin-success-light: #e3f6e7;
+  --skin-warning: #ffca58;
+  --skin-warning-light: #fff3d9;
+  --skin-danger: #f05268;
+  --skin-danger-light: #ffdfe5;
+  --skin-violet: #b794f4;
+  --skin-violet-light: #eee7ff;
+  --skin-muted: #d1b5c4;
+  --skin-muted-light: #f3e8ee;
+}
+
+:root[data-skin="lavender"],
+[data-skin-preview="lavender"] {
+  --skin-canvas: #f8f5ff;
+  --skin-primary: #9b82f3;
+  --skin-primary-light: #e8e0ff;
+  --skin-accent: #ffdb4d;
+  --skin-accent-light: #fff5c7;
+  --skin-info: #5eb9e8;
+  --skin-info-light: #dff3fb;
+  --skin-success: #7bc987;
+  --skin-success-light: #e5f4e7;
+  --skin-warning: #ffb357;
+  --skin-warning-light: #ffebd5;
+  --skin-danger: #f3616d;
+  --skin-danger-light: #ffe1e4;
+  --skin-violet: #c0a9ff;
+  --skin-violet-light: #f0ebff;
+  --skin-muted: #bfb4d4;
+  --skin-muted-light: #ece8f3;
+}
+
+:root[data-skin="sky"],
+[data-skin-preview="sky"] {
+  --skin-canvas: #effaff;
+  --skin-primary: #55beeb;
+  --skin-primary-light: #d7f3ff;
+  --skin-accent: #ff8a4c;
+  --skin-accent-light: #ffe4d6;
+  --skin-info: #6388ff;
+  --skin-info-light: #e3e9ff;
+  --skin-success: #67c78a;
+  --skin-success-light: #e1f3e7;
+  --skin-warning: #ffd05c;
+  --skin-warning-light: #fff4d7;
+  --skin-danger: #f2545b;
+  --skin-danger-light: #ffdedf;
+  --skin-violet: #9d8df1;
+  --skin-violet-light: #edeaff;
+  --skin-muted: #adc7d3;
+  --skin-muted-light: #e6f0f4;
 }
 
 /* ============================================================
