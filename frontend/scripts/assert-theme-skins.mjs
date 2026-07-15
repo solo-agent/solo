@@ -82,17 +82,17 @@ const expectedRefresh = {
   blueprint: ['Light Modern', '明亮现代', '#74b4ee', '#c88bdd'],
   ultraviolet: ['GitHub Light', 'GitHub 浅色', '#54aeff', '#d2a8ff'],
   seasalt: ['Quiet Light', '静谧浅色', '#c4b7d7', '#91b3e0'],
-  tomato: ['Solarized Light', 'Solarized 浅色', '#73b8e6', '#e2c66f'],
-  matcha: ['Ayu Light', 'Ayu 浅色', '#74baf0', '#c6a1e4'],
-  bubblegum: ['Catppuccin Latte', 'Catppuccin 拿铁', '#89b4fa', '#cba6f7'],
-  lavender: ['Rosé Pine Dawn', 'Rosé Pine 黎明', '#9ccfd8', '#c4a7e7'],
-  sky: ['Gruvbox Light', 'Gruvbox 浅色', '#83a598', '#d3869b'],
+  tomato: ['Solarized Light', 'Solarized 浅色', '#e8aa63', '#75c1bc'],
+  matcha: ['Ayu Light', 'Ayu 浅色', '#f5ad66', '#c6a1e4'],
+  bubblegum: ['Catppuccin Latte', 'Catppuccin 拿铁', '#cba6f7', '#89b4fa'],
+  lavender: ['Rosé Pine Dawn', 'Rosé Pine 黎明', '#ebbcba', '#c4a7e7'],
+  sky: ['Gruvbox Light', 'Gruvbox 浅色', '#b8bb26', '#d3869b'],
 };
 const i18n = read('lib/i18n.ts');
 for (const [id, [englishName, chineseName, primary, accent]] of Object.entries(expectedRefresh)) {
   const blockStart = css.indexOf(`:root[data-skin="${id}"]`);
   const block = css.slice(blockStart, css.indexOf('\n}', blockStart)).toLowerCase();
-  if (!block.includes(primary) || !block.includes(accent)) {
+  if (!block.includes(`--skin-primary: ${primary};`) || !block.includes(`--skin-accent: ${accent};`)) {
     throw new Error(`${id} is missing its approved editor palette`);
   }
   const { labelKey } = themeOptions.find((option) => option.id === id);

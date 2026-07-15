@@ -408,16 +408,16 @@
 :root[data-skin="tomato"],
 [data-skin-preview="tomato"] {
   --skin-canvas: #fdf6e3;
-  --skin-primary: #73b8e6;
-  --skin-primary-light: #dceef8;
-  --skin-accent: #e2c66f;
-  --skin-accent-light: #f7edc9;
-  --skin-info: #75c1bc;
-  --skin-info-light: #dff1ef;
+  --skin-primary: #e8aa63;
+  --skin-primary-light: #f8e4cd;
+  --skin-accent: #75c1bc;
+  --skin-accent-light: #dff1ef;
+  --skin-info: #73b8e6;
+  --skin-info-light: #dceef8;
   --skin-success: #a9b858;
   --skin-success-light: #edf0cf;
-  --skin-warning: #e8aa63;
-  --skin-warning-light: #f8e4cd;
+  --skin-warning: #e2c66f;
+  --skin-warning-light: #f7edc9;
   --skin-danger: #e27d61;
   --skin-danger-light: #f7ddd4;
   --skin-violet: #aaa8df;
@@ -429,8 +429,8 @@
 :root[data-skin="matcha"],
 [data-skin-preview="matcha"] {
   --skin-canvas: #fafafa;
-  --skin-primary: #74baf0;
-  --skin-primary-light: #dfeffc;
+  --skin-primary: #f5ad66;
+  --skin-primary-light: #fde8d0;
   --skin-accent: #c6a1e4;
   --skin-accent-light: #efe3f7;
   --skin-info: #7ac6dd;
@@ -450,10 +450,10 @@
 :root[data-skin="bubblegum"],
 [data-skin-preview="bubblegum"] {
   --skin-canvas: #eff1f5;
-  --skin-primary: #89b4fa;
-  --skin-primary-light: #dce9fd;
-  --skin-accent: #cba6f7;
-  --skin-accent-light: #efe3fd;
+  --skin-primary: #cba6f7;
+  --skin-primary-light: #efe3fd;
+  --skin-accent: #89b4fa;
+  --skin-accent-light: #dce9fd;
   --skin-info: #89dceb;
   --skin-info-light: #def5f8;
   --skin-success: #a6e3a1;
@@ -471,8 +471,8 @@
 :root[data-skin="lavender"],
 [data-skin-preview="lavender"] {
   --skin-canvas: #faf4ed;
-  --skin-primary: #9ccfd8;
-  --skin-primary-light: #e1f0f1;
+  --skin-primary: #ebbcba;
+  --skin-primary-light: #f8e6e4;
   --skin-accent: #c4a7e7;
   --skin-accent-light: #ede5f6;
   --skin-info: #9ccfd8;
@@ -481,8 +481,8 @@
   --skin-success-light: #e4ece2;
   --skin-warning: #f6c177;
   --skin-warning-light: #fce9cb;
-  --skin-danger: #ebbcba;
-  --skin-danger-light: #f8e6e4;
+  --skin-danger: #d99aaa;
+  --skin-danger-light: #f4dce1;
   --skin-violet: #c4a7e7;
   --skin-violet-light: #ede5f6;
   --skin-muted: #b9aaa4;
@@ -492,14 +492,14 @@
 :root[data-skin="sky"],
 [data-skin-preview="sky"] {
   --skin-canvas: #fbf1c7;
-  --skin-primary: #83a598;
-  --skin-primary-light: #d5e1d9;
+  --skin-primary: #b8bb26;
+  --skin-primary-light: #ecebad;
   --skin-accent: #d3869b;
   --skin-accent-light: #f0d6dc;
-  --skin-info: #8ec07c;
-  --skin-info-light: #dce8cf;
-  --skin-success: #b8bb26;
-  --skin-success-light: #ecebad;
+  --skin-info: #83a598;
+  --skin-info-light: #d5e1d9;
+  --skin-success: #8ec07c;
+  --skin-success-light: #dce8cf;
   --skin-warning: #fabd2f;
   --skin-warning-light: #fbe8a3;
   --skin-danger: #fb4934;
