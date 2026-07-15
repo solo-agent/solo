@@ -27,6 +27,8 @@ const spaceMono = Space_Mono({
   variable: "--font-space-mono",
 });
 
+const themeScript = `try{const skin=localStorage.getItem("solo.skin");document.documentElement.dataset.skin=["classic","blueprint","ultraviolet","seasalt","tomato","matcha","bubblegum","lavender","sky"].includes(skin)?skin:"classic"}catch{}`;
+
 export const metadata: Metadata = {
   title: t('appTitle'),
   description: t('appDescription'),
@@ -43,8 +45,13 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      data-skin="classic"
+      suppressHydrationWarning
       className={`${inter.variable} ${spaceGrotesk.variable} ${spaceMono.variable}`}
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body className="min-h-screen antialiased">
         <AuthProvider>
           <WSProvider>
