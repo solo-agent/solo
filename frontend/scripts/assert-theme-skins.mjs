@@ -78,6 +78,29 @@ for (const { id } of themeOptions) {
   if (!css.includes(`data-skin-preview="${id}"`)) throw new Error(`Missing preview CSS for ${id}`);
 }
 
+const expectedRefresh = {
+  blueprint: ['Light Modern', '明亮现代', '#74b4ee', '#c88bdd'],
+  ultraviolet: ['GitHub Light', 'GitHub 浅色', '#54aeff', '#d2a8ff'],
+  seasalt: ['Quiet Light', '静谧浅色', '#c4b7d7', '#91b3e0'],
+  tomato: ['Solarized Light', 'Solarized 浅色', '#73b8e6', '#e2c66f'],
+  matcha: ['Ayu Light', 'Ayu 浅色', '#74baf0', '#c6a1e4'],
+  bubblegum: ['Catppuccin Latte', 'Catppuccin 拿铁', '#89b4fa', '#cba6f7'],
+  lavender: ['Rosé Pine Dawn', 'Rosé Pine 黎明', '#9ccfd8', '#c4a7e7'],
+  sky: ['Gruvbox Light', 'Gruvbox 浅色', '#83a598', '#d3869b'],
+};
+const i18n = read('lib/i18n.ts');
+for (const [id, [englishName, chineseName, primary, accent]] of Object.entries(expectedRefresh)) {
+  const blockStart = css.indexOf(`:root[data-skin="${id}"]`);
+  const block = css.slice(blockStart, css.indexOf('\n}', blockStart)).toLowerCase();
+  if (!block.includes(primary) || !block.includes(accent)) {
+    throw new Error(`${id} is missing its approved editor palette`);
+  }
+  const { labelKey } = themeOptions.find((option) => option.id === id);
+  for (const name of [englishName, chineseName]) {
+    if (!i18n.includes(`${labelKey}: '${name}'`)) throw new Error(`${id} is missing the name ${name}`);
+  }
+}
+
 const layout = read('app/layout.tsx');
 for (const needle of ['data-skin="classic"', 'suppressHydrationWarning', 'solo.skin']) {
   if (!layout.includes(needle)) throw new Error(`Layout is missing ${needle}`);

@@ -344,170 +344,170 @@
 
 :root[data-skin="blueprint"],
 [data-skin-preview="blueprint"] {
-  --skin-canvas: #f3f7ff;
-  --skin-primary: #3b82f6;
-  --skin-primary-light: #dceaff;
-  --skin-accent: #ff5d8f;
-  --skin-accent-light: #ffd9e5;
-  --skin-info: #38cfe8;
-  --skin-info-light: #ddf8fc;
-  --skin-success: #79d58c;
-  --skin-success-light: #e3f7e7;
-  --skin-warning: #ffbc51;
-  --skin-warning-light: #fff0d5;
-  --skin-danger: #ff5f68;
-  --skin-danger-light: #ffe0e3;
-  --skin-violet: #a78bfa;
-  --skin-violet-light: #eee9ff;
-  --skin-muted: #b9c5d3;
-  --skin-muted-light: #edf1f5;
+  --skin-canvas: #ffffff;
+  --skin-primary: #74b4ee;
+  --skin-primary-light: #dceeff;
+  --skin-accent: #c88bdd;
+  --skin-accent-light: #f1dcf5;
+  --skin-info: #8ac6f2;
+  --skin-info-light: #e4f3ff;
+  --skin-success: #79c69a;
+  --skin-success-light: #e3f4e9;
+  --skin-warning: #e3c36b;
+  --skin-warning-light: #fff5d6;
+  --skin-danger: #f0a6a0;
+  --skin-danger-light: #fce5e3;
+  --skin-violet: #c88bdd;
+  --skin-violet-light: #f1dcf5;
+  --skin-muted: #b9b9b9;
+  --skin-muted-light: #eeeeee;
 }
 
 :root[data-skin="ultraviolet"],
 [data-skin-preview="ultraviolet"] {
-  --skin-canvas: #fbf6ff;
-  --skin-primary: #b47cff;
-  --skin-primary-light: #eee0ff;
-  --skin-accent: #51d6be;
-  --skin-accent-light: #ddf8f2;
-  --skin-info: #6ca8ff;
-  --skin-info-light: #e2eeff;
-  --skin-success: #82d38b;
-  --skin-success-light: #e4f6e8;
-  --skin-warning: #ffc857;
-  --skin-warning-light: #fff2d8;
-  --skin-danger: #ff6b75;
-  --skin-danger-light: #ffe3e5;
-  --skin-violet: #8d74d8;
-  --skin-violet-light: #ece7fa;
-  --skin-muted: #c9bdd6;
-  --skin-muted-light: #f0eaf5;
+  --skin-canvas: #f6f8fa;
+  --skin-primary: #54aeff;
+  --skin-primary-light: #ddf4ff;
+  --skin-accent: #d2a8ff;
+  --skin-accent-light: #f1e5ff;
+  --skin-info: #54aeff;
+  --skin-info-light: #ddf4ff;
+  --skin-success: #56d364;
+  --skin-success-light: #dafbe1;
+  --skin-warning: #e3b341;
+  --skin-warning-light: #fff8c5;
+  --skin-danger: #ff7b72;
+  --skin-danger-light: #ffebe9;
+  --skin-violet: #d2a8ff;
+  --skin-violet-light: #f1e5ff;
+  --skin-muted: #afb8c1;
+  --skin-muted-light: #eaeef2;
 }
 
 :root[data-skin="seasalt"],
 [data-skin-preview="seasalt"] {
-  --skin-canvas: #f1fff9;
-  --skin-primary: #36c9a5;
-  --skin-primary-light: #d7f8ec;
-  --skin-accent: #ff7a59;
-  --skin-accent-light: #ffe2db;
-  --skin-info: #5a8dee;
-  --skin-info-light: #e0e9ff;
-  --skin-success: #75c56b;
-  --skin-success-light: #e3f4e0;
-  --skin-warning: #ffcb57;
-  --skin-warning-light: #fff3d4;
-  --skin-danger: #f45b69;
-  --skin-danger-light: #ffdfe3;
-  --skin-violet: #8e7df2;
-  --skin-violet-light: #ece9ff;
-  --skin-muted: #adc9bf;
-  --skin-muted-light: #e7f2ee;
+  --skin-canvas: #f5f5f5;
+  --skin-primary: #c4b7d7;
+  --skin-primary-light: #ede8f4;
+  --skin-accent: #91b3e0;
+  --skin-accent-light: #e3edf9;
+  --skin-info: #91b3e0;
+  --skin-info-light: #e3edf9;
+  --skin-success: #b8cf9e;
+  --skin-success-light: #e9f0e2;
+  --skin-warning: #e1c384;
+  --skin-warning-light: #f9f0dd;
+  --skin-danger: #e9aaa3;
+  --skin-danger-light: #f9e6e4;
+  --skin-violet: #bca3d8;
+  --skin-violet-light: #ece3f5;
+  --skin-muted: #bfc2bb;
+  --skin-muted-light: #e7e8e5;
 }
 
 :root[data-skin="tomato"],
 [data-skin-preview="tomato"] {
-  --skin-canvas: #fff5ef;
-  --skin-primary: #ff624a;
-  --skin-primary-light: #ffe2db;
-  --skin-accent: #4f9dff;
-  --skin-accent-light: #ddebff;
-  --skin-info: #56d6c9;
-  --skin-info-light: #ddf8f3;
-  --skin-success: #75c76d;
-  --skin-success-light: #e3f4e0;
-  --skin-warning: #ffc24c;
-  --skin-warning-light: #fff0d1;
-  --skin-danger: #e9435c;
-  --skin-danger-light: #ffdbe1;
-  --skin-violet: #a889e8;
-  --skin-violet-light: #efe8fa;
-  --skin-muted: #c8b7af;
-  --skin-muted-light: #f0e9e5;
+  --skin-canvas: #fdf6e3;
+  --skin-primary: #73b8e6;
+  --skin-primary-light: #dceef8;
+  --skin-accent: #e2c66f;
+  --skin-accent-light: #f7edc9;
+  --skin-info: #75c1bc;
+  --skin-info-light: #dff1ef;
+  --skin-success: #a9b858;
+  --skin-success-light: #edf0cf;
+  --skin-warning: #e8aa63;
+  --skin-warning-light: #f8e4cd;
+  --skin-danger: #e27d61;
+  --skin-danger-light: #f7ddd4;
+  --skin-violet: #aaa8df;
+  --skin-violet-light: #eae9f7;
+  --skin-muted: #b9b39e;
+  --skin-muted-light: #eee8d5;
 }
 
 :root[data-skin="matcha"],
 [data-skin-preview="matcha"] {
-  --skin-canvas: #f6ffe9;
-  --skin-primary: #a4d936;
-  --skin-primary-light: #ecf8c9;
-  --skin-accent: #5577ff;
-  --skin-accent-light: #e0e6ff;
-  --skin-info: #4fc3d7;
-  --skin-info-light: #ddf6f9;
-  --skin-success: #60bf70;
-  --skin-success-light: #dff3e3;
-  --skin-warning: #ffc857;
-  --skin-warning-light: #fff2d8;
-  --skin-danger: #f25f5c;
-  --skin-danger-light: #ffe0df;
-  --skin-violet: #9b85e8;
-  --skin-violet-light: #ede9fa;
-  --skin-muted: #b8c39b;
-  --skin-muted-light: #eaf0dc;
+  --skin-canvas: #fafafa;
+  --skin-primary: #74baf0;
+  --skin-primary-light: #dfeffc;
+  --skin-accent: #c6a1e4;
+  --skin-accent-light: #efe3f7;
+  --skin-info: #7ac6dd;
+  --skin-info-light: #e0f3f8;
+  --skin-success: #b0cd61;
+  --skin-success-light: #eef4d7;
+  --skin-warning: #f6c568;
+  --skin-warning-light: #fff0cb;
+  --skin-danger: #f39a9a;
+  --skin-danger-light: #fde1e1;
+  --skin-violet: #c6a1e4;
+  --skin-violet-light: #efe3f7;
+  --skin-muted: #b5babd;
+  --skin-muted-light: #ededed;
 }
 
 :root[data-skin="bubblegum"],
 [data-skin-preview="bubblegum"] {
-  --skin-canvas: #fff2f8;
-  --skin-primary: #ff78b7;
-  --skin-primary-light: #ffdded;
-  --skin-accent: #4fd1c5;
-  --skin-accent-light: #dcf7f3;
-  --skin-info: #70a5ff;
-  --skin-info-light: #e3ecff;
-  --skin-success: #78ce86;
-  --skin-success-light: #e3f6e7;
-  --skin-warning: #ffca58;
-  --skin-warning-light: #fff3d9;
-  --skin-danger: #f05268;
-  --skin-danger-light: #ffdfe5;
-  --skin-violet: #b794f4;
-  --skin-violet-light: #eee7ff;
-  --skin-muted: #d1b5c4;
-  --skin-muted-light: #f3e8ee;
+  --skin-canvas: #eff1f5;
+  --skin-primary: #89b4fa;
+  --skin-primary-light: #dce9fd;
+  --skin-accent: #cba6f7;
+  --skin-accent-light: #efe3fd;
+  --skin-info: #89dceb;
+  --skin-info-light: #def5f8;
+  --skin-success: #a6e3a1;
+  --skin-success-light: #e5f5e3;
+  --skin-warning: #f9e2af;
+  --skin-warning-light: #fbf2de;
+  --skin-danger: #f38ba8;
+  --skin-danger-light: #fadce5;
+  --skin-violet: #cba6f7;
+  --skin-violet-light: #efe3fd;
+  --skin-muted: #9ca0b0;
+  --skin-muted-light: #dce0e8;
 }
 
 :root[data-skin="lavender"],
 [data-skin-preview="lavender"] {
-  --skin-canvas: #f8f5ff;
-  --skin-primary: #9b82f3;
-  --skin-primary-light: #e8e0ff;
-  --skin-accent: #ffdb4d;
-  --skin-accent-light: #fff5c7;
-  --skin-info: #5eb9e8;
-  --skin-info-light: #dff3fb;
-  --skin-success: #7bc987;
-  --skin-success-light: #e5f4e7;
-  --skin-warning: #ffb357;
-  --skin-warning-light: #ffebd5;
-  --skin-danger: #f3616d;
-  --skin-danger-light: #ffe1e4;
-  --skin-violet: #c0a9ff;
-  --skin-violet-light: #f0ebff;
-  --skin-muted: #bfb4d4;
-  --skin-muted-light: #ece8f3;
+  --skin-canvas: #faf4ed;
+  --skin-primary: #9ccfd8;
+  --skin-primary-light: #e1f0f1;
+  --skin-accent: #c4a7e7;
+  --skin-accent-light: #ede5f6;
+  --skin-info: #9ccfd8;
+  --skin-info-light: #e1f0f1;
+  --skin-success: #a3bea3;
+  --skin-success-light: #e4ece2;
+  --skin-warning: #f6c177;
+  --skin-warning-light: #fce9cb;
+  --skin-danger: #ebbcba;
+  --skin-danger-light: #f8e6e4;
+  --skin-violet: #c4a7e7;
+  --skin-violet-light: #ede5f6;
+  --skin-muted: #b9aaa4;
+  --skin-muted-light: #f2e9e1;
 }
 
 :root[data-skin="sky"],
 [data-skin-preview="sky"] {
-  --skin-canvas: #effaff;
-  --skin-primary: #55beeb;
-  --skin-primary-light: #d7f3ff;
-  --skin-accent: #ff8a4c;
-  --skin-accent-light: #ffe4d6;
-  --skin-info: #6388ff;
-  --skin-info-light: #e3e9ff;
-  --skin-success: #67c78a;
-  --skin-success-light: #e1f3e7;
-  --skin-warning: #ffd05c;
-  --skin-warning-light: #fff4d7;
-  --skin-danger: #f2545b;
-  --skin-danger-light: #ffdedf;
-  --skin-violet: #9d8df1;
-  --skin-violet-light: #edeaff;
-  --skin-muted: #adc7d3;
-  --skin-muted-light: #e6f0f4;
+  --skin-canvas: #fbf1c7;
+  --skin-primary: #83a598;
+  --skin-primary-light: #d5e1d9;
+  --skin-accent: #d3869b;
+  --skin-accent-light: #f0d6dc;
+  --skin-info: #8ec07c;
+  --skin-info-light: #dce8cf;
+  --skin-success: #b8bb26;
+  --skin-success-light: #ecebad;
+  --skin-warning: #fabd2f;
+  --skin-warning-light: #fbe8a3;
+  --skin-danger: #fb4934;
+  --skin-danger-light: #f8c3b9;
+  --skin-violet: #d3869b;
+  --skin-violet-light: #f0d6dc;
+  --skin-muted: #a89984;
+  --skin-muted-light: #ebdbb2;
 }
 
 /* ============================================================
