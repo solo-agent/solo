@@ -363,6 +363,9 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	case "thread_unfollow":
 		serverPath = "/api/v1/threads/unfollow"
 		serverBody, _ = json.Marshal(map[string]string{"target": req.Content})
+	case "team_form":
+		serverPath = "/api/v1/team-formations"
+		serverBody = []byte(req.Content)
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown action: " + req.Action})
 		return
@@ -396,7 +399,11 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		httpReq.Header.Set("Authorization", "Bearer "+tok)
 
-		resp, fwdErr := h.httpClient.Do(httpReq)
+		client := h.httpClient
+		if req.Action == "team_form" {
+			client = cloneHTTPClientWithTimeout(h.httpClient, 55*time.Second)
+		}
+		resp, fwdErr := client.Do(httpReq)
 		if fwdErr != nil {
 			return nil, nil, fwdErr
 		}
@@ -431,6 +438,12 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	w.Write(body)
+}
+
+func cloneHTTPClientWithTimeout(client *http.Client, timeout time.Duration) *http.Client {
+	clone := *client
+	clone.Timeout = timeout
+	return &clone
 }
 
 // getProvider returns the LLM provider for the given provider type.

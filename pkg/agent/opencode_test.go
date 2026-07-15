@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -50,8 +51,11 @@ func TestOpenCodeExecute_ExecLookPathNotFound(t *testing.T) {
 }
 
 func TestOpenCodeStartReturnsAfterSessionNewBeforePromptCompletes(t *testing.T) {
-	fake := filepath.Join(t.TempDir(), "opencode")
-	script := `#!/bin/sh
+	tempDir := t.TempDir()
+	fake := filepath.Join(tempDir, "opencode")
+	promptStarted := filepath.Join(tempDir, "prompt-started")
+	releasePrompt := filepath.Join(tempDir, "release-prompt")
+	script := fmt.Sprintf(`#!/bin/sh
 while IFS= read -r line; do
   case "$line" in
     *'"method":"initialize"'*)
@@ -61,11 +65,13 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":1,"result":{"sessionId":"opencode-session-1"}}\n'
       ;;
     *'"method":"session/prompt"'*)
-      sleep 5
+	  : > %q
+	  while [ ! -f %q ]; do sleep 0.01; done
+	  printf '{"jsonrpc":"2.0","id":2,"result":{"stopReason":"end_turn"}}\n'
       ;;
   esac
 done
-`
+`, promptStarted, releasePrompt)
 	if err := os.WriteFile(fake, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +101,21 @@ done
 		if ps.SessionID != "opencode-session-1" {
 			t.Fatalf("SessionID = %q, want opencode-session-1", ps.SessionID)
 		}
-	case <-time.After(500 * time.Millisecond):
+		if _, err := os.Stat(promptStarted); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("stat prompt marker: %v", err)
+		}
+		if err := os.WriteFile(releasePrompt, nil, 0o600); err != nil {
+			t.Fatalf("release prompt: %v", err)
+		}
+		select {
+		case result := <-ps.Result:
+			if result == nil || result.Status != "completed" {
+				t.Fatalf("prompt result = %#v, want completed", result)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("initial prompt did not complete after release")
+		}
+	case <-time.After(5 * time.Second):
 		cancel()
 		t.Fatal("Start did not return before session/prompt completed")
 	}

@@ -36,16 +36,16 @@ type healthResponse struct {
 }
 
 var (
-	startTime        = time.Now()
-	daemonID         string
-	serverURL        string
-	internalToken    string
-	llmProvider      llm.Provider
-	dbPool           *pgxpool.Pool
-	machineLock      *agent.MachineLock
-	taskMgr          *taskManager
-		daemonH          *daemonHandler
-	workspaceMgr     *agent.WorkspaceManager
+	startTime     = time.Now()
+	daemonID      string
+	serverURL     string
+	internalToken string
+	llmProvider   llm.Provider
+	dbPool        *pgxpool.Pool
+	machineLock   *agent.MachineLock
+	taskMgr       *taskManager
+	daemonH       *daemonHandler
+	workspaceMgr  *agent.WorkspaceManager
 )
 
 func main() {
@@ -57,7 +57,7 @@ func main() {
 
 	daemonID = cfg.DaemonID
 	serverURL = cfg.ServerURL
-	internalToken = cfg.JWTSecret // Use JWT secret as internal token for dev
+	internalToken = resolveInternalToken(os.Getenv("INTERNAL_TOKEN_SECRET"), cfg.JWTSecret)
 
 	port := os.Getenv("DAEMON_PORT")
 	if port == "" {
@@ -142,11 +142,11 @@ func main() {
 
 	// Internal daemon endpoints (called by server)
 	r.Route("/internal/daemon/tasks/{taskID}", func(r chi.Router) {
-		r.Get("/events", h.TaskEvents)   // SSE event stream
-		r.Post("/cancel", h.CancelTask)   // Cancel running task
+		r.Get("/events", h.TaskEvents)  // SSE event stream
+		r.Post("/cancel", h.CancelTask) // Cancel running task
 	})
 	r.Route("/internal/daemon", func(r chi.Router) {
-		r.Post("/run", h.Run)           // Server dispatches agent tasks here
+		r.Post("/run", h.Run)            // Server dispatches agent tasks here
 		r.Post("/proxy", h.ProxyRequest) // Agent-to-server proxy
 		r.Route("/workspace", func(r chi.Router) {
 			r.Get("/list", h.HandleWorkspaceList)
@@ -176,7 +176,6 @@ func main() {
 			os.Exit(1)
 		}
 	}()
-
 
 	// Register with server on startup
 	if err := registerWithServer(ctx); err != nil {
@@ -210,6 +209,13 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("daemon server stopped")
+}
+
+func resolveInternalToken(configuredToken, jwtSecret string) string {
+	if configuredToken != "" {
+		return configuredToken
+	}
+	return jwtSecret
 }
 
 // registerWithServer sends a registration request to the server.
@@ -414,13 +420,13 @@ type daemonRegisterResponse struct {
 }
 
 type daemonHeartbeatPayload struct {
-	DaemonID    string                                  `json:"daemon_id"`
-	Load        int32                                   `json:"load"`
-	MaxLoad     int                                     `json:"max_load"`
-	UptimeSec   int64                                   `json:"uptime_seconds"`
-	ActiveTasks []string                                `json:"active_tasks"`
-	AgentIDs    []string                                `json:"agent_ids"`
-	SystemInfo  SystemInfo                              `json:"system_info"`
+	DaemonID    string     `json:"daemon_id"`
+	Load        int32      `json:"load"`
+	MaxLoad     int        `json:"max_load"`
+	UptimeSec   int64      `json:"uptime_seconds"`
+	ActiveTasks []string   `json:"active_tasks"`
+	AgentIDs    []string   `json:"agent_ids"`
+	SystemInfo  SystemInfo `json:"system_info"`
 	// Skills are served on-demand via /internal/daemon/skills, not in heartbeat.
 }
 
@@ -537,7 +543,6 @@ func agentWorkspaceRoots(provider, wsDir string) []skillloader.SkillRoot {
 		return nil
 	}
 }
-
 
 // writeJSON writes a JSON response.
 func writeJSON(w http.ResponseWriter, status int, v any) {

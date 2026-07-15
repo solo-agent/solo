@@ -90,6 +90,10 @@ func (s *ComputerService) GetComputer(ctx context.Context, id, userID string) (*
 		c.DaemonURL = *daemonURL
 	}
 	c.LastHeartbeat = lastHeartbeat
+	c.AgentIDs, err = s.activeAgentIDs(ctx, c.AgentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get computer active agents: %w", err)
+	}
 
 	return &c, nil
 }
@@ -124,6 +128,10 @@ func (s *ComputerService) ListComputers(ctx context.Context, userID string) ([]C
 		c.DaemonID = daemonID
 		c.DaemonURL = daemonURL
 		c.LastHeartbeat = lastHeartbeat
+		c.AgentIDs, err = s.activeAgentIDs(ctx, c.AgentIDs)
+		if err != nil {
+			return nil, fmt.Errorf("list computers active agents: %w", err)
+		}
 		c.MyRole = role
 		computers = append(computers, c)
 	}
@@ -167,6 +175,10 @@ func (s *ComputerService) UpdateComputer(ctx context.Context, id, userID, name s
 		c.DaemonURL = *daemonURL
 	}
 	c.LastHeartbeat = lastHeartbeat
+	c.AgentIDs, err = s.activeAgentIDs(ctx, c.AgentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("update computer active agents: %w", err)
+	}
 
 	return &c, nil
 }
@@ -220,11 +232,15 @@ func (s *ComputerService) UpsertComputerByDaemonID(ctx context.Context, daemonID
 // re-register to recreate the missing row.
 func (s *ComputerService) UpdateHeartbeat(ctx context.Context, daemonID, daemonURL string, agentIDs []string, sysinfo ComputerSystemInfo) error {
 	now := time.Now()
+	activeAgentIDs, err := s.activeAgentIDs(ctx, agentIDs)
+	if err != nil {
+		return fmt.Errorf("update heartbeat active agents: %w", err)
+	}
 	result, err := s.pool.Exec(ctx,
 		`UPDATE computers SET status = 'online', last_heartbeat = $1, daemon_url = $2,
 		        agent_ids = $3, os = $4, hostname = $5, ip = $6, updated_at = $1
 		 WHERE daemon_id = $7`,
-		now, daemonURL, agentIDs, sysinfo.OS, sysinfo.Hostname, sysinfo.IP, daemonID,
+		now, daemonURL, activeAgentIDs, sysinfo.OS, sysinfo.Hostname, sysinfo.IP, daemonID,
 	)
 	if err != nil {
 		return fmt.Errorf("update heartbeat: %w", err)
@@ -233,6 +249,37 @@ func (s *ComputerService) UpdateHeartbeat(ctx context.Context, daemonID, daemonU
 		return fmt.Errorf("update heartbeat: no computer with daemon_id %s", daemonID)
 	}
 	return nil
+}
+
+func (s *ComputerService) activeAgentIDs(ctx context.Context, ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return []string{}, nil
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id::text FROM agents WHERE id = ANY($1::uuid[]) AND is_active = true`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	active := make(map[string]bool, len(ids))
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		active[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]string, 0, len(active))
+	for _, id := range ids {
+		if active[id] {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 // MarkOffline marks computers as offline where last_heartbeat is older than

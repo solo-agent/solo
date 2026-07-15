@@ -64,11 +64,15 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 			close(msgCh)
 			close(resCh)
 		},
+		onTurnFailed: func(err error) {
+			resCh <- &Result{Status: "failed", Error: err.Error()}
+			close(msgCh)
+			close(resCh)
+		},
 	}
 
 	// Start reader goroutine for process lifetime.
 	go func() {
-		defer close(runner.done)
 		scanner := bufio.NewScanner(runner.stdout)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 		for scanner.Scan() {
@@ -78,7 +82,16 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 			}
 			c.handleLine(line)
 		}
-		c.closeAllPending(fmt.Errorf("codex process exited"))
+		processErr := fmt.Errorf("codex process exited unexpectedly")
+		if err := scanner.Err(); err != nil {
+			processErr = fmt.Errorf("codex process output failed: %w", err)
+		}
+		c.closeAllPending(processErr)
+		// Publish process death before the failed turn result so callers cannot
+		// acquire the released turn lock and briefly reuse a dead session.
+		runner.cancel()
+		runner.finish()
+		c.signalTurnFailure(processErr)
 	}()
 
 	// Initialize handshake.
@@ -142,13 +155,21 @@ func (b *CodexBackend) Send(ctx context.Context, ps *PersistentSession, messages
 	msgCh := make(chan OutputChunk, 256)
 	resCh := make(chan *Result, 1)
 
-	// Redirect client callbacks to this turn's channels.
+	// Redirect client callbacks to this turn's channels and reset terminal
+	// deduplication before starting the next turn.
 	state.client.onChunk = func(chunk OutputChunk) { trySend(msgCh, chunk) }
-	state.client.onTurnDone = func(aborted bool) {
-		resCh <- codexTurnResult(aborted)
-		close(msgCh)
-		close(resCh)
-	}
+	state.client.prepareTurn(
+		func(aborted bool) {
+			resCh <- codexTurnResult(aborted)
+			close(msgCh)
+			close(resCh)
+		},
+		func(err error) {
+			resCh <- &Result{Status: "failed", Error: err.Error()}
+			close(msgCh)
+			close(resCh)
+		},
+	)
 
 	if _, err := state.client.request(ctx, "turn/start", map[string]any{
 		"threadId": state.threadID,
@@ -290,6 +311,7 @@ func (b *CodexBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *E
 	var outputMu sync.Mutex
 	var output strings.Builder
 	turnDone := make(chan bool, 1) // true = aborted
+	turnFailed := make(chan error, 1)
 
 	// Use a package-level helper constant to represent turn done sentinel.
 	const turnNotAborted = false
@@ -316,6 +338,12 @@ func (b *CodexBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *E
 			default:
 			}
 		},
+		onTurnFailed: func(err error) {
+			select {
+			case turnFailed <- err:
+			default:
+			}
+		},
 	}
 
 	// Start reading stdout in background.
@@ -331,7 +359,12 @@ func (b *CodexBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *E
 			}
 			c.handleLine(line)
 		}
-		c.closeAllPending(fmt.Errorf("codex process exited"))
+		processErr := fmt.Errorf("codex process exited unexpectedly")
+		if err := scanner.Err(); err != nil {
+			processErr = fmt.Errorf("codex process output failed: %w", err)
+		}
+		c.closeAllPending(processErr)
+		c.signalTurnFailure(processErr)
 	}()
 
 	var waitOnce sync.Once
@@ -434,6 +467,10 @@ func (b *CodexBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *E
 						finalError = errMsg
 					}
 				}
+			case err := <-turnFailed:
+				waitingForTurn = false
+				finalStatus = "failed"
+				finalError = err.Error()
 			case <-semanticTimer.C:
 				waitingForTurn = false
 				finalStatus = "timeout"
@@ -563,6 +600,7 @@ func buildCodexArgs(opts *ExecuteOptions) []string {
 // ── codexClient: JSON-RPC 2.0 transport ──
 
 type turnDoneCallback func(aborted bool)
+type turnFailedCallback func(error)
 
 type codexClient struct {
 	logger               *slog.Logger
@@ -575,9 +613,12 @@ type codexClient struct {
 	onChunk              func(OutputChunk)
 	onSemanticActivity   func(description string)
 	onTurnDone           turnDoneCallback
+	onTurnFailed         turnFailedCallback
 	notificationProtocol string
 	turnStarted          bool
 	completedTurnIDs     map[string]bool
+	turnDoneMu           sync.Mutex
+	turnDone             bool
 
 	usageMu sync.Mutex
 	usage   TokenUsage
@@ -751,7 +792,11 @@ func (c *codexClient) handleNotification(raw map[string]json.RawMessage) {
 	}
 
 	if method == "codex/event" || strings.HasPrefix(method, "codex/event/") {
-		c.notificationProtocol = "legacy"
+		if c.notificationProtocol == "raw" {
+			c.notificationProtocol = "mixed"
+		} else if c.notificationProtocol == "" || c.notificationProtocol == "unknown" {
+			c.notificationProtocol = "legacy"
+		}
 		msgData, ok := params["msg"]
 		if !ok {
 			return
@@ -764,15 +809,71 @@ func (c *codexClient) handleNotification(raw map[string]json.RawMessage) {
 		return
 	}
 
-	if c.notificationProtocol != "legacy" {
-		if c.notificationProtocol == "unknown" &&
-			(method == "turn/started" || method == "turn/completed" ||
-				method == "thread/started" || strings.HasPrefix(method, "item/")) {
-			c.notificationProtocol = "raw"
+	// Current Codex app-server versions can emit legacy codex/event payloads for
+	// item activity and standard JSON-RPC notifications for lifecycle events in
+	// the same turn. Always route non-legacy notifications through the standard
+	// handler so turn/completed cannot be silently ignored after a legacy event.
+	if c.notificationProtocol == "legacy" {
+		c.notificationProtocol = "mixed"
+	} else if c.notificationProtocol == "" || c.notificationProtocol == "unknown" {
+		c.notificationProtocol = "raw"
+	}
+	c.handleRawNotification(method, params)
+}
+
+func (c *codexClient) prepareTurn(onDone turnDoneCallback, onFailed turnFailedCallback) {
+	c.turnDoneMu.Lock()
+	defer c.turnDoneMu.Unlock()
+	if c.turnDone && c.turnID != "" {
+		if c.completedTurnIDs == nil {
+			c.completedTurnIDs = map[string]bool{}
 		}
-		if c.notificationProtocol == "raw" {
-			c.handleRawNotification(method, params)
+		c.completedTurnIDs[c.turnID] = true
+	}
+	c.onTurnDone = onDone
+	c.onTurnFailed = onFailed
+	c.turnDone = false
+	c.turnStarted = false
+	c.turnID = ""
+}
+
+func (c *codexClient) signalTurnFailure(err error) {
+	c.turnDoneMu.Lock()
+	if c.turnDone {
+		c.turnDoneMu.Unlock()
+		return
+	}
+	c.turnDone = true
+	if c.turnID != "" {
+		if c.completedTurnIDs == nil {
+			c.completedTurnIDs = map[string]bool{}
 		}
+		c.completedTurnIDs[c.turnID] = true
+	}
+	onFailed := c.onTurnFailed
+	c.turnDoneMu.Unlock()
+	if onFailed != nil {
+		onFailed(err)
+	}
+}
+
+func (c *codexClient) signalTurnDone(aborted bool) {
+	c.turnDoneMu.Lock()
+	if c.turnDone {
+		c.turnDoneMu.Unlock()
+		return
+	}
+	c.turnDone = true
+	if c.turnID != "" {
+		if c.completedTurnIDs == nil {
+			c.completedTurnIDs = map[string]bool{}
+		}
+		c.completedTurnIDs[c.turnID] = true
+	}
+	onDone := c.onTurnDone
+	c.turnDoneMu.Unlock()
+	if onDone != nil {
+		onDone(aborted)
 	}
 }
 
@@ -826,13 +927,9 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 		}
 	case "task_complete":
 		c.extractUsageFromMap(msg)
-		if c.onTurnDone != nil {
-			c.onTurnDone(false)
-		}
+		c.signalTurnDone(false)
 	case "turn_aborted":
-		if c.onTurnDone != nil {
-			c.onTurnDone(true)
-		}
+		c.signalTurnDone(true)
 	}
 }
 
@@ -880,9 +977,7 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 
 		aborted := status == "cancelled" || status == "canceled" ||
 			status == "aborted" || status == "interrupted"
-		if c.onTurnDone != nil {
-			c.onTurnDone(aborted)
-		}
+		c.signalTurnDone(aborted)
 
 	case "error":
 		willRetry, _ := params["willRetry"].(bool)
@@ -900,9 +995,7 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 	case "thread/status/changed":
 		statusType := extractNestedString(params, "status", "type")
 		if statusType == "idle" && c.turnStarted {
-			if c.onTurnDone != nil {
-				c.onTurnDone(false)
-			}
+			c.signalTurnDone(false)
 		}
 
 	default:
@@ -963,9 +1056,7 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 		}
 		phase, _ := item["phase"].(string)
 		if phase == "final_answer" && c.turnStarted {
-			if c.onTurnDone != nil {
-				c.onTurnDone(false)
-			}
+			c.signalTurnDone(false)
 		}
 	}
 }

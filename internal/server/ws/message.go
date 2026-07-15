@@ -54,11 +54,6 @@ const (
 	// Agent chunk events (SOLO-agent-view)
 	EventAgentChunk = "agent.chunk"
 
-	// Agent activity event (SOLO-island PR1) — derived from OutputChunk
-	// events, carries the island-facing status and a short activity_text
-	// summary. Powers the AgentIsland floating UI.
-	EventAgentActivity = "agent.activity"
-
 	EventAgentRunStarted  = "agent.run.started"
 	EventAgentRunUpdated  = "agent.run.updated"
 	EventAgentRunEvent    = "agent.run.event"
@@ -74,6 +69,9 @@ const (
 
 	// Inbox events (v1.5)
 	EventInboxUpdated = "inbox.updated"
+
+	// Lucy automatic team formation events.
+	EventTeamFormed = "team.formed"
 )
 
 // Envelope creates a JSON-encoded WSMessage for broadcasting.
@@ -201,23 +199,6 @@ type AgentChunkPayload struct {
 	ChunkType string   `json:"chunk_type"` // thinking, tool_use, tool_result, text, error
 	Content   string   `json:"content"`
 	Tool      *ToolRef `json:"tool,omitempty"`
-}
-
-// AgentActivityPayload is broadcast on agent.activity. It carries the
-// island-facing status and a one-line activity_text summary, derived by
-// the daemon from agent.OutputChunk events. Powers the AgentIsland
-// floating UI; replaces the previous chunk-based heuristic in
-// useAgentChunks for the island pill state.
-type AgentActivityPayload struct {
-	ChannelID        string `json:"channel_id"`
-	AgentID          string `json:"agent_id"`
-	AgentName        string `json:"agent_name,omitempty"`
-	Status           string `json:"status"`        // island status: idle | thinking | running | streaming | waiting_approval | error
-	ActivityText     string `json:"activity_text"` // one-line summary in zh-CN
-	ToolName         string `json:"tool_name,omitempty"`
-	ToolInputSummary string `json:"tool_input_summary,omitempty"` // e.g. "Bash: npm test"
-	Source           string `json:"source,omitempty"`             // claude | codex | gemini | kiro | ...; metadata only, not shown in UI
-	Timestamp        string `json:"timestamp"`
 }
 
 type AgentRunPayload struct {
@@ -399,4 +380,21 @@ type TaskDeletedPayload struct {
 	ID         string `json:"id"`
 	ChannelID  string `json:"channel_id"`
 	TaskNumber int    `json:"task_number"`
+}
+
+// TeamFormedPayload tells the owner's clients that Lucy atomically created a
+// new team channel. It is user-scoped because the target channel did not exist
+// when clients established their channel subscriptions.
+type TeamFormedPayload struct {
+	FormationID           string   `json:"formation_id"`
+	SourceChannelID       string   `json:"source_channel_id"`
+	SourceMessageID       string   `json:"source_message_id"`
+	ChannelID             string   `json:"channel_id"`
+	ChannelName           string   `json:"channel_name"`
+	MemberCount           int      `json:"member_count"`
+	TaskCount             int      `json:"task_count"`
+	RelationshipDocsReady bool     `json:"relationship_docs_ready"`
+	Warnings              []string `json:"warnings,omitempty"`
+	DashboardURL          string   `json:"dashboard_url"`
+	CreatedAt             string   `json:"created_at"`
 }

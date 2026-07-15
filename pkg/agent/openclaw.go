@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -107,7 +106,7 @@ type openclawPersistentState struct {
 	runner    *persistentRunner
 	client    *acpClient
 	sessionID string
-	turnFin   atomic.Bool // guards duplicate onPromptDone calls per turn
+	turns     acpTurnController
 }
 
 // Compile-time check.
@@ -118,8 +117,8 @@ func (s *openclawPersistentState) SessionID() string       { return s.sessionID 
 func (s *openclawPersistentState) Done() <-chan struct{}   { return s.runner.done }
 func (s *openclawPersistentState) Notify(msg string) error { return s.runner.write([]byte(msg)) }
 
-// Start creates a persistent OpenClaw session via ACP. The initial
-// handshake and prompt are processed synchronously before Start returns.
+// Start creates a persistent OpenClaw session via ACP. The handshake completes
+// before Start returns; the initial prompt continues asynchronously.
 func (b *OpenClawBackend) Start(ctx context.Context, req *ExecuteRequest, opts *ExecuteOptions) (*PersistentSession, error) {
 	execPath := b.executablePath
 	if _, err := exec.LookPath(execPath); err != nil {
@@ -139,41 +138,24 @@ func (b *OpenClawBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 	}
 
 	prompt := buildPrompt(req, opts)
-	msgCh := make(chan OutputChunk, 256)
-	resCh := make(chan *Result, 1)
-
-	var outputMu sync.Mutex
-	var output strings.Builder
-	turnDone := make(chan acpPromptResult, 1)
+	state := &openclawPersistentState{runner: runner}
+	turn, turnErr := state.turns.begin(opts.Model)
+	if turnErr != nil {
+		_ = runner.close()
+		return nil, fmt.Errorf("openclaw: begin initial turn: %w", turnErr)
+	}
 
 	cl := &acpClient{
 		logger:  b.logger,
 		stdin:   runner.stdin,
 		pending: make(map[int]*pendingRPC),
-		onChunk: func(chunk OutputChunk) {
-			if chunk.Type == string(MessageText) && chunk.Content != "" {
-				outputMu.Lock()
-				output.WriteString(chunk.Content)
-				outputMu.Unlock()
-			}
-			trySend(msgCh, chunk)
-		},
-		onPromptDone: func(pr acpPromptResult) {
-			select {
-			case turnDone <- pr:
-			default:
-			}
-		},
 	}
-
-	state := &openclawPersistentState{
-		runner: runner,
-		client: cl,
-	}
+	cl.setCallbacks(state.turns.emit, state.turns.recordPromptDone)
+	state.client = cl
 
 	// Start reader goroutine for process lifetime.
 	go func() {
-		defer close(state.runner.done)
+		defer state.runner.finish()
 		scanner := bufio.NewScanner(runner.stdout)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 		for scanner.Scan() {
@@ -184,23 +166,11 @@ func (b *OpenClawBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 			cl.handleLine(line)
 		}
 		cl.closeAllPending(fmt.Errorf("openclaw process exited"))
-
-		// If a turn is still active, signal failure.
-		if state.turnFin.CompareAndSwap(false, true) {
-			resCh <- &Result{Status: "failed", Error: "openclaw process exited unexpectedly"}
-			close(msgCh)
-			close(resCh)
-		}
+		state.turns.failActive("openclaw process exited unexpectedly")
 	}()
 
-	// Drive the initial handshake and prompt synchronously.
-	startTime := time.Now()
 	handleError := func(errMsg string) {
-		if state.turnFin.CompareAndSwap(false, true) {
-			resCh <- &Result{Status: "failed", Error: errMsg, DurationMs: time.Since(startTime).Milliseconds()}
-			close(msgCh)
-			close(resCh)
-		}
+		state.turns.finish(turn, acpPromptErrorStatus(ctx), errMsg)
 	}
 
 	// 1. Initialize handshake.
@@ -212,9 +182,9 @@ func (b *OpenClawBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 		},
 		"clientCapabilities": map[string]any{},
 	}); err != nil {
-		runner.close()
 		handleError(fmt.Sprintf("openclaw initialize failed: %v", err))
-		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		_ = runner.close()
+		return &PersistentSession{Messages: turn.msgCh, Result: turn.resCh, state: state}, nil
 	}
 
 	// 2. Create or resume session.
@@ -234,15 +204,15 @@ func (b *OpenClawBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 	if sessionID == "" {
 		result, err := cl.request(ctx, "session/new", buildOpenclawSessionParams(cwd, opts.Model))
 		if err != nil {
-			runner.close()
 			handleError(fmt.Sprintf("openclaw session/new failed: %v", err))
-			return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+			_ = runner.close()
+			return &PersistentSession{Messages: turn.msgCh, Result: turn.resCh, state: state}, nil
 		}
 		sessionID = extractACPSessionID(result)
 		if sessionID == "" {
-			runner.close()
 			handleError("openclaw session/new returned no session ID")
-			return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+			_ = runner.close()
+			return &PersistentSession{Messages: turn.msgCh, Result: turn.resCh, state: state}, nil
 		}
 	}
 	cl.sessionID = sessionID
@@ -267,29 +237,23 @@ func (b *OpenClawBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 		}, promptBlocks...)
 	}
 
-	trySend(msgCh, OutputChunk{Type: string(MessageStatus), Content: "running", SessionID: sessionID})
+	state.turns.emit(OutputChunk{Type: string(MessageStatus), Content: "running", SessionID: sessionID})
 
 	startACPInitialPromptTurn(acpInitialPromptTurn{
 		ctx:          ctx,
 		provider:     "openclaw",
-		model:        opts.Model,
 		sessionID:    sessionID,
 		promptBlocks: promptBlocks,
 		client:       cl,
-		msgCh:        msgCh,
-		resCh:        resCh,
-		turnDone:     turnDone,
-		output:       &output,
-		outputMu:     &outputMu,
-		turnFin:      &state.turnFin,
-		startTime:    startTime,
+		turns:        &state.turns,
+		turn:         turn,
 	})
 
 	var stopOnce sync.Once
 	stop := func() error { stopOnce.Do(func() { runner.cancel() }); return nil }
 	return &PersistentSession{
-		Messages:  msgCh,
-		Result:    resCh,
+		Messages:  turn.msgCh,
+		Result:    turn.resCh,
 		Stop:      stop,
 		SessionID: sessionID,
 		state:     state,
@@ -308,82 +272,34 @@ func (b *OpenClawBackend) Send(ctx context.Context, ps *PersistentSession, messa
 	}
 
 	prompt := buildPromptFromMessages(messages)
+	turn, err := state.turns.begin("")
+	if err != nil {
+		return nil, fmt.Errorf("openclaw: %w", err)
+	}
 
-	msgCh := make(chan OutputChunk, 256)
-	resCh := make(chan *Result, 1)
-
-	var outputMu sync.Mutex
-	var output strings.Builder
-	turnDone := make(chan acpPromptResult, 1)
-
-	// Redirect client callbacks to this turn's channels.
-	state.client.setCallbacks(
-		func(chunk OutputChunk) {
-			if chunk.Type == string(MessageText) && chunk.Content != "" {
-				outputMu.Lock()
-				output.WriteString(chunk.Content)
-				outputMu.Unlock()
-			}
-			trySend(msgCh, chunk)
-		},
-		func(pr acpPromptResult) {
-			select {
-			case turnDone <- pr:
-			default:
-			}
-		},
-	)
-
-	startTime := time.Now()
-	state.turnFin.Store(false)
-
-	if _, err := state.client.request(ctx, "session/prompt", map[string]any{
+	if _, err = state.client.request(ctx, "session/prompt", map[string]any{
 		"sessionId": state.sessionID,
 		"prompt": []map[string]any{
 			{"type": "text", "text": prompt, "role": "user"},
 		},
 	}); err != nil {
-		if state.turnFin.CompareAndSwap(false, true) {
-			close(msgCh)
-			close(resCh)
-		}
+		state.turns.finish(turn, acpPromptErrorStatus(ctx), err.Error())
 		return nil, fmt.Errorf("openclaw persistent session/prompt: %w", err)
 	}
 
-	var usage TokenUsage
-	select {
-	case pr := <-turnDone:
-		usage = pr.usage
-	default:
-	}
-
-	duration := time.Since(startTime)
-	outputMu.Lock()
-	finalOutput := output.String()
-	outputMu.Unlock()
-
-	if state.turnFin.CompareAndSwap(false, true) {
-		resCh <- &Result{
-			Status:     "completed",
-			Output:     finalOutput,
-			DurationMs: duration.Milliseconds(),
-			Usage:      buildACPUsageMap(usage, ""),
-		}
-		close(msgCh)
-		close(resCh)
-	}
+	state.turns.finish(turn, "completed", "")
 
 	b.logger.Info("openclaw: persistent turn completed via Send",
 		"session_id", state.sessionID,
-		"duration", duration.Round(time.Millisecond).String(),
+		"duration", time.Since(turn.startedAt).Round(time.Millisecond).String(),
 	)
 
 	var stopOnce sync.Once
 	stop := func() error { stopOnce.Do(func() {}); return nil }
 
 	return &PersistentSession{
-		Messages:  msgCh,
-		Result:    resCh,
+		Messages:  turn.msgCh,
+		Result:    turn.resCh,
 		Stop:      stop,
 		SessionID: state.sessionID,
 		state:     state,

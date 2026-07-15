@@ -206,6 +206,7 @@ type claudePersistentState struct {
 
 	// sessionID from Claude Code's "system" init message.
 	sessionID string
+	metaMu    sync.RWMutex
 
 	// initInfo captures the Claude Code `system/init` event payload
 	// (model, MCP servers, plugin errors) for the lifetime of the
@@ -224,10 +225,80 @@ type claudePersistentState struct {
 // turnState captures the per-turn streaming channels and accumulated output.
 // Created fresh for each Start/Send call and stored in claudePersistentState.turn.
 type turnState struct {
-	id     string
-	msgCh  chan OutputChunk
-	resCh  chan *Result
-	output strings.Builder
+	id         string
+	msgCh      chan OutputChunk
+	resCh      chan *Result
+	output     strings.Builder
+	startedAt  time.Time
+	finishOnce sync.Once
+}
+
+func newClaudeTurn() *turnState {
+	return &turnState{
+		id:        uuid.New().String(),
+		msgCh:     make(chan OutputChunk, 256),
+		resCh:     make(chan *Result, 1),
+		startedAt: time.Now(),
+	}
+}
+
+func (t *turnState) finish(result *Result) {
+	t.finishOnce.Do(func() {
+		close(t.msgCh)
+		t.resCh <- result
+		close(t.resCh)
+	})
+}
+
+func (s *claudePersistentState) beginTurn(turn *turnState) error {
+	if !s.turn.CompareAndSwap(nil, turn) {
+		return errors.New("claude: turn already in progress")
+	}
+	return nil
+}
+
+func (s *claudePersistentState) finishTurn(turn *turnState, result *Result) bool {
+	if turn == nil || !s.turn.CompareAndSwap(turn, nil) {
+		return false
+	}
+	turn.finish(result)
+	return true
+}
+
+func (s *claudePersistentState) sessionIDValue() string {
+	s.metaMu.RLock()
+	defer s.metaMu.RUnlock()
+	return s.sessionID
+}
+
+func (s *claudePersistentState) setSessionID(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	s.metaMu.Lock()
+	s.sessionID = sessionID
+	s.metaMu.Unlock()
+}
+
+func (s *claudePersistentState) setInitInfo(info *claudeInitInfo) {
+	if info == nil {
+		return
+	}
+	s.metaMu.Lock()
+	s.initInfo = info
+	s.metaMu.Unlock()
+}
+
+func (s *claudePersistentState) initInfoMap() map[string]any {
+	s.metaMu.RLock()
+	defer s.metaMu.RUnlock()
+	return s.initInfo.toMap()
+}
+
+func (s *claudePersistentState) setExitErr(err error) {
+	s.metaMu.Lock()
+	s.exitErr = err
+	s.metaMu.Unlock()
 }
 
 // ── SessionStater implementation ──────────────────────────────────────────────
@@ -236,7 +307,7 @@ func (s *claudePersistentState) IsAlive() bool {
 	return s.cmd.ProcessState == nil || !s.cmd.ProcessState.Exited()
 }
 
-func (s *claudePersistentState) SessionID() string { return s.sessionID }
+func (s *claudePersistentState) SessionID() string { return s.sessionIDValue() }
 
 func (s *claudePersistentState) Done() <-chan struct{} { return s.done }
 
@@ -309,22 +380,25 @@ func (b *ClaudeBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 		totalUsage: make(map[string]TokenUsage),
 	}
 
+	// Register the initial turn before writing the prompt so even a very fast
+	// CLI cannot emit events before a turn exists to receive them.
+	turn := newClaudeTurn()
+	if err := state.beginTurn(turn); err != nil {
+		_ = stdin.Close()
+		cancel()
+		_ = cmd.Wait()
+		return nil, err
+	}
+
 	// Write the initial prompt. Stdin stays OPEN for subsequent Send() calls.
 	prompt := buildPrompt(req, opts)
 	if err := writeClaudeInput(stdin, prompt); err != nil {
+		state.finishTurn(turn, &Result{Status: "failed", Error: err.Error()})
 		_ = stdin.Close()
 		cancel()
 		_ = cmd.Wait()
 		return nil, fmt.Errorf("claude: write input: %w", err)
 	}
-
-	// Create the initial turn.
-	turn := &turnState{
-		id:    uuid.New().String(),
-		msgCh: make(chan OutputChunk, 256),
-		resCh: make(chan *Result, 1),
-	}
-	state.turn.Store(turn)
 
 	go b.persistentStreamLoop(runCtx, state, timeout)
 
@@ -340,7 +414,7 @@ func (b *ClaudeBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 		Messages:  turn.msgCh,
 		Result:    turn.resCh,
 		Stop:      stop,
-		SessionID: state.sessionID,
+		SessionID: state.sessionIDValue(),
 		state:     state,
 	}, nil
 }
@@ -359,7 +433,7 @@ func (b *ClaudeBackend) persistentStreamLoop(
 	defer state.cancel()
 	defer close(state.done)
 
-	startTime := time.Now()
+	sessionStartedAt := time.Now()
 
 	go func() {
 		<-runCtx.Done()
@@ -404,7 +478,7 @@ func (b *ClaudeBackend) persistentStreamLoop(
 				var initEvt claudeInitEvent
 				if err := json.Unmarshal(rawLine, &initEvt); err == nil {
 					if info := b.handleSystemInit(initEvt); info != nil {
-						state.initInfo = info
+						state.setInitInfo(info)
 					}
 				}
 			case "api_retry":
@@ -438,15 +512,10 @@ func (b *ClaudeBackend) persistentStreamLoop(
 					res.Status = "failed"
 					res.Error = msg.ResultText
 				}
-				res.DurationMs = time.Since(startTime).Milliseconds()
-				if state.initInfo != nil {
-					res.InitInfo = state.initInfo.toMap()
-				}
-				close(turn.msgCh)
-				turn.resCh <- res
-				close(turn.resCh)
-				state.turn.Store(nil)
-				b.logger.Info("claude: turn completed", "turn_id", turn.id, "session_id", state.sessionID)
+				res.DurationMs = time.Since(turn.startedAt).Milliseconds()
+				res.InitInfo = state.initInfoMap()
+				state.finishTurn(turn, res)
+				b.logger.Info("claude: turn completed", "turn_id", turn.id, "session_id", state.sessionIDValue())
 			}
 
 		case "error":
@@ -456,41 +525,48 @@ func (b *ClaudeBackend) persistentStreamLoop(
 					Error:  msg.ErrorText,
 					Usage:  b.snapshotUsage(state),
 				}
-				if state.initInfo != nil {
-					res.InitInfo = state.initInfo.toMap()
-				}
-				close(turn.msgCh)
-				turn.resCh <- res
-				close(turn.resCh)
-				state.turn.Store(nil)
+				res.DurationMs = time.Since(turn.startedAt).Milliseconds()
+				res.InitInfo = state.initInfoMap()
+				state.finishTurn(turn, res)
 			}
 		}
 	}
 
-	// Process exited. Drain any remaining turn.
+	state.setExitErr(state.cmd.Wait())
+
+	// Process exited. Complete the currently active turn exactly once.
 	if turn := state.turn.Load(); turn != nil {
 		errMsg := "subprocess exited unexpectedly"
-		if state.exitErr != nil {
-			errMsg = state.exitErr.Error()
+		status := "failed"
+		if runCtx.Err() != nil {
+			status = "cancelled"
+			errMsg = "execution cancelled"
+		} else {
+			state.metaMu.RLock()
+			if state.exitErr != nil {
+				errMsg = state.exitErr.Error()
+			}
+			state.metaMu.RUnlock()
 		}
-		close(turn.msgCh)
-		turn.resCh <- &Result{Status: "failed", Error: errMsg}
-		close(turn.resCh)
+		state.finishTurn(turn, &Result{
+			Status:     status,
+			Error:      errMsg,
+			DurationMs: time.Since(turn.startedAt).Milliseconds(),
+			Usage:      b.snapshotUsage(state),
+			InitInfo:   state.initInfoMap(),
+		})
 	}
 
-	state.exitErr = state.cmd.Wait()
-	duration := time.Since(startTime)
+	duration := time.Since(sessionStartedAt)
 
 	b.logger.Info("claude: persistent session ended",
-		"session_id", state.sessionID,
+		"session_id", state.sessionIDValue(),
 		"duration", duration.Round(time.Millisecond).String(),
 	)
 }
 
 func updateClaudeSessionID(state *claudePersistentState, sessionID string) {
-	if sessionID != "" {
-		state.sessionID = sessionID
-	}
+	state.setSessionID(sessionID)
 }
 
 func (b *ClaudeBackend) handleAssistantPersistent(msg claudeSDKMessage, turn *turnState, state *claudePersistentState) {
@@ -588,27 +664,25 @@ func (b *ClaudeBackend) Send(ctx context.Context, ps *PersistentSession, message
 	}
 	promptBuilder.WriteString("Assistant:")
 
-	// Create the new turn BEFORE writing to stdin so the stream loop
-	// can route output immediately.
-	turn := &turnState{
-		id:    uuid.New().String(),
-		msgCh: make(chan OutputChunk, 256),
-		resCh: make(chan *Result, 1),
-	}
-	state.turn.Store(turn)
-
 	payload, err := buildClaudeInput(promptBuilder.String())
 	if err != nil {
-		state.turn.Store(nil)
 		return nil, fmt.Errorf("claude: build send input: %w", err)
 	}
 
+	// Register the new turn before writing so output can be routed
+	// immediately, while rejecting callers that bypass SessionManager and try
+	// to overlap turns on the same provider process.
+	turn := newClaudeTurn()
+	if err := state.beginTurn(turn); err != nil {
+		return nil, err
+	}
+
 	if _, err := state.stdin.Write(payload); err != nil {
-		state.turn.Store(nil)
+		state.finishTurn(turn, &Result{Status: "failed", Error: err.Error()})
 		return nil, fmt.Errorf("claude: write to session stdin: %w", err)
 	}
 
-	b.logger.Info("claude: turn started via Send", "turn_id", turn.id, "session_id", state.sessionID)
+	b.logger.Info("claude: turn started via Send", "turn_id", turn.id, "session_id", state.sessionIDValue())
 
 	var stopOnce sync.Once
 	stop := func() error {
@@ -622,7 +696,7 @@ func (b *ClaudeBackend) Send(ctx context.Context, ps *PersistentSession, message
 		Messages:  turn.msgCh,
 		Result:    turn.resCh,
 		Stop:      stop,
-		SessionID: state.sessionID,
+		SessionID: state.sessionIDValue(),
 		state:     state,
 	}, nil
 }
@@ -637,7 +711,7 @@ func (b *ClaudeBackend) Close(ps *PersistentSession) error {
 		return fmt.Errorf("claude: invalid session state")
 	}
 
-	b.logger.Info("claude: closing persistent session", "session_id", state.sessionID)
+	b.logger.Info("claude: closing persistent session", "session_id", state.sessionIDValue())
 
 	// Close stdin to signal Claude Code to exit.
 	_ = state.stdin.Close()
@@ -654,7 +728,7 @@ func (b *ClaudeBackend) Close(ps *PersistentSession) error {
 	}
 
 	b.logger.Info("claude: persistent session closed",
-		"session_id", state.sessionID,
+		"session_id", state.sessionIDValue(),
 		"pid", state.cmd.Process.Pid,
 	)
 
@@ -667,7 +741,7 @@ func (b *ClaudeBackend) ForceClose(ps *PersistentSession) error {
 	if !ok || state == nil {
 		return fmt.Errorf("claude: invalid session state")
 	}
-	b.logger.Warn("claude: force-closing persistent session", "session_id", state.sessionID)
+	b.logger.Warn("claude: force-closing persistent session", "session_id", state.sessionIDValue())
 	state.cancel()
 	if state.cmd != nil && state.cmd.Process != nil {
 		_ = state.cmd.Process.Kill()
@@ -675,7 +749,7 @@ func (b *ClaudeBackend) ForceClose(ps *PersistentSession) error {
 	select {
 	case <-state.done:
 	case <-time.After(2 * time.Second):
-		b.logger.Error("claude: force-kill did not reap process within 2s", "session_id", state.sessionID)
+		b.logger.Error("claude: force-kill did not reap process within 2s", "session_id", state.sessionIDValue())
 	}
 	return nil
 }

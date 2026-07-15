@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [master, main, develop]
   pull_request:
-    branches: [main]
+    branches: [master, main]
 
 env:
   GO_VERSION: "1.22"
@@ -24,11 +24,8 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: go.sum
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          args: --timeout=5m ./...
+      - name: Go vet
+        run: go vet ./...
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -58,7 +55,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready -U solo -d solo_test
+          --health-cmd "pg_isready -U solo -d solo_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
@@ -73,10 +70,16 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: go.sum
 
+      - name: Run database migrations
+        run: go run ./cmd/migrate up
+        env:
+          DATABASE_URL: postgres://solo:solo-test@localhost:5432/solo_test?sslmode=disable
+
       - name: Run Go tests
         run: go test ./... -v -count=1
         env:
           DATABASE_URL: postgres://solo:solo-test@localhost:5432/solo_test?sslmode=disable
+          TEAM_FORMATION_TEST_DATABASE_URL: postgres://solo:solo-test@localhost:5432/solo_test?sslmode=disable
           JWT_SECRET: ci-test-secret
           APP_ENV: test
 

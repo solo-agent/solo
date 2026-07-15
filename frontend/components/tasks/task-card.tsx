@@ -177,7 +177,7 @@ export function TaskCard({ task, onClick, showChannel = true, parentTaskNumber, 
                 'inline-flex items-center gap-1 border-2 border-black px-2 py-1 font-mono text-[10px] font-bold uppercase shadow-brutal-sm transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none disabled:pointer-events-none disabled:opacity-80 disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-brutal-sm',
                 artifactAction === 'generate' && 'bg-brutal-success text-black',
                 artifactAction === 'pending' && 'bg-brutal-muted text-black',
-                artifactAction === 'read' && 'bg-brutal-primary text-black',
+                artifactAction === 'read' && 'bg-brutal-primary text-black animate-bounce-slow',
               )}
               aria-label={`Generate artifact for ${task.title}`}
             >

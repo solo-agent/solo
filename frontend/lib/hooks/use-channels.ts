@@ -8,6 +8,7 @@ import { t } from '@/lib/i18n';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import type { Channel, CreateChannelInput } from '@/lib/types';
+import { useWebSocket } from '@/lib/ws-context';
 
 // ---- Backend response shape ----
 
@@ -42,6 +43,7 @@ export function useChannels() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
+  const { onEvent } = useWebSocket();
 
   const loadChannels = useCallback(async () => {
     setIsLoading(true);
@@ -67,6 +69,14 @@ export function useChannels() {
       mountedRef.current = false;
     };
   }, [loadChannels]);
+
+  useEffect(() => {
+    return onEvent((event) => {
+      if (event.type === 'team.formed') {
+        void loadChannels();
+      }
+    });
+  }, [loadChannels, onEvent]);
 
   const createChannel = useCallback(
     async (input: CreateChannelInput): Promise<Channel> => {

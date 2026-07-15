@@ -125,30 +125,3 @@ func BroadcastAgentChunk(hub realtime.Broadcaster, channelID, agentID, agentName
 	envelope := Envelope(EventAgentChunk, payload)
 	hub.BroadcastToChannel(channelID, envelope)
 }
-
-// BroadcastAgentActivity broadcasts an agent.activity event to channel
-// subscribers. Carries the island-facing status and a short activity_text
-// summary derived from the agent's OutputChunk. Powers the AgentIsland
-// floating UI; the island subscribes to this single event instead of
-// multiple chunk/typing/thinking streams.
-func BroadcastAgentActivity(hub realtime.Broadcaster, channelID, agentID, agentName, status, activityText, toolName, toolInputSummary, source string) {
-	payload := AgentActivityPayload{
-		ChannelID:        channelID,
-		AgentID:          agentID,
-		AgentName:        agentName,
-		Status:           status,
-		ActivityText:     activityText,
-		ToolName:         toolName,
-		ToolInputSummary: toolInputSummary,
-		Source:           source,
-		Timestamp:        time.Now().UTC().Format(time.RFC3339),
-	}
-	envelope := Envelope(EventAgentActivity, payload)
-	hub.BroadcastToChannel(channelID, envelope)
-
-	slog.Debug("broadcast agent activity",
-		"channel_id", channelID,
-		"agent_id", agentID,
-		"status", status,
-	)
-}

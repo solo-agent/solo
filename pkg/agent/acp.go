@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -36,17 +35,11 @@ type acpPromptResult struct {
 type acpInitialPromptTurn struct {
 	ctx          context.Context
 	provider     string
-	model        string
 	sessionID    string
 	promptBlocks []map[string]any
 	client       *acpClient
-	msgCh        chan OutputChunk
-	resCh        chan *Result
-	turnDone     <-chan acpPromptResult
-	output       *strings.Builder
-	outputMu     *sync.Mutex
-	turnFin      *atomic.Bool
-	startTime    time.Time
+	turns        *acpTurnController
+	turn         *acpRuntimeTurn
 }
 
 func startACPInitialPromptTurn(turn acpInitialPromptTurn) {
@@ -61,40 +54,156 @@ func startACPInitialPromptTurn(turn acpInitialPromptTurn) {
 			} else if errors.Is(turn.ctx.Err(), context.Canceled) {
 				msg = "execution cancelled"
 			}
-			finishACPInitialPromptTurn(turn, &Result{
-				Status:     "failed",
-				Error:      msg,
-				DurationMs: time.Since(turn.startTime).Milliseconds(),
-			})
+			turn.turns.finish(turn.turn, acpPromptErrorStatus(turn.ctx), msg)
 			return
 		}
 
-		var usage TokenUsage
-		select {
-		case pr := <-turn.turnDone:
-			usage = pr.usage
-		default:
-		}
-
-		turn.outputMu.Lock()
-		finalOutput := turn.output.String()
-		turn.outputMu.Unlock()
-
-		finishACPInitialPromptTurn(turn, &Result{
-			Status:     "completed",
-			Output:     finalOutput,
-			DurationMs: time.Since(turn.startTime).Milliseconds(),
-			Usage:      buildACPUsageMap(usage, turn.model),
-		})
+		turn.turns.finish(turn.turn, "completed", "")
 	}()
 }
 
-func finishACPInitialPromptTurn(turn acpInitialPromptTurn, result *Result) {
-	if turn.turnFin.CompareAndSwap(false, true) {
-		turn.resCh <- result
-		close(turn.msgCh)
-		close(turn.resCh)
+func acpPromptErrorStatus(ctx context.Context) string {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "timed_out"
 	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return "cancelled"
+	}
+	return "failed"
+}
+
+// acpRuntimeTurn owns all mutable state and output channels for one ACP
+// session/prompt request. Providers keep one controller for the lifetime of a
+// process so process exit and late callbacks always target the active turn,
+// never channels captured by Start.
+type acpRuntimeTurn struct {
+	mu        sync.Mutex
+	msgCh     chan OutputChunk
+	resCh     chan *Result
+	output    strings.Builder
+	usage     TokenUsage
+	model     string
+	startedAt time.Time
+	finished  bool
+}
+
+func newACPRuntimeTurn(model string) *acpRuntimeTurn {
+	return &acpRuntimeTurn{
+		msgCh:     make(chan OutputChunk, 256),
+		resCh:     make(chan *Result, 1),
+		model:     model,
+		startedAt: time.Now(),
+	}
+}
+
+func (t *acpRuntimeTurn) emit(chunk OutputChunk) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.finished {
+		return
+	}
+	if chunk.Type == string(MessageText) && chunk.Content != "" {
+		t.output.WriteString(chunk.Content)
+	}
+	trySend(t.msgCh, chunk)
+}
+
+func (t *acpRuntimeTurn) recordPromptDone(pr acpPromptResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.finished {
+		return
+	}
+	// ACP implementations may emit both turn_end and the session/prompt
+	// response. Preserve fields already reported when the duplicate terminal
+	// signal omits usage instead of replacing them with zeroes.
+	if pr.usage.InputTokens != 0 {
+		t.usage.InputTokens = pr.usage.InputTokens
+	}
+	if pr.usage.OutputTokens != 0 {
+		t.usage.OutputTokens = pr.usage.OutputTokens
+	}
+	if pr.usage.CacheReadTokens != 0 {
+		t.usage.CacheReadTokens = pr.usage.CacheReadTokens
+	}
+}
+
+func (t *acpRuntimeTurn) finish(status, errMsg string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.finished {
+		return false
+	}
+	t.finished = true
+	result := &Result{
+		Status:     status,
+		Error:      errMsg,
+		Output:     t.output.String(),
+		DurationMs: time.Since(t.startedAt).Milliseconds(),
+		Usage:      buildACPUsageMap(t.usage, t.model),
+	}
+	t.resCh <- result
+	close(t.msgCh)
+	close(t.resCh)
+	return true
+}
+
+// acpTurnController enforces the ACP contract that a process has at most one
+// active prompt turn. It also serializes callback delivery with terminal
+// channel closure, preventing late events and process-exit paths from sending
+// to channels that belong to an earlier turn.
+type acpTurnController struct {
+	mu      sync.Mutex
+	current *acpRuntimeTurn
+}
+
+func (c *acpTurnController) begin(model string) (*acpRuntimeTurn, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.current != nil {
+		return nil, errors.New("ACP turn already in progress")
+	}
+	turn := newACPRuntimeTurn(model)
+	c.current = turn
+	return turn, nil
+}
+
+func (c *acpTurnController) emit(chunk OutputChunk) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.current != nil {
+		c.current.emit(chunk)
+	}
+}
+
+func (c *acpTurnController) recordPromptDone(pr acpPromptResult) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.current != nil {
+		c.current.recordPromptDone(pr)
+	}
+}
+
+func (c *acpTurnController) finish(turn *acpRuntimeTurn, status, errMsg string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if turn == nil || c.current != turn {
+		return false
+	}
+	finished := turn.finish(status, errMsg)
+	c.current = nil
+	return finished
+}
+
+func (c *acpTurnController) failActive(errMsg string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.current == nil {
+		return false
+	}
+	finished := c.current.finish("failed", errMsg)
+	c.current = nil
+	return finished
 }
 
 // ── ACP Client ──

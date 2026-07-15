@@ -67,13 +67,9 @@ export type WSServerEvent =
   | { type: 'agent.run.updated'; run_id: string; session_id?: string; agent_id: string; agent_name?: string; task_id?: string; channel_id?: string; thread_id?: string; status: 'queued' | 'thinking' | 'running' | 'streaming' | 'waiting_input' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled' | 'timeout'; activity_text?: string; tool_name?: string; tool_input_summary?: string; transcript_path?: string; source?: string; timestamp?: string }
   | { type: 'agent.run.finished'; run_id: string; session_id?: string; agent_id: string; agent_name?: string; task_id?: string; channel_id?: string; thread_id?: string; status: 'completed' | 'failed' | 'cancelled' | 'timeout'; activity_text?: string; tool_name?: string; tool_input_summary?: string; transcript_path?: string; source?: string; timestamp?: string }
   | { type: 'agent.run.event'; id?: string; run_id: string; session_id?: string; agent_id: string; agent_name?: string; channel_id?: string; thread_id?: string; seq: number; event_type: string; message?: string; tool_name?: string; payload?: Record<string, unknown>; timestamp: string }
-  // ---- Agent activity event (SOLO-island PR1) — single channel-scoped
-  // event carrying the island-facing status and a one-line activity_text
-  // summary. Powers the AgentIsland floating UI. Derived by the daemon
-  // from agent.OutputChunk events.
-  | { type: 'agent.activity'; channel_id: string; agent_id: string; agent_name?: string; status: 'idle' | 'thinking' | 'running' | 'streaming' | 'waiting_approval' | 'error'; activity_text: string; tool_name?: string; tool_input_summary?: string; source?: string; timestamp: string }
   // ---- 频道成员事件 ----
   | { type: 'member.added'; channel_id: string; member_type: string; member_id: string; member_name?: string }
+  | { type: 'member.removed'; channel_id: string; member_type?: string; member_id: string; member_name?: string }
   // ---- 流式消息事件 (SOLO-51-F, SOLO-52-F) ----
   | { type: 'message.agent_typing'; id: string; channel_id: string; thread_id?: string; sender_id: string; sender_name?: string; content: string; created_at: string }
   // ---- 任务事件 (SOLO-122-B) ----
@@ -84,12 +80,14 @@ export type WSServerEvent =
   | { type: 'relationship_created'; id: string; from_agent_id: string; to_agent_id: string; rel_type: string; channel_id?: string; channel_name?: string }
   | { type: 'relationship_updated'; id: string; from_agent_id: string; to_agent_id: string; rel_type: string; channel_id?: string; channel_name?: string }
   | { type: 'relationship_deleted'; id: string; from_agent_id: string; to_agent_id: string }
-  | { type: 'agent_deleted'; agent_id: string; deleted_relationship_ids?: string[] }
+  | { type: 'agent_deleted'; agent_id: string }
   // ---- DM 事件 ----
   | { type: 'dm.message.new'; id: string; dm_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; created_at: string; attachments?: Attachment[]; thread_id?: string }
   | { type: 'dm.updated'; dm_id: string; last_message?: { content: string; sender_id: string; sender_name: string; created_at: string }; last_reply_at?: string; unread_count: number }
   // ---- Inbox events (v1.5) ----
-  | { type: 'inbox.updated'; };
+  | { type: 'inbox.updated'; }
+  // ---- Lucy automatic team formation ----
+  | { type: 'team.formed'; formation_id: string; source_channel_id: string; source_message_id: string; channel_id: string; channel_name: string; member_count: number; task_count: number; relationship_template?: string; relationship_overrides?: number; relationship_docs_ready: boolean; warnings?: string[]; dashboard_url: string; created_at: string };
 
 /** 客户端发送的 WebSocket 命令 */
 export type WSClientCommand =

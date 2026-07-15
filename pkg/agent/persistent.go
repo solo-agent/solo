@@ -6,6 +6,8 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,11 +25,25 @@ type persistentRunner struct {
 	cancel     context.CancelFunc
 	done       chan struct{}
 	logger     *slog.Logger
+	waitOnce   sync.Once
+	doneOnce   sync.Once
+	exited     atomic.Bool
 }
 
 // isAlive returns true if the subprocess is still running.
 func (r *persistentRunner) isAlive() bool {
-	return r.cmd.ProcessState == nil || !r.cmd.ProcessState.Exited()
+	return !r.exited.Load()
+}
+
+// finish reaps the subprocess and publishes its terminal state. Protocol
+// reader goroutines must defer this instead of closing done directly so
+// IsAlive cannot remain true after stdout reaches EOF.
+func (r *persistentRunner) finish() {
+	r.waitOnce.Do(func() {
+		_ = r.cmd.Wait()
+		r.exited.Store(true)
+	})
+	r.doneOnce.Do(func() { close(r.done) })
 }
 
 // write writes data to the subprocess stdin. Each call is serialized by the

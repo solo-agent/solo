@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -33,6 +32,7 @@ type PendingTaskInfo struct {
 	TaskID    string    `json:"task_id"`
 	AgentID   string    `json:"agent_id"`
 	DaemonID  string    `json:"daemon_id"`
+	RunID     string    `json:"run_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -44,7 +44,7 @@ type DaemonInfo struct {
 	Version          string       `json:"version"`
 	Capabilities     []string     `json:"capabilities"`
 	MaxConcurrent    int          `json:"max_concurrent"`
-	CurrentLoad      atomic.Int32 `json:"current_load"`
+	CurrentLoad      int32        `json:"current_load"`
 	AgentTypes       []string     `json:"agent_types"`
 	Status           DaemonStatus `json:"status"`
 	LastHeartbeat    time.Time    `json:"last_heartbeat"`
@@ -145,7 +145,7 @@ func (dm *DaemonManager) Heartbeat(daemonID string, load int32) bool {
 	info.LastHeartbeat = time.Now()
 	info.MissedHeartbeats = 0
 	info.Status = DaemonStatusOnline
-	info.CurrentLoad.Store(load)
+	info.CurrentLoad = load
 
 	return true
 }
@@ -166,22 +166,24 @@ func (dm *DaemonManager) GetDaemon(daemonID string) (*DaemonInfo, bool) {
 // Called when a daemon shuts down cleanly.
 func (dm *DaemonManager) Unregister(daemonID string) {
 	dm.mu.Lock()
-	defer dm.mu.Unlock()
-
 	delete(dm.daemons, daemonID)
 
-	// Remove all pending tasks for this daemon
-	count := 0
+	timedOutTasks := make([]PendingTaskInfo, 0)
 	for taskID, task := range dm.pendingTasks {
 		if task.DaemonID == daemonID {
+			timedOutTasks = append(timedOutTasks, task)
 			delete(dm.pendingTasks, taskID)
-			count++
 		}
+	}
+	dm.mu.Unlock()
+
+	for _, task := range timedOutTasks {
+		dm.timeoutPendingTaskRun(task)
 	}
 
 	slog.Info("daemon unregistered",
 		"daemon_id", daemonID,
-		"cleaned_tasks", count,
+		"cleaned_tasks", len(timedOutTasks),
 	)
 }
 
@@ -209,6 +211,21 @@ func (dm *DaemonManager) TrackTask(taskID, daemonID, agentID string) {
 		DaemonID:  daemonID,
 		CreatedAt: time.Now(),
 	}
+}
+
+// AttachTaskRun records the agent run created for a pending daemon task.
+func (dm *DaemonManager) AttachTaskRun(taskID, runID string) {
+	if taskID == "" || runID == "" {
+		return
+	}
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+	task, ok := dm.pendingTasks[taskID]
+	if !ok {
+		return
+	}
+	task.RunID = runID
+	dm.pendingTasks[taskID] = task
 }
 
 // RemoveTask removes a task from the pending tracking once it completes or errors.
@@ -245,7 +262,7 @@ func (dm *DaemonManager) SelectDaemon(capability string) *DaemonInfo {
 		if d.Status != DaemonStatusOnline {
 			continue
 		}
-		load := d.CurrentLoad.Load()
+		load := d.CurrentLoad
 		if load >= int32(d.MaxConcurrent) {
 			continue
 		}
@@ -533,9 +550,9 @@ func (dm *DaemonManager) healthCheckLoop() {
 }
 
 func (dm *DaemonManager) checkHealth() {
-	dm.mu.Lock()
-	defer dm.mu.Unlock()
+	var timedOutTasks []PendingTaskInfo
 
+	dm.mu.Lock()
 	now := time.Now()
 	for id, info := range dm.daemons {
 		sinceHB := now.Sub(info.LastHeartbeat)
@@ -566,6 +583,7 @@ func (dm *DaemonManager) checkHealth() {
 		cleanedCount := 0
 		for taskID, task := range dm.pendingTasks {
 			if task.DaemonID == id {
+				timedOutTasks = append(timedOutTasks, task)
 				delete(dm.pendingTasks, taskID)
 				cleanedCount++
 			}
@@ -579,14 +597,21 @@ func (dm *DaemonManager) checkHealth() {
 	}
 
 	// Remove tasks that have exceeded the timeout threshold.
-	dm.removeStaleTasks(now)
+	timedOutTasks = append(timedOutTasks, dm.removeStaleTasks(now)...)
+	dm.mu.Unlock()
+
+	for _, task := range timedOutTasks {
+		dm.timeoutPendingTaskRun(task)
+	}
 }
 
 // removeStaleTasks removes pending tasks that have exceeded the timeout duration.
-func (dm *DaemonManager) removeStaleTasks(now time.Time) {
+func (dm *DaemonManager) removeStaleTasks(now time.Time) []PendingTaskInfo {
 	cleaned := 0
+	timedOutTasks := make([]PendingTaskInfo, 0)
 	for taskID, task := range dm.pendingTasks {
 		if now.Sub(task.CreatedAt) > dm.taskTimeout {
+			timedOutTasks = append(timedOutTasks, task)
 			delete(dm.pendingTasks, taskID)
 			cleaned++
 		}
@@ -596,6 +621,37 @@ func (dm *DaemonManager) removeStaleTasks(now time.Time) {
 			"task_count", cleaned,
 			"timeout", dm.taskTimeout,
 		)
+	}
+	return timedOutTasks
+}
+
+func (dm *DaemonManager) timeoutPendingTaskRun(task PendingTaskInfo) {
+	if task.RunID == "" || dm.pool == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	runSvc := NewAgentRunService(dm.pool)
+	run, err := runSvc.GetRun(ctx, task.RunID)
+	if err != nil {
+		slog.Warn("failed to load pending task run for timeout", "task_id", task.TaskID, "run_id", task.RunID, "error", err)
+		return
+	}
+	if !isActiveAgentRunStatus(run.Status) {
+		return
+	}
+	finished, err := runSvc.FinishRun(ctx, FinishRunInput{
+		RunID:        run.ID,
+		Status:       AgentRunStatusTimeout,
+		ActivityText: agentActivityTimeout,
+	})
+	if err != nil {
+		slog.Warn("failed to timeout pending task run", "task_id", task.TaskID, "run_id", task.RunID, "error", err)
+		return
+	}
+	if dm.hub != nil {
+		dm.hub.Broadcast(realtime.Envelope("agent.run.finished", runPayload(finished, finished.AgentID, finished.AgentName, "")))
 	}
 }
 
@@ -635,13 +691,13 @@ type DaemonRegisterResponse struct {
 }
 
 type DaemonHeartbeatRequest struct {
-	DaemonID    string                        `json:"daemon_id"`
-	Load        int32                         `json:"load"`
-	MaxLoad     int                           `json:"max_load"`
-	UptimeSec   int64                         `json:"uptime_seconds"`
-	ActiveTasks []string                      `json:"active_tasks"`
-	AgentIDs    []string                      `json:"agent_ids,omitempty"`
-	SystemInfo  DaemonSystemInfo              `json:"system_info"`
+	DaemonID    string           `json:"daemon_id"`
+	Load        int32            `json:"load"`
+	MaxLoad     int              `json:"max_load"`
+	UptimeSec   int64            `json:"uptime_seconds"`
+	ActiveTasks []string         `json:"active_tasks"`
+	AgentIDs    []string         `json:"agent_ids,omitempty"`
+	SystemInfo  DaemonSystemInfo `json:"system_info"`
 }
 
 type DaemonHeartbeatResponse struct {

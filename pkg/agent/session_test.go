@@ -44,15 +44,62 @@ func TestSessionManagerHoldsTurnUntilEarlyStartResultCloses(t *testing.T) {
 	}
 }
 
+func TestSessionManagerHoldsTurnUntilDeliveredResultCloses(t *testing.T) {
+	backend := newEarlyReturnBackend()
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+
+	first, err := mgr.GetOrCreateSession(context.Background(), "agent-1", AgentConfig{
+		AgentID:      "agent-1",
+		Name:         "Agent",
+		SystemPrompt: "You are Agent.",
+		Provider:     "codex",
+	}, ChannelContext{}, []Message{{Role: RoleUser, Content: "first"}}, nil)
+	if err != nil {
+		t.Fatalf("GetOrCreateSession: %v", err)
+	}
+	backend.finishStart()
+	if result := <-first.Result; result == nil || result.Status != "completed" {
+		t.Fatalf("start result = %#v, want completed", result)
+	}
+
+	second, err := mgr.DeliverMessage(context.Background(), "agent-1", []Message{{Role: RoleUser, Content: "second"}})
+	if err != nil {
+		t.Fatalf("DeliverMessage: %v", err)
+	}
+	if !mgr.QueueIfBusy("agent-1", Message{Role: RoleUser, Content: "third"}) {
+		t.Fatal("QueueIfBusy = false while delivered result is still open, want true")
+	}
+
+	backend.finishSend()
+	if result := <-second.Result; result == nil || result.Status != "completed" {
+		t.Fatalf("send result = %#v, want completed", result)
+	}
+
+	deadline := time.After(500 * time.Millisecond)
+	for {
+		if !mgr.QueueIfBusy("agent-1", Message{Role: RoleUser, Content: "fourth"}) {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("QueueIfBusy stayed true after delivered result closed")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
 type earlyReturnBackend struct {
-	resultCh chan *Result
-	doneCh   chan struct{}
+	startResultCh chan *Result
+	sendResultCh  chan *Result
+	doneCh        chan struct{}
 }
 
 func newEarlyReturnBackend() *earlyReturnBackend {
 	return &earlyReturnBackend{
-		resultCh: make(chan *Result, 1),
-		doneCh:   make(chan struct{}),
+		startResultCh: make(chan *Result, 1),
+		sendResultCh:  make(chan *Result, 1),
+		doneCh:        make(chan struct{}),
 	}
 }
 
@@ -66,15 +113,22 @@ func (b *earlyReturnBackend) Start(context.Context, *ExecuteRequest, *ExecuteOpt
 	msgCh := make(chan OutputChunk)
 	return &PersistentSession{
 		Messages:  msgCh,
-		Result:    b.resultCh,
+		Result:    b.startResultCh,
 		Stop:      func() error { return nil },
 		SessionID: "session-1",
 		state:     earlyReturnState{doneCh: b.doneCh, sessionID: "session-1"},
 	}, nil
 }
 
-func (b *earlyReturnBackend) Send(context.Context, *PersistentSession, []Message) (*PersistentSession, error) {
-	return nil, nil
+func (b *earlyReturnBackend) Send(_ context.Context, previous *PersistentSession, _ []Message) (*PersistentSession, error) {
+	msgCh := make(chan OutputChunk)
+	return &PersistentSession{
+		Messages:  msgCh,
+		Result:    b.sendResultCh,
+		Stop:      func() error { return nil },
+		SessionID: previous.SessionID,
+		state:     previous.state,
+	}, nil
 }
 
 func (b *earlyReturnBackend) Close(*PersistentSession) error { return nil }
@@ -82,8 +136,13 @@ func (b *earlyReturnBackend) Close(*PersistentSession) error { return nil }
 func (b *earlyReturnBackend) ForceClose(*PersistentSession) error { return nil }
 
 func (b *earlyReturnBackend) finishStart() {
-	b.resultCh <- &Result{Status: "completed"}
-	close(b.resultCh)
+	b.startResultCh <- &Result{Status: "completed"}
+	close(b.startResultCh)
+}
+
+func (b *earlyReturnBackend) finishSend() {
+	b.sendResultCh <- &Result{Status: "completed"}
+	close(b.sendResultCh)
 }
 
 type earlyReturnState struct {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/solo-ai/solo/internal/server/handler"
 	"github.com/solo-ai/solo/internal/server/middleware"
+	"github.com/solo-ai/solo/internal/server/onboarding"
 	"github.com/solo-ai/solo/internal/server/service"
 	"github.com/solo-ai/solo/internal/server/ws"
 	"github.com/solo-ai/solo/pkg/metrics"
@@ -47,11 +49,19 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 
 	// Initialize services
 	workspaceRoot := defaultAgentWorkspaceRoot()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := onboarding.UpgradeExistingLucyKnowledge(ctx, pool, workspaceRoot); err != nil {
+			slog.Warn("onboarding: existing Lucy knowledge upgrade failed", "error", err)
+		}
+	}()
 	relationshipMD := service.NewRelationshipsMDGenerator(pool, workspaceRoot)
 	taskSvc := service.NewTaskService(pool)
 	taskSvc.SetAgentNotifier(service.NewAgentNotifier(pool, hub, agentSvc))
 	relationshipSvc := service.NewAgentRelationshipService(pool, relationshipMD)
 	templateSvc := service.NewTemplateService(pool, relationshipMD)
+	teamFormationSvc := service.NewTeamFormationService(pool, relationshipMD, hub)
 	computerSvc := service.NewComputerService(pool)
 	inboxSvc := service.NewInboxService(pool)
 	artifactRoot := os.Getenv("ARTIFACTS_DIR")
@@ -82,7 +92,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	channelHandler := handler.NewChannelHandler(pool)
 	memberHandler := handler.NewMemberHandler(pool, agentSvc)
 	messageHandler := handler.NewMessageHandler(pool, hub, agentSvc, taskSvc)
-	agentHandler := handler.NewAgentHandler(pool, dm)
+	agentHandler := handler.NewAgentHandler(pool, dm, hub)
 	agentRunHandler := handler.NewAgentRunHandler(pool)
 	dashboardHandler := handler.NewDashboardHandler(pool)
 	threadHandler := handler.NewThreadHandler(pool, hub, agentSvc)
@@ -92,6 +102,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	taskHandler := handler.NewTaskHandler(pool, hub, agentSvc, taskSvc, mentionSvc)
 	relationshipHandler := handler.NewAgentRelationshipHandler(relationshipSvc)
 	templateHandler := handler.NewTemplateHandler(templateSvc)
+	teamFormationHandler := handler.NewTeamFormationHandler(teamFormationSvc)
 	searchHandler := handler.NewSearchHandler(pool)
 	computerHandler := handler.NewComputerHandler(computerSvc, dm, pool)
 	inboxHandler := handler.NewInboxHandler(inboxSvc)
@@ -260,6 +271,9 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 			r.Get("/", templateHandler.List)
 			r.Post("/{templateID}/apply", templateHandler.Apply)
 		})
+
+		// Lucy-only declarative auto-team provisioning.
+		r.Post("/api/v1/team-formations", teamFormationHandler.Form)
 
 		// Agent backends metadata (registered backend adapters)
 		r.Get("/api/v1/agent-backends", agentHandler.AgentBackends)

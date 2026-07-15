@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -75,7 +74,7 @@ type opencodePersistentState struct {
 	runner    *persistentRunner
 	client    *acpClient
 	sessionID string
-	turnFin   atomic.Bool
+	turns     acpTurnController
 }
 
 var _ SessionStater = (*opencodePersistentState)(nil)
@@ -105,40 +104,23 @@ func (b *OpenCodeBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 	}
 
 	prompt := buildPrompt(req, opts)
-	msgCh := make(chan OutputChunk, 256)
-	resCh := make(chan *Result, 1)
-
-	var outputMu sync.Mutex
-	var output strings.Builder
-	turnDone := make(chan acpPromptResult, 1)
+	state := &opencodePersistentState{runner: runner}
+	turn, err := state.turns.begin(opts.Model)
+	if err != nil {
+		_ = runner.close()
+		return nil, fmt.Errorf("opencode: begin initial turn: %w", err)
+	}
 
 	cl := &acpClient{
 		logger:  b.logger,
 		stdin:   runner.stdin,
 		pending: make(map[int]*pendingRPC),
-		onChunk: func(chunk OutputChunk) {
-			if chunk.Type == string(MessageText) && chunk.Content != "" {
-				outputMu.Lock()
-				output.WriteString(chunk.Content)
-				outputMu.Unlock()
-			}
-			trySend(msgCh, chunk)
-		},
-		onPromptDone: func(pr acpPromptResult) {
-			select {
-			case turnDone <- pr:
-			default:
-			}
-		},
 	}
-
-	state := &opencodePersistentState{
-		runner: runner,
-		client: cl,
-	}
+	cl.setCallbacks(state.turns.emit, state.turns.recordPromptDone)
+	state.client = cl
 
 	go func() {
-		defer close(state.runner.done)
+		defer state.runner.finish()
 		scanner := bufio.NewScanner(runner.stdout)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 		for scanner.Scan() {
@@ -149,20 +131,11 @@ func (b *OpenCodeBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 			cl.handleLine(line)
 		}
 		cl.closeAllPending(fmt.Errorf("opencode process exited"))
-		if state.turnFin.CompareAndSwap(false, true) {
-			resCh <- &Result{Status: "failed", Error: "opencode process exited unexpectedly"}
-			close(msgCh)
-			close(resCh)
-		}
+		state.turns.failActive("opencode process exited unexpectedly")
 	}()
 
-	startTime := time.Now()
 	handleError := func(errMsg string) {
-		if state.turnFin.CompareAndSwap(false, true) {
-			resCh <- &Result{Status: "failed", Error: errMsg, DurationMs: time.Since(startTime).Milliseconds()}
-			close(msgCh)
-			close(resCh)
-		}
+		state.turns.finish(turn, acpPromptErrorStatus(ctx), errMsg)
 	}
 
 	if _, err := cl.request(ctx, "initialize", map[string]any{
@@ -170,9 +143,9 @@ func (b *OpenCodeBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 		"clientInfo":         map[string]any{"name": "solo-agent-sdk", "version": "1.0.0"},
 		"clientCapabilities": map[string]any{},
 	}); err != nil {
-		runner.close()
 		handleError(fmt.Sprintf("opencode initialize failed: %v", err))
-		return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+		_ = runner.close()
+		return &PersistentSession{Messages: turn.msgCh, Result: turn.resCh, state: state}, nil
 	}
 
 	cwd := opts.WorkspaceDir
@@ -194,15 +167,15 @@ func (b *OpenCodeBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 			"mcpServers": []any{},
 		})
 		if err != nil {
-			runner.close()
 			handleError(fmt.Sprintf("opencode session/new failed: %v", err))
-			return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+			_ = runner.close()
+			return &PersistentSession{Messages: turn.msgCh, Result: turn.resCh, state: state}, nil
 		}
 		sessionID = extractACPSessionID(result)
 		if sessionID == "" {
-			runner.close()
 			handleError("opencode session/new returned no session ID")
-			return &PersistentSession{Messages: msgCh, Result: resCh, state: state}, nil
+			_ = runner.close()
+			return &PersistentSession{Messages: turn.msgCh, Result: turn.resCh, state: state}, nil
 		}
 	}
 	cl.sessionID = sessionID
@@ -227,29 +200,23 @@ func (b *OpenCodeBackend) Start(ctx context.Context, req *ExecuteRequest, opts *
 		}, promptBlocks...)
 	}
 
-	trySend(msgCh, OutputChunk{Type: string(MessageStatus), Content: "running", SessionID: sessionID})
+	state.turns.emit(OutputChunk{Type: string(MessageStatus), Content: "running", SessionID: sessionID})
 
 	startACPInitialPromptTurn(acpInitialPromptTurn{
 		ctx:          ctx,
 		provider:     "opencode",
-		model:        opts.Model,
 		sessionID:    sessionID,
 		promptBlocks: promptBlocks,
 		client:       cl,
-		msgCh:        msgCh,
-		resCh:        resCh,
-		turnDone:     turnDone,
-		output:       &output,
-		outputMu:     &outputMu,
-		turnFin:      &state.turnFin,
-		startTime:    startTime,
+		turns:        &state.turns,
+		turn:         turn,
 	})
 
 	var stopOnce sync.Once
 	stop := func() error { stopOnce.Do(func() { runner.cancel() }); return nil }
 	return &PersistentSession{
-		Messages:  msgCh,
-		Result:    resCh,
+		Messages:  turn.msgCh,
+		Result:    turn.resCh,
 		Stop:      stop,
 		SessionID: sessionID,
 		state:     state,
@@ -266,80 +233,34 @@ func (b *OpenCodeBackend) Send(ctx context.Context, ps *PersistentSession, messa
 	}
 
 	prompt := buildPromptFromMessages(messages)
-	msgCh := make(chan OutputChunk, 256)
-	resCh := make(chan *Result, 1)
+	turn, err := state.turns.begin("")
+	if err != nil {
+		return nil, fmt.Errorf("opencode: %w", err)
+	}
 
-	var outputMu sync.Mutex
-	var output strings.Builder
-	turnDone := make(chan acpPromptResult, 1)
-
-	state.client.setCallbacks(
-		func(chunk OutputChunk) {
-			if chunk.Type == string(MessageText) && chunk.Content != "" {
-				outputMu.Lock()
-				output.WriteString(chunk.Content)
-				outputMu.Unlock()
-			}
-			trySend(msgCh, chunk)
-		},
-		func(pr acpPromptResult) {
-			select {
-			case turnDone <- pr:
-			default:
-			}
-		},
-	)
-
-	startTime := time.Now()
-	state.turnFin.Store(false)
-
-	if _, err := state.client.request(ctx, "session/prompt", map[string]any{
+	if _, err = state.client.request(ctx, "session/prompt", map[string]any{
 		"sessionId": state.sessionID,
 		"prompt": []map[string]any{
 			{"type": "text", "text": prompt, "role": "user"},
 		},
 	}); err != nil {
-		if state.turnFin.CompareAndSwap(false, true) {
-			close(msgCh)
-			close(resCh)
-		}
+		state.turns.finish(turn, acpPromptErrorStatus(ctx), err.Error())
 		return nil, fmt.Errorf("opencode persistent session/prompt: %w", err)
 	}
 
-	var usage TokenUsage
-	select {
-	case pr := <-turnDone:
-		usage = pr.usage
-	default:
-	}
-
-	duration := time.Since(startTime)
-	outputMu.Lock()
-	finalOutput := output.String()
-	outputMu.Unlock()
-
-	if state.turnFin.CompareAndSwap(false, true) {
-		resCh <- &Result{
-			Status:     "completed",
-			Output:     finalOutput,
-			DurationMs: duration.Milliseconds(),
-			Usage:      buildACPUsageMap(usage, ""),
-		}
-		close(msgCh)
-		close(resCh)
-	}
+	state.turns.finish(turn, "completed", "")
 
 	b.logger.Info("opencode: persistent turn completed via Send",
 		"session_id", state.sessionID,
-		"duration", duration.Round(time.Millisecond).String(),
+		"duration", time.Since(turn.startedAt).Round(time.Millisecond).String(),
 	)
 
 	var stopOnce2 sync.Once
 	stop := func() error { stopOnce2.Do(func() {}); return nil }
 
 	return &PersistentSession{
-		Messages:  msgCh,
-		Result:    resCh,
+		Messages:  turn.msgCh,
+		Result:    turn.resCh,
 		Stop:      stop,
 		SessionID: state.sessionID,
 		state:     state,

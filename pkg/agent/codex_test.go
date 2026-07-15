@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"log/slog"
 	"os"
 	"strings"
@@ -185,6 +186,55 @@ func TestCodexClientCompletesOnSnakeCaseFinalAnswer(t *testing.T) {
 
 	if !done {
 		t.Fatal("onTurnDone was not called")
+	}
+}
+
+func TestCodexClientHandlesRawCompletionAfterLegacyEvent(t *testing.T) {
+	doneCount := 0
+	c := &codexClient{
+		logger:               slog.Default(),
+		notificationProtocol: "unknown",
+		onTurnDone: func(aborted bool) {
+			if aborted {
+				t.Fatal("aborted = true, want false")
+			}
+			doneCount++
+		},
+	}
+
+	legacy, err := json.Marshal(map[string]any{
+		"method": "codex/event",
+		"params": map[string]any{"msg": map[string]any{
+			"type":    "agent_message",
+			"message": "Working.",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.handleLine(string(legacy))
+
+	completed, err := json.Marshal(map[string]any{
+		"method": "turn/completed",
+		"params": map[string]any{
+			"threadId": "thread-1",
+			"turn": map[string]any{
+				"id":     "turn-1",
+				"status": "completed",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.handleLine(string(completed))
+	c.handleLine(string(completed))
+
+	if doneCount != 1 {
+		t.Fatalf("onTurnDone calls = %d, want 1", doneCount)
+	}
+	if c.notificationProtocol != "mixed" {
+		t.Fatalf("notificationProtocol = %q, want mixed", c.notificationProtocol)
 	}
 }
 

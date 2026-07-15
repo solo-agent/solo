@@ -45,6 +45,7 @@ type AgentSessionManager struct {
 
 // agentSessionEntry wraps a session with lifetime metadata.
 type agentSessionEntry struct {
+	mu          sync.RWMutex
 	AgentID     string
 	Session     *PersistentSession // nil when asleep
 	AgentConfig AgentConfig
@@ -53,6 +54,26 @@ type agentSessionEntry struct {
 	LastActive  time.Time
 	sessionID   string // preserved across sleep/wake for --resume
 	asleep      bool
+}
+
+func (e *agentSessionEntry) snapshot() (*PersistentSession, bool, string) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.Session, e.asleep, e.sessionID
+}
+
+func (e *agentSessionEntry) updateSession(ps *PersistentSession) {
+	sessionID := ""
+	if state, ok := ps.state.(SessionStater); ok {
+		sessionID = state.SessionID()
+	}
+	e.mu.Lock()
+	e.LastActive = time.Now()
+	e.Session = ps
+	if sessionID != "" {
+		e.sessionID = sessionID
+	}
+	e.mu.Unlock()
 }
 
 // NewAgentSessionManager creates a new session manager.
@@ -85,7 +106,8 @@ func (m *AgentSessionManager) GetOrCreateSession(ctx context.Context, agentID st
 		if m.isSessionAlive(entry) {
 			return m.deliverToSession(ctx, agentID, entry, initialMessages)
 		}
-		return m.createSession(ctx, agentID, agentCfg, channelCtx, initialMessages, entry.sessionID, mentionedNames)
+		_, _, resumeID := entry.snapshot()
+		return m.createSession(ctx, agentID, agentCfg, channelCtx, initialMessages, resumeID, mentionedNames)
 	}
 
 	// Check retry cooldown for agents with recent failed starts.
@@ -106,7 +128,8 @@ func (m *AgentSessionManager) DeliverMessage(ctx context.Context, agentID string
 	if !exists {
 		return nil, fmt.Errorf("no session for agent %s", agentID)
 	}
-	if entry.asleep {
+	_, asleep, _ := entry.snapshot()
+	if asleep {
 		return nil, fmt.Errorf("session for agent %s is asleep — use GetOrCreateSession to wake", agentID)
 	}
 	if !m.isSessionAlive(entry) {
@@ -164,7 +187,11 @@ func (m *AgentSessionManager) IsActive(agentID string) bool {
 	m.mu.RLock()
 	entry, exists := m.sessions[agentID]
 	m.mu.RUnlock()
-	return exists && !entry.asleep && m.isSessionAlive(entry)
+	if !exists {
+		return false
+	}
+	_, asleep, _ := entry.snapshot()
+	return !asleep && m.isSessionAlive(entry)
 }
 
 // ActiveAgentIDs returns the IDs of all agents with an active (non-asleep,
@@ -177,7 +204,8 @@ func (m *AgentSessionManager) ActiveAgentIDs() []string {
 
 	var ids []string
 	for agentID, entry := range m.sessions {
-		if !entry.asleep && m.isSessionAlive(entry) {
+		_, asleep, _ := entry.snapshot()
+		if !asleep && m.isSessionAlive(entry) {
 			ids = append(ids, agentID)
 		}
 	}
@@ -198,8 +226,9 @@ func (m *AgentSessionManager) CloseSession(agentID string) error {
 	}
 
 	m.logger.Info("session: closing", "agent_id", agentID)
-	if !entry.asleep && entry.Session != nil {
-		return m.backend.Close(entry.Session)
+	ps, asleep, _ := entry.snapshot()
+	if !asleep && ps != nil {
+		return m.backend.Close(ps)
 	}
 	return nil
 }
@@ -220,8 +249,9 @@ func (m *AgentSessionManager) ForceCloseSession(agentID string) error {
 	}
 
 	m.logger.Warn("session: force-closing", "agent_id", agentID)
-	if !entry.asleep && entry.Session != nil {
-		return m.backend.ForceClose(entry.Session)
+	ps, asleep, _ := entry.snapshot()
+	if !asleep && ps != nil {
+		return m.backend.ForceClose(ps)
 	}
 	return nil
 }
@@ -237,9 +267,10 @@ func (m *AgentSessionManager) CloseAll() {
 	m.mu.Unlock()
 
 	for _, entry := range entries {
-		if !entry.asleep && entry.Session != nil {
+		ps, asleep, _ := entry.snapshot()
+		if !asleep && ps != nil {
 			m.logger.Info("session: closing (shutdown)", "agent_id", entry.AgentID)
-			_ = m.backend.Close(entry.Session)
+			_ = m.backend.Close(ps)
 		}
 	}
 }
@@ -247,10 +278,11 @@ func (m *AgentSessionManager) CloseAll() {
 // ── Internal ─────────────────────────────────────────────────────────────────
 
 func (m *AgentSessionManager) isSessionAlive(entry *agentSessionEntry) bool {
-	if entry.asleep || entry.Session == nil {
+	ps, asleep, _ := entry.snapshot()
+	if asleep || ps == nil {
 		return false
 	}
-	state, ok := entry.Session.state.(SessionStater)
+	state, ok := ps.state.(SessionStater)
 	if !ok {
 		return false
 	}
@@ -259,10 +291,16 @@ func (m *AgentSessionManager) isSessionAlive(entry *agentSessionEntry) bool {
 
 func (m *AgentSessionManager) deliverToSession(ctx context.Context, agentID string, entry *agentSessionEntry, messages []Message) (*PersistentSession, error) {
 	release := m.acquireTurn(agentID)
-	defer release()
+	releaseOnReturn := true
+	defer func() {
+		if releaseOnReturn {
+			release()
+		}
+	}()
 
 	m.logger.Info("session: delivering message", "agent_id", agentID)
-	ps, err := m.backend.Send(ctx, entry.Session, messages)
+	previous, _, _ := entry.snapshot()
+	ps, err := m.backend.Send(ctx, previous, messages)
 	if err != nil {
 		m.logger.Error("session: Send failed", "agent_id", agentID, "error", err)
 		m.mu.Lock()
@@ -270,15 +308,13 @@ func (m *AgentSessionManager) deliverToSession(ctx context.Context, agentID stri
 		m.mu.Unlock()
 		return nil, err
 	}
-
-	entry.LastActive = time.Now()
-	entry.Session = ps
-	if state, ok := ps.state.(SessionStater); ok {
-		if sid := state.SessionID(); sid != "" {
-			entry.sessionID = sid
-		}
+	if ps == nil {
+		return nil, fmt.Errorf("session backend returned a nil session for agent %s", agentID)
 	}
-	entry.Session = ps
+
+	entry.updateSession(ps)
+	holdTurnUntilResult(ps, release)
+	releaseOnReturn = false
 	return ps, nil
 }
 
@@ -295,7 +331,18 @@ func (m *AgentSessionManager) createSession(ctx context.Context, agentID string,
 	entry, exists := m.sessions[agentID]
 	m.mu.RUnlock()
 	if exists && m.isSessionAlive(entry) {
-		return m.backend.Send(ctx, entry.Session, messages)
+		previous, _, _ := entry.snapshot()
+		ps, err := m.backend.Send(ctx, previous, messages)
+		if err != nil {
+			return nil, err
+		}
+		if ps == nil {
+			return nil, fmt.Errorf("session backend returned a nil session for agent %s", agentID)
+		}
+		entry.updateSession(ps)
+		holdTurnUntilResult(ps, release)
+		releaseOnReturn = false
+		return ps, nil
 	}
 
 	m.logger.Info("session: creating", "agent_id", agentID, "resume", prevSessionID)
@@ -354,13 +401,17 @@ func (m *AgentSessionManager) createSession(ctx context.Context, agentID string,
 	}
 
 	m.mu.Lock()
-	if old, ok := m.sessions[agentID]; ok && !old.asleep && old.Session != nil {
-		_ = m.backend.Close(old.Session)
+	if old, ok := m.sessions[agentID]; ok {
+		oldSession, oldAsleep, _ := old.snapshot()
+		if !oldAsleep && oldSession != nil {
+			_ = m.backend.Close(oldSession)
+		}
 	}
 	m.sessions[agentID] = entry
 	m.mu.Unlock()
 
-	go m.watchCrash(agentID, agentCfg, channelCtx, entry)
+	state, _ := ps.state.(SessionStater)
+	go m.watchCrash(agentID, agentCfg, channelCtx, entry, state)
 	holdTurnUntilResult(ps, release)
 	releaseOnReturn = false
 
@@ -420,9 +471,8 @@ func (m *AgentSessionManager) inFailedCooldown(agentID string) bool {
 
 // watchCrash monitors a session. On unexpected exit (crash, not sleep),
 // auto-restarts with --resume to recover context.
-func (m *AgentSessionManager) watchCrash(agentID string, agentCfg AgentConfig, channelCtx ChannelContext, entry *agentSessionEntry) {
-	state, ok := entry.Session.state.(SessionStater)
-	if !ok {
+func (m *AgentSessionManager) watchCrash(agentID string, agentCfg AgentConfig, channelCtx ChannelContext, entry *agentSessionEntry, state SessionStater) {
+	if state == nil {
 		return
 	}
 
@@ -431,11 +481,11 @@ func (m *AgentSessionManager) watchCrash(agentID string, agentCfg AgentConfig, c
 	m.mu.RLock()
 	currentEntry, exists := m.sessions[agentID]
 	m.mu.RUnlock()
-	if !exists || currentEntry != entry || entry.asleep {
+	_, asleep, resumeID := entry.snapshot()
+	if !exists || currentEntry != entry || asleep {
 		return
 	}
 
-	resumeID := entry.sessionID
 	if sid := state.SessionID(); sid != "" {
 		resumeID = sid
 	}
@@ -468,10 +518,14 @@ func (m *AgentSessionManager) notifyInbox(agentID string, count int) {
 	m.mu.RLock()
 	entry, exists := m.sessions[agentID]
 	m.mu.RUnlock()
-	if !exists || entry.asleep || entry.Session == nil {
+	if !exists {
 		return
 	}
-	state, ok := entry.Session.state.(SessionStater)
+	ps, asleep, _ := entry.snapshot()
+	if asleep || ps == nil {
+		return
+	}
+	state, ok := ps.state.(SessionStater)
 	if !ok {
 		return
 	}
