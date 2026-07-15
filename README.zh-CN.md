@@ -71,6 +71,10 @@ make db-reset # 重置本地数据库
 
 ![Solo 频道工作区与团队关系](./assets/readme/channel.png)
 
+**浏览器本地皮肤** - 在设置中切换 9 套受经典代码编辑器主题启发的浅色配色；即时生效、仅保存在当前浏览器，同时保持 Solo 的新粗野主义布局不变。
+
+![Solo 浏览器本地皮肤](./assets/readme/skins.png)
+
 **讨论串任务交接** - 在左侧打开任务讨论串，右侧保留任务看板，让认领、审核、子任务和产物始终跟对话连在一起。
 
 ![Solo 讨论串任务交接](./assets/readme/tasks.png)

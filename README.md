@@ -69,6 +69,10 @@ make db-reset # Reset the local database
 
 ![Solo channel workspace and team graph](./assets/readme/channel.png)
 
+**Browser-local skins** - switch between nine editor-inspired light palettes from Settings. Changes apply instantly and stay in the current browser while Solo's neo-brutalist layout remains unchanged.
+
+![Solo browser-local skins](./assets/readme/skins.png)
+
 **Threaded task handoff** - open task discussions beside the task board so claims, review, subtasks, and artifacts stay connected to the conversation.
 
 ![Solo threaded task handoff](./assets/readme/tasks.png)
