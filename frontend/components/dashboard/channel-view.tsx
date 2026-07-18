@@ -6,9 +6,10 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Users, Loader2, SquareCheckBig, Plus, Network, Maximize2, Minimize2 } from 'lucide-react';
+import { Users, Loader2, SquareCheckBig, Plus, Network, Maximize2, Minimize2, BrainCircuit } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
+import { useThinkingSpace } from '@/lib/hooks/use-thinking-space';
 import { useChannelMembers } from '@/lib/hooks/use-channel-members';
 import { useWebSocket } from '@/lib/ws-context';
 import { useTasks } from '@/lib/hooks/use-tasks';
@@ -23,6 +24,7 @@ import { AddAgentModal } from './add-agent-modal';
 import { TaskBoard } from '@/components/tasks/task-board';
 import { RelationshipWorkspace } from '@/components/relationships/relationship-workspace';
 import { RelationshipDetailPanel } from '@/components/relationships/relationship-detail-panel';
+import { ThinkingWorkspace } from '@/components/thinking/thinking-workspace';
 import { Button, PanelToggleIcon, panelToggleButtonClass } from '@/components/ui/button';
 import { tabButtonClass } from '@/components/ui/tab-bar';
 import { buildDashboardHref, parseDashboardParams, type DashboardPanel, type DashboardView } from '@/lib/dashboard-url';
@@ -85,6 +87,27 @@ export function ChannelView({
 }: ChannelViewProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const dashboardState = useMemo(() => parseDashboardParams(searchParams), [searchParams]);
+  const workspaceView = dashboardState.view;
+  const mainPanel = dashboardState.panel;
+  const isThinking = workspaceView === 'thinking';
+  const pushDashboardState = useCallback(
+    (patch: Partial<{
+      view: DashboardView;
+      panel: DashboardPanel;
+      taskId: string | null;
+      threadId: string | null;
+      messageId: string | null;
+      agentId: string | null;
+      relationshipId: string | null;
+      nodeId: string | null;
+    }>) => {
+      router.push(buildDashboardHref(channel.id, { ...dashboardState, ...patch }));
+    },
+    [channel.id, dashboardState, router],
+  );
+  const thinking = useThinkingSpace(channel.id, isThinking, dashboardState.nodeId);
+  const selectedThinkingNode = thinking.space?.nodes.find((node) => node.id === thinking.selectedNodeId) ?? null;
   const {
     messages,
     isLoading,
@@ -97,7 +120,7 @@ export function ChannelView({
     loadMoreError,
     loadMore,
     markMessageThreadRead,
-  } = useMessages(channel.id);
+  } = useMessages(isThinking && !thinking.selectedNodeId ? null : channel.id, isThinking ? thinking.selectedNodeId : null);
 
   const {
     members,
@@ -113,24 +136,6 @@ export function ChannelView({
   // Keep a ref to the latest agents list for use in WS event handler closures
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
-
-  const dashboardState = useMemo(() => parseDashboardParams(searchParams), [searchParams]);
-  const workspaceView = dashboardState.view;
-  const mainPanel = dashboardState.panel;
-  const pushDashboardState = useCallback(
-    (patch: Partial<{
-      view: DashboardView;
-      panel: DashboardPanel;
-      taskId: string | null;
-      threadId: string | null;
-      messageId: string | null;
-      agentId: string | null;
-      relationshipId: string | null;
-    }>) => {
-      router.push(buildDashboardHref(channel.id, { ...dashboardState, ...patch }));
-    },
-    [channel.id, dashboardState, router],
-  );
 
   const [threadMessage, setThreadMessage] = useState<Message | null>(null);
   const [isAddAgentModalOpen, setIsAddAgentModalOpen] = useState(false);
@@ -792,6 +797,34 @@ export function ChannelView({
     if (task) void handleGenerateArtifact(task);
   }, [channelTasks, handleGenerateArtifact]);
 
+  const handleThinkingNodeSelect = useCallback((nodeId: string) => {
+    thinking.setSelectedNodeId(nodeId);
+    pushDashboardState({
+      view: 'thinking',
+      panel: 'conversation',
+      nodeId,
+      taskId: null,
+      threadId: null,
+      agentId: null,
+      relationshipId: null,
+      messageId: null,
+    });
+  }, [pushDashboardState, thinking]);
+
+  const handleThinkingModeChange = useCallback((active: boolean) => {
+    if (!active && !isThinking) return;
+    pushDashboardState({
+      view: active ? 'thinking' : 'team',
+      panel: 'conversation',
+      nodeId: active ? thinking.selectedNodeId : null,
+      taskId: null,
+      threadId: null,
+      agentId: null,
+      relationshipId: null,
+      messageId: null,
+    });
+  }, [isThinking, pushDashboardState, thinking.selectedNodeId]);
+
   const handleRegenerateArtifact = useCallback(async () => {
     if (!artifactPreview || isGeneratingTask(artifactPreview.task_id)) return;
 
@@ -858,13 +891,16 @@ export function ChannelView({
             <div className="sidebar-collapse-offset flex h-14 flex-shrink-0 items-center border-b-2 border-black px-4">
               <div className="flex min-w-0 flex-1 items-center gap-2">
                 <span className="font-heading text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                  {t('taskChannel')}
+                  {isThinking ? t('thinkingCurrentBranch') : t('taskChannel')}
                 </span>
-                <h2 className="truncate font-heading text-lg font-bold text-foreground">{channel.name}</h2>
+                <h2 className="truncate font-heading text-lg font-bold text-foreground">{isThinking ? selectedThinkingNode?.title ?? channel.name : channel.name}</h2>
+                {isThinking && selectedThinkingNode?.agent_name && (
+                  <span className="truncate border border-black bg-brutal-info-light px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase">{selectedThinkingNode.agent_name}</span>
+                )}
               </div>
             </div>
             <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream">
-            {showOnboardingWizard && (
+            {showOnboardingWizard && !isThinking && (
               <div className="px-4 pt-4">
                 <WizardCard channelId={channel.id} />
               </div>
@@ -875,8 +911,8 @@ export function ChannelView({
               error={error}
               onRetry={(id, content) => retryMessage(id, content)}
               onCancel={(id) => cancelMessage(id)}
-              onReply={handleReply}
-              onAsTask={handleAsTaskOpen}
+              onReply={isThinking ? undefined : handleReply}
+              onAsTask={isThinking ? undefined : handleAsTaskOpen}
               hasMore={hasMore}
               isLoadingMore={isLoadingMore}
               loadMoreError={loadMoreError}
@@ -911,6 +947,9 @@ export function ChannelView({
               }}
               members={members}
               showAsTaskToggle
+              thinkingMode={isThinking}
+              onThinkingModeChange={handleThinkingModeChange}
+              disabled={Boolean(selectedThinkingNode?.fork_handoff_pending || selectedThinkingNode?.returning_at || selectedThinkingNode?.returned_at)}
             />
           </div>
           </>
@@ -939,19 +978,30 @@ export function ChannelView({
           <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
-              onClick={() => pushDashboardState({ view: 'team' })}
+              onClick={() => pushDashboardState({ view: 'team', panel: 'conversation', nodeId: null })}
               className={tabButtonClass(workspaceView === 'team')}
+              aria-pressed={workspaceView === 'team'}
             >
               <Network className="h-3.5 w-3.5" />
               {t('navTeams')}
             </button>
             <button
               type="button"
-              onClick={() => pushDashboardState({ view: 'task' })}
+              onClick={() => pushDashboardState({ view: 'task', panel: 'conversation', nodeId: null })}
               className={tabButtonClass(workspaceView === 'task')}
+              aria-pressed={workspaceView === 'task'}
             >
               <SquareCheckBig className="h-3.5 w-3.5" />
               {t('navTasks')}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleThinkingModeChange(true)}
+              className={tabButtonClass(workspaceView === 'thinking')}
+              aria-pressed={workspaceView === 'thinking'}
+            >
+              <BrainCircuit className="h-3.5 w-3.5" />
+              {t('thinkingMode')}
             </button>
           </div>
           <div className="flex shrink-0 items-center gap-1">
@@ -1041,6 +1091,19 @@ export function ChannelView({
               />
             </div>
           </div>
+        )}
+
+        {workspaceView === 'thinking' && (
+          <ThinkingWorkspace
+            space={thinking.space}
+            selectedNodeId={thinking.selectedNodeId}
+            isLoading={thinking.isLoading}
+            error={thinking.error}
+            onSelect={handleThinkingNodeSelect}
+            onCreateChild={thinking.createChild}
+            onRetryForkHandoff={thinking.retryForkHandoff}
+            onReturnNode={thinking.returnNode}
+          />
         )}
       </div>
       )}

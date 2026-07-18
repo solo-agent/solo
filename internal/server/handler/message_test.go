@@ -38,6 +38,21 @@ func TestMessageHandler_Create_Validation(t *testing.T) {
 			body:       `{"content":"hello"}`,
 			wantStatus: http.StatusUnauthorized,
 		},
+		{
+			name:       "invalid thinking node",
+			body:       `{"content":"hello","thinking_node_id":"not-a-uuid"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "thinking node with thread",
+			body:       `{"content":"hello","thinking_node_id":"550e8400-e29b-41d4-a716-446655440000","thread_id":"message-prefix"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "thinking node as task",
+			body:       `{"content":"hello","thinking_node_id":"550e8400-e29b-41d4-a716-446655440000","as_task":true}`,
+			wantStatus: http.StatusBadRequest,
+		},
 	}
 
 	for _, tt := range tests {
@@ -79,6 +94,18 @@ func TestHasMessageBody(t *testing.T) {
 				t.Fatalf("hasMessageBody() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCanPostToThinkingNode(t *testing.T) {
+	if !canPostToThinkingNode("user", "user-1", "agent-1") {
+		t.Fatal("human channel member should be able to post to a selected node")
+	}
+	if !canPostToThinkingNode("agent", "agent-1", "agent-1") {
+		t.Fatal("assigned Agent should be able to post to its node")
+	}
+	if canPostToThinkingNode("agent", "agent-2", "agent-1") {
+		t.Fatal("unassigned Agent should not be able to post to another Agent's node")
 	}
 }
 

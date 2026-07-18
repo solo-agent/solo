@@ -11,10 +11,9 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Activity } from 'lucide-react';
 import { RelationshipActivityCard } from '@/components/relationships/relationship-activity-card';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
-import { agentRunStatusText } from '@/lib/agent-activity';
+import { agentRunShowsDots, agentRunShowsHalo, agentRunStatusColor, agentRunStatusText } from '@/lib/agent-activity';
 import { t } from '@/lib/i18n';
 import type { LiveAgentState } from '@/lib/hooks/use-team-agent-activity';
-import type { AgentRunStatus } from '@/lib/agent-run-types';
 import type { TaskStatus } from '@/lib/types';
 
 export interface AgentNodeTask {
@@ -35,30 +34,6 @@ export interface AgentNodeData {
   onOpenTask?: (taskId: string) => void;
   onOpenTaskArtifact?: (taskId: string) => void;
 }
-
-const STATUS_BORDER: Record<AgentRunStatus | 'idle', string> = {
-  queued: '#9ca3af',
-  thinking: '#3B7DD8',
-  running: '#0891b2',
-  streaming: '#16a34a',
-  waiting_input: '#f59e0b',
-  waiting_approval: '#ea580c',
-  completed: '#16a34a',
-  failed: '#dc2626',
-  cancelled: '#6b7280',
-  timeout: '#be123c',
-  idle: '#000000',
-};
-
-const ACTIVE_DOT_STATUSES = new Set<AgentRunStatus>(['thinking', 'running', 'streaming']);
-const ACTIVE_HALO_STATUSES = new Set<AgentRunStatus>([
-  'queued',
-  'thinking',
-  'running',
-  'streaming',
-  'waiting_input',
-  'waiting_approval',
-]);
 
 const TASK_STATUS_BORDER: Partial<Record<TaskStatus, string>> = {
   in_progress: '#3B7DD8',
@@ -170,10 +145,10 @@ function RelationshipNodeComponent({ data, selected }: NodeProps) {
   const agentData = data as unknown as AgentNodeData;
   const isActive = agentData.isActive ?? false;
   const status = agentData.liveActivity?.currentRun?.status;
-  const borderColor = STATUS_BORDER[status ?? 'idle'];
+  const borderColor = agentRunStatusColor(status);
   const statusText = status ? agentRunStatusText(status) : (isActive ? t('online') : t('offline'));
-  const showDots = status ? ACTIVE_DOT_STATUSES.has(status) : false;
-  const showHalo = status ? ACTIVE_HALO_STATUSES.has(status) : false;
+  const showDots = agentRunShowsDots(status);
+  const showHalo = agentRunShowsHalo(status);
   const hasTask = !!agentData.task;
 
   return (

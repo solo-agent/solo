@@ -1,4 +1,4 @@
-export type DashboardView = 'team' | 'task';
+export type DashboardView = 'team' | 'task' | 'thinking';
 export type DashboardPanel = 'conversation' | 'thread' | 'agent' | 'relationship';
 
 export interface DashboardUrlState {
@@ -10,9 +10,10 @@ export interface DashboardUrlState {
   messageId: string | null;
   agentId: string | null;
   relationshipId: string | null;
+  nodeId: string | null;
 }
 
-const views = new Set<DashboardView>(['team', 'task']);
+const views = new Set<DashboardView>(['team', 'task', 'thinking']);
 const panels = new Set<DashboardPanel>(['conversation', 'thread', 'agent', 'relationship']);
 type SearchParamsLike = Pick<URLSearchParams, 'get'>;
 
@@ -38,6 +39,7 @@ export function parseDashboardParams(params: SearchParamsLike): DashboardUrlStat
     messageId: params.get('message'),
     agentId: parsedPanel === 'agent' ? params.get('agent') : null,
     relationshipId: parsedPanel === 'relationship' ? params.get('relationship') : null,
+    nodeId: parsedView === 'thinking' ? params.get('node') : null,
   };
 }
 
@@ -56,5 +58,6 @@ export function buildDashboardHref(
   if (panel === 'conversation' && patch.messageId) params.set('message', patch.messageId);
   if (panel === 'agent' && patch.agentId) params.set('agent', patch.agentId);
   if (panel === 'relationship' && patch.relationshipId) params.set('relationship', patch.relationshipId);
+  if (view === 'thinking' && patch.nodeId) params.set('node', patch.nodeId);
   return `/dashboard?${params.toString()}`;
 }

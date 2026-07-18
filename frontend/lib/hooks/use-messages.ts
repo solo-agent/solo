@@ -29,6 +29,7 @@ interface MessageResponse {
   content: string;
   content_type: string;
   thread_id?: string;
+  thinking_node_id?: string;
   reply_count?: number;
   task_number?: number;
   task_title?: string;
@@ -56,9 +57,11 @@ function mapMessageResponse(resp: MessageResponse): Message {
     user_id: resp.sender_id,
     display_name: resp.sender_name || resp.sender_id,
     content: resp.content,
+    content_type: resp.content_type,
     created_at: resp.created_at,
     status: 'sent',
     thread_id: resp.thread_id,
+    thinking_node_id: resp.thinking_node_id,
     reply_count: resp.reply_count,
     sender_type: resp.sender_type as 'user' | 'agent' | 'system' | undefined,
     sender_active: resp.sender_active,
@@ -80,7 +83,9 @@ function flatToMessage(event: {
   sender_id: string;
   sender_name?: string;
   content: string;
+  content_type?: string;
   thread_id?: string;
+  thinking_node_id?: string;
   reply_count?: number;
   task_number?: number;
   task_title?: string;
@@ -97,10 +102,12 @@ function flatToMessage(event: {
     user_id: event.sender_id,
     display_name: event.sender_name || event.sender_id,
     content: event.content,
+    content_type: event.content_type,
     created_at: event.created_at,
     status: 'sent',
     thread_parent_id: event.thread_id,
     thread_id: event.thread_id,
+    thinking_node_id: event.thinking_node_id,
     reply_count: event.reply_count,
     sender_type: event.sender_type as 'user' | 'agent' | 'system' | undefined,
     task_number: event.task_number,
@@ -115,7 +122,7 @@ function flatToMessage(event: {
 
 // ---- Hook ----
 
-export function useMessages(channelId: string | null) {
+export function useMessages(channelId: string | null, thinkingNodeId: string | null = null) {
   const { subscribe, unsubscribe, onEvent, isConnected } = useWebSocket();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -133,6 +140,8 @@ export function useMessages(channelId: string | null) {
 
   const channelIdRef = useRef(channelId);
   channelIdRef.current = channelId;
+  const thinkingNodeIdRef = useRef(thinkingNodeId);
+  thinkingNodeIdRef.current = thinkingNodeId;
 
   // Keep channelRef immediately in sync so sendMessage and other operations
   // can use it before the first async loadMessages completes.
@@ -155,6 +164,7 @@ export function useMessages(channelId: string | null) {
     if (isConnected && !wasConnected) {
       const cid = channelIdRef.current;
       if (!cid) return;
+      const nodeID = thinkingNodeIdRef.current;
 
       const currentMsgs = messagesRef.current;
       if (currentMsgs.length === 0) return;
@@ -167,8 +177,10 @@ export function useMessages(channelId: string | null) {
           .get<MessageListResponse>(`/api/v1/channels/${cid}/messages`, {
             limit: '50',
             after: lastMsg.id,
+            ...(nodeID ? { thinking_node_id: nodeID } : {}),
           })
           .then((res) => {
+            if (channelIdRef.current !== cid || thinkingNodeIdRef.current !== nodeID) return;
             if (res.messages.length > 0) {
               setMessages((prev) => {
                 const existingIds = new Set(prev.map((m) => m.id));
@@ -212,6 +224,7 @@ export function useMessages(channelId: string | null) {
       if (event.type === 'message.new') {
         if (event.channel_id !== cid) return;
         if (event.thread_id) return;
+        if ((event.thinking_node_id ?? null) !== thinkingNodeIdRef.current) return;
 
         setMessages((prev) => {
           const existing = prev.find((m) => m.id === event.id);
@@ -260,6 +273,7 @@ export function useMessages(channelId: string | null) {
       if (event.type === 'message.agent_typing') {
         if (event.channel_id !== cid) return;
         if (event.thread_id) return;
+        if ((event.thinking_node_id ?? null) !== thinkingNodeIdRef.current) return;
 
         setMessages((prev) => {
           const existing = prev.find((m) => m.id === event.id);
@@ -285,6 +299,7 @@ export function useMessages(channelId: string | null) {
               created_at: event.created_at,
               status: 'streaming' as const,
               sender_type: 'agent' as const,
+              thinking_node_id: event.thinking_node_id,
             },
           ];
         });
@@ -366,6 +381,7 @@ export function useMessages(channelId: string | null) {
 
   const loadMessages = useCallback(async (id: string) => {
     if (loadingRef.current) return;
+    const requestedNodeID = thinkingNodeIdRef.current;
     loadingRef.current = true;
     setIsLoading(true);
     setError(null);
@@ -373,9 +389,12 @@ export function useMessages(channelId: string | null) {
     try {
       const res = await apiClient.get<MessageListResponse>(
         `/api/v1/channels/${id}/messages`,
-        { limit: String(PAGE_SIZE) },
+        {
+          limit: String(PAGE_SIZE),
+          ...(thinkingNodeIdRef.current ? { thinking_node_id: thinkingNodeIdRef.current } : {}),
+        },
       );
-      if (channelRef.current === null || channelRef.current === id) {
+      if ((channelRef.current === null || channelRef.current === id) && thinkingNodeIdRef.current === requestedNodeID) {
         const parsed = res.messages.map(mapMessageResponse);
         setMessages(parsed);
         setHasMore(res.has_more);
@@ -405,6 +424,8 @@ export function useMessages(channelId: string | null) {
   }, []);
 
   useEffect(() => {
+    setMessages([]);
+    loadingRef.current = false;
     if (channelId) {
       loadMessages(channelId);
     } else {
@@ -412,12 +433,13 @@ export function useMessages(channelId: string | null) {
       setHasMore(true);
       channelRef.current = null;
     }
-  }, [channelId, loadMessages]);
+  }, [channelId, thinkingNodeId, loadMessages]);
 
   // ---- Load older messages (cursor-based pagination) ----
 
   const loadMore = useCallback(async () => {
     const id = channelRef.current;
+    const nodeID = thinkingNodeIdRef.current;
     if (!id || !hasMore || loadingMoreRef.current) return;
 
     loadingMoreRef.current = true;
@@ -435,8 +457,14 @@ export function useMessages(channelId: string | null) {
       const oldestId = currentMsgs[0].id;
       const res = await apiClient.get<MessageListResponse>(
         `/api/v1/channels/${id}/messages`,
-        { limit: String(PAGE_SIZE), before: oldestId },
+        {
+          limit: String(PAGE_SIZE),
+          before: oldestId,
+          ...(nodeID ? { thinking_node_id: nodeID } : {}),
+        },
       );
+
+      if (channelRef.current !== id || thinkingNodeIdRef.current !== nodeID) return;
 
       const older = res.messages.map(mapMessageResponse);
       setMessages((prev) => [...older, ...prev]);
@@ -452,6 +480,7 @@ export function useMessages(channelId: string | null) {
         }
       }
     } catch {
+      if (channelRef.current !== id || thinkingNodeIdRef.current !== nodeID) return;
       setLoadMoreError(t('earlierMessageLoadError'));
     } finally {
       setIsLoadingMore(false);
@@ -469,6 +498,7 @@ export function useMessages(channelId: string | null) {
       attachmentIds?: string[],
     ): Promise<{ id: string; task_number?: number } | null> => {
       const id = channelRef.current;
+      const nodeID = thinkingNodeIdRef.current;
       const trimmedContent = content.trim();
       const hasAttachments = Boolean(attachmentIds && attachmentIds.length > 0);
       if (!id || (!trimmedContent && !hasAttachments) || (asTask && !trimmedContent)) return null;
@@ -482,12 +512,16 @@ export function useMessages(channelId: string | null) {
         content: trimmedContent,
         created_at: new Date().toISOString(),
         status: 'sending',
+        thinking_node_id: nodeID ?? undefined,
       };
 
       setMessages((prev) => [...prev, optimisticMessage]);
 
       try {
         const body: Record<string, unknown> = { content: trimmedContent };
+        if (nodeID) {
+          body.thinking_node_id = nodeID;
+        }
         if (mentionedAgentIds && mentionedAgentIds.length > 0) {
           body.mentioned_agent_ids = mentionedAgentIds;
         }
@@ -509,6 +543,13 @@ export function useMessages(channelId: string | null) {
         const realMessageId = isTaskResponse
           ? (confirmed as unknown as Record<string, unknown>).message_id as string
           : confirmed.id;
+
+        if (channelRef.current !== id || thinkingNodeIdRef.current !== nodeID) {
+          return {
+            id: realMessageId,
+            task_number: (confirmed as unknown as Record<string, unknown>).task_number as number | undefined,
+          };
+        }
 
         setMessages((prev) => {
           if (isTaskResponse) {
@@ -572,6 +613,7 @@ export function useMessages(channelId: string | null) {
           task_number: (confirmed as unknown as Record<string, unknown>).task_number as number | undefined,
         };
       } catch {
+        if (channelRef.current !== id || thinkingNodeIdRef.current !== nodeID) return null;
         setMessages((prev) =>
           prev.map((m) =>
             m.id === tempId ? { ...m, status: 'failed' as const } : m,
@@ -588,6 +630,7 @@ export function useMessages(channelId: string | null) {
   const retryMessage = useCallback(
     async (messageId: string, content: string) => {
       const id = channelRef.current;
+      const nodeID = thinkingNodeIdRef.current;
       if (!id) return;
 
       setMessages((prev) =>
@@ -599,14 +642,20 @@ export function useMessages(channelId: string | null) {
       try {
         const confirmed = await apiClient.post<MessageResponse>(
           `/api/v1/channels/${id}/messages`,
-          { content },
+          {
+            content,
+            ...(nodeID ? { thinking_node_id: nodeID } : {}),
+          },
         );
+
+        if (channelRef.current !== id || thinkingNodeIdRef.current !== nodeID) return;
 
         setMessages((prev) => {
           const filtered = prev.filter((m) => m.id !== messageId && m.id !== confirmed.id);
           return [...filtered, { ...mapMessageResponse(confirmed), status: 'sent' as const }];
         });
       } catch {
+        if (channelRef.current !== id || thinkingNodeIdRef.current !== nodeID) return;
         setMessages((prev) =>
           prev.map((m) =>
             m.id === messageId ? { ...m, status: 'failed' as const } : m,

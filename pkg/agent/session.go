@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
@@ -12,9 +13,10 @@ import (
 // exits immediately (indicating a CLI misconfiguration, not a transient failure).
 const failedStartRetryInterval = 30 * time.Second
 
-// AgentSessionManager manages a pool of agent sessions
-// processes stay alive indefinitely (no idle timeout), crash recovery is
-// automatic via --resume, and concurrent starts are rate-limited.
+// AgentSessionManager manages a pool of Agent and Thinking-node sessions.
+// Crash recovery is automatic via --resume, concurrent starts are rate-limited,
+// and callers may explicitly sleep idle Thinking sessions without affecting
+// ordinary Agent session lifetime.
 type AgentSessionManager struct {
 	backend      PersistentBackend
 	workspaceMgr *WorkspaceManager
@@ -24,8 +26,10 @@ type AgentSessionManager struct {
 	sessions map[string]*agentSessionEntry
 	mu       sync.RWMutex
 
-	activeTurns map[string]chan struct{}
-	turnsMu     sync.Mutex
+	activeTurns       map[string]chan struct{}
+	agentTurns        map[string]chan struct{}
+	activeAgentScopes map[string]string
+	turnsMu           sync.Mutex
 
 	// pendingMessages holds messages queued while an agent is busy.
 	// Used for freshness hold: before an agent's reply is persisted,
@@ -46,6 +50,7 @@ type AgentSessionManager struct {
 // agentSessionEntry wraps a session with lifetime metadata.
 type agentSessionEntry struct {
 	mu          sync.RWMutex
+	SessionKey  string
 	AgentID     string
 	Session     *PersistentSession // nil when asleep
 	AgentConfig AgentConfig
@@ -83,72 +88,111 @@ func NewAgentSessionManager(backend PersistentBackend, workspaceMgr *WorkspaceMa
 	}
 	slots := make(chan struct{}, 5) // max 5 concurrent starts
 	return &AgentSessionManager{
-		backend:         backend,
-		workspaceMgr:    workspaceMgr,
-		memoryMgr:       memoryMgr,
-		logger:          logger,
-		sessions:        make(map[string]*agentSessionEntry),
-		activeTurns:     make(map[string]chan struct{}),
-		pendingMessages: make(map[string][]Message),
-		startSlots:      slots,
-		failedStarts:    make(map[string]time.Time),
+		backend:           backend,
+		workspaceMgr:      workspaceMgr,
+		memoryMgr:         memoryMgr,
+		logger:            logger,
+		sessions:          make(map[string]*agentSessionEntry),
+		activeTurns:       make(map[string]chan struct{}),
+		agentTurns:        make(map[string]chan struct{}),
+		activeAgentScopes: make(map[string]string),
+		pendingMessages:   make(map[string][]Message),
+		startSlots:        slots,
+		failedStarts:      make(map[string]time.Time),
 	}
+}
+
+// AgentSessionKey is the stable pool key for Solo's existing Agent-wide session.
+func AgentSessionKey(agentID string) string {
+	return "agent:" + agentID
+}
+
+// ThinkingSessionKey is the stable pool key for one isolated Thinking node session.
+func ThinkingSessionKey(nodeID string) string {
+	return "thinking:" + nodeID
+}
+
+// ActiveThinkingNodeID returns the Thinking node whose scoped Session
+// currently owns this Agent's turn. The value is runtime-owned routing state,
+// not metadata supplied by the Agent or its CLI.
+func (m *AgentSessionManager) ActiveThinkingNodeID(agentID string) (string, bool) {
+	m.turnsMu.Lock()
+	defer m.turnsMu.Unlock()
+	sessionKey := m.activeAgentScopes[agentID]
+	nodeID, ok := strings.CutPrefix(sessionKey, "thinking:")
+	return nodeID, ok && nodeID != ""
 }
 
 // GetOrCreateSession returns an existing session or creates one.
 // Asleep sessions are automatically woken via --resume.
 func (m *AgentSessionManager) GetOrCreateSession(ctx context.Context, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, initialMessages []Message, mentionedNames []string) (*PersistentSession, error) {
+	return m.GetOrCreateScopedSession(ctx, AgentSessionKey(agentID), agentID, agentCfg, channelCtx, initialMessages, "", mentionedNames)
+}
+
+// GetOrCreateScopedSession returns or creates a persistent session whose pool
+// identity is independent from the Agent identity that owns the runtime.
+func (m *AgentSessionManager) GetOrCreateScopedSession(ctx context.Context, sessionKey, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, initialMessages []Message, resumeSessionID string, mentionedNames []string) (*PersistentSession, error) {
 	m.mu.RLock()
-	entry, exists := m.sessions[agentID]
+	entry, exists := m.sessions[sessionKey]
 	m.mu.RUnlock()
 
 	if exists {
 		if m.isSessionAlive(entry) {
-			return m.deliverToSession(ctx, agentID, entry, initialMessages)
+			return m.deliverToSession(ctx, sessionKey, entry, initialMessages)
 		}
 		_, _, resumeID := entry.snapshot()
-		return m.createSession(ctx, agentID, agentCfg, channelCtx, initialMessages, resumeID, mentionedNames)
+		return m.createSession(ctx, sessionKey, agentID, agentCfg, channelCtx, initialMessages, firstNonEmpty(resumeID, resumeSessionID), mentionedNames)
 	}
 
 	// Check retry cooldown for agents with recent failed starts.
-	if m.inFailedCooldown(agentID) {
-		m.logger.Warn("session: skipping start, in cooldown after recent failure", "agent_id", agentID)
-		return nil, fmt.Errorf("session start cooldown for agent %s", agentID)
+	if m.inFailedCooldown(sessionKey) {
+		m.logger.Warn("session: skipping start, in cooldown after recent failure", "agent_id", agentID, "session_key", sessionKey)
+		return nil, fmt.Errorf("session start cooldown for %s", sessionKey)
 	}
 
-	return m.createSession(ctx, agentID, agentCfg, channelCtx, initialMessages, "", mentionedNames)
+	return m.createSession(ctx, sessionKey, agentID, agentCfg, channelCtx, initialMessages, resumeSessionID, mentionedNames)
 }
 
 // DeliverMessage sends a message to an active session.
 func (m *AgentSessionManager) DeliverMessage(ctx context.Context, agentID string, messages []Message) (*PersistentSession, error) {
+	return m.DeliverScopedMessage(ctx, AgentSessionKey(agentID), messages)
+}
+
+// DeliverScopedMessage sends a message to an active scoped session.
+func (m *AgentSessionManager) DeliverScopedMessage(ctx context.Context, sessionKey string, messages []Message) (*PersistentSession, error) {
 	m.mu.RLock()
-	entry, exists := m.sessions[agentID]
+	entry, exists := m.sessions[sessionKey]
 	m.mu.RUnlock()
 
 	if !exists {
-		return nil, fmt.Errorf("no session for agent %s", agentID)
+		return nil, fmt.Errorf("no session for %s", sessionKey)
 	}
 	_, asleep, _ := entry.snapshot()
 	if asleep {
-		return nil, fmt.Errorf("session for agent %s is asleep — use GetOrCreateSession to wake", agentID)
+		return nil, fmt.Errorf("session %s is asleep — use GetOrCreateScopedSession to wake", sessionKey)
 	}
 	if !m.isSessionAlive(entry) {
-		return nil, fmt.Errorf("session for agent %s has exited", agentID)
+		return nil, fmt.Errorf("session %s has exited", sessionKey)
 	}
 
-	return m.deliverToSession(ctx, agentID, entry, messages)
+	return m.deliverToSession(ctx, sessionKey, entry, messages)
 }
 
 // QueueIfBusy attempts to deliver a message. If the agent is currently
 // processing another turn, the message is queued for freshness hold instead
 // of blocking. Returns true if the message was queued.
 func (m *AgentSessionManager) QueueIfBusy(agentID string, msg Message) bool {
+	return m.QueueScopedIfBusy(AgentSessionKey(agentID), msg)
+}
+
+// QueueScopedIfBusy queues a message when the scoped session is in a turn.
+func (m *AgentSessionManager) QueueScopedIfBusy(sessionKey string, msg Message) bool {
 	m.turnsMu.Lock()
-	ch, exists := m.activeTurns[agentID]
+	ch, exists := m.activeTurns[sessionKey]
 	if !exists {
 		ch = make(chan struct{}, 1)
 		ch <- struct{}{}
-		m.activeTurns[agentID] = ch
+		m.activeTurns[sessionKey] = ch
 	}
 	m.turnsMu.Unlock()
 
@@ -162,12 +206,12 @@ func (m *AgentSessionManager) QueueIfBusy(agentID string, msg Message) bool {
 	default:
 		// Turn is held — queue the message.
 		m.pendingMu.Lock()
-		m.pendingMessages[agentID] = append(m.pendingMessages[agentID], msg)
-		count := len(m.pendingMessages[agentID])
+		m.pendingMessages[sessionKey] = append(m.pendingMessages[sessionKey], msg)
+		count := len(m.pendingMessages[sessionKey])
 		m.pendingMu.Unlock()
-		m.logger.Info("session: message queued", "agent_id", agentID, "pending_count", count)
+		m.logger.Info("session: message queued", "session_key", sessionKey, "pending_count", count)
 		// v1.3: Write inbox notification to agent stdin.
-		m.notifyInbox(agentID, count)
+		m.notifyInbox(sessionKey, count)
 		return true
 	}
 }
@@ -175,17 +219,27 @@ func (m *AgentSessionManager) QueueIfBusy(agentID string, msg Message) bool {
 // FlushPending returns and clears all pending messages for an agent.
 // Called after a turn completes to check if newer messages arrived.
 func (m *AgentSessionManager) FlushPending(agentID string) []Message {
+	return m.FlushScopedPending(AgentSessionKey(agentID))
+}
+
+// FlushScopedPending returns and clears queued messages for a scoped session.
+func (m *AgentSessionManager) FlushScopedPending(sessionKey string) []Message {
 	m.pendingMu.Lock()
-	msgs := m.pendingMessages[agentID]
-	delete(m.pendingMessages, agentID)
+	msgs := m.pendingMessages[sessionKey]
+	delete(m.pendingMessages, sessionKey)
 	m.pendingMu.Unlock()
 	return msgs
 }
 
 // IsActive returns true if the agent has a running (non-asleep) session.
 func (m *AgentSessionManager) IsActive(agentID string) bool {
+	return m.IsScopedActive(AgentSessionKey(agentID))
+}
+
+// IsScopedActive reports whether a scoped persistent process is alive.
+func (m *AgentSessionManager) IsScopedActive(sessionKey string) bool {
 	m.mu.RLock()
-	entry, exists := m.sessions[agentID]
+	entry, exists := m.sessions[sessionKey]
 	m.mu.RUnlock()
 	if !exists {
 		return false
@@ -202,11 +256,13 @@ func (m *AgentSessionManager) ActiveAgentIDs() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	seen := make(map[string]bool)
 	var ids []string
-	for agentID, entry := range m.sessions {
+	for _, entry := range m.sessions {
 		_, asleep, _ := entry.snapshot()
-		if !asleep && m.isSessionAlive(entry) {
-			ids = append(ids, agentID)
+		if !asleep && m.isSessionAlive(entry) && !seen[entry.AgentID] {
+			seen[entry.AgentID] = true
+			ids = append(ids, entry.AgentID)
 		}
 	}
 	return ids
@@ -214,10 +270,78 @@ func (m *AgentSessionManager) ActiveAgentIDs() []string {
 
 // CloseSession terminates a session (active or asleep).
 func (m *AgentSessionManager) CloseSession(agentID string) error {
+	return m.closeScopedSession(AgentSessionKey(agentID), false)
+}
+
+// CloseThinkingSession terminates one node-scoped provider Session while
+// preserving its persisted provider ID for audit.
+func (m *AgentSessionManager) CloseThinkingSession(nodeID string) error {
+	return m.closeScopedSession(ThinkingSessionKey(nodeID), false)
+}
+
+// ForceCloseThinkingSession terminates one node process immediately. It is
+// used when the owning channel is archived and no further turn may complete.
+func (m *AgentSessionManager) ForceCloseThinkingSession(nodeID string) error {
+	return m.closeScopedSession(ThinkingSessionKey(nodeID), true)
+}
+
+// SleepIdleThinkingSessions gracefully releases idle node processes while
+// retaining their provider session IDs for the next --resume.
+func (m *AgentSessionManager) SleepIdleThinkingSessions(idleBefore time.Time) (int, error) {
+	m.mu.RLock()
+	keys := make([]string, 0)
+	for sessionKey := range m.sessions {
+		if strings.HasPrefix(sessionKey, "thinking:") {
+			keys = append(keys, sessionKey)
+		}
+	}
+	m.mu.RUnlock()
+
+	slept := 0
+	var firstErr error
+	for _, sessionKey := range keys {
+		release, ok := m.tryAcquireScopedTurn(sessionKey)
+		if !ok {
+			continue
+		}
+
+		m.mu.RLock()
+		entry := m.sessions[sessionKey]
+		m.mu.RUnlock()
+		if entry == nil {
+			release()
+			continue
+		}
+
+		entry.mu.Lock()
+		if entry.asleep || entry.Session == nil || !entry.LastActive.Before(idleBefore) {
+			entry.mu.Unlock()
+			release()
+			continue
+		}
+		ps := entry.Session
+		if ps.SessionID != "" {
+			entry.sessionID = ps.SessionID
+		}
+		entry.Session = nil
+		entry.asleep = true
+		entry.mu.Unlock()
+
+		m.logger.Info("session: sleeping idle Thinking process", "agent_id", entry.AgentID, "session_key", sessionKey)
+		if err := m.backend.Close(ps); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		slept++
+		release()
+	}
+	return slept, firstErr
+}
+
+func (m *AgentSessionManager) closeScopedSession(sessionKey string, force bool) error {
 	m.mu.Lock()
-	entry, exists := m.sessions[agentID]
+	entry, exists := m.sessions[sessionKey]
 	if exists {
-		delete(m.sessions, agentID)
+		delete(m.sessions, sessionKey)
 	}
 	m.mu.Unlock()
 
@@ -225,9 +349,12 @@ func (m *AgentSessionManager) CloseSession(agentID string) error {
 		return nil
 	}
 
-	m.logger.Info("session: closing", "agent_id", agentID)
+	m.logger.Info("session: closing", "agent_id", entry.AgentID, "session_key", sessionKey, "force", force)
 	ps, asleep, _ := entry.snapshot()
 	if !asleep && ps != nil {
+		if force {
+			return m.backend.ForceClose(ps)
+		}
 		return m.backend.Close(ps)
 	}
 	return nil
@@ -238,22 +365,26 @@ func (m *AgentSessionManager) CloseSession(agentID string) error {
 // can be discarded.
 func (m *AgentSessionManager) ForceCloseSession(agentID string) error {
 	m.mu.Lock()
-	entry, exists := m.sessions[agentID]
-	if exists {
-		delete(m.sessions, agentID)
+	entries := make([]*agentSessionEntry, 0)
+	for sessionKey, entry := range m.sessions {
+		if entry.AgentID == agentID {
+			entries = append(entries, entry)
+			delete(m.sessions, sessionKey)
+		}
 	}
 	m.mu.Unlock()
 
-	if !exists {
-		return nil
+	var firstErr error
+	for _, entry := range entries {
+		m.logger.Warn("session: force-closing", "agent_id", agentID, "session_key", entry.SessionKey)
+		ps, asleep, _ := entry.snapshot()
+		if !asleep && ps != nil {
+			if err := m.backend.ForceClose(ps); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
 	}
-
-	m.logger.Warn("session: force-closing", "agent_id", agentID)
-	ps, asleep, _ := entry.snapshot()
-	if !asleep && ps != nil {
-		return m.backend.ForceClose(ps)
-	}
-	return nil
+	return firstErr
 }
 
 // CloseAll terminates all sessions.
@@ -289,8 +420,8 @@ func (m *AgentSessionManager) isSessionAlive(entry *agentSessionEntry) bool {
 	return state.IsAlive()
 }
 
-func (m *AgentSessionManager) deliverToSession(ctx context.Context, agentID string, entry *agentSessionEntry, messages []Message) (*PersistentSession, error) {
-	release := m.acquireTurn(agentID)
+func (m *AgentSessionManager) deliverToSession(ctx context.Context, sessionKey string, entry *agentSessionEntry, messages []Message) (*PersistentSession, error) {
+	release := m.acquireTurn(sessionKey, entry.AgentID)
 	releaseOnReturn := true
 	defer func() {
 		if releaseOnReturn {
@@ -298,18 +429,21 @@ func (m *AgentSessionManager) deliverToSession(ctx context.Context, agentID stri
 		}
 	}()
 
-	m.logger.Info("session: delivering message", "agent_id", agentID)
-	previous, _, _ := entry.snapshot()
+	m.logger.Info("session: delivering message", "agent_id", entry.AgentID, "session_key", sessionKey)
+	previous, asleep, _ := entry.snapshot()
+	if asleep || previous == nil {
+		return nil, fmt.Errorf("session %s went to sleep before delivery", sessionKey)
+	}
 	ps, err := m.backend.Send(ctx, previous, messages)
 	if err != nil {
-		m.logger.Error("session: Send failed", "agent_id", agentID, "error", err)
+		m.logger.Error("session: Send failed", "agent_id", entry.AgentID, "session_key", sessionKey, "error", err)
 		m.mu.Lock()
-		delete(m.sessions, agentID)
+		delete(m.sessions, sessionKey)
 		m.mu.Unlock()
 		return nil, err
 	}
 	if ps == nil {
-		return nil, fmt.Errorf("session backend returned a nil session for agent %s", agentID)
+		return nil, fmt.Errorf("session backend returned a nil session for %s", sessionKey)
 	}
 
 	entry.updateSession(ps)
@@ -318,8 +452,8 @@ func (m *AgentSessionManager) deliverToSession(ctx context.Context, agentID stri
 	return ps, nil
 }
 
-func (m *AgentSessionManager) createSession(ctx context.Context, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, messages []Message, prevSessionID string, mentionedNames []string) (*PersistentSession, error) {
-	release := m.acquireTurn(agentID)
+func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, messages []Message, prevSessionID string, mentionedNames []string) (*PersistentSession, error) {
+	release := m.acquireTurn(sessionKey, agentID)
 	releaseOnReturn := true
 	defer func() {
 		if releaseOnReturn {
@@ -328,7 +462,7 @@ func (m *AgentSessionManager) createSession(ctx context.Context, agentID string,
 	}()
 
 	m.mu.RLock()
-	entry, exists := m.sessions[agentID]
+	entry, exists := m.sessions[sessionKey]
 	m.mu.RUnlock()
 	if exists && m.isSessionAlive(entry) {
 		previous, _, _ := entry.snapshot()
@@ -337,7 +471,7 @@ func (m *AgentSessionManager) createSession(ctx context.Context, agentID string,
 			return nil, err
 		}
 		if ps == nil {
-			return nil, fmt.Errorf("session backend returned a nil session for agent %s", agentID)
+			return nil, fmt.Errorf("session backend returned a nil session for %s", sessionKey)
 		}
 		entry.updateSession(ps)
 		holdTurnUntilResult(ps, release)
@@ -345,7 +479,7 @@ func (m *AgentSessionManager) createSession(ctx context.Context, agentID string,
 		return ps, nil
 	}
 
-	m.logger.Info("session: creating", "agent_id", agentID, "resume", prevSessionID)
+	m.logger.Info("session: creating", "agent_id", agentID, "session_key", sessionKey, "resume", prevSessionID)
 
 	ws, err := m.workspaceMgr.Prepare(agentID, nil)
 	if err != nil {
@@ -391,6 +525,7 @@ func (m *AgentSessionManager) createSession(ctx context.Context, agentID string,
 	}
 
 	entry = &agentSessionEntry{
+		SessionKey:  sessionKey,
 		AgentID:     agentID,
 		Session:     ps,
 		AgentConfig: agentCfg,
@@ -401,17 +536,17 @@ func (m *AgentSessionManager) createSession(ctx context.Context, agentID string,
 	}
 
 	m.mu.Lock()
-	if old, ok := m.sessions[agentID]; ok {
+	if old, ok := m.sessions[sessionKey]; ok {
 		oldSession, oldAsleep, _ := old.snapshot()
 		if !oldAsleep && oldSession != nil {
 			_ = m.backend.Close(oldSession)
 		}
 	}
-	m.sessions[agentID] = entry
+	m.sessions[sessionKey] = entry
 	m.mu.Unlock()
 
 	state, _ := ps.state.(SessionStater)
-	go m.watchCrash(agentID, agentCfg, channelCtx, entry, state)
+	go m.watchCrash(sessionKey, agentID, agentCfg, channelCtx, entry, state)
 	holdTurnUntilResult(ps, release)
 	releaseOnReturn = false
 
@@ -419,12 +554,12 @@ func (m *AgentSessionManager) createSession(ctx context.Context, agentID string,
 	// to prevent retry storms on the next trigger.
 	if !m.isSessionAlive(entry) {
 		m.failedStartsMu.Lock()
-		m.failedStarts[agentID] = time.Now()
+		m.failedStarts[sessionKey] = time.Now()
 		m.failedStartsMu.Unlock()
-		m.logger.Warn("session: created but process died immediately, cooling down", "agent_id", agentID)
+		m.logger.Warn("session: created but process died immediately, cooling down", "agent_id", agentID, "session_key", sessionKey)
 	}
 
-	m.logger.Info("session: created", "agent_id", agentID)
+	m.logger.Info("session: created", "agent_id", agentID, "session_key", sessionKey)
 	return ps, nil
 }
 
@@ -471,7 +606,7 @@ func (m *AgentSessionManager) inFailedCooldown(agentID string) bool {
 
 // watchCrash monitors a session. On unexpected exit (crash, not sleep),
 // auto-restarts with --resume to recover context.
-func (m *AgentSessionManager) watchCrash(agentID string, agentCfg AgentConfig, channelCtx ChannelContext, entry *agentSessionEntry, state SessionStater) {
+func (m *AgentSessionManager) watchCrash(sessionKey, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, entry *agentSessionEntry, state SessionStater) {
 	if state == nil {
 		return
 	}
@@ -479,7 +614,7 @@ func (m *AgentSessionManager) watchCrash(agentID string, agentCfg AgentConfig, c
 	<-state.Done()
 
 	m.mu.RLock()
-	currentEntry, exists := m.sessions[agentID]
+	currentEntry, exists := m.sessions[sessionKey]
 	m.mu.RUnlock()
 	_, asleep, resumeID := entry.snapshot()
 	if !exists || currentEntry != entry || asleep {
@@ -492,11 +627,12 @@ func (m *AgentSessionManager) watchCrash(agentID string, agentCfg AgentConfig, c
 
 	m.logger.Warn("session: crashed, auto-restarting",
 		"agent_id", agentID,
+		"session_key", sessionKey,
 		"session_id", resumeID,
 	)
 
 	m.mu.Lock()
-	delete(m.sessions, agentID)
+	delete(m.sessions, sessionKey)
 	m.mu.Unlock()
 
 	restartMsg := Message{
@@ -504,9 +640,9 @@ func (m *AgentSessionManager) watchCrash(agentID string, agentCfg AgentConfig, c
 		Content: "Your session has been restored after a restart. Context is preserved via --resume. Continue from where you left off.",
 	}
 
-	_, err := m.createSession(context.Background(), agentID, agentCfg, channelCtx, []Message{restartMsg}, resumeID, nil)
+	_, err := m.createSession(context.Background(), sessionKey, agentID, agentCfg, channelCtx, []Message{restartMsg}, resumeID, nil)
 	if err != nil {
-		m.logger.Error("session: crash recovery failed", "agent_id", agentID, "error", err)
+		m.logger.Error("session: crash recovery failed", "agent_id", agentID, "session_key", sessionKey, "error", err)
 	}
 }
 
@@ -514,9 +650,9 @@ func (m *AgentSessionManager) watchCrash(agentID string, agentCfg AgentConfig, c
 // "1 pending inbox message(s)" pattern. The agent sees
 // this notification at the start of its next stdin read and can call
 // solo message check to pull the actual content.
-func (m *AgentSessionManager) notifyInbox(agentID string, count int) {
+func (m *AgentSessionManager) notifyInbox(sessionKey string, count int) {
 	m.mu.RLock()
-	entry, exists := m.sessions[agentID]
+	entry, exists := m.sessions[sessionKey]
 	m.mu.RUnlock()
 	if !exists {
 		return
@@ -533,19 +669,53 @@ func (m *AgentSessionManager) notifyInbox(agentID string, count int) {
 	_ = state.Notify(notification)
 }
 
-func (m *AgentSessionManager) acquireTurn(agentID string) func() {
+func (m *AgentSessionManager) acquireTurn(sessionKey, agentID string) func() {
 	m.turnsMu.Lock()
-	ch, exists := m.activeTurns[agentID]
+	ch, exists := m.activeTurns[sessionKey]
 	if !exists {
 		ch = make(chan struct{}, 1)
 		ch <- struct{}{}
-		m.activeTurns[agentID] = ch
+		m.activeTurns[sessionKey] = ch
+	}
+	agentCh, exists := m.agentTurns[agentID]
+	if !exists {
+		agentCh = make(chan struct{}, 1)
+		agentCh <- struct{}{}
+		m.agentTurns[agentID] = agentCh
 	}
 	m.turnsMu.Unlock()
 
 	<-ch
+	<-agentCh
+	m.turnsMu.Lock()
+	m.activeAgentScopes[agentID] = sessionKey
+	m.turnsMu.Unlock()
 
 	return func() {
+		m.turnsMu.Lock()
+		if m.activeAgentScopes[agentID] == sessionKey {
+			delete(m.activeAgentScopes, agentID)
+		}
+		m.turnsMu.Unlock()
+		agentCh <- struct{}{}
 		ch <- struct{}{}
+	}
+}
+
+func (m *AgentSessionManager) tryAcquireScopedTurn(sessionKey string) (func(), bool) {
+	m.turnsMu.Lock()
+	ch, exists := m.activeTurns[sessionKey]
+	if !exists {
+		ch = make(chan struct{}, 1)
+		ch <- struct{}{}
+		m.activeTurns[sessionKey] = ch
+	}
+	m.turnsMu.Unlock()
+
+	select {
+	case <-ch:
+		return func() { ch <- struct{}{} }, true
+	default:
+		return nil, false
 	}
 }

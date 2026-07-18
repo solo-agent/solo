@@ -104,3 +104,11 @@ func TestShouldTriggerAgentForSender(t *testing.T) {
 		})
 	}
 }
+
+func TestExcludeAgentPreventsSelfMentionLoop(t *testing.T) {
+	agents := []agentChannelInfo{{ID: "sender"}, {ID: "peer"}}
+	got := excludeAgent(agents, "sender")
+	if len(got) != 1 || got[0].ID != "peer" {
+		t.Fatalf("unexpected remaining agents: %#v", got)
+	}
+}

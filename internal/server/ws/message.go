@@ -41,6 +41,7 @@ const (
 	EventSystem            = "system"
 	EventThreadMessageNew  = "thread.message.new"
 	EventThreadReplyNotify = "thread.reply"
+	EventThinkingUpdated   = "thinking.updated"
 
 	// Agent status events (SOLO-46-B)
 	EventAgentThinking = "agent.thinking"
@@ -155,6 +156,7 @@ type MessageNewPayload struct {
 	Content            string           `json:"content"`
 	ContentType        string           `json:"content_type"`
 	ThreadID           string           `json:"thread_id,omitempty"`
+	ThinkingNodeID     string           `json:"thinking_node_id,omitempty"`
 	MentionedAgentIDs  []string         `json:"mentioned_agent_ids,omitempty"`
 	AttachmentIDs      []string         `json:"attachment_ids,omitempty"`
 	Attachments        []AttachmentMeta `json:"attachments,omitempty"`

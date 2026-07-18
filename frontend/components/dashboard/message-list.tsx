@@ -42,6 +42,7 @@ import {
   DialogCloseButton,
 } from '@/components/ui/dialog';
 import { AgentMessage } from './agent-message';
+import { MessageMarkdown } from './message-markdown';
 import { StreamingMessage } from './streaming-message';
 import { MessageAttachments } from './message-attachments';
 import type { AgentDetailTarget, ChannelMember, Message } from '@/lib/types';
@@ -116,6 +117,7 @@ interface MessageItemProps {
   onEdit?: (id: string, content: string) => void;
   onDelete?: (id: string) => void;
   onAsTask?: (message: Message) => void;
+  onOpenArtifactReference?: (ref: string) => void;
 }
 
 const MessageItem = memo(function MessageItem({
@@ -127,6 +129,7 @@ const MessageItem = memo(function MessageItem({
   onEdit,
   onDelete,
   onAsTask,
+  onOpenArtifactReference,
 }: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content || '');
@@ -140,6 +143,8 @@ const MessageItem = memo(function MessageItem({
   // SOLO-225-F: task message detection
   const taskStatus = message.task_status as string | undefined;
   const isTaskMessage = message.task_number != null && taskStatus != null;
+  const isThinkingHandoff = message.content_type === 'thinking_handoff'
+    || (message.sender_type === 'system' && message.content.startsWith('Handoff returned from '));
   const headerConfig = isTaskMessage && taskStatus ? TASK_HEADER_CONFIG[taskStatus] : null;
 
   // P25-08-F: unread thread dot condition
@@ -353,6 +358,11 @@ const MessageItem = memo(function MessageItem({
               </button>
             </div>
           </div>
+        ) : isThinkingHandoff ? (
+          <MessageMarkdown
+            content={message.content}
+            onOpenArtifactReference={onOpenArtifactReference}
+          />
         ) : (
           <p
             className={cn(
@@ -913,6 +923,7 @@ export function MessageList({
                 onReply={onReply}
                 onEdit={onEdit}
                 onAsTask={onAsTask}
+                onOpenArtifactReference={onOpenArtifactReference}
                 onDelete={
                   onDelete
                     ? (id) => {

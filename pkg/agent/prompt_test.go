@@ -16,6 +16,19 @@ func TestBuildSystemPrompt_Identity(t *testing.T) {
 	assertHas(t, p, "agent-1")
 	assertHas(t, p, "You are a test bot.")
 	assertHas(t, p, "#general")
+	assertNotHas(t, p, "## Thinking Runtime")
+}
+
+func TestBuildSystemPrompt_ThinkingRuntimeIsSeparateFromInitialRole(t *testing.T) {
+	p := BuildSystemPrompt(
+		AgentConfig{Name: "TestBot", SystemPrompt: "You lead the team.", ThinkingRuntimePrompt: "You are in node abc."},
+		ChannelContext{TriggerType: TriggerChat}, "", nil,
+	)
+	initial := strings.Index(p, "## Initial role\n\nYou lead the team.")
+	thinking := strings.Index(p, "## Thinking Runtime\n\nYou are in node abc.")
+	if initial < 0 || thinking < initial {
+		t.Fatalf("Thinking Runtime must be a section after Initial role:\n%s", p)
+	}
 }
 
 func TestBuildSystemPrompt_RuntimeContext(t *testing.T) {

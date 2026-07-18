@@ -1,6 +1,42 @@
 import { t, type TranslationKey } from '@/lib/i18n';
 import type { AgentRunStatus } from '@/lib/agent-run-types';
 
+const RUN_STATUS_COLOR: Record<AgentRunStatus | 'idle', string> = {
+  queued: '#9ca3af',
+  thinking: '#3B7DD8',
+  running: '#0891b2',
+  streaming: '#16a34a',
+  waiting_input: '#f59e0b',
+  waiting_approval: '#ea580c',
+  completed: '#16a34a',
+  failed: '#dc2626',
+  cancelled: '#6b7280',
+  timeout: '#be123c',
+  idle: '#000000',
+};
+
+const ACTIVE_DOT_STATUSES = new Set<AgentRunStatus>(['thinking', 'running', 'streaming']);
+const ACTIVE_HALO_STATUSES = new Set<AgentRunStatus>([
+  'queued',
+  'thinking',
+  'running',
+  'streaming',
+  'waiting_input',
+  'waiting_approval',
+]);
+
+export function agentRunStatusColor(status?: AgentRunStatus) {
+  return RUN_STATUS_COLOR[status ?? 'idle'];
+}
+
+export function agentRunShowsDots(status?: AgentRunStatus) {
+  return Boolean(status && ACTIVE_DOT_STATUSES.has(status));
+}
+
+export function agentRunShowsHalo(status?: AgentRunStatus) {
+  return Boolean(status && ACTIVE_HALO_STATUSES.has(status));
+}
+
 const ACTIVITY_TEXT_KEYS: Record<string, TranslationKey> = {
   'agent.activity.accepted': 'agentActivityAccepted',
   'agent.activity.no_visible_reply': 'agentActivityNoVisibleReply',

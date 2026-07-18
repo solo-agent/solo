@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,11 @@ import (
 
 const backendFinalResultWaitAfter = 5 * time.Second
 
+const (
+	defaultThinkingSessionIdleTTL       = 30 * time.Minute
+	defaultThinkingSessionSweepInterval = time.Minute
+)
+
 // agentTokenState holds a cached JWT for an agent plus its expiry.
 type agentTokenState struct {
 	accessToken string
@@ -46,6 +52,8 @@ type daemonHandler struct {
 	workspaceManager *agent.WorkspaceManager
 	memoryManager    *agent.MemoryManager
 	sessionManagers  map[string]*agent.AgentSessionManager // v1.4: per-provider persistent sessions
+	thinkingIdleTTL  time.Duration
+	thinkingSweep    time.Duration
 
 	// v1.4: per-agent token store for persistent session token auto-refresh (SOLO-254-B).
 	agentTokens   map[string]*agentTokenState // agentID -> cached token + expiry
@@ -67,7 +75,22 @@ func newDaemonHandler(pool *pgxpool.Pool, tm *taskManager, provider llm.Provider
 		workspaceManager: agent.NewWorkspaceManager(""),
 		memoryManager:    agent.NewMemoryManager(""),
 		agentTokens:      make(map[string]*agentTokenState),
+		thinkingIdleTTL:  durationFromEnv("THINKING_SESSION_IDLE_TTL", defaultThinkingSessionIdleTTL),
+		thinkingSweep:    durationFromEnv("THINKING_SESSION_SWEEP_INTERVAL", defaultThinkingSessionSweepInterval),
 	}
+}
+
+func durationFromEnv(name string, fallback time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration <= 0 {
+		slog.Warn("daemon: invalid duration setting, using default", "name", name, "value", value, "default", fallback)
+		return fallback
+	}
+	return duration
 }
 
 // SetSessionManager registers a session manager for a provider type.
@@ -104,6 +127,47 @@ func (h *daemonHandler) activeSessionAgentIDs() []string {
 		}
 	}
 	return ids
+}
+
+func (h *daemonHandler) activeThinkingNodeID(agentID string) (string, error) {
+	var nodeID string
+	for provider, sm := range h.sessionManagers {
+		candidate, ok := sm.ActiveThinkingNodeID(agentID)
+		if !ok {
+			continue
+		}
+		if nodeID != "" && nodeID != candidate {
+			return "", fmt.Errorf("agent %s has conflicting Thinking runtime scopes (%s, provider %s)", agentID, candidate, provider)
+		}
+		nodeID = candidate
+	}
+	return nodeID, nil
+}
+
+// runThinkingSessionReaper releases only idle Thinking node processes. The
+// provider session ID remains in the session manager so the next turn resumes
+// the same conversation; ordinary Agent sessions are deliberately untouched.
+func (h *daemonHandler) runThinkingSessionReaper(ctx context.Context) {
+	ticker := time.NewTicker(h.thinkingSweep)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case now := <-ticker.C:
+			idleBefore := now.Add(-h.thinkingIdleTTL)
+			for provider, sm := range h.sessionManagers {
+				slept, err := sm.SleepIdleThinkingSessions(idleBefore)
+				if err != nil {
+					slog.Warn("daemon: failed to sleep idle Thinking sessions", "provider", provider, "error", err)
+				}
+				if slept > 0 {
+					slog.Info("daemon: slept idle Thinking sessions", "provider", provider, "count", slept)
+				}
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // ── Token store (SOLO-254-B: persistent session token auto-refresh) ────────────
@@ -311,6 +375,7 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		ChannelID  string `json:"channel_id"`
 		Content    string `json:"content,omitempty"`
 		ThreadID   string `json:"thread_id,omitempty"`
+		NodeID     string `json:"thinking_node_id,omitempty"`
 		TaskNumber int    `json:"task_number,omitempty"`
 		TaskID     string `json:"task_id,omitempty"`
 		Status     string `json:"status,omitempty"`
@@ -318,6 +383,20 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
+	}
+	if req.Action == "message_send" || req.Action == "message_read" || req.Action == "message_check" {
+		runtimeNodeID, err := h.activeThinkingNodeID(req.AgentID)
+		if err != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "ambiguous Thinking runtime route"})
+			return
+		}
+		if runtimeNodeID != "" {
+			if req.NodeID != "" && req.NodeID != runtimeNodeID {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "Thinking node route conflicts with active runtime"})
+				return
+			}
+			req.NodeID = runtimeNodeID
+		}
 	}
 
 	// Generate or reuse auth token for this agent (SOLO-254-B: token store).
@@ -337,6 +416,9 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		if req.ThreadID != "" {
 			bodyMap["thread_id"] = req.ThreadID
 		}
+		if req.NodeID != "" {
+			bodyMap["thinking_node_id"] = req.NodeID
+		}
 		serverBody, _ = json.Marshal(bodyMap)
 	case "task_claim":
 		if req.TaskID != "" {
@@ -355,8 +437,14 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		serverPath = "/api/v1/server/info"
 	case "message_read":
 		serverPath = fmt.Sprintf("/api/v1/channels/%s/messages", req.ChannelID)
+		if req.NodeID != "" {
+			serverPath += "?thinking_node_id=" + url.QueryEscape(req.NodeID)
+		}
 	case "message_check":
 		serverPath = fmt.Sprintf("/api/v1/messages/check?channel_id=%s", req.ChannelID)
+		if req.NodeID != "" {
+			serverPath += "&thinking_node_id=" + url.QueryEscape(req.NodeID)
+		}
 	case "channel_join":
 		serverPath = "/api/v1/channels/join"
 		serverBody, _ = json.Marshal(map[string]string{"target": req.Content})
@@ -484,15 +572,20 @@ func (h *daemonHandler) getProvider(providerType string) llm.Provider {
 
 // runTaskRequest is the payload sent by the server to the daemon.
 type runTaskRequest struct {
-	TaskID         string             `json:"task_id"`
-	AgentID        string             `json:"agent_id"`
-	ChannelID      string             `json:"channel_id"`
-	ThreadID       string             `json:"thread_id,omitempty"`
-	Messages       []llmMessage       `json:"messages"`
-	SystemPrompt   string             `json:"system_prompt"`
-	ModelConfig    modelConfigPayload `json:"model_config"`
-	TaskContext    string             `json:"task_context,omitempty"`    // SOLO-221-B: summary of pending tasks in channel
-	MentionedNames []string           `json:"mentioned_names,omitempty"` // v1.3: names of @mentioned agents
+	TaskID                string             `json:"task_id"`
+	AgentID               string             `json:"agent_id"`
+	ChannelID             string             `json:"channel_id"`
+	ThreadID              string             `json:"thread_id,omitempty"`
+	NodeID                string             `json:"thinking_node_id,omitempty"`
+	ResumeSessionID       string             `json:"resume_session_id,omitempty"`
+	ReturnHandoff         bool               `json:"return_handoff,omitempty"`
+	Messages              []llmMessage       `json:"messages"`
+	ColdStartMessages     []llmMessage       `json:"cold_start_messages,omitempty"`
+	SystemPrompt          string             `json:"system_prompt"`
+	ThinkingRuntimePrompt string             `json:"thinking_runtime_prompt,omitempty"`
+	ModelConfig           modelConfigPayload `json:"model_config"`
+	TaskContext           string             `json:"task_context,omitempty"`    // SOLO-221-B: summary of pending tasks in channel
+	MentionedNames        []string           `json:"mentioned_names,omitempty"` // v1.3: names of @mentioned agents
 }
 
 type llmMessage struct {
@@ -603,6 +696,9 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 	// SOLO-221-B: Append task context to the system prompt so agents
 	// can see pending tasks in the channel.
 	systemPrompt := req.SystemPrompt
+	if req.ThinkingRuntimePrompt != "" {
+		systemPrompt += "\n\n## Thinking Runtime\n\n" + req.ThinkingRuntimePrompt
+	}
 	if req.TaskContext != "" {
 		if systemPrompt != "" {
 			systemPrompt += "\n\n"
@@ -739,6 +835,15 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 // It prepares the workspace, loads memory, builds the system prompt, and
 // executes the agent, streaming output chunks as SSE events.
 func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskRequest, backend agent.Backend) {
+	if req.ReturnHandoff && req.NodeID != "" {
+		defer func() {
+			for provider, sm := range h.sessionManagers {
+				if err := sm.CloseThinkingSession(req.NodeID); err != nil {
+					slog.Warn("task: failed to close returned Thinking session", "node_id", req.NodeID, "provider", provider, "error", err)
+				}
+			}
+		}()
+	}
 	h.taskManager.UpdateStatus(req.TaskID, taskStatusThinking)
 	slog.Info("task processing started (backend)",
 		"task_id", req.TaskID,
@@ -822,6 +927,9 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		"SOLO_AGENT_ID":   req.AgentID,
 		"SOLO_AGENT_NAME": agentInfo.Name,
 	}
+	if req.NodeID != "" {
+		agentEnv["SOLO_NODE_ID"] = req.NodeID
+	}
 	if agentToken != "" {
 		agentEnv["SOLO_AUTH_TOKEN"] = agentToken
 	}
@@ -829,21 +937,29 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	for k, v := range agentInfo.CustomEnv {
 		agentEnv[k] = v
 	}
+	// SOLO_NODE_ID is runtime-owned routing state. Agent custom environment
+	// must not redirect a normal or node-scoped session into another node.
+	if req.NodeID != "" {
+		agentEnv["SOLO_NODE_ID"] = req.NodeID
+	} else {
+		delete(agentEnv, "SOLO_NODE_ID")
+	}
 
 	// Build system prompt using PromptBuilder
 	hostname, _ := os.Hostname()
 	agentCfg := agent.AgentConfig{
-		AgentID:       req.AgentID,
-		Name:          agentInfo.Name,
-		SystemPrompt:  req.SystemPrompt,
-		Model:         req.ModelConfig.Model,
-		Provider:      req.ModelConfig.Provider,
-		CustomArgs:    agentInfo.CustomArgs,
-		Env:           agentEnv,
-		WorkspacePath: ws.WorkDir,
-		ServerID:      h.serverURL,
-		Hostname:      hostname,
-		OS:            runtime.GOOS + " " + runtime.GOARCH,
+		AgentID:               req.AgentID,
+		Name:                  agentInfo.Name,
+		SystemPrompt:          req.SystemPrompt,
+		ThinkingRuntimePrompt: req.ThinkingRuntimePrompt,
+		Model:                 req.ModelConfig.Model,
+		Provider:              req.ModelConfig.Provider,
+		CustomArgs:            agentInfo.CustomArgs,
+		Env:                   agentEnv,
+		WorkspacePath:         ws.WorkDir,
+		ServerID:              h.serverURL,
+		Hostname:              hostname,
+		OS:                    runtime.GOOS + " " + runtime.GOARCH,
 	}
 	systemPrompt := agent.BuildSystemPrompt(agentCfg, channelCtx, memoryContent, req.MentionedNames)
 
@@ -862,6 +978,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	}
 
 	materializedMessages := h.materializeMessageAttachments(ctx, req.Messages, ws.WorkDir)
+	materializedColdStartMessages := h.materializeMessageAttachments(ctx, req.ColdStartMessages, ws.WorkDir)
 
 	// Convert messages to agent.Message format
 	msgs := make([]agent.Message, len(materializedMessages))
@@ -873,6 +990,18 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 			Attachments: m.Attachments,
 		}
 	}
+	coldStartMsgs := make([]agent.Message, len(materializedColdStartMessages))
+	for i, m := range materializedColdStartMessages {
+		coldStartMsgs[i] = agent.Message{
+			Role:        agent.Role(m.Role),
+			Content:     m.Content,
+			SenderID:    m.SenderID,
+			Attachments: m.Attachments,
+		}
+	}
+	if len(coldStartMsgs) == 0 {
+		coldStartMsgs = msgs
+	}
 
 	h.pushEventJSON(req.TaskID, "thinking", map[string]string{
 		"agent_id": req.AgentID,
@@ -882,17 +1011,12 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	// Execute via Backend
 	executeReq := &agent.ExecuteRequest{
 		AgentID:  req.AgentID,
-		Messages: msgs,
+		Messages: coldStartMsgs,
 	}
-	// Inject solo binary into workspace so agents can run solo CLI commands.
-	// The workspace is Claude Code's CWD, so ./solo is immediately accessible.
-	// Try PATH first, then fall back to the daemon binary's directory.
-	soloPath, _ := exec.LookPath("solo")
-	if soloPath == "" {
-		if exe, err := os.Executable(); err == nil {
-			soloPath = filepath.Join(filepath.Dir(exe), "solo")
-		}
-	}
+	// Inject the companion solo CLI into the workspace so agents can send
+	// visible messages through the daemon proxy. Development uses .pids/solo;
+	// packaged installs keep it beside the daemon.
+	soloPath := resolveSoloBinary()
 	if soloPath != "" {
 		soloDest := filepath.Join(ws.WorkDir, "solo")
 		if copyErr := copyFile(soloPath, soloDest, 0755); copyErr != nil {
@@ -911,33 +1035,46 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		// ExtraArgs: daemonConfig.ExtraArgs[backend.Name()], // P1 reserved
 	}
 
-	// v1.3: Session-aware dispatch.
-	// For Claude backend, use persistent sessions via AgentSessionManager.
-	// Falls back to backend.Execute() for non-persistent backends.
+	// v1.3: Session-aware dispatch. Thinking nodes use a node-scoped pool key
+	// while retaining the real Agent identity, workspace, and configuration.
 	var session *agent.Session
 	var providerSessionID string
 	var transcriptPath string
 	if _, isPersistent := backend.(agent.PersistentBackend); isPersistent && h.getSessionManager(req.ModelConfig.Provider) != nil {
-		if h.getSessionManager(req.ModelConfig.Provider).IsActive(req.AgentID) {
-			slog.Info("task: reusing persistent session", "agent_id", req.AgentID)
-			ps, psErr := h.getSessionManager(req.ModelConfig.Provider).DeliverMessage(ctx, req.AgentID, msgs)
+		sm := h.getSessionManager(req.ModelConfig.Provider)
+		sessionKey := agent.AgentSessionKey(req.AgentID)
+		if req.NodeID != "" {
+			sessionKey = agent.ThinkingSessionKey(req.NodeID)
+		}
+		if sm.IsScopedActive(sessionKey) {
+			slog.Info("task: reusing persistent session", "agent_id", req.AgentID, "session_key", sessionKey)
+			ps, psErr := sm.DeliverScopedMessage(ctx, sessionKey, msgs)
 			if psErr == nil {
 				providerSessionID = ps.SessionID
 				transcriptPath = transcriptPathForProvider(req.ModelConfig.Provider, ws.WorkDir, providerSessionID)
 				session = &agent.Session{Messages: ps.Messages, Result: ps.Result, Stop: ps.Stop, SessionID: providerSessionID}
 			} else {
-				slog.Warn("task: session delivery failed", "agent_id", req.AgentID, "error", psErr)
+				slog.Warn("task: session delivery failed", "agent_id", req.AgentID, "session_key", sessionKey, "error", psErr)
 			}
-		} else {
+		}
+		// The idle reaper may put a session to sleep between IsScopedActive
+		// and delivery. In either the cold-start or that race, wake/create the
+		// scoped session here so a Thinking turn never falls back to a stateless
+		// Execute call.
+		if session == nil {
 			_, _ = h.refreshToken(ctx, req.AgentID)
-			slog.Info("task: creating persistent session", "agent_id", req.AgentID)
-			ps, psErr := h.getSessionManager(req.ModelConfig.Provider).GetOrCreateSession(ctx, req.AgentID, agentCfg, channelCtx, msgs, req.MentionedNames)
+			startMessages := coldStartMsgs
+			if req.ResumeSessionID != "" {
+				startMessages = msgs
+			}
+			slog.Info("task: creating persistent session", "agent_id", req.AgentID, "session_key", sessionKey, "resume", req.ResumeSessionID)
+			ps, psErr := sm.GetOrCreateScopedSession(ctx, sessionKey, req.AgentID, agentCfg, channelCtx, startMessages, req.ResumeSessionID, req.MentionedNames)
 			if psErr == nil {
 				providerSessionID = ps.SessionID
 				transcriptPath = transcriptPathForProvider(req.ModelConfig.Provider, ws.WorkDir, providerSessionID)
 				session = &agent.Session{Messages: ps.Messages, Result: ps.Result, Stop: ps.Stop, SessionID: providerSessionID}
 			} else {
-				slog.Warn("task: session creation failed, falling back to Execute", "agent_id", req.AgentID, "error", psErr)
+				slog.Warn("task: session creation failed, falling back to Execute", "agent_id", req.AgentID, "session_key", sessionKey, "error", psErr)
 			}
 		}
 	}
@@ -1715,6 +1852,32 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	return err
 }
 
+func resolveSoloBinary() string {
+	candidates := make([]string, 0, 5)
+	if configured := strings.TrimSpace(os.Getenv("SOLO_CLI_BIN")); configured != "" {
+		candidates = append(candidates, configured)
+	}
+	if path, err := exec.LookPath("solo"); err == nil {
+		candidates = append(candidates, path)
+	}
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "solo"))
+	}
+	if wd, err := os.Getwd(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(wd, ".pids", "solo"),
+			filepath.Join(wd, "bin", "solo"),
+		)
+	}
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
+			return candidate
+		}
+	}
+	return ""
+}
+
 func soloSkillsRoot() string {
 	if dir := os.Getenv("SOLO_SKILLS_DIR"); dir != "" {
 		return dir
@@ -2107,5 +2270,49 @@ func (h *daemonHandler) CleanupAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type cleanupThinkingSessionsRequest struct {
+	NodeIDs []string `json:"node_ids"`
+}
+
+// CleanupThinkingSessions handles POST /internal/daemon/thinking/cleanup.
+// The server broadcasts this idempotent request when a channel is archived,
+// because node-to-daemon affinity is intentionally not persisted yet.
+func (h *daemonHandler) CleanupThinkingSessions(w http.ResponseWriter, r *http.Request) {
+	var req cleanupThinkingSessionsRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256*1024))
+	if err := decoder.Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if len(req.NodeIDs) > 1000 {
+		http.Error(w, "too many node_ids", http.StatusBadRequest)
+		return
+	}
+
+	nodeIDs := make([]string, 0, len(req.NodeIDs))
+	seen := make(map[string]struct{}, len(req.NodeIDs))
+	for _, nodeID := range req.NodeIDs {
+		if _, err := uuid.Parse(nodeID); err != nil {
+			http.Error(w, "invalid node_id", http.StatusBadRequest)
+			return
+		}
+		if _, ok := seen[nodeID]; ok {
+			continue
+		}
+		seen[nodeID] = struct{}{}
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+
+	for provider, sm := range h.sessionManagers {
+		for _, nodeID := range nodeIDs {
+			if err := sm.ForceCloseThinkingSession(nodeID); err != nil {
+				slog.Warn("daemon: force-close Thinking session failed", "node_id", nodeID, "provider", provider, "error", err)
+			}
+		}
+	}
+	slog.Info("daemon: Thinking session cleanup completed", "node_count", len(nodeIDs))
 	w.WriteHeader(http.StatusNoContent)
 }

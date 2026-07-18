@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { displayAgentActivity } from '@/lib/agent-activity';
 import { useWebSocket } from '@/lib/ws-context';
@@ -19,6 +19,7 @@ interface AgentRunResponse {
   task_id?: string;
   channel_id?: string;
   thread_id?: string;
+  thinking_node_id?: string;
   status: AgentRunStatus;
   activity_text?: string;
   tool_name?: string;
@@ -37,6 +38,7 @@ export interface LiveAgentState {
     taskId?: string;
     channelId?: string;
     threadId?: string;
+    thinkingNodeId?: string;
     status: AgentRunStatus;
     activityText?: string;
     toolName?: string;
@@ -81,6 +83,7 @@ function runToLive(run: AgentRunResponse): LiveAgentState {
       taskId: run.task_id,
       channelId: run.channel_id,
       threadId: run.thread_id,
+      thinkingNodeId: run.thinking_node_id,
       status: run.status,
       activityText: run.activity_text,
       toolName: run.tool_name,
@@ -94,14 +97,37 @@ function runToLive(run: AgentRunResponse): LiveAgentState {
   };
 }
 
+function indexLatest(
+  runs: Iterable<LiveAgentState>,
+  keyFor: (run: LiveAgentState) => string | undefined,
+) {
+  const indexed = new Map<string, LiveAgentState>();
+  for (const run of runs) {
+    const key = keyFor(run);
+    if (!key) continue;
+    const existing = indexed.get(key);
+    if (!existing || (run.currentRun?.updatedAt ?? 0) >= (existing.currentRun?.updatedAt ?? 0)) {
+      indexed.set(key, run);
+    }
+  }
+  return indexed;
+}
+
 export function useTeamAgentActivity() {
-  const [liveByAgent, setLiveByAgent] = useState<Map<string, LiveAgentState>>(new Map());
+  const [liveByRun, setLiveByRun] = useState<Map<string, LiveAgentState>>(new Map());
   const { onEvent, isConnected } = useWebSocket();
   const mountedRef = useRef(false);
   const hasConnectedRef = useRef(false);
-  const latestRunByAgentRef = useRef<Map<string, string>>(new Map());
   const messageCacheRef = useRef<Map<string, MessageEvent>>(new Map());
   const finishedTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const liveByAgent = useMemo(
+    () => indexLatest(liveByRun.values(), (live) => live.agentId),
+    [liveByRun],
+  );
+  const liveByThinkingNode = useMemo(
+    () => indexLatest(liveByRun.values(), (live) => live.currentRun?.thinkingNodeId),
+    [liveByRun],
+  );
 
   const rememberMessage = useCallback((event: MessageEvent) => {
     const cache = messageCacheRef.current;
@@ -112,25 +138,25 @@ export function useTeamAgentActivity() {
     }
   }, []);
 
-  const clearFinishedTimer = useCallback((agentId: string) => {
-    const timer = finishedTimersRef.current.get(agentId);
+  const clearFinishedTimer = useCallback((runId: string) => {
+    const timer = finishedTimersRef.current.get(runId);
     if (timer) clearTimeout(timer);
-    finishedTimersRef.current.delete(agentId);
+    finishedTimersRef.current.delete(runId);
   }, []);
 
-  const scheduleFinishedClear = useCallback((agentId: string) => {
-    clearFinishedTimer(agentId);
+  const scheduleFinishedClear = useCallback((runId: string) => {
+    clearFinishedTimer(runId);
     const timer = setTimeout(() => {
-      setLiveByAgent((prev) => {
-        const current = prev.get(agentId);
+      setLiveByRun((prev) => {
+        const current = prev.get(runId);
         if (!current?.currentRun || !FINISHED_STATUSES.has(current.currentRun.status)) return prev;
         const next = new Map(prev);
-        next.delete(agentId);
+        next.delete(runId);
         return next;
       });
-      finishedTimersRef.current.delete(agentId);
+      finishedTimersRef.current.delete(runId);
     }, FINISHED_VISIBLE_MS);
-    finishedTimersRef.current.set(agentId, timer);
+    finishedTimersRef.current.set(runId, timer);
   }, [clearFinishedTimer]);
 
   const loadActiveRuns = useCallback(() => {
@@ -140,28 +166,20 @@ export function useTeamAgentActivity() {
         const sorted = [...runs].sort((a, b) => timestampMs(b.updated_at) - timestampMs(a.updated_at));
         const next = new Map<string, LiveAgentState>();
         for (const run of sorted) {
-          if (!next.has(run.agent_id)) {
-            latestRunByAgentRef.current.set(run.agent_id, run.id);
-            next.set(run.agent_id, runToLive(run));
-          }
+          next.set(run.id, runToLive(run));
         }
-        setLiveByAgent(next);
+        setLiveByRun(next);
       })
       .catch(() => {
         if (!mountedRef.current) return;
-        setLiveByAgent(new Map());
+        setLiveByRun(new Map());
       });
   }, []);
 
   const upsertRun = useCallback((event: RunEvent) => {
-    const latestRunId = latestRunByAgentRef.current.get(event.agent_id);
-    if (event.type !== 'agent.run.started' && latestRunId && latestRunId !== event.run_id) return;
-    if (event.type === 'agent.run.finished' && !latestRunId) return;
-
     const updatedAt = timestampMs(event.timestamp);
-    latestRunByAgentRef.current.set(event.agent_id, event.run_id);
-    setLiveByAgent((prev) => {
-      const existing = prev.get(event.agent_id);
+    setLiveByRun((prev) => {
+      const existing = prev.get(event.run_id);
       const status = event.status;
       const nextToolName = event.tool_name !== undefined ? event.tool_name : existing?.currentRun?.toolName;
       const nextToolInputSummary = event.tool_input_summary !== undefined ? event.tool_input_summary : existing?.currentRun?.toolInputSummary;
@@ -174,7 +192,7 @@ export function useTeamAgentActivity() {
             ? undefined
             : existing?.currentTool;
       const next = new Map(prev);
-      next.set(event.agent_id, {
+      next.set(event.run_id, {
         agentId: event.agent_id,
         agentName: event.agent_name ?? existing?.agentName ?? 'Agent',
         currentRun: {
@@ -183,6 +201,7 @@ export function useTeamAgentActivity() {
           taskId: event.task_id ?? existing?.currentRun?.taskId,
           channelId: event.channel_id ?? existing?.currentRun?.channelId,
           threadId: event.thread_id ?? existing?.currentRun?.threadId,
+          thinkingNodeId: event.thinking_node_id ?? existing?.currentRun?.thinkingNodeId,
           status,
           activityText: event.activity_text ?? existing?.currentRun?.activityText,
           toolName: nextToolName,
@@ -198,17 +217,17 @@ export function useTeamAgentActivity() {
       return next;
     });
 
-    if (FINISHED_STATUSES.has(event.status)) scheduleFinishedClear(event.agent_id);
-    else clearFinishedTimer(event.agent_id);
+    if (FINISHED_STATUSES.has(event.status)) scheduleFinishedClear(event.run_id);
+    else clearFinishedTimer(event.run_id);
   }, [clearFinishedTimer, scheduleFinishedClear]);
 
   const applyMessageToHumanCard = useCallback((message: MessageEvent) => {
-    setLiveByAgent((prev) => {
+    setLiveByRun((prev) => {
       let changed = false;
       const next = new Map(prev);
-      for (const [agentId, live] of prev) {
+      for (const [runId, live] of prev) {
         if (live.currentHumanMsg?.messageId !== message.id) continue;
-        next.set(agentId, {
+        next.set(runId, {
           ...live,
           currentHumanMsg: {
             messageId: message.id,
@@ -225,13 +244,9 @@ export function useTeamAgentActivity() {
   }, []);
 
   const handleRunEvent = useCallback((event: AgentRunEvent) => {
-    const latestRunId = latestRunByAgentRef.current.get(event.agent_id);
-    if (latestRunId && latestRunId !== event.run_id) return;
-
     const time = timestampMs(event.timestamp);
-    latestRunByAgentRef.current.set(event.agent_id, event.run_id);
-    setLiveByAgent((prev) => {
-      const existing = prev.get(event.agent_id);
+    setLiveByRun((prev) => {
+      const existing = prev.get(event.run_id);
       const next = new Map(prev);
       const live: LiveAgentState = existing ?? {
         agentId: event.agent_id,
@@ -241,15 +256,25 @@ export function useTeamAgentActivity() {
           sessionId: event.session_id,
           channelId: event.channel_id,
           threadId: event.thread_id,
+          thinkingNodeId: event.thinking_node_id,
           status: 'running',
           startedAt: time,
           updatedAt: time,
         },
       };
+      const currentRun = {
+        ...live.currentRun!,
+        sessionId: event.session_id ?? live.currentRun?.sessionId,
+        channelId: event.channel_id ?? live.currentRun?.channelId,
+        threadId: event.thread_id ?? live.currentRun?.threadId,
+        thinkingNodeId: event.thinking_node_id ?? live.currentRun?.thinkingNodeId,
+        updatedAt: time,
+      };
 
       if (event.event_type === 'tool_started') {
-        next.set(event.agent_id, {
+        next.set(event.run_id, {
           ...live,
+          currentRun,
           currentTool: {
             name: event.tool_name || event.message || 'Tool',
             args: payloadText(event.payload, 'input'),
@@ -260,8 +285,9 @@ export function useTeamAgentActivity() {
       }
 
       if (event.event_type === 'tool_finished') {
-        next.set(event.agent_id, {
+        next.set(event.run_id, {
           ...live,
+          currentRun,
           currentTool: undefined,
           currentActivity: { text: trimText(event.message, event.tool_name || 'Tool finished'), startedAt: time },
         });
@@ -272,8 +298,9 @@ export function useTeamAgentActivity() {
         const messageId = payloadText(event.payload, 'message_id');
         if (!messageId) return prev;
         const msg = messageCacheRef.current.get(messageId);
-        next.set(event.agent_id, {
+        next.set(event.run_id, {
           ...live,
+          currentRun,
           currentHumanMsg: {
             messageId,
             text: trimText(msg?.content, event.message || 'New message'),
@@ -288,8 +315,9 @@ export function useTeamAgentActivity() {
       if (event.event_type === 'activity' || event.event_type === 'assistant_message') {
         const text = trimText(event.message);
         if (!text) return prev;
-        next.set(event.agent_id, {
+        next.set(event.run_id, {
           ...live,
+          currentRun,
           currentActivity: { text, startedAt: time },
         });
         return next;
@@ -300,6 +328,7 @@ export function useTeamAgentActivity() {
   }, []);
 
   useEffect(() => {
+    const finishedTimers = finishedTimersRef.current;
     mountedRef.current = true;
     void loadActiveRuns();
     const handleFocus = () => void loadActiveRuns();
@@ -307,8 +336,8 @@ export function useTeamAgentActivity() {
     return () => {
       mountedRef.current = false;
       window.removeEventListener('focus', handleFocus);
-      finishedTimersRef.current.forEach((timer) => clearTimeout(timer));
-      finishedTimersRef.current.clear();
+      finishedTimers.forEach((timer) => clearTimeout(timer));
+      finishedTimers.clear();
     };
   }, [loadActiveRuns]);
 
@@ -336,17 +365,22 @@ export function useTeamAgentActivity() {
       return;
     }
     if (event.type === 'agent_deleted') {
-      clearFinishedTimer(event.agent_id);
-      setLiveByAgent((prev) => {
+      setLiveByRun((prev) => {
         const next = new Map(prev);
-        next.delete(event.agent_id);
+        for (const [runId, live] of prev) {
+          if (live.agentId !== event.agent_id) continue;
+          clearFinishedTimer(runId);
+          next.delete(runId);
+        }
         return next;
       });
-      latestRunByAgentRef.current.delete(event.agent_id);
     }
   }), [applyMessageToHumanCard, clearFinishedTimer, handleRunEvent, onEvent, rememberMessage, upsertRun]);
 
-  const getLatestRunId = useCallback((agentId: string) => latestRunByAgentRef.current.get(agentId), []);
+  const getLatestRunId = useCallback(
+    (agentId: string) => liveByAgent.get(agentId)?.currentRun?.runId,
+    [liveByAgent],
+  );
 
-  return { liveByAgent, getLatestRunId };
+  return { liveByAgent, liveByThinkingNode, getLatestRunId };
 }
