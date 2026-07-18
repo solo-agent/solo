@@ -270,7 +270,7 @@ The server-to-daemon control plane also exposes an internal, idempotent Thinking
 - Existing Agent session manager methods keep their Agent-scoped wrappers; scoped methods extend rather than replace them.
 - The idle policy requires no database migration and no frontend state. `agent_session_id` continues to describe provider continuity, not whether a local OS process is currently resident.
 - Existing Agent session/run records remain valid because new node foreign keys are nullable.
-- The Handoff migration renames the old Thinking summary columns, clears mechanical active/inherited snapshots, and preserves already-returned terminal content as `returned_handoff` provenance.
+- The single Thinking migration creates the final Handoff schema directly; no mechanical summary columns or transitional rename/cleanup steps are retained.
 - Older `solo` binaries remain compatible while called from a live persistent node turn: the daemon reconstructs missing route metadata. Current binaries still send the explicit field, and normal channel turns have no inferred node scope.
 - The migration is reversible: remove node/run scope columns and indexes before dropping Thinking tables/message scope.
 - No data is copied from normal channel history into Thinking nodes. Starting Thinking creates a new root conversation boundary.

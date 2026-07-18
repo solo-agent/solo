@@ -1,3 +1,5 @@
+DROP INDEX IF EXISTS idx_agent_runs_thinking_node;
+ALTER TABLE agent_runs DROP COLUMN IF EXISTS thinking_node_id;
 DROP INDEX IF EXISTS idx_messages_thinking_node;
 ALTER TABLE messages
     DROP CONSTRAINT IF EXISTS messages_single_conversation_scope,
