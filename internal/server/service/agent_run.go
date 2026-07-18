@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,6 +68,8 @@ var nonPrimaryTaskRunStatuses = []string{
 	string(AgentRunStatusCancelled),
 }
 
+var ErrAmbiguousAgentRunScope = errors.New("multiple executing runs for one Agent and channel")
+
 type AgentSession struct {
 	ID                string    `json:"id"`
 	AgentID           string    `json:"agent_id"`
@@ -88,6 +91,7 @@ type AgentRun struct {
 	TriggerMessageID string          `json:"trigger_message_id,omitempty"`
 	ChannelID        string          `json:"channel_id,omitempty"`
 	ThreadID         string          `json:"thread_id,omitempty"`
+	ThinkingNodeID   string          `json:"thinking_node_id,omitempty"`
 	Status           AgentRunStatus  `json:"status"`
 	ActivityText     string          `json:"activity_text"`
 	ToolName         string          `json:"tool_name,omitempty"`
@@ -149,6 +153,7 @@ type StartRunInput struct {
 	TriggerMessageID string
 	ChannelID        string
 	ThreadID         string
+	ThinkingNodeID   string
 	Status           AgentRunStatus
 	ActivityText     string
 	ToolName         string
@@ -181,8 +186,9 @@ type UpdateRunTranscriptInput struct {
 }
 
 type BindRunSessionInput struct {
-	RunID     string
-	SessionID string
+	RunID          string
+	SessionID      string
+	ThinkingNodeID string
 }
 
 type LinkRunTaskInput struct {
@@ -289,18 +295,18 @@ func (s *AgentRunService) StartRun(ctx context.Context, input StartRunInput) (*A
 	}
 	return scanAgentRun(s.pool.QueryRow(ctx,
 		`INSERT INTO agent_runs (
-		   id, agent_id, session_id, trigger_type, trigger_message_id, channel_id, thread_id,
+		   id, agent_id, session_id, trigger_type, trigger_message_id, channel_id, thread_id, thinking_node_id,
 		   status, activity_text, tool_name, tool_input_summary, source, usage_json
-		 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		 RETURNING id::text, agent_id::text,
 		       COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
 		       COALESCE(session_id::text, ''), trigger_type,
 		       COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
-		       COALESCE(thread_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
+		       COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		       COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
 		       started_at, updated_at, finished_at`,
 		uuid.NewString(), input.AgentID, nullableUUID(input.SessionID), input.TriggerType,
-		nullableUUID(input.TriggerMessageID), nullableUUID(input.ChannelID), nullableUUID(input.ThreadID),
+		nullableUUID(input.TriggerMessageID), nullableUUID(input.ChannelID), nullableUUID(input.ThreadID), nullableUUID(input.ThinkingNodeID),
 		string(input.Status), input.ActivityText, nullableStr(input.ToolName),
 		nullableStr(input.ToolInputSummary), nullableStr(input.Source), usage,
 	))
@@ -313,22 +319,56 @@ func (s *AgentRunService) BindRunSession(ctx context.Context, input BindRunSessi
 	if input.SessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
-	return scanAgentRun(s.pool.QueryRow(ctx,
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	run, err := scanAgentRun(tx.QueryRow(ctx,
 		`UPDATE agent_runs
 		    SET session_id = $2,
 		        status = CASE WHEN status = 'queued' THEN 'running' ELSE status END,
 		        activity_text = CASE WHEN status = 'queued' THEN '执行中' ELSE activity_text END,
 		        updated_at = now()
 		  WHERE id = $1
+		    AND EXISTS (
+		        SELECT 1 FROM agent_sessions s
+		         WHERE s.id = $2 AND s.agent_id = agent_runs.agent_id
+		    )
 		  RETURNING id::text, agent_id::text,
 		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
 		        COALESCE(session_id::text, ''), trigger_type,
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
-		        COALESCE(thread_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
+		        COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''),
 		        usage_json, started_at, updated_at, finished_at`,
 		input.RunID, input.SessionID,
 	))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("run and session owner mismatch")
+		}
+		return nil, err
+	}
+	if input.ThinkingNodeID != "" && input.ThinkingNodeID != run.ThinkingNodeID {
+		return nil, fmt.Errorf("run and thinking node mismatch")
+	}
+	if run.ThinkingNodeID != "" {
+		tag, err := tx.Exec(ctx, `
+			UPDATE thinking_nodes
+			   SET agent_session_id = $1, updated_at = now()
+			 WHERE id = $2 AND agent_id = $3`, input.SessionID, run.ThinkingNodeID, run.AgentID)
+		if err != nil {
+			return nil, err
+		}
+		if tag.RowsAffected() != 1 {
+			return nil, fmt.Errorf("thinking node session owner mismatch")
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return run, nil
 }
 
 func (s *AgentRunService) AppendEvent(ctx context.Context, input AppendRunEventInput) (*AgentRunEvent, error) {
@@ -365,7 +405,7 @@ func (s *AgentRunService) UpdateStatus(ctx context.Context, input UpdateRunStatu
 		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
 		        COALESCE(session_id::text, ''), trigger_type,
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
-		        COALESCE(thread_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
+		        COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
 		        started_at, updated_at, finished_at`,
 		input.RunID, string(input.Status), input.ActivityText, nullableStr(input.ToolName),
@@ -386,7 +426,7 @@ func (s *AgentRunService) UpdateRunTranscript(ctx context.Context, input UpdateR
 		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
 		        COALESCE(session_id::text, ''), trigger_type,
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
-		        COALESCE(thread_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
+		        COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''),
 		        usage_json, started_at, updated_at, finished_at`,
 		input.RunID, nullableStr(input.TranscriptPath),
@@ -427,7 +467,7 @@ func (s *AgentRunService) FinishRun(ctx context.Context, input FinishRunInput) (
 		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
 		        COALESCE(session_id::text, ''), trigger_type,
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
-		        COALESCE(thread_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
+		        COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
 		        started_at, updated_at, finished_at`,
 		input.RunID, string(input.Status), input.ActivityText, usage,
@@ -452,6 +492,45 @@ func (s *AgentRunService) ListActiveRuns(ctx context.Context) ([]AgentRun, error
 			string(AgentRunStatusWaitingApproval),
 		},
 	))
+}
+
+// ResolveExecutingThinkingNode returns the node scope of the single Agent turn
+// that is actually executing for a channel. Queued/thinking runs are excluded:
+// they may be waiting behind the Agent-wide runtime lock and cannot be the
+// process issuing the current CLI/API request. Multiple executing rows fail
+// closed even when one is channel-scoped.
+func (s *AgentRunService) ResolveExecutingThinkingNode(ctx context.Context, agentID, channelID string) (string, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT COALESCE(thinking_node_id::text, '')
+		  FROM agent_runs
+		 WHERE agent_id = $1
+		   AND channel_id = $2
+		   AND status = ANY($3)
+		   AND updated_at >= now() - interval '2 minutes'
+		 ORDER BY updated_at DESC
+		 LIMIT 2`, agentID, channelID, []string{
+		string(AgentRunStatusRunning),
+		string(AgentRunStatusStreaming),
+		string(AgentRunStatusWaitingInput),
+		string(AgentRunStatusWaitingApproval),
+	})
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	var nodeID string
+	count := 0
+	for rows.Next() {
+		count++
+		if count > 1 {
+			return "", ErrAmbiguousAgentRunScope
+		}
+		if err := rows.Scan(&nodeID); err != nil {
+			return "", err
+		}
+	}
+	return nodeID, rows.Err()
 }
 
 func (s *AgentRunService) ListActiveRunsForUser(ctx context.Context, userID string) ([]AgentRun, error) {
@@ -660,7 +739,7 @@ func (s *AgentRunService) ListAgentTasks(ctx context.Context, agentID string) ([
 func baseAgentRunSelect() string {
 	return `SELECT r.id::text, r.agent_id::text, COALESCE(a.name, ''), COALESCE(r.session_id::text, ''), r.trigger_type,
 	        COALESCE(r.trigger_message_id::text, ''), COALESCE(r.channel_id::text, ''),
-	        COALESCE(r.thread_id::text, ''), r.status, r.activity_text, COALESCE(r.tool_name, ''),
+	        COALESCE(r.thread_id::text, ''), COALESCE(r.thinking_node_id::text, ''), r.status, r.activity_text, COALESCE(r.tool_name, ''),
 	        COALESCE(r.tool_input_summary, ''), COALESCE(r.source, ''), COALESCE(r.transcript_path, ''), r.usage_json,
 	        r.started_at, r.updated_at, r.finished_at
 	   FROM agent_runs r
@@ -701,7 +780,7 @@ func scanAgentRun(row interface {
 	var finished sql.NullTime
 	if err := row.Scan(
 		&run.ID, &run.AgentID, &run.AgentName, &run.SessionID, &run.TriggerType, &run.TriggerMessageID,
-		&run.ChannelID, &run.ThreadID, &status, &run.ActivityText, &run.ToolName,
+		&run.ChannelID, &run.ThreadID, &run.ThinkingNodeID, &status, &run.ActivityText, &run.ToolName,
 		&run.ToolInputSummary, &run.Source, &run.TranscriptPath, &run.UsageJSON,
 		&run.StartedAt, &run.UpdatedAt, &finished,
 	); err != nil {

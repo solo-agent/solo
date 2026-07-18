@@ -13,15 +13,16 @@ import (
 // AgentConfig is the local cache of Agent configuration stored in
 // solo-config.json inside the agent's workspace root.
 type AgentConfig struct {
-	AgentID      string            `json:"agent_id"`
-	Name         string            `json:"name"`
-	SystemPrompt string            `json:"system_prompt"`
-	Model        string            `json:"model"`
-	Provider     string            `json:"provider"`
-	Effort       string            `json:"effort,omitempty"`
-	MaxTurns     int               `json:"max_turns,omitempty"`
-	Env          map[string]string `json:"env,omitempty"`
-	CustomArgs   []string          `json:"custom_args,omitempty"`
+	AgentID               string            `json:"agent_id"`
+	Name                  string            `json:"name"`
+	SystemPrompt          string            `json:"system_prompt"`
+	ThinkingRuntimePrompt string            `json:"thinking_runtime_prompt,omitempty"`
+	Model                 string            `json:"model"`
+	Provider              string            `json:"provider"`
+	Effort                string            `json:"effort,omitempty"`
+	MaxTurns              int               `json:"max_turns,omitempty"`
+	Env                   map[string]string `json:"env,omitempty"`
+	CustomArgs            []string          `json:"custom_args,omitempty"`
 	// Runtime context for system prompt.
 	WorkspacePath string `json:"workspace_path,omitempty"`
 	ServerID      string `json:"server_id,omitempty"`

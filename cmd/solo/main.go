@@ -357,6 +357,9 @@ func proxyRequest(action, channelID, content, threadID, token string, taskNumber
 	if threadID != "" {
 		body["thread_id"] = threadID
 	}
+	if nodeID := os.Getenv("SOLO_NODE_ID"); nodeID != "" {
+		body["thinking_node_id"] = nodeID
+	}
 	if taskNumber > 0 {
 		body["task_number"] = taskNumber
 	}
@@ -803,6 +806,9 @@ func handleMessageSend(args []string, baseURL, token string) {
 	if threadID != "" {
 		reqBody["thread_id"] = threadID
 	}
+	if nodeID := os.Getenv("SOLO_NODE_ID"); nodeID != "" {
+		reqBody["thinking_node_id"] = nodeID
+	}
 
 	body, _ := json.Marshal(reqBody)
 	// Try daemon proxy first
@@ -934,12 +940,18 @@ func handleMessageCheck(args []string, baseURL, token string) {
 	fs.StringVar(&channelID, "channel", "", "Channel ID")
 	fs.Parse(args)
 
-	url := fmt.Sprintf("%s/api/v1/messages/check", baseURL)
+	requestURL := fmt.Sprintf("%s/api/v1/messages/check", baseURL)
 	if channelID != "" {
-		url += "?channel_id=" + channelID
+		requestURL += "?channel_id=" + url.QueryEscape(channelID)
+		if nodeID := os.Getenv("SOLO_NODE_ID"); nodeID != "" {
+			requestURL += "&thinking_node_id=" + url.QueryEscape(nodeID)
+		}
 	}
 
-	statusCode, body, err := doHTTP(http.MethodGet, url, token, nil)
+	statusCode, body, err := proxyRequest("message_check", channelID, "", "", token, 0, "")
+	if err != nil {
+		statusCode, body, err = doHTTP(http.MethodGet, requestURL, token, nil)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
 		doExit(exitUsage)
@@ -1057,15 +1069,18 @@ func handleMessageRead(args []string, baseURL, token string) {
 	if isDM {
 		channelBase = "/api/v1/dm"
 	}
-	url := fmt.Sprintf("%s%s/%s/messages?limit=%d", baseURL, channelBase, channelID, limit)
+	requestURL := fmt.Sprintf("%s%s/%s/messages?limit=%d", baseURL, channelBase, channelID, limit)
 	if before != "" {
-		url += "&before=" + before
+		requestURL += "&before=" + before
 	}
 	if after != "" {
-		url += "&after=" + after
+		requestURL += "&after=" + after
+	}
+	if nodeID := os.Getenv("SOLO_NODE_ID"); nodeID != "" && !isDM {
+		requestURL += "&thinking_node_id=" + url.QueryEscape(nodeID)
 	}
 
-	statusCode, body, err := doHTTP(http.MethodGet, url, token, nil)
+	statusCode, body, err := doHTTP(http.MethodGet, requestURL, token, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
 		doExit(exitUsage)

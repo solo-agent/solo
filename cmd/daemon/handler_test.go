@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -211,5 +213,34 @@ func TestCloneHTTPClientWithTimeoutPreservesTransport(t *testing.T) {
 	}
 	if original.Timeout != 10*time.Second {
 		t.Fatalf("original timeout changed to %s", original.Timeout)
+	}
+}
+
+func TestCleanupThinkingSessionsValidatesNodeIDs(t *testing.T) {
+	h := newDaemonHandler(nil, newTaskManager(), fakeStreamProvider{}, "", "")
+
+	invalid := httptest.NewRequest(http.MethodPost, "/internal/daemon/thinking/cleanup", bytes.NewBufferString(`{"node_ids":["not-a-uuid"]}`))
+	invalidResponse := httptest.NewRecorder()
+	h.CleanupThinkingSessions(invalidResponse, invalid)
+	if invalidResponse.Code != http.StatusBadRequest {
+		t.Fatalf("invalid node status = %d, want %d", invalidResponse.Code, http.StatusBadRequest)
+	}
+
+	valid := httptest.NewRequest(http.MethodPost, "/internal/daemon/thinking/cleanup", bytes.NewBufferString(`{"node_ids":["550e8400-e29b-41d4-a716-446655440000"]}`))
+	validResponse := httptest.NewRecorder()
+	h.CleanupThinkingSessions(validResponse, valid)
+	if validResponse.Code != http.StatusNoContent {
+		t.Fatalf("valid node status = %d, want %d", validResponse.Code, http.StatusNoContent)
+	}
+}
+
+func TestDurationFromEnv(t *testing.T) {
+	t.Setenv("TEST_THINKING_DURATION", "5s")
+	if got := durationFromEnv("TEST_THINKING_DURATION", time.Minute); got != 5*time.Second {
+		t.Fatalf("duration = %s, want 5s", got)
+	}
+	t.Setenv("TEST_THINKING_DURATION", "invalid")
+	if got := durationFromEnv("TEST_THINKING_DURATION", time.Minute); got != time.Minute {
+		t.Fatalf("invalid duration fallback = %s, want 1m", got)
 	}
 }

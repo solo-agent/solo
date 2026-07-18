@@ -371,6 +371,12 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 		b.WriteString("\n\n")
 	}
 
+	if agent.ThinkingRuntimePrompt != "" {
+		b.WriteString("## Thinking Runtime\n\n")
+		b.WriteString(agent.ThinkingRuntimePrompt)
+		b.WriteString("\n\n")
+	}
+
 	return strings.TrimSpace(b.String())
 }
 

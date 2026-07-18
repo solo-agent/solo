@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -9,16 +10,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/solo-ai/solo/internal/server/service"
 )
 
 // ChannelHandler handles channel-related HTTP requests.
 type ChannelHandler struct {
 	pool *pgxpool.Pool
+	dm   *service.DaemonManager
 }
 
 // NewChannelHandler creates a new ChannelHandler.
-func NewChannelHandler(pool *pgxpool.Pool) *ChannelHandler {
-	return &ChannelHandler{pool: pool}
+func NewChannelHandler(pool *pgxpool.Pool, dm *service.DaemonManager) *ChannelHandler {
+	return &ChannelHandler{pool: pool, dm: dm}
 }
 
 // --- Request/Response types ---
@@ -80,7 +83,6 @@ func (h *ChannelHandler) JoinByTarget(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "joined", "channel_id": channelID})
 }
-
 
 // ServerInfo handles GET /api/v1/server/info
 // Returns channels, agents, and humans visible to the authenticated user.
@@ -471,5 +473,37 @@ func (h *ChannelHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("channel archived", "channel_id", channelID, "user_id", userID)
+
+	rows, queryErr := h.pool.Query(r.Context(), `
+		SELECT node.id::text
+		FROM thinking_spaces space
+		JOIN thinking_nodes node ON node.space_id = space.id
+		WHERE space.channel_id = $1`, channelID)
+	if queryErr != nil {
+		slog.Warn("failed to list Thinking nodes for archived channel cleanup", "channel_id", channelID, "error", queryErr)
+	} else {
+		nodeIDs := make([]string, 0)
+		for rows.Next() {
+			var nodeID string
+			if err := rows.Scan(&nodeID); err != nil {
+				slog.Warn("failed to scan Thinking node for archived channel cleanup", "channel_id", channelID, "error", err)
+				continue
+			}
+			nodeIDs = append(nodeIDs, nodeID)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			slog.Warn("failed while listing Thinking nodes for archived channel cleanup", "channel_id", channelID, "error", err)
+		}
+		if h.dm != nil && len(nodeIDs) > 0 {
+			go func(ids []string) {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				if err := h.dm.CleanupThinkingSessions(ctx, ids); err != nil {
+					slog.Warn("failed to clean Thinking sessions for archived channel", "channel_id", channelID, "error", err)
+				}
+			}(append([]string(nil), nodeIDs...))
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"message": "channel deleted"})
 }

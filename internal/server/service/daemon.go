@@ -311,6 +311,47 @@ func (dm *DaemonManager) SendTask(ctx context.Context, daemon *DaemonInfo, req i
 	return result.Bytes(), nil
 }
 
+// CleanupThinkingSessions broadcasts node process cleanup to every online
+// daemon. Runtime affinity is not durable, so the operation is intentionally
+// idempotent and fan-out based.
+func (dm *DaemonManager) CleanupThinkingSessions(ctx context.Context, nodeIDs []string) error {
+	payload, err := json.Marshal(struct {
+		NodeIDs []string `json:"node_ids"`
+	}{NodeIDs: nodeIDs})
+	if err != nil {
+		return fmt.Errorf("marshal Thinking cleanup request: %w", err)
+	}
+
+	var firstErr error
+	for _, daemon := range dm.ListDaemons() {
+		if daemon.Status != DaemonStatusOnline {
+			continue
+		}
+		url := fmt.Sprintf("http://%s:%d/internal/daemon/thinking/cleanup", daemon.Host, daemon.Port)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("create Thinking cleanup request: %w", err)
+			}
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := dm.httpClient.Do(req)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("send Thinking cleanup to daemon %s: %w", daemon.ID, err)
+			}
+			continue
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent && firstErr == nil {
+			firstErr = fmt.Errorf("daemon %s returned status %d on Thinking cleanup", daemon.ID, resp.StatusCode)
+		}
+	}
+	return firstErr
+}
+
 // --- SSE Streaming task support ---
 
 // SSEDaemonEvent represents a single event from the daemon's SSE stream.

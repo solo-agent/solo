@@ -49,6 +49,9 @@ else
   if [ ! -f "$PID_DIR/daemon" ]; then
     echo "Building daemon..."
     go build -o "$PID_DIR/daemon" ./cmd/daemon/
+  fi
+  if [ ! -f "$PID_DIR/solo" ]; then
+    echo "Building solo CLI..."
     go build -o "$PID_DIR/solo" ./cmd/solo/
   fi
   nohup env DAEMON_SERVER_URL="$SERVER_URL" "$PID_DIR/daemon" > daemon.log 2>&1 &

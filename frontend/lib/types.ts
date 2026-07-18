@@ -28,6 +28,7 @@ export interface Message {
   user_id: string;
   display_name: string;
   content: string;
+  content_type?: string;
   created_at: string;
   status: 'sending' | 'sent' | 'failed' | 'streaming';
   thread_parent_id?: string;
@@ -53,6 +54,42 @@ export interface Message {
   attachments?: Attachment[];
   /** 发送者是否活跃（agent 被删除后为 false） */
   sender_active?: boolean;
+  /** Thinking node this message belongs to. Omitted for normal channel messages. */
+  thinking_node_id?: string;
+}
+
+export type ThinkingNodeSource = 'root' | 'team' | 'manual' | 'auto';
+
+export interface ThinkingNode {
+  id: string;
+  space_id: string;
+  parent_id?: string;
+  agent_id?: string;
+  agent_name?: string;
+  agent_session_id?: string;
+  title: string;
+  source: ThinkingNodeSource;
+  checkpoint_handoff?: string;
+  checkpoint_handoff_at?: string;
+  inherited_handoff?: string;
+  fork_handoff_pending: boolean;
+  fork_handoff_at?: string;
+  returned_handoff?: string;
+  returning_at?: string;
+  returned_at?: string;
+  depth: number;
+  sort_order: number;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ThinkingSpace {
+  id: string;
+  channel_id: string;
+  nodes: ThinkingNode[];
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CreateChannelInput {

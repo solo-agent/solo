@@ -11,15 +11,18 @@ function shorten(value: string | undefined, max: number) {
 function CardShell({
   children,
   className,
+  kind,
   title,
 }: {
   children: ReactNode;
   className?: string;
+  kind: 'human' | 'activity' | 'tool';
   title?: string;
 }) {
   return (
     <div
       title={title}
+      data-agent-activity-kind={kind}
       className={cn(
         'pointer-events-auto border-2 border-black bg-white px-2 py-1 shadow-brutal-sm',
         'max-w-[190px] animate-in fade-in zoom-in-95 duration-150',
@@ -33,7 +36,7 @@ function CardShell({
 
 export const ActivityCard = memo(function ActivityCard({ text }: { text: string }) {
   return (
-    <CardShell className="bg-brutal-info-light" title={text}>
+    <CardShell kind="activity" className="bg-brutal-info-light" title={text}>
       <div className="flex items-center gap-1.5">
         <Brain className="h-3 w-3 flex-shrink-0 text-brutal-info" />
         <span className="truncate font-mono text-[9px] font-bold text-black">
@@ -53,7 +56,7 @@ export const ToolCard = memo(function ToolCard({
 }) {
   const full = args ? `${name}: ${args}` : name;
   return (
-    <CardShell className="bg-brutal-primary-light" title={full}>
+    <CardShell kind="tool" className="bg-brutal-primary-light" title={full}>
       <div className="flex min-w-0 items-center gap-1.5">
         <Wrench className="h-3 w-3 flex-shrink-0 text-yellow-700" />
         <span className="font-mono text-[10px] font-black text-black">{shorten(name, 18)}</span>
@@ -76,7 +79,7 @@ export const HumanMsgCard = memo(function HumanMsgCard({
 }) {
   const full = `${author}: ${text}`;
   return (
-    <CardShell className="bg-brutal-warning-light" title={full}>
+    <CardShell kind="human" className="bg-brutal-warning-light" title={full}>
       <div className="flex min-w-0 items-center gap-1.5">
         <MessageSquare className="h-3 w-3 flex-shrink-0 text-orange-700" />
         <span className="max-w-[150px] truncate font-mono text-[8px] font-bold text-black">
@@ -87,14 +90,31 @@ export const HumanMsgCard = memo(function HumanMsgCard({
   );
 });
 
+export type ActivityCardPlacement = 'top' | 'right' | 'bottom' | 'left';
+
+const PLACEMENT_CLASS: Record<ActivityCardPlacement, string> = {
+  top: 'bottom-full left-1/2 mb-3 -translate-x-1/2',
+  right: 'left-full top-1/2 ml-3 -translate-y-1/2',
+  bottom: 'left-1/2 top-full mt-3 -translate-x-1/2',
+  left: 'right-full top-1/2 mr-3 -translate-y-1/2',
+};
+
 export const RelationshipActivityCard = memo(function RelationshipActivityCard({
   activity,
+  placement = 'top',
 }: {
   activity?: LiveAgentState;
+  placement?: ActivityCardPlacement;
 }) {
   if (!activity) return null;
   return (
-    <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-3 flex w-max max-w-[220px] -translate-x-1/2 flex-col items-stretch gap-2">
+    <div
+      data-agent-activity-stack
+      className={cn(
+        'pointer-events-none absolute z-20 flex w-max max-w-[220px] flex-col items-stretch gap-2',
+        PLACEMENT_CLASS[placement],
+      )}
+    >
       {activity.currentHumanMsg && (
         <HumanMsgCard
           author={activity.currentHumanMsg.authorName}

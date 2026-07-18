@@ -19,8 +19,9 @@ import (
 
 // Default agent auto-response settings.
 const (
-	defaultContextMessageCount = 1 // v1.3: — deliver only the triggering message
-	defaultDebounceDuration    = 2 * time.Second
+	defaultContextMessageCount     = 1 // v1.3: — deliver only the triggering message
+	defaultNodeContextMessageCount = 50
+	defaultDebounceDuration        = 2 * time.Second
 )
 
 const (
@@ -160,6 +161,9 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 	mentionedNames := s.resolveMentionedNames(ctx, mentionedAgentIDs)
 
 	targetAgents := s.routeChannelTargets(ctx, agents, mentionedAgentIDs, hasMentions)
+	if senderType == "agent" {
+		targetAgents = excludeAgent(targetAgents, senderID)
+	}
 
 	if len(targetAgents) == 0 {
 		return
@@ -236,6 +240,230 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 		// Dispatch via streaming SSE and handle events
 		go s.handleStreamingAgentTask(context.Background(), daemon, taskReq, ag)
 	}
+}
+
+// TriggerAgentResponseInNode dispatches an isolated Thinking node turn. Raw
+// messages stay in the node; only Agent-authored Handoffs cross boundaries.
+func (s *AgentService) TriggerAgentResponseInNode(ctx context.Context, channelID, nodeID, messageID, senderType, senderID string, mentionedAgentIDs []string, hasMentions bool, agentChain []string) {
+	_ = s.triggerAgentResponseInNode(ctx, channelID, nodeID, messageID, senderType, senderID, mentionedAgentIDs, hasMentions, agentChain, "", false)
+}
+
+const thinkingReturnPrompt = `Complete this Thinking branch by producing its final handoff for the parent.
+Use the full context already present in this exact local Agent session. Do not create branches or continue implementation work.
+Send exactly one protocol message with solo message send. Its first line must be [[handoff:return]], followed by concise Markdown under 1500 words using these exact headings:
+# Handoff
+## Objective and scope
+## Confirmed conclusions
+## Evidence or artifacts
+## Unresolved questions
+## Risks and assumptions
+## Recommended parent action`
+
+// TriggerThinkingNodeReturn uses the node's existing Agent and provider Session
+// for the final handoff. The assigned Agent's message seals the node.
+func (s *AgentService) TriggerThinkingNodeReturn(ctx context.Context, channelID, nodeID string) error {
+	return s.triggerAgentResponseInNode(ctx, channelID, nodeID, "", "system", "system", nil, false, nil, thinkingReturnPrompt, true)
+}
+
+func (s *AgentService) TriggerThinkingForkHandoff(ctx context.Context, channelID, parentID, childID, childTitle string) error {
+	prompt := fmt.Sprintf(`Prepare the initial Handoff for the newly split child branch %q.
+Use the full context already present in this exact parent Agent Session. Do not continue implementation work.
+Send exactly one protocol message with solo message send. Its first line must be [[handoff:fork:%s]], followed by concise Markdown under 1000 words using these exact headings:
+# Handoff
+## Objective and scope
+## Confirmed conclusions
+## Evidence or artifacts
+## Unresolved questions
+## Risks and assumptions
+## Recommended first action`, childTitle, childID)
+	return s.triggerAgentResponseInNode(ctx, channelID, parentID, "", "system", "system", nil, false, nil, prompt, false)
+}
+
+func (s *AgentService) triggerAgentResponseInNode(ctx context.Context, channelID, nodeID, messageID, senderType, senderID string, mentionedAgentIDs []string, hasMentions bool, agentChain []string, handoffPrompt string, returnHandoff bool) error {
+	handoffRun := handoffPrompt != ""
+	// Agent messages are the output of the node's owning runtime. Mentions in
+	// that output provide context or create splits; they must not start another
+	// turn in the same node.
+	if !handoffRun && senderType == "agent" {
+		return nil
+	}
+	if !handoffRun && !shouldTriggerAgentForSender(senderType, mentionedAgentIDs) {
+		return nil
+	}
+	agents, err := s.getChannelActiveAgents(ctx, channelID)
+	if err != nil {
+		slog.Error("failed to get agents for thinking node", "node_id", nodeID, "error", err)
+		return err
+	}
+	nodeCtx, err := s.getThinkingNodeRuntimeContext(ctx, channelID, nodeID)
+	if err != nil {
+		slog.Error("failed to build thinking node context", "node_id", nodeID, "error", err)
+		return err
+	}
+	// A node has one stable owning Agent. Mentions remain conversational
+	// context and must not silently replace the node's runtime identity.
+	targets := filterAgentsByID(agents, []string{nodeCtx.AgentID})
+	if len(targets) == 0 {
+		return errors.New("assigned Thinking Agent is unavailable")
+	}
+
+	coldStartMessages, err := s.getRecentMessagesForNode(ctx, channelID, nodeID, defaultNodeContextMessageCount)
+	if err != nil {
+		slog.Error("failed to load thinking node messages", "node_id", nodeID, "error", err)
+		return err
+	}
+	turnMessages := coldStartMessages
+	if len(turnMessages) > 1 {
+		turnMessages = turnMessages[len(turnMessages)-1:]
+	}
+	if handoffRun {
+		handoffMessage := agent.Message{Role: agent.RoleUser, Content: handoffPrompt, SenderID: "system"}
+		turnMessages = []agent.Message{handoffMessage}
+		coldStartMessages = append(coldStartMessages, handoffMessage)
+	}
+	if nodeCtx.TurnContext != "" {
+		contextMessage := agent.Message{
+			Role:     agent.RoleUser,
+			Content:  "[Solo Thinking branch context; Agent-authored Handoffs only]\n" + nodeCtx.TurnContext,
+			SenderID: "system",
+		}
+		turnMessages = append([]agent.Message{contextMessage}, turnMessages...)
+		coldStartMessages = append([]agent.Message{contextMessage}, coldStartMessages...)
+	}
+	mentionedNames := s.resolveMentionedNames(ctx, mentionedAgentIDs)
+	dispatched := false
+	for _, ag := range targets {
+		debounceScope := "node:" + nodeID
+		if !handoffRun && s.checkThreadDebounce(channelID, debounceScope, ag.ID) {
+			continue
+		}
+		s.updateThreadDebounce(channelID, debounceScope, ag.ID)
+		if len(agentChain) >= maxAgentChainDepth || containsStr(agentChain, ag.ID) {
+			continue
+		}
+		newChain := append(append([]string(nil), agentChain...), ag.ID)
+		daemon := s.dm.SelectDaemon("llm")
+		if daemon == nil {
+			s.broadcastAgentError("", channelID, ag.ID, ag.Name, agentErrorNoAvailableDaemon)
+			if handoffRun {
+				return errors.New("no available local Agent daemon")
+			}
+			continue
+		}
+		taskReq := daemonTaskRequest{
+			TaskID:                uuid.NewString(),
+			AgentID:               ag.ID,
+			ChannelID:             channelID,
+			NodeID:                nodeID,
+			TriggerMessageID:      messageID,
+			Messages:              turnMessages,
+			ColdStartMessages:     coldStartMessages,
+			SystemPrompt:          ag.SystemPrompt,
+			ThinkingRuntimePrompt: nodeCtx.StaticPrompt,
+			ModelConfig:           agent.ModelConfig{Provider: ag.ModelProvider, Model: ag.ModelName},
+			AgentChain:            newChain,
+			MentionedNames:        mentionedNames,
+			ResumeSessionID:       nodeCtx.ResumeSessionID,
+			ReturnHandoff:         returnHandoff,
+		}
+		go s.handleStreamingAgentTask(context.Background(), daemon, taskReq, ag)
+		dispatched = true
+	}
+	if handoffRun && !dispatched {
+		return errors.New("failed to dispatch Thinking handoff")
+	}
+	return nil
+}
+
+type thinkingNodeRuntimeContext struct {
+	AgentID         string
+	StaticPrompt    string
+	TurnContext     string
+	ResumeSessionID string
+}
+
+func (s *AgentService) getThinkingNodeRuntimeContext(ctx context.Context, channelID, nodeID string) (thinkingNodeRuntimeContext, error) {
+	var title, inherited, parentCheckpoint string
+	var hasTeamChildren bool
+	var result thinkingNodeRuntimeContext
+	err := s.pool.QueryRow(ctx, `
+		SELECT n.title, COALESCE(n.agent_id::text, ''), n.inherited_handoff,
+		       COALESCE(parent.checkpoint_handoff, ''), COALESCE(sess.external_session_id, ''),
+		       EXISTS (SELECT 1 FROM thinking_nodes team WHERE team.parent_id = n.id AND team.source = 'team')
+		  FROM thinking_nodes n
+		  JOIN thinking_spaces space ON space.id = n.space_id AND space.channel_id = $1
+		  LEFT JOIN thinking_nodes parent ON parent.id = n.parent_id
+		  LEFT JOIN agent_sessions sess ON sess.id = n.agent_session_id AND sess.agent_id = n.agent_id
+		 WHERE n.id = $2`, channelID, nodeID,
+	).Scan(&title, &result.AgentID, &inherited, &parentCheckpoint, &result.ResumeSessionID, &hasTeamChildren)
+	if err != nil {
+		return thinkingNodeRuntimeContext{}, err
+	}
+	siblings, err := s.thinkingHandoffs(ctx, `
+		SELECT sibling.title,
+		       CASE WHEN sibling.returned_at IS NOT NULL THEN sibling.returned_handoff ELSE sibling.checkpoint_handoff END
+		  FROM thinking_nodes current
+		  JOIN thinking_nodes sibling ON sibling.parent_id = current.parent_id AND sibling.id <> current.id
+		 WHERE current.id = $1
+		   AND CASE WHEN sibling.returned_at IS NOT NULL THEN sibling.returned_handoff ELSE sibling.checkpoint_handoff END <> ''
+		 ORDER BY sibling.sort_order LIMIT 5`, nodeID)
+	if err != nil {
+		return thinkingNodeRuntimeContext{}, err
+	}
+	returned, err := s.thinkingHandoffs(ctx, `
+		SELECT child.title, child.returned_handoff
+		  FROM thinking_nodes child
+		 WHERE child.parent_id = $1 AND child.returned_handoff <> ''
+		 ORDER BY child.returned_at DESC NULLS LAST LIMIT 8`, nodeID)
+	if err != nil {
+		return thinkingNodeRuntimeContext{}, err
+	}
+	var staticPrompt strings.Builder
+	fmt.Fprintf(&staticPrompt, "You are working inside the isolated Thinking node %q (node_id=%s).\n", title, nodeID)
+	staticPrompt.WriteString("Only this node's raw conversation is available. Keep this branch focused. Reply with `solo message send` as usual; Solo routes it back to this node automatically.\n")
+	if hasTeamChildren {
+		staticPrompt.WriteString("The root's first-level team branches already exist. Do not emit split directives from this node; continue in the appropriate team branch instead.\n")
+	} else {
+		staticPrompt.WriteString("If the discussion reveals a distinct durable workstream, add at most three lines in the exact form `[[split: Branch title]]` inside the message sent with `solo message send`; Solo removes the markers and creates child nodes. Do not split for ordinary follow-up questions.\n")
+	}
+	staticPrompt.WriteString("When this branch materially changes its objective, conclusions, evidence, risks, or unresolved work, send one additional protocol message after the visible reply. Its first line must be `[[handoff:checkpoint]]`, followed by `# Handoff` with Objective and scope, Confirmed conclusions, Evidence or artifacts, Unresolved questions, Risks and assumptions, and Recommended next action. This protocol message is hidden from conversation. Do not create it by copying only the last message.\n")
+	result.StaticPrompt = staticPrompt.String()
+
+	var turnContext strings.Builder
+	if inherited != "" {
+		fmt.Fprintf(&turnContext, "Fork Handoff prepared for this node:\n%s\n", inherited)
+	} else if parentCheckpoint != "" {
+		fmt.Fprintf(&turnContext, "Parent checkpoint Handoff:\n%s\n", parentCheckpoint)
+	}
+	if len(siblings) > 0 {
+		turnContext.WriteString("\nSibling branch awareness (do not treat as raw dialogue):\n")
+		turnContext.WriteString(strings.Join(siblings, "\n"))
+		turnContext.WriteByte('\n')
+	}
+	if len(returned) > 0 {
+		turnContext.WriteString("\nHandoffs returned by child nodes:\n")
+		turnContext.WriteString(strings.Join(returned, "\n"))
+		turnContext.WriteByte('\n')
+	}
+	result.TurnContext = strings.TrimSpace(turnContext.String())
+	return result, nil
+}
+
+func (s *AgentService) thinkingHandoffs(ctx context.Context, query, nodeID string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, query, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []string{}
+	for rows.Next() {
+		var title, handoff string
+		if err := rows.Scan(&title, &handoff); err != nil {
+			return nil, err
+		}
+		result = append(result, "- "+title+": "+handoff)
+	}
+	return result, rows.Err()
 }
 
 func (s *AgentService) routeChannelTargets(ctx context.Context, agents []agentChannelInfo, mentionedAgentIDs []string, hasMentions bool) []agentChannelInfo {
@@ -339,6 +567,23 @@ const (
 // handleStreamingAgentTask dispatches a task to a daemon via SSE streaming
 // and forwards events to WebSocket subscribers.
 func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *DaemonInfo, taskReq daemonTaskRequest, ag agentChannelInfo) {
+	if taskReq.ReturnHandoff {
+		defer func() {
+			cleared, err := NewThinkingService(s.pool).CancelReturn(context.Background(), taskReq.NodeID)
+			if err != nil {
+				slog.Warn("failed to release Thinking return lock", "node_id", taskReq.NodeID, "error", err)
+				return
+			}
+			if cleared && s.hub != nil {
+				payload, _ := json.Marshal(map[string]any{
+					"type":       "thinking.updated",
+					"channel_id": taskReq.ChannelID,
+					"node_id":    taskReq.NodeID,
+				})
+				s.hub.BroadcastToChannel(taskReq.ChannelID, payload)
+			}
+		}()
+	}
 	// Get agent display name
 	agentName := ag.Name
 	if agentName == "" {
@@ -366,6 +611,7 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 		TriggerMessageID: taskReq.TriggerMessageID,
 		ChannelID:        taskReq.ChannelID,
 		ThreadID:         taskReq.ThreadID,
+		ThinkingNodeID:   taskReq.NodeID,
 		Status:           AgentRunStatusQueued,
 		ActivityText:     "等待执行",
 		Source:           taskReq.ModelConfig.Provider,
@@ -509,8 +755,9 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 			return
 		}
 		updatedRun, err := runSvc.BindRunSession(ctx, BindRunSessionInput{
-			RunID:     run.ID,
-			SessionID: session.ID,
+			RunID:          run.ID,
+			SessionID:      session.ID,
+			ThinkingNodeID: taskReq.NodeID,
 		})
 		if err != nil {
 			slog.Warn("failed to bind agent run session", "run_id", run.ID, "session_id", session.ID, "error", err)
@@ -750,6 +997,7 @@ func runPayload(run *AgentRun, agentID, agentName, taskID string) map[string]any
 		"task_id":            taskID,
 		"channel_id":         run.ChannelID,
 		"thread_id":          run.ThreadID,
+		"thinking_node_id":   run.ThinkingNodeID,
 		"status":             run.Status,
 		"activity_text":      run.ActivityText,
 		"tool_name":          run.ToolName,
@@ -780,19 +1028,20 @@ func (s *AgentService) appendAndBroadcastRunEvent(ctx context.Context, runSvc *A
 		return
 	}
 	s.hub.Broadcast(realtime.Envelope("agent.run.event", map[string]any{
-		"id":         event.ID,
-		"run_id":     run.ID,
-		"session_id": run.SessionID,
-		"agent_id":   agentID,
-		"agent_name": agentName,
-		"channel_id": run.ChannelID,
-		"thread_id":  run.ThreadID,
-		"seq":        event.Seq,
-		"event_type": event.Type,
-		"message":    event.Message,
-		"tool_name":  event.ToolName,
-		"payload":    json.RawMessage(event.Payload),
-		"timestamp":  event.CreatedAt.UTC().Format(time.RFC3339),
+		"id":               event.ID,
+		"run_id":           run.ID,
+		"session_id":       run.SessionID,
+		"agent_id":         agentID,
+		"agent_name":       agentName,
+		"channel_id":       run.ChannelID,
+		"thread_id":        run.ThreadID,
+		"thinking_node_id": run.ThinkingNodeID,
+		"seq":              event.Seq,
+		"event_type":       event.Type,
+		"message":          event.Message,
+		"tool_name":        event.ToolName,
+		"payload":          json.RawMessage(event.Payload),
+		"timestamp":        event.CreatedAt.UTC().Format(time.RFC3339),
 	}))
 }
 
@@ -1318,6 +1567,12 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 	if len(targetAgents) == 0 {
 		return
 	}
+	if senderType == "agent" {
+		targetAgents = excludeAgent(targetAgents, senderID)
+	}
+	if len(targetAgents) == 0 {
+		return
+	}
 
 	// Get thread context messages
 	threadSvc := NewThreadService(s.pool)
@@ -1451,6 +1706,19 @@ func shouldTriggerAgentForSender(senderType string, mentionedAgentIDs []string) 
 		return len(mentionedAgentIDs) > 0
 	}
 	return true
+}
+
+func excludeAgent(agents []agentChannelInfo, agentID string) []agentChannelInfo {
+	if agentID == "" {
+		return agents
+	}
+	filtered := make([]agentChannelInfo, 0, len(agents))
+	for _, ag := range agents {
+		if ag.ID != agentID {
+			filtered = append(filtered, ag)
+		}
+	}
+	return filtered
 }
 
 // CheckClaimWindow checks whether the given claimerID is allowed to claim the
@@ -1844,6 +2112,10 @@ func (s *AgentService) getThreadRootAgentSender(ctx context.Context, threadID st
 // v1.3: format — each message gets a structured header plus
 // "Respond as appropriate" routing instruction on the last message.
 func (s *AgentService) getRecentMessages(ctx context.Context, channelID string, limit int) ([]agent.Message, error) {
+	return s.getRecentMessagesForNode(ctx, channelID, "", limit)
+}
+
+func (s *AgentService) getRecentMessagesForNode(ctx context.Context, channelID, nodeID string, limit int) ([]agent.Message, error) {
 	// Get channel name for the target header.
 	var channelName, channelType string
 	_ = s.pool.QueryRow(ctx, `SELECT COALESCE(name, id::text), type FROM channels WHERE id = $1`, channelID).Scan(&channelName, &channelType)
@@ -1856,10 +2128,11 @@ func (s *AgentService) getRecentMessages(ctx context.Context, channelID string, 
 	rows, err := s.pool.Query(ctx,
 		`SELECT m.id, m.sender_type, m.sender_id, m.content, m.created_at, COALESCE(m.attachment_ids, '{}') as attachment_ids
 		 FROM messages m
-		 WHERE m.channel_id = $1 AND m.thread_id IS NULL
-		 ORDER BY m.created_at DESC, m.id DESC
-		 LIMIT $2`,
-		channelID, limit,
+			 WHERE m.channel_id = $1 AND m.thread_id IS NULL
+			   AND (($3 = '' AND m.thinking_node_id IS NULL) OR m.thinking_node_id = NULLIF($3, '')::uuid)
+			 ORDER BY m.created_at DESC, m.id DESC
+			 LIMIT $2`,
+		channelID, limit, nodeID,
 	)
 	if err != nil {
 		return nil, err
@@ -1913,7 +2186,11 @@ func (s *AgentService) getRecentMessages(ctx context.Context, channelID string, 
 
 		// On the LAST (most recent) message, append routing instruction.
 		if i == len(rows_)-1 {
-			content += "\n\nRespond as appropriate. Complete all your work before stopping.\nReply in the channel or create/reply in a thread as appropriate; use each message's `target` and `msg` fields to choose the exact target."
+			if nodeID == "" {
+				content += "\n\nRespond as appropriate. Complete all your work before stopping.\nReply in the channel or create/reply in a thread as appropriate; use each message's `target` and `msg` fields to choose the exact target."
+			} else {
+				content += "\n\nRespond in the current Thinking node. Complete all your work before stopping."
+			}
 		}
 
 		msgs = append(msgs, agent.Message{
@@ -2044,19 +2321,24 @@ func (s *AgentService) getChannelOpenTasksSummary(ctx context.Context, channelID
 
 // daemonTaskRequest is the format for tasks sent from server to daemon.
 type daemonTaskRequest struct {
-	TaskID           string            `json:"task_id"`
-	AgentID          string            `json:"agent_id"`
-	ChannelID        string            `json:"channel_id"`
-	ThreadID         string            `json:"thread_id,omitempty"`
-	TriggerMessageID string            `json:"trigger_message_id,omitempty"`
-	Messages         []agent.Message   `json:"messages"`
-	SystemPrompt     string            `json:"system_prompt"`
-	ModelConfig      agent.ModelConfig `json:"model_config"`
-	OriginTaskID     string            `json:"origin_task_id,omitempty"`   // SOLO-123-B: task ID for status update
-	TaskContext      string            `json:"task_context,omitempty"`     // SOLO-221-B: summary of pending tasks in channel
-	AgentChain       []string          `json:"agent_chain,omitempty"`      // SOLO-228-B: agent trigger chain for loop prevention
-	MentionedNames   []string          `json:"mentioned_names,omitempty"`  // v1.3: names of @mentioned agents for context awareness
-	InitialGreeting  string            `json:"initial_greeting,omitempty"` // greeting message to prepend as system context
+	TaskID                string            `json:"task_id"`
+	AgentID               string            `json:"agent_id"`
+	ChannelID             string            `json:"channel_id"`
+	ThreadID              string            `json:"thread_id,omitempty"`
+	NodeID                string            `json:"thinking_node_id,omitempty"`
+	ResumeSessionID       string            `json:"resume_session_id,omitempty"`
+	TriggerMessageID      string            `json:"trigger_message_id,omitempty"`
+	Messages              []agent.Message   `json:"messages"`
+	ColdStartMessages     []agent.Message   `json:"cold_start_messages,omitempty"`
+	SystemPrompt          string            `json:"system_prompt"`
+	ThinkingRuntimePrompt string            `json:"thinking_runtime_prompt,omitempty"`
+	ModelConfig           agent.ModelConfig `json:"model_config"`
+	OriginTaskID          string            `json:"origin_task_id,omitempty"`   // SOLO-123-B: task ID for status update
+	TaskContext           string            `json:"task_context,omitempty"`     // SOLO-221-B: summary of pending tasks in channel
+	AgentChain            []string          `json:"agent_chain,omitempty"`      // SOLO-228-B: agent trigger chain for loop prevention
+	MentionedNames        []string          `json:"mentioned_names,omitempty"`  // v1.3: names of @mentioned agents for context awareness
+	InitialGreeting       string            `json:"initial_greeting,omitempty"` // greeting message to prepend as system context
+	ReturnHandoff         bool              `json:"return_handoff,omitempty"`
 }
 
 // containsStr returns true if the slice s contains value v.

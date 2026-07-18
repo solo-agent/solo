@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -307,6 +308,67 @@ func TestAgentRunServiceLifecycle(t *testing.T) {
 		if active.ID == failedRun.ID {
 			t.Fatalf("failed run %s should not be listed as active", failedRun.ID)
 		}
+	}
+}
+
+func TestResolveExecutingThinkingNodeFailsClosed(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, ownerID)
+	channelID := agentRunChannel(t, pool, ownerID)
+	spaceID := uuid.NewString()
+	nodeID := uuid.NewString()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE channel_id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM thinking_spaces WHERE id = $1`, spaceID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+	_, err := pool.Exec(ctx,
+		`INSERT INTO thinking_spaces (id, channel_id, created_by) VALUES ($1, $2, $3)`,
+		spaceID, channelID, ownerID)
+	if err != nil {
+		t.Fatalf("create Thinking space: %v", err)
+	}
+	_, err = pool.Exec(ctx, `
+		INSERT INTO thinking_nodes (id, space_id, agent_id, title, source, created_by)
+		VALUES ($1, $2, $3, 'Root', 'root', $4)`, nodeID, spaceID, agentID, ownerID)
+	if err != nil {
+		t.Fatalf("create Thinking node: %v", err)
+	}
+	svc := NewAgentRunService(pool)
+	nodeRun, err := svc.StartRun(ctx, StartRunInput{
+		AgentID:        agentID,
+		TriggerType:    AgentRunTriggerMessage,
+		ChannelID:      channelID,
+		ThinkingNodeID: nodeID,
+		Status:         AgentRunStatusQueued,
+	})
+	if err != nil {
+		t.Fatalf("start queued node run: %v", err)
+	}
+	if got, err := svc.ResolveExecutingThinkingNode(ctx, agentID, channelID); err != nil || got != "" {
+		t.Fatalf("queued scope = %q, %v, want empty", got, err)
+	}
+	if _, err := svc.UpdateStatus(ctx, UpdateRunStatusInput{RunID: nodeRun.ID, Status: AgentRunStatusRunning}); err != nil {
+		t.Fatalf("mark node run executing: %v", err)
+	}
+	if got, err := svc.ResolveExecutingThinkingNode(ctx, agentID, channelID); err != nil || got != nodeID {
+		t.Fatalf("executing scope = %q, %v, want %q", got, err, nodeID)
+	}
+
+	if _, err := svc.StartRun(ctx, StartRunInput{
+		AgentID:     agentID,
+		TriggerType: AgentRunTriggerMessage,
+		ChannelID:   channelID,
+		Status:      AgentRunStatusRunning,
+	}); err != nil {
+		t.Fatalf("start conflicting channel run: %v", err)
+	}
+	if _, err := svc.ResolveExecutingThinkingNode(ctx, agentID, channelID); !errors.Is(err, ErrAmbiguousAgentRunScope) {
+		t.Fatalf("ambiguous scope error = %v, want %v", err, ErrAmbiguousAgentRunScope)
 	}
 }
 

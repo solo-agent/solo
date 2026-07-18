@@ -27,6 +27,7 @@ export interface WSMessage {
   content: string;
   content_type?: string;
   thread_parent_id?: string;
+  thinking_node_id?: string;
   created_at: string;
   updated_at?: string;
   /** 发送状态（本地乐观更新 / 流式输出使用） */
@@ -46,9 +47,10 @@ export type WSServerEvent =
   | { type: 'connected'; user_id: string }
   | { type: 'error'; code: string; message: string }
   // ---- 消息事件 ----
-  | { type: 'message.new'; id: string; channel_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; thread_id?: string; created_at: string; attachments?: Attachment[] }
+  | { type: 'message.new'; id: string; channel_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; thread_id?: string; thinking_node_id?: string; created_at: string; attachments?: Attachment[] }
   | { type: 'message.updated'; id: string; channel_id: string; content: string; sender_type?: string; sender_id?: string; updated_at: string; task_number?: number; task_title?: string; task_status?: string; task_claimer_name?: string; task_claimer_deleted?: boolean; reply_count?: number }
   | { type: 'message.deleted'; channel_id: string; message_id: string }
+  | { type: 'thinking.updated'; channel_id: string; space_id?: string; node_id?: string }
   // ---- 线程事件 ----
   // thread.message.new: 后端 ThreadMessageNewPayload 为 {message:{...}, thread:{...}} 嵌套结构
   | { type: 'thread.message.new'; message: { id: string; channel_id: string; thread_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; created_at: string; attachments?: Attachment[] }; thread: { thread_id: string; reply_count: number; last_reply_at: string } }
@@ -63,15 +65,15 @@ export type WSServerEvent =
   | { type: 'agent.error'; channel_id: string; thread_id?: string; agent_id: string; agent_name?: string; error?: string; detail?: string }
   // ---- Agent chunk events (agent view) ----
   | { type: 'agent.chunk'; channel_id: string; agent_id: string; agent_name: string; chunk_type: string; content: string; tool?: { name: string; input?: string; output?: string; call_id?: string }; timestamp: string }
-  | { type: 'agent.run.started'; run_id: string; session_id?: string; agent_id: string; agent_name?: string; task_id?: string; channel_id?: string; thread_id?: string; status: 'queued' | 'thinking' | 'running' | 'streaming' | 'waiting_input' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled' | 'timeout'; activity_text?: string; tool_name?: string; tool_input_summary?: string; transcript_path?: string; source?: string; timestamp?: string }
-  | { type: 'agent.run.updated'; run_id: string; session_id?: string; agent_id: string; agent_name?: string; task_id?: string; channel_id?: string; thread_id?: string; status: 'queued' | 'thinking' | 'running' | 'streaming' | 'waiting_input' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled' | 'timeout'; activity_text?: string; tool_name?: string; tool_input_summary?: string; transcript_path?: string; source?: string; timestamp?: string }
-  | { type: 'agent.run.finished'; run_id: string; session_id?: string; agent_id: string; agent_name?: string; task_id?: string; channel_id?: string; thread_id?: string; status: 'completed' | 'failed' | 'cancelled' | 'timeout'; activity_text?: string; tool_name?: string; tool_input_summary?: string; transcript_path?: string; source?: string; timestamp?: string }
-  | { type: 'agent.run.event'; id?: string; run_id: string; session_id?: string; agent_id: string; agent_name?: string; channel_id?: string; thread_id?: string; seq: number; event_type: string; message?: string; tool_name?: string; payload?: Record<string, unknown>; timestamp: string }
+  | { type: 'agent.run.started'; run_id: string; session_id?: string; agent_id: string; agent_name?: string; task_id?: string; channel_id?: string; thread_id?: string; thinking_node_id?: string; status: 'queued' | 'thinking' | 'running' | 'streaming' | 'waiting_input' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled' | 'timeout'; activity_text?: string; tool_name?: string; tool_input_summary?: string; transcript_path?: string; source?: string; timestamp?: string }
+  | { type: 'agent.run.updated'; run_id: string; session_id?: string; agent_id: string; agent_name?: string; task_id?: string; channel_id?: string; thread_id?: string; thinking_node_id?: string; status: 'queued' | 'thinking' | 'running' | 'streaming' | 'waiting_input' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled' | 'timeout'; activity_text?: string; tool_name?: string; tool_input_summary?: string; transcript_path?: string; source?: string; timestamp?: string }
+  | { type: 'agent.run.finished'; run_id: string; session_id?: string; agent_id: string; agent_name?: string; task_id?: string; channel_id?: string; thread_id?: string; thinking_node_id?: string; status: 'completed' | 'failed' | 'cancelled' | 'timeout'; activity_text?: string; tool_name?: string; tool_input_summary?: string; transcript_path?: string; source?: string; timestamp?: string }
+  | { type: 'agent.run.event'; id?: string; run_id: string; session_id?: string; agent_id: string; agent_name?: string; channel_id?: string; thread_id?: string; thinking_node_id?: string; seq: number; event_type: string; message?: string; tool_name?: string; payload?: Record<string, unknown>; timestamp: string }
   // ---- 频道成员事件 ----
   | { type: 'member.added'; channel_id: string; member_type: string; member_id: string; member_name?: string }
   | { type: 'member.removed'; channel_id: string; member_type?: string; member_id: string; member_name?: string }
   // ---- 流式消息事件 (SOLO-51-F, SOLO-52-F) ----
-  | { type: 'message.agent_typing'; id: string; channel_id: string; thread_id?: string; sender_id: string; sender_name?: string; content: string; created_at: string }
+  | { type: 'message.agent_typing'; id: string; channel_id: string; thread_id?: string; thinking_node_id?: string; sender_id: string; sender_name?: string; content: string; created_at: string }
   // ---- 任务事件 (SOLO-122-B) ----
   | { type: 'task.created'; id: string; task_number: number; channel_id: string; creator_id: string; title: string; description?: string; status: string; claimer_id?: string; priority?: string; due_date?: string; message_id?: string; parent_task_id?: string; subtask_count?: number; done_subtask_count?: number; artifact_status?: 'none' | 'pending' | 'available'; created_at: string; updated_at: string }
   | { type: 'task.updated'; id: string; task_number: number; channel_id: string; title: string; description?: string; status: string; claimer_id?: string; claimer_name?: string; claimer_deleted?: boolean; priority?: string; due_date?: string; message_id?: string; parent_task_id?: string; subtask_count?: number; done_subtask_count?: number; artifact_status?: 'none' | 'pending' | 'available'; updated_at: string }

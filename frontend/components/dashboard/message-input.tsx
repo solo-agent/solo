@@ -28,6 +28,7 @@ import {
   X,
   Check,
   AlertTriangle,
+  BrainCircuit,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMentions } from '@/lib/hooks/use-mentions';
@@ -63,6 +64,10 @@ interface MessageInputProps {
   members: ChannelMember[];
   /** Show the "As Task" toggle (for channel views only) */
   showAsTaskToggle?: boolean;
+  /** Controlled Thinking mode for node-scoped conversations. */
+  thinkingMode?: boolean;
+  onThinkingModeChange?: (active: boolean) => void;
+  disabled?: boolean;
 }
 
 // ---- Upload helper ----
@@ -104,6 +109,9 @@ export function MessageInput({
   placeholder = t('messagePlaceholder'),
   members,
   showAsTaskToggle = false,
+  thinkingMode = false,
+  onThinkingModeChange,
+  disabled = false,
 }: MessageInputProps) {
   const [content, setContent] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -112,6 +120,10 @@ export function MessageInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isSendingRef = useRef(false);
+
+  useEffect(() => {
+    if (thinkingMode) setAsTask(false);
+  }, [thinkingMode]);
 
   // ---- Upload state ----
   const [isDragging, setIsDragging] = useState(false);
@@ -349,7 +361,7 @@ export function MessageInput({
   const trimmed = content.trim();
   const doneUploads = uploads.filter((u) => u.status === 'done');
   const hasUploading = uploads.some((u) => u.status === 'uploading');
-  const canSend = (trimmed.length > 0 || (!asTask && doneUploads.length > 0)) && !isSending && !hasUploading;
+  const canSend = (trimmed.length > 0 || (!asTask && doneUploads.length > 0)) && !isSending && !hasUploading && !disabled;
 
   const handleSend = useCallback(async () => {
     if (!canSend || isSendingRef.current) return;
@@ -597,30 +609,42 @@ export function MessageInput({
 
         {/* Message / Task mode */}
         {showAsTaskToggle && (
-          <div className="mb-2 flex w-fit items-center gap-2" role="group" aria-label={`${t('messages')} / ${t('tasks')}`}>
+          <div className="mb-2 flex w-fit items-center gap-2" role="group" aria-label={`${t('messages')} / ${t('tasks')} / ${t('thinkingMode')}`}>
             <button
               type="button"
-              onClick={() => setAsTask(false)}
+              onClick={() => { setAsTask(false); onThinkingModeChange?.(false); }}
               className={cn(
                 'btn-brutal btn-brutal-sm flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] font-bold',
-                !asTask ? 'btn-brutal-primary' : 'bg-white text-muted-foreground hover:text-foreground',
+                !asTask && !thinkingMode ? 'btn-brutal-primary' : 'bg-white text-muted-foreground hover:text-foreground',
               )}
-              aria-pressed={!asTask}
+              aria-pressed={!asTask && !thinkingMode}
             >
               <MessageSquare className="h-3.5 w-3.5" />
               {t('messages')}
             </button>
             <button
               type="button"
-              onClick={() => setAsTask(true)}
+              onClick={() => { setAsTask(true); onThinkingModeChange?.(false); }}
               className={cn(
                 'btn-brutal btn-brutal-sm flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] font-bold',
-                asTask ? 'btn-brutal-primary' : 'bg-white text-muted-foreground hover:text-foreground',
+                asTask && !thinkingMode ? 'btn-brutal-primary' : 'bg-white text-muted-foreground hover:text-foreground',
               )}
-              aria-pressed={asTask}
+              aria-pressed={asTask && !thinkingMode}
             >
               <SquareCheckBig className="h-3.5 w-3.5" />
               {t('tasks')}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAsTask(false); onThinkingModeChange?.(true); }}
+              className={cn(
+                'btn-brutal btn-brutal-sm flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] font-bold',
+                thinkingMode ? 'btn-brutal-primary' : 'bg-white text-muted-foreground hover:text-foreground',
+              )}
+              aria-pressed={thinkingMode}
+            >
+              <BrainCircuit className="h-3.5 w-3.5" />
+              {t('thinkingMode')}
             </button>
           </div>
         )}
@@ -643,10 +667,10 @@ export function MessageInput({
             onSelect={handleCursorMove}
             onClick={handleCursorMove}
             onPaste={handlePaste}
-            placeholder={asTask ? t('taskMessagePlaceholder') : placeholder}
+            placeholder={asTask ? t('taskMessagePlaceholder') : thinkingMode ? t('thinkingPlaceholder') : placeholder}
             rows={1}
             autoFocus
-            disabled={isSending}
+            disabled={isSending || disabled}
             aria-label={asTask ? t('taskDescriptionInput') : t('messageInput')}
             aria-autocomplete="list"
             aria-controls={mentionActive ? 'mention-listbox' : undefined}
@@ -663,7 +687,7 @@ export function MessageInput({
           <button
             type="button"
             onClick={openFilePicker}
-            disabled={isSending || hasUploading}
+            disabled={isSending || hasUploading || disabled}
             className={cn(
               'absolute bottom-2 flex h-8 w-8 items-center justify-center',
               'btn-brutal bg-white text-foreground hover:bg-brutal-primary-light',

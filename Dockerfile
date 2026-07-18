@@ -18,6 +18,7 @@ COPY . .
 # Build both server and daemon binaries with stripped debug info
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/server ./cmd/server/
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/daemon ./cmd/daemon/
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/solo ./cmd/solo/
 
 # =============================================================================
 # Stage 2: Runtime image — reuse golang:alpine (already cached)
@@ -28,8 +29,9 @@ RUN addgroup -S solo && adduser -S -G solo solo
 
 COPY --from=builder /app/server /usr/local/bin/server
 COPY --from=builder /app/daemon /usr/local/bin/daemon
+COPY --from=builder /app/solo /usr/local/bin/solo
 
-RUN chown solo:solo /usr/local/bin/server /usr/local/bin/daemon
+RUN chown solo:solo /usr/local/bin/server /usr/local/bin/daemon /usr/local/bin/solo
 
 USER solo
 

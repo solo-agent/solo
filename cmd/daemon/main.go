@@ -148,6 +148,7 @@ func main() {
 	r.Route("/internal/daemon", func(r chi.Router) {
 		r.Post("/run", h.Run)            // Server dispatches agent tasks here
 		r.Post("/proxy", h.ProxyRequest) // Agent-to-server proxy
+		r.Post("/thinking/cleanup", h.CleanupThinkingSessions)
 		r.Route("/workspace", func(r chi.Router) {
 			r.Get("/list", h.HandleWorkspaceList)
 			r.Get("/read", h.HandleWorkspaceRead)
@@ -168,6 +169,7 @@ func main() {
 	// Graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	go h.runThinkingSessionReaper(ctx)
 
 	go func() {
 		slog.Info("daemon server starting", "addr", srv.Addr)

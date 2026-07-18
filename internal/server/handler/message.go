@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -31,6 +32,38 @@ func formatUUIDArray(ids []string) string {
 	return "{" + strings.Join(ids, ",") + "}"
 }
 
+func nullableUUIDString(id string) any {
+	if id == "" {
+		return nil
+	}
+	return id
+}
+
+func canPostToThinkingNode(senderType, senderID, nodeAgentID string) bool {
+	return senderType != "agent" || senderID == nodeAgentID
+}
+
+var errThinkingNodeScopeConflict = errors.New("requested Thinking node conflicts with executing Agent run")
+
+func reconcileThinkingNodeScope(ctx context.Context, pool *pgxpool.Pool, agentID, channelID, requestedNodeID string) (string, error) {
+	activeNodeID, err := service.NewAgentRunService(pool).ResolveExecutingThinkingNode(ctx, agentID, channelID)
+	if err != nil || activeNodeID == "" {
+		return requestedNodeID, err
+	}
+	if requestedNodeID != "" && requestedNodeID != activeNodeID {
+		return "", errThinkingNodeScopeConflict
+	}
+	return activeNodeID, nil
+}
+
+func writeThinkingScopeError(w http.ResponseWriter, err error) {
+	if errors.Is(err, service.ErrAmbiguousAgentRunScope) || errors.Is(err, errThinkingNodeScopeConflict) {
+		writeError(w, http.StatusConflict, "ambiguous Thinking runtime route")
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "failed to resolve Thinking runtime route")
+}
+
 // MessageHandler handles message-related HTTP requests.
 type MessageHandler struct {
 	pool       *pgxpool.Pool
@@ -54,10 +87,11 @@ func NewMessageHandler(pool *pgxpool.Pool, hub *ws.Hub, agentSvc *service.AgentS
 // --- Request/Response types ---
 
 type CreateMessageRequest struct {
-	Content       string   `json:"content"`
-	AsTask        bool     `json:"as_task,omitempty"`
-	AttachmentIDs []string `json:"attachment_ids,omitempty"`
-	ThreadID      string   `json:"thread_id,omitempty"`
+	Content        string   `json:"content"`
+	AsTask         bool     `json:"as_task,omitempty"`
+	AttachmentIDs  []string `json:"attachment_ids,omitempty"`
+	ThreadID       string   `json:"thread_id,omitempty"`
+	ThinkingNodeID string   `json:"thinking_node_id,omitempty"`
 }
 
 // AttachmentMeta is the attachment metadata included in message responses.
@@ -90,6 +124,7 @@ type MessageResponse struct {
 	TaskClaimerName    string           `json:"task_claimer_name,omitempty"`
 	TaskClaimerDeleted bool             `json:"task_claimer_deleted"`
 	HasUnreadThread    bool             `json:"has_unread_thread,omitempty"`
+	ThinkingNodeID     string           `json:"thinking_node_id,omitempty"`
 }
 
 type MessageListResponse struct {
@@ -131,6 +166,17 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "message content exceeds maximum length of 10000 characters")
 		return
 	}
+	thinkingNodeID := strings.TrimSpace(req.ThinkingNodeID)
+	if thinkingNodeID != "" {
+		if req.ThreadID != "" || req.AsTask {
+			writeError(w, http.StatusBadRequest, "thinking node messages cannot also be threads or tasks")
+			return
+		}
+		if _, err := uuid.Parse(thinkingNodeID); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid thinking node ID")
+			return
+		}
+	}
 
 	// Verify sender is a member of the channel and channel is not archived
 	var isMember bool
@@ -157,6 +203,27 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	).Scan(&isArchived)
 	if err == nil && isArchived {
 		writeError(w, http.StatusGone, "channel is archived")
+		return
+	}
+
+	// Determine sender type before resolving runtime-owned node scope. A
+	// legacy Agent CLI may omit thinking_node_id, but the executing Agent Run
+	// still provides an authoritative route.
+	var isAgent bool
+	_ = h.pool.QueryRow(r.Context(),
+		`SELECT EXISTS(SELECT 1 FROM agents WHERE id = $1)`, userID,
+	).Scan(&isAgent)
+	senderType := "user"
+	if isAgent {
+		senderType = "agent"
+		thinkingNodeID, err = reconcileThinkingNodeScope(r.Context(), h.pool, userID, channelID, thinkingNodeID)
+		if err != nil {
+			writeThinkingScopeError(w, err)
+			return
+		}
+	}
+	if thinkingNodeID != "" && (req.ThreadID != "" || req.AsTask) {
+		writeError(w, http.StatusBadRequest, "thinking node messages cannot also be threads or tasks")
 		return
 	}
 
@@ -233,14 +300,99 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Determine sender type (agent vs human) so JOINs resolve correctly.
-	var isAgent bool
-	_ = h.pool.QueryRow(r.Context(),
-		`SELECT EXISTS(SELECT 1 FROM agents WHERE id = $1)`, userID,
-	).Scan(&isAgent)
-	senderType := "user"
-	if isAgent {
-		senderType = "agent"
+	autoSplitTitles := []string{}
+	var handoffProtocol *service.ThinkingHandoffProtocol
+	if thinkingNodeID != "" {
+		thinkingSvc := service.NewThinkingService(h.pool)
+		node, err := thinkingSvc.GetNodeForChannel(r.Context(), channelID, thinkingNodeID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "thinking node not found")
+			return
+		}
+		if node.ReturnedAt != nil {
+			writeError(w, http.StatusConflict, service.ErrThinkingReturned.Error())
+			return
+		}
+		if node.ForkHandoffPending {
+			writeError(w, http.StatusConflict, service.ErrThinkingPreparing.Error())
+			return
+		}
+		if node.ReturningAt != nil && senderType != "agent" {
+			writeError(w, http.StatusConflict, service.ErrThinkingReturning.Error())
+			return
+		}
+		if senderType == "agent" {
+			if !canPostToThinkingNode(senderType, userID, node.AgentID) {
+				writeError(w, http.StatusForbidden, "agent is not assigned to this thinking node")
+				return
+			}
+			if protocol, ok := service.ParseThinkingHandoffProtocol(content); ok {
+				handoffProtocol = &protocol
+				content = protocol.Content
+			}
+			if node.ReturningAt != nil && (handoffProtocol == nil || handoffProtocol.Kind != "return") {
+				writeError(w, http.StatusConflict, "thinking return requires the handoff protocol")
+				return
+			}
+			if handoffProtocol != nil && handoffProtocol.Kind == "return" && node.ReturningAt == nil {
+				writeError(w, http.StatusConflict, "thinking node is not returning")
+				return
+			}
+			if node.ReturningAt == nil {
+				if handoffProtocol == nil {
+					content, autoSplitTitles = service.ExtractThinkingSplits(content)
+					if content == "" && len(autoSplitTitles) > 0 {
+						content = "Split into: " + strings.Join(autoSplitTitles, ", ")
+					}
+				}
+			}
+		}
+	}
+
+	if handoffProtocol != nil {
+		thinkingSvc := service.NewThinkingService(h.pool)
+		updatedNodeID := thinkingNodeID
+		switch handoffProtocol.Kind {
+		case "checkpoint":
+			node, err := thinkingSvc.SaveCheckpointHandoff(r.Context(), channelID, thinkingNodeID, userID, handoffProtocol.Content)
+			if err != nil {
+				writeError(w, http.StatusConflict, err.Error())
+				return
+			}
+			updatedNodeID = node.ID
+		case "fork":
+			node, err := thinkingSvc.CompleteForkHandoff(r.Context(), channelID, thinkingNodeID, handoffProtocol.TargetID, userID, handoffProtocol.Content)
+			if err != nil {
+				writeError(w, http.StatusConflict, err.Error())
+				return
+			}
+			updatedNodeID = node.ID
+		case "return":
+			node, returnedMessage, err := thinkingSvc.CompleteReturn(r.Context(), channelID, thinkingNodeID, userID, handoffProtocol.Content)
+			if err != nil {
+				writeError(w, http.StatusConflict, err.Error())
+				return
+			}
+			updatedNodeID = node.ID
+			if h.hub != nil {
+				h.hub.BroadcastToChannel(channelID, ws.Envelope(ws.EventMessageNew, ws.MessageNewPayload{
+					ID: returnedMessage.ID, ChannelID: channelID, SenderType: "system", SenderID: "system",
+					SenderName: "Solo", Content: returnedMessage.Content, ContentType: "thinking_handoff",
+					ThinkingNodeID: node.ParentID, CreatedAt: returnedMessage.CreatedAt.Format(time.RFC3339),
+				}))
+			}
+		}
+		if h.hub != nil {
+			h.hub.BroadcastToChannel(channelID, ws.Envelope(ws.EventThinkingUpdated, map[string]string{
+				"channel_id": channelID, "node_id": updatedNodeID,
+			}))
+		}
+		writeJSON(w, http.StatusCreated, MessageResponse{
+			ID: uuid.NewString(), ChannelID: channelID, SenderType: "agent", SenderID: userID,
+			ContentType: "thinking_handoff_protocol", ThinkingNodeID: thinkingNodeID,
+			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		})
+		return
 	}
 
 	// Insert message with mentioned_agent_ids and attachment_ids
@@ -252,16 +404,35 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		nullableThreadID = threadID
 	}
 	_, err = h.pool.Exec(r.Context(),
-		`INSERT INTO messages (id, channel_id, thread_id, sender_type, sender_id, content, mentioned_agent_ids, attachment_ids, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7::uuid[], $8::uuid[], $9, $9)`,
-		messageID, channelID, nullableThreadID, senderType, userID, content, formatUUIDArray(mentionedAgentIDs), formatUUIDArray(attachmentIDs), now,
+		`INSERT INTO messages (id, channel_id, thread_id, thinking_node_id, sender_type, sender_id, content, mentioned_agent_ids, attachment_ids, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uuid[], $9::uuid[], $10, $10)`,
+		messageID, channelID, nullableThreadID, nullableUUIDString(thinkingNodeID), senderType, userID, content, formatUUIDArray(mentionedAgentIDs), formatUUIDArray(attachmentIDs), now,
 	)
 	if err != nil {
 		slog.Error("failed to persist message", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to send message")
 		return
 	}
-
+	if thinkingNodeID != "" {
+		thinkingSvc := service.NewThinkingService(h.pool)
+		topologyChanged := false
+		for _, title := range autoSplitTitles {
+			child, err := thinkingSvc.CreateChild(r.Context(), channelID, thinkingNodeID, title, userID, "auto")
+			if err != nil {
+				slog.Warn("failed to create automatic thinking branch", "node_id", thinkingNodeID, "title", title, "error", err)
+			} else {
+				topologyChanged = true
+				if h.agentSvc != nil {
+					if err := h.agentSvc.TriggerThinkingForkHandoff(r.Context(), channelID, thinkingNodeID, child.ID, child.Title); err != nil {
+						slog.Warn("failed to prepare automatic fork handoff", "node_id", child.ID, "error", err)
+					}
+				}
+			}
+		}
+		if topologyChanged && h.hub != nil {
+			h.hub.BroadcastToChannel(channelID, ws.Envelope(ws.EventThinkingUpdated, map[string]string{"channel_id": channelID, "node_id": thinkingNodeID}))
+		}
+	}
 	// Update thread reply_count and store threadRootMsgID for later broadcast
 	var threadRootMsgID string
 	var threadReplyCount int
@@ -386,6 +557,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 			Content:           content,
 			ContentType:       "text",
 			ThreadID:          threadID,
+			ThinkingNodeID:    thinkingNodeID,
 			MentionedAgentIDs: mentionedAgentIDs,
 			AttachmentIDs:     attachmentIDs,
 			Attachments:       toWSAttachmentMeta(attachments),
@@ -426,7 +598,9 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// TriggerAgentResponse (existing behavior).
 	if h.agentSvc != nil && !req.AsTask {
 		hasMentions := len(mentionedAgentIDs) > 0
-		if threadID != "" {
+		if thinkingNodeID != "" {
+			go h.agentSvc.TriggerAgentResponseInNode(context.Background(), channelID, thinkingNodeID, messageID, senderType, userID, mentionedAgentIDs, hasMentions, nil)
+		} else if threadID != "" {
 			go h.agentSvc.TriggerAgentResponseInThread(context.Background(), channelID, threadID, senderType, userID, mentionedAgentIDs, hasMentions, nil)
 		} else {
 			go h.agentSvc.TriggerAgentResponse(context.Background(), channelID, messageID, senderType, userID, mentionedAgentIDs, hasMentions, nil)
@@ -444,6 +618,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		MentionedAgentIDs: mentionedAgentIDs,
 		AttachmentIDs:     attachmentIDs,
 		Attachments:       attachments,
+		ThinkingNodeID:    thinkingNodeID,
 		CreatedAt:         now.Format(time.RFC3339),
 	}
 
@@ -500,6 +675,13 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	thinkingNodeID := strings.TrimSpace(r.URL.Query().Get("thinking_node_id"))
+	if thinkingNodeID != "" {
+		if _, err := uuid.Parse(thinkingNodeID); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid thinking node ID")
+			return
+		}
+	}
 
 	// Check user is a member and channel is not archived
 	var isMember bool
@@ -535,6 +717,17 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusGone, "channel is archived")
 		return
 	}
+	thinkingNodeID, err = reconcileThinkingNodeScope(r.Context(), h.pool, userID, channelID, thinkingNodeID)
+	if err != nil {
+		writeThinkingScopeError(w, err)
+		return
+	}
+	if thinkingNodeID != "" {
+		if _, err := service.NewThinkingService(h.pool).GetNodeForChannel(r.Context(), channelID, thinkingNodeID); err != nil {
+			writeError(w, http.StatusNotFound, "thinking node not found")
+			return
+		}
+	}
 
 	// Build query with cursor using tuple comparison for deterministic pagination.
 	query := `SELECT m.id, m.channel_id, m.sender_type, m.sender_id,
@@ -543,6 +736,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		                   ELSE COALESCE(u.display_name, a.name, m.sender_id::text)
 		                 END as sender_name,
 		                 COALESCE(a.is_active, false) AS sender_active,
+		                 COALESCE(m.thinking_node_id::text, '') AS thinking_node_id,
 	                 m.content, m.content_type, COALESCE(m.attachment_ids, '{}') as attachment_ids, m.created_at,
 		                 COALESCE(t.reply_count, 0) AS reply_count,
 		                 COALESCE(tasks.task_number, 0) AS task_number,
@@ -558,12 +752,18 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		          LEFT JOIN tasks ON tasks.message_id = m.id
 		          LEFT JOIN users u_claimer ON tasks.claimer_id = u_claimer.id
 		          LEFT JOIN agents a_claimer ON tasks.claimer_id = a_claimer.id
-	          WHERE m.channel_id = $1 AND m.thread_id IS NULL`
+		          WHERE m.channel_id = $1 AND m.thread_id IS NULL`
 
 	args := []any{channelID, userID}
+	if thinkingNodeID == "" {
+		query += ` AND m.thinking_node_id IS NULL`
+	} else {
+		query += ` AND m.thinking_node_id = $` + strconv.Itoa(len(args)+1)
+		args = append(args, thinkingNodeID)
+	}
 
 	if before != "" {
-		query += ` AND (m.created_at, m.id) < (SELECT c.created_at, c.id FROM messages c WHERE c.id = $3)`
+		query += ` AND (m.created_at, m.id) < (SELECT c.created_at, c.id FROM messages c WHERE c.id = $` + strconv.Itoa(len(args)+1) + `)`
 		args = append(args, before)
 	}
 
@@ -583,7 +783,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		var msg MessageResponse
 		var createdAt time.Time
 		err := rows.Scan(&msg.ID, &msg.ChannelID, &msg.SenderType, &msg.SenderID,
-			&msg.SenderName, &msg.SenderActive, &msg.Content, &msg.ContentType, &msg.AttachmentIDs, &createdAt,
+			&msg.SenderName, &msg.SenderActive, &msg.ThinkingNodeID, &msg.Content, &msg.ContentType, &msg.AttachmentIDs, &createdAt,
 			&msg.ReplyCount, &msg.TaskNumber, &msg.TaskStatus, &msg.TaskClaimerName, &msg.TaskClaimerDeleted, &msg.HasUnreadThread)
 		if err != nil {
 			slog.Error("failed to scan message row", "error", err)
@@ -959,6 +1159,13 @@ func (h *MessageHandler) Check(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "channel_id is required")
 		return
 	}
+	thinkingNodeID := strings.TrimSpace(r.URL.Query().Get("thinking_node_id"))
+	if thinkingNodeID != "" {
+		if _, err := uuid.Parse(thinkingNodeID); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid thinking node ID")
+			return
+		}
+	}
 
 	limit := defaultMessageLimit
 	if l := r.URL.Query().Get("limit"); l != "" {
@@ -988,15 +1195,33 @@ func (h *MessageHandler) Check(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	}
+	thinkingNodeID, err = reconcileThinkingNodeScope(r.Context(), h.pool, userID, channelID, thinkingNodeID)
+	if err != nil {
+		writeThinkingScopeError(w, err)
+		return
+	}
+	if thinkingNodeID != "" {
+		if _, err := service.NewThinkingService(h.pool).GetNodeForChannel(r.Context(), channelID, thinkingNodeID); err != nil {
+			writeError(w, http.StatusNotFound, "thinking node not found")
+			return
+		}
+	}
 
-	rows, err := h.pool.Query(r.Context(),
-		`SELECT m.id, m.channel_id, m.sender_type, m.sender_id,
+	query := `SELECT m.id, m.channel_id, m.sender_type, m.sender_id,
 				m.content, m.reply_to, m.created_at, m.updated_at
 		 FROM messages m
-		 WHERE m.channel_id = $1 AND COALESCE(m.is_deleted, false) = false
-		 ORDER BY m.created_at DESC
-		 LIMIT $2`, channelID, limit,
-	)
+		 WHERE m.channel_id = $1 AND COALESCE(m.is_deleted, false) = false`
+	args := []any{channelID}
+	if thinkingNodeID == "" {
+		query += ` AND m.thinking_node_id IS NULL`
+	} else {
+		query += ` AND m.thinking_node_id = $2`
+		args = append(args, thinkingNodeID)
+	}
+	query += ` ORDER BY m.created_at DESC LIMIT $` + strconv.Itoa(len(args)+1)
+	args = append(args, limit)
+
+	rows, err := h.pool.Query(r.Context(), query, args...)
 	if err != nil {
 		slog.Error("message check: query failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to query messages")

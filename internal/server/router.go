@@ -89,13 +89,14 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(pool, agentSvc)
-	channelHandler := handler.NewChannelHandler(pool)
+	channelHandler := handler.NewChannelHandler(pool, dm)
 	memberHandler := handler.NewMemberHandler(pool, agentSvc)
 	messageHandler := handler.NewMessageHandler(pool, hub, agentSvc, taskSvc)
 	agentHandler := handler.NewAgentHandler(pool, dm, hub)
 	agentRunHandler := handler.NewAgentRunHandler(pool)
 	dashboardHandler := handler.NewDashboardHandler(pool)
 	threadHandler := handler.NewThreadHandler(pool, hub, agentSvc)
+	thinkingHandler := handler.NewThinkingHandler(pool, hub, agentSvc)
 	dmHandler := handler.NewDMHandler(pool, hub, agentSvc, taskSvc)
 	daemonHandler := handler.NewDaemonHandler(dm, agentSvc, computerSvc)
 	mentionSvc := service.NewMentionService(pool)
@@ -230,6 +231,15 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 						r.Post("/", threadHandler.CreateThreadReply)
 						r.Get("/", threadHandler.ListThreadMessages)
 					})
+				})
+
+				// Thinking mode: one node-scoped conversation graph per channel.
+				r.Route("/thinking", func(r chi.Router) {
+					r.Get("/", thinkingHandler.Get)
+					r.Post("/", thinkingHandler.Ensure)
+					r.Post("/nodes/{nodeID}/children", thinkingHandler.CreateChild)
+					r.Post("/nodes/{nodeID}/handoff/retry", thinkingHandler.RetryForkHandoff)
+					r.Post("/nodes/{nodeID}/return", thinkingHandler.ReturnNode)
 				})
 			})
 		})
