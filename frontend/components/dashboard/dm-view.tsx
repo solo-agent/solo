@@ -589,7 +589,7 @@ export function DMView({
 
         {/* Messages tab */}
         {viewTab === 'messages' && (
-          <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream">
+          <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream animate-fade-in">
             {/* System message banner */}
             <div className="flex-shrink-0 border-b-2 border-black bg-brutal-cream px-6 py-3">
               <div className="flex items-center gap-2 font-body text-sm text-muted-foreground">
@@ -671,7 +671,7 @@ export function DMView({
 
         {/* Tasks tab (v1.2 Phase 2+3) */}
         {viewTab === 'tasks' && (
-          <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex flex-1 flex-col overflow-hidden animate-fade-in">
             <div className="flex-shrink-0 border-b-2 border-black bg-brutal-cream px-6 py-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 font-body text-sm text-muted-foreground">
@@ -701,7 +701,7 @@ export function DMView({
       {/* ThreadPanel — always mounted for smooth width transition */}
       <div
         className="flex-shrink-0 bg-brutal-cream overflow-hidden relative transition-[width] duration-100 ease-linear border-l-2 border-transparent"
-        style={{ width: rightPanelOpen ? threadPanelWidth : 0, borderLeftColor: rightPanelOpen ? '#000' : 'transparent' }}
+        style={{ width: rightPanelOpen ? threadPanelWidth : 0, borderLeftColor: rightPanelOpen ? 'var(--color-border)' : 'transparent' }}
       >
         {/* Resize handle — only interactive when panel is open */}
         {rightPanelOpen && (

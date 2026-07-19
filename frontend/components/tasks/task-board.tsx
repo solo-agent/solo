@@ -14,6 +14,7 @@ import { AlertCircle, RefreshCw } from 'lucide-react';
 import { TaskColumn } from './task-column';
 import type { Task, TaskStatus } from '@/lib/types';
 import { t } from '@/lib/i18n';
+import { motionScrollBehavior } from '@/lib/motion';
 
 // ---- Constants ----
 
@@ -111,7 +112,7 @@ export function TaskBoard({
   useEffect(() => {
     if (!selectedTaskId || isLoading) return;
     const el = boardRef.current?.querySelector<HTMLElement>(`[data-task-id="${selectedTaskId}"]`);
-    el?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+    el?.scrollIntoView({ behavior: motionScrollBehavior(), block: 'center', inline: 'center' });
   }, [isLoading, selectedTaskId, tasks.length]);
 
   // ---- Error state ----

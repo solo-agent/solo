@@ -1,18 +1,11 @@
 import type { TranslationKey } from '@/lib/i18n';
 
 export const themeStorageKey = 'solo.skin';
-export const defaultThemeId = 'classic';
+export const defaultThemeId = 'archive';
 
 export const themeOptions = [
+  { id: 'archive', labelKey: 'themeArchive' },
   { id: 'classic', labelKey: 'themeClassic' },
-  { id: 'blueprint', labelKey: 'themeBlueprint' },
-  { id: 'ultraviolet', labelKey: 'themeUltraviolet' },
-  { id: 'seasalt', labelKey: 'themeSeasalt' },
-  { id: 'tomato', labelKey: 'themeTomato' },
-  { id: 'matcha', labelKey: 'themeMatcha' },
-  { id: 'bubblegum', labelKey: 'themeBubblegum' },
-  { id: 'lavender', labelKey: 'themeLavender' },
-  { id: 'sky', labelKey: 'themeSky' },
 ] as const satisfies ReadonlyArray<{ id: string; labelKey: TranslationKey }>;
 
 export type ThemeId = (typeof themeOptions)[number]['id'];

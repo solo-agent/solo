@@ -95,7 +95,7 @@ function ChannelItem({
       aria-current={isSelected ? 'true' : undefined}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <div className={selectableRowIconClass('bg-brutal-info')}>
+        <div className={selectableRowIconClass('channel-hash-icon bg-brutal-info')}>
           <span className="font-mono text-base font-bold leading-none select-none">#</span>
         </div>
         <span className="truncate font-body">{channel.name}</span>

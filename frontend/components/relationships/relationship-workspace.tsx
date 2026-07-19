@@ -48,6 +48,7 @@ import { useAgents } from '@/lib/hooks/use-agents';
 import { useTeamAgentActivity } from '@/lib/hooks/use-team-agent-activity';
 import { listTemplates, applyTemplate, type Template } from '@/lib/templates-api';
 import { useCliDetection } from '@/lib/hooks/use-cli-detection';
+import { motionDuration } from '@/lib/motion';
 
 // ---- Node/Edge types ----
 
@@ -138,7 +139,7 @@ export function RelationshipWorkspace({
 
   const fitGraph = useCallback(() => {
     requestAnimationFrame(() => {
-      flowRef.current?.fitView({ padding: 0.25, maxZoom: 0.85, duration: 250 });
+      flowRef.current?.fitView({ padding: 0.25, maxZoom: 0.85, duration: motionDuration(420) });
     });
   }, []);
 
@@ -920,6 +921,7 @@ export function RelationshipWorkspace({
         {/* Graph */}
         <div className="flex-1 relative">
           <ReactFlow
+            className="relationship-flow"
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChange}
@@ -946,12 +948,14 @@ export function RelationshipWorkspace({
             defaultEdgeOptions={{
               type: 'relationship',
             }}
+            proOptions={{ hideAttribution: true }}
             deleteKeyCode={null}
           >
-            <Background color="rgba(0,0,0,0.08)" gap={20} />
+            <Background color="var(--color-border)" gap={20} />
             <Controls
-              className="!border-2 !border-black !shadow-brutal-sm"
+              className="flow-controls"
               position="bottom-right"
+              style={{ border: '2px solid var(--color-brutal-black)', boxShadow: '3px 3px 0 var(--color-brutal-shadow)' }}
             />
           </ReactFlow>
 
@@ -1137,8 +1141,8 @@ export function RelationshipWorkspace({
             {t('relationshipLegend')}:
           </span>
           {[
-            { type: 'assigns_to', color: '#4A90D9', dash: '' },
-            { type: 'collaborates_with', color: '#10B981', dash: '8,4' },
+            { type: 'assigns_to', color: 'var(--color-brutal-info)', dash: '' },
+            { type: 'collaborates_with', color: 'var(--color-brutal-success)', dash: '8,4' },
           ].map(({ type, color, dash }) => (
             <span key={type} className="flex items-center gap-1.5 font-mono text-[10px]">
               <svg width="24" height="8"><line x1="0" y1="4" x2="24" y2="4" stroke={color} strokeWidth={2} strokeDasharray={dash || undefined} /></svg>
@@ -1149,7 +1153,7 @@ export function RelationshipWorkspace({
       </div>
       <div
         className="flex-shrink-0 bg-brutal-cream overflow-hidden relative transition-[width] duration-100 ease-linear border-l-2 border-transparent"
-        style={{ width: detailPanelOpen ? detailPanelWidth : 0, borderLeftColor: detailPanelOpen ? '#000' : 'transparent' }}
+        style={{ width: detailPanelOpen ? detailPanelWidth : 0, borderLeftColor: detailPanelOpen ? 'var(--color-border)' : 'transparent' }}
       >
         {detailPanelOpen && (
           <div

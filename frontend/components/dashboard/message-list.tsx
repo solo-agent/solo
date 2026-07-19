@@ -33,6 +33,7 @@ import { buildValidNames } from '@/lib/utils/highlight';
 import { Avatar } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import { motionScrollBehavior } from '@/lib/motion';
 import {
   Dialog,
   DialogHeader,
@@ -604,7 +605,7 @@ function ScrollToBottom({ onClick }: { onClick: () => void }) {
         // flush against the right 2px border. px-2.5 (10px each side)
         // balances the existing 18px left margin (14px icon + 4px gap)
         // so the button reads as a proper brutal pill, not a chopped label.
-        className="btn-brutal btn-brutal-sm h-8 gap-1 px-2.5 text-xs"
+        className="btn-brutal btn-brutal-sm h-8 gap-1 bg-white px-2.5 text-xs"
         aria-label={t('scrollToLatest')}
       >
         <ChevronDown className="h-3.5 w-3.5" />
@@ -804,7 +805,7 @@ export function MessageList({
 
   useEffect(() => {
     if (isAtBottom && messages.length > prevMessageCountRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      bottomRef.current?.scrollIntoView({ behavior: motionScrollBehavior() });
     }
     prevMessageCountRef.current = messages.length;
   }, [messages.length, isAtBottom]);
@@ -822,7 +823,7 @@ export function MessageList({
     const timer = setTimeout(() => {
       const el = document.querySelector(`[data-message-id="${scrollToMessageId}"]`);
       if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.scrollIntoView({ behavior: motionScrollBehavior(), block: 'center' });
         setHighlightedMessageId(scrollToMessageId);
       }
     }, 100);
@@ -836,7 +837,7 @@ export function MessageList({
   }, [scrollToMessageId, scrollKey, isLoading]);
 
   const scrollToBottom = () => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    bottomRef.current?.scrollIntoView({ behavior: motionScrollBehavior() });
     setIsAtBottom(true);
   };
 

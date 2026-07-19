@@ -36,8 +36,8 @@ export interface AgentNodeData {
 }
 
 const TASK_STATUS_BORDER: Partial<Record<TaskStatus, string>> = {
-  in_progress: '#3B7DD8',
-  in_review: '#A99BE8',
+  in_progress: 'var(--color-brutal-info)',
+  in_review: 'var(--color-brutal-violet)',
 };
 
 function RunningDots() {
@@ -70,7 +70,7 @@ function AgentTaskMiniCard({
   onOpenTask?: (taskId: string) => void;
   onOpenTaskArtifact?: (taskId: string) => void;
 }) {
-  const borderColor = TASK_STATUS_BORDER[task.status] ?? '#3B7DD8';
+  const borderColor = TASK_STATUS_BORDER[task.status] ?? 'var(--color-brutal-info)';
   const taskLabel = task.taskNumber ? `#${task.taskNumber}` : 'TASK';
   const artifactLabel = task.artifactStatus === 'available'
     ? 'ARTIFACT'
@@ -88,13 +88,13 @@ function AgentTaskMiniCard({
 
   return (
     <div className="nodrag nopan mt-3 flex flex-col items-center">
-      <div className="h-3 border-l-2 border-black" />
+      <div className="relationship-task-connector h-3 border-l-2 border-black" />
       <div
         role="button"
         tabIndex={0}
         aria-label={`Open ${taskLabel} ${task.title}`}
-        className="w-[240px] cursor-pointer border-4 bg-white p-3 text-left shadow-brutal-sm transition-transform hover:-translate-y-0.5 hover:shadow-brutal"
-        style={{ borderColor }}
+        className="relationship-task-card w-[240px] cursor-pointer border-4 bg-white p-3 text-left shadow-brutal-sm transition-transform hover:-translate-y-0.5 hover:shadow-brutal"
+        style={{ borderColor, '--relationship-task-status-color': borderColor } as CSSProperties}
         onClick={(event) => {
           event.stopPropagation();
           openTask();
@@ -110,7 +110,7 @@ function AgentTaskMiniCard({
         <div className="mb-1 flex items-center justify-between gap-2">
           <span className="font-mono text-[10px] font-bold text-muted-foreground">{taskLabel}</span>
           <span
-            className="border-2 border-black px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase text-black"
+            className="relationship-task-status border-2 border-black px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase text-black"
             style={{ backgroundColor: borderColor }}
           >
             {taskStatusText(task.status)}
@@ -158,7 +158,7 @@ function RelationshipNodeComponent({ data, selected }: NodeProps) {
       )}
       <div
         className={[
-          'relative overflow-visible px-4 py-3 border-4 min-w-[140px] cursor-pointer hover:-translate-y-0.5 hover:shadow-brutal-lg active:translate-x-0.5 active:translate-y-0.5 transition-transform duration-100',
+          'relationship-agent-node relative overflow-visible px-4 py-3 border-4 min-w-[140px] cursor-pointer hover:-translate-y-0.5 hover:shadow-brutal-lg active:translate-x-0.5 active:translate-y-0.5 transition-transform duration-100',
           showHalo ? 'team-agent-active-halo' : '',
           selected ? 'bg-brutal-primary shadow-brutal-lg' : 'bg-white shadow-brutal',
         ].join(' ')}

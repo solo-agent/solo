@@ -33,6 +33,7 @@ import { panelToggleButtonClass } from '@/components/ui/button';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useThread } from '@/lib/hooks/use-thread';
+import { motionScrollBehavior } from '@/lib/motion';
 import { useMentions } from '@/lib/hooks/use-mentions';
 import { useWebSocket } from '@/lib/ws-context';
 import { useToast } from '@/components/ui/toast';
@@ -803,7 +804,7 @@ export function ThreadPanel({
 
   useEffect(() => {
     if (messages.length > prevMessageCount.current) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      bottomRef.current?.scrollIntoView({ behavior: motionScrollBehavior() });
     }
     prevMessageCount.current = messages.length;
   }, [messages.length]);
@@ -819,7 +820,7 @@ export function ThreadPanel({
     const timer = setTimeout(() => {
       const el = scrollRef.current?.querySelector(`[data-message-id="${targetMessageId}"]`);
       if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.scrollIntoView({ behavior: motionScrollBehavior(), block: 'center' });
         setHighlightedMessageId(targetMessageId);
       }
     }, 100);

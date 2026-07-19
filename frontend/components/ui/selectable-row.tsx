@@ -21,7 +21,7 @@ export interface SelectableRowProps
 
 export function selectableRowClass(selected = false, className?: string) {
   return cn(
-    "group flex cursor-pointer items-center gap-2 border-2 px-3 py-1.5 text-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-info focus-visible:ring-offset-2",
+    "selectable-row group flex cursor-pointer items-center gap-2 border-2 px-3 py-1.5 text-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-info focus-visible:ring-offset-2",
     selected
       ? "border-black bg-brutal-primary text-black shadow-brutal-sm"
       : "border-transparent text-black hover:border-black",
@@ -31,7 +31,7 @@ export function selectableRowClass(selected = false, className?: string) {
 
 export function selectableRowIconClass(className?: string) {
   return cn(
-    "flex h-7 w-7 flex-shrink-0 items-center justify-center border-2 border-black shadow-brutal-sm",
+    "selectable-row-icon flex h-7 w-7 flex-shrink-0 items-center justify-center border-2 border-black shadow-brutal-sm",
     className,
   );
 }

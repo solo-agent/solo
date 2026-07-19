@@ -6,6 +6,7 @@ import { useAgentChunks } from '@/lib/hooks/use-agent-chunks';
 import { AgentTrack } from './agent-track';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
+import { motionScrollBehavior } from '@/lib/motion';
 
 interface AgentViewPanelProps {
   channelId: string | null;
@@ -56,7 +57,7 @@ export function AgentViewPanel({
     if (!focusedAgentId) return;
     const el = trackRefs.current.get(focusedAgentId);
     if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.scrollIntoView({ behavior: motionScrollBehavior(), block: 'center' });
     }
     setHighlightedId(focusedAgentId);
     const timer = setTimeout(() => {

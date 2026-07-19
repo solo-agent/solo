@@ -207,12 +207,13 @@ function ActionButton({
   return (
     <button
       type="button"
+      data-tone={tone}
       disabled={disabled}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
       }}
-      className={`${bg} inline-flex cursor-pointer select-none items-center gap-1 border-2 border-black px-2 py-1 font-heading text-[10px] font-black uppercase text-black shadow-brutal-sm transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-info focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:grayscale disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-brutal-sm disabled:opacity-50`}
+      className={`${bg} task-action-button inline-flex cursor-pointer select-none items-center gap-1 border-2 border-black px-2 py-1 font-heading text-[10px] font-black uppercase text-black shadow-brutal-sm transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brutal-info focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:grayscale disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-brutal-sm disabled:opacity-50`}
     >
       {children}
     </button>

@@ -35,6 +35,7 @@ export function ThinkingNodeCard({ data, selected }: NodeProps<ThinkingFlowNode>
     <div
       className="relative flex h-[148px] w-[156px] flex-col items-center text-center"
       data-thinking-node-id={node.id}
+      data-thinking-node-kind={isRoot ? 'root' : isTeam ? 'team' : 'branch'}
       data-agent-run-status={runStatus}
       aria-current={selected ? 'true' : undefined}
       title={node.returned_handoff || node.checkpoint_handoff || node.inherited_handoff || t('thinkingNewBranch')}
@@ -42,11 +43,11 @@ export function ThinkingNodeCard({ data, selected }: NodeProps<ThinkingFlowNode>
       {node.parent_id && <Handle type="target" position={Position.Top} style={{ top: orbCenter }} className="!h-1 !w-1 !border-0 !bg-transparent" />}
       <div
         className={cn(
-          'relative flex shrink-0 items-center justify-center border-2 border-black bg-white shadow-brutal-sm transition-[transform,box-shadow,background-color]',
+          'thinking-node-orb relative flex shrink-0 items-center justify-center border-2 border-black bg-white shadow-brutal-sm transition-[transform,box-shadow,background-color]',
           'rounded-[48%_52%_46%_54%/54%_46%_52%_48%]',
           isRoot ? 'h-24 w-24' : isTeam ? 'h-20 w-20' : 'h-16 w-16',
           agentRunShowsHalo(runStatus) && 'team-agent-active-halo',
-          selected && '-translate-x-0.5 -translate-y-0.5 bg-brutal-primary shadow-brutal-md ring-2 ring-black ring-offset-2 ring-offset-brutal-cream',
+          selected && 'thinking-node-selected -translate-x-0.5 -translate-y-0.5 bg-brutal-primary shadow-brutal-md ring-2 ring-black ring-offset-2 ring-offset-brutal-cream',
         )}
         style={{ '--team-agent-status-color': statusColor } as CSSProperties}
       >
@@ -54,7 +55,9 @@ export function ThinkingNodeCard({ data, selected }: NodeProps<ThinkingFlowNode>
           activity={liveActivity}
           placement={data.activityPlacement}
         />
-        <NodeIcon className={cn(isRoot ? 'h-8 w-8' : 'h-6 w-6')} />
+        <span className={cn('thinking-node-icon flex items-center justify-center rounded-full', isRoot ? 'h-12 w-12' : 'h-10 w-10')}>
+          <NodeIcon className={cn(isRoot ? 'h-8 w-8' : 'h-6 w-6')} />
+        </span>
         {node.returned_at && (
           <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-black bg-brutal-success text-black">
             <Check className="h-3 w-3" />

@@ -32,6 +32,7 @@ import { cn } from '@/lib/utils';
 import { useTeamAgentActivity } from '@/lib/hooks/use-team-agent-activity';
 import { agentRunShowsHalo } from '@/lib/agent-activity';
 import { t } from '@/lib/i18n';
+import { motionDuration } from '@/lib/motion';
 import type { ThinkingNode, ThinkingSpace } from '@/lib/types';
 
 const nodeTypes = { thinkingNode: ThinkingNodeCard };
@@ -139,7 +140,7 @@ function layoutSpace(
     source: node.parent_id,
     target: node.id,
     type: 'straight',
-    style: { stroke: '#6b675f', strokeWidth: 2 },
+    style: { stroke: 'var(--skin-subtle-text)', strokeWidth: 2 },
   }] : []);
   return { nodes, edges };
 }
@@ -241,7 +242,7 @@ export function ThinkingWorkspace({
         padding: showOverview ? 0.2 : 0.65,
         minZoom: 0.7,
         maxZoom: 1,
-        duration: 350,
+        duration: motionDuration(420),
       });
     });
     return () => cancelAnimationFrame(frame);
@@ -319,6 +320,7 @@ export function ThinkingWorkspace({
                 type="button"
                 variant="outline"
                 size="sm"
+                className="bg-white"
                 onClick={() => { void retryForkHandoff(); }}
                 disabled={parentRunActive || busy}
                 title={parentRunActive ? t('thinkingForkPreparingHint') : t('thinkingForkRetryHint')}
@@ -331,6 +333,7 @@ export function ThinkingWorkspace({
               type="button"
               variant="outline"
               size="sm"
+              className="bg-white"
               onClick={() => setShowSplit(true)}
               disabled={splitDisabled}
               title={selectedNode?.returned_at ? t('thinkingReturnedNoSplit') : undefined}
@@ -341,6 +344,7 @@ export function ThinkingWorkspace({
               type="button"
               variant="outline"
               size="sm"
+              className="bg-white"
               onClick={() => { void returnNode(); }}
               disabled={returnDisabled}
               title={returnHint}
@@ -355,6 +359,7 @@ export function ThinkingWorkspace({
       <div className={cn('min-h-0 flex-1 bg-brutal-cream', busy && 'cursor-progress')}>
         <ThinkingActivityContext.Provider value={liveByThinkingNode}>
           <ReactFlow
+            className="thinking-flow"
             nodes={graph.nodes}
             edges={graph.edges}
             nodeTypes={nodeTypes}
@@ -365,9 +370,14 @@ export function ThinkingWorkspace({
             minZoom={0.25}
             maxZoom={1.5}
             onInit={setFlow}
+            proOptions={{ hideAttribution: true }}
           >
             <Background variant={BackgroundVariant.Dots} gap={18} size={1.5} color="#b8b1a3" />
-            <Controls showInteractive={false} className="!border-2 !border-black !shadow-brutal-sm" />
+            <Controls
+              showInteractive={false}
+              className="flow-controls"
+              style={{ border: '2px solid var(--color-brutal-black)', boxShadow: '3px 3px 0 var(--color-brutal-shadow)' }}
+            />
           </ReactFlow>
         </ThinkingActivityContext.Provider>
       </div>
