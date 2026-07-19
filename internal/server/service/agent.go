@@ -279,6 +279,22 @@ Send exactly one protocol message with solo message send. Its first line must be
 	return s.triggerAgentResponseInNode(ctx, channelID, parentID, "", "system", "system", nil, false, nil, prompt, false)
 }
 
+const thinkingCheckpointRefreshPrompt = `Publish a fresh Current State for this Thinking branch.
+Use the full context already present in this exact local Agent session. Do not continue implementation work and do not send a visible conversational reply.
+Preserve concrete identifiers, decisions, evidence, and unresolved dependencies that another branch needs to act correctly.
+Send exactly one protocol message with solo message send. Its first line must be [[handoff:checkpoint]], followed by concise Markdown under 1500 words using these exact headings:
+# Handoff
+## Objective and scope
+## Confirmed conclusions
+## Evidence or artifacts
+## Unresolved questions
+## Risks and assumptions
+## Recommended next action`
+
+func (s *AgentService) TriggerThinkingCheckpointRefresh(ctx context.Context, channelID, nodeID string) error {
+	return s.triggerAgentResponseInNode(ctx, channelID, nodeID, "", "system", "system", nil, false, nil, thinkingCheckpointRefreshPrompt, false)
+}
+
 func (s *AgentService) triggerAgentResponseInNode(ctx context.Context, channelID, nodeID, messageID, senderType, senderID string, mentionedAgentIDs []string, hasMentions bool, agentChain []string, handoffPrompt string, returnHandoff bool) error {
 	handoffRun := handoffPrompt != ""
 	// Agent messages are the output of the node's owning runtime. Mentions in
@@ -401,12 +417,24 @@ func (s *AgentService) getThinkingNodeRuntimeContext(ctx context.Context, channe
 	}
 	siblings, err := s.thinkingHandoffs(ctx, `
 		SELECT sibling.title,
-		       CASE WHEN sibling.returned_at IS NOT NULL THEN sibling.returned_handoff ELSE sibling.checkpoint_handoff END
+		       CASE
+		         WHEN sibling.returned_at IS NOT NULL THEN
+		           '[final Handoff]' || CASE WHEN sibling.returned_handoff = '' THEN ' unavailable' ELSE E'\n' || sibling.returned_handoff END
+		         WHEN sibling.checkpoint_handoff = '' OR sibling.checkpoint_handoff_at IS NULL THEN
+		           '[active; Current State not published]'
+		         WHEN EXISTS (
+		           SELECT 1 FROM messages latest
+		            WHERE latest.thinking_node_id = sibling.id
+		              AND latest.sender_type = 'agent'
+		              AND COALESCE(latest.is_deleted, false) = false
+		              AND latest.created_at > sibling.checkpoint_handoff_at
+		         ) THEN '[active; Current State may need refresh]' || E'\n' || sibling.checkpoint_handoff
+		         ELSE '[active; Current State current]' || E'\n' || sibling.checkpoint_handoff
+		       END
 		  FROM thinking_nodes current
 		  JOIN thinking_nodes sibling ON sibling.parent_id = current.parent_id AND sibling.id <> current.id
 		 WHERE current.id = $1
-		   AND CASE WHEN sibling.returned_at IS NOT NULL THEN sibling.returned_handoff ELSE sibling.checkpoint_handoff END <> ''
-		 ORDER BY sibling.sort_order LIMIT 5`, nodeID)
+		 ORDER BY sibling.sort_order`, nodeID)
 	if err != nil {
 		return thinkingNodeRuntimeContext{}, err
 	}
@@ -426,7 +454,7 @@ func (s *AgentService) getThinkingNodeRuntimeContext(ctx context.Context, channe
 	} else {
 		staticPrompt.WriteString("If the discussion reveals a distinct durable workstream, add at most three lines in the exact form `[[split: Branch title]]` inside the message sent with `solo message send`; Solo removes the markers and creates child nodes. Do not split for ordinary follow-up questions.\n")
 	}
-	staticPrompt.WriteString("When this branch materially changes its objective, conclusions, evidence, risks, or unresolved work, send one additional protocol message after the visible reply. Its first line must be `[[handoff:checkpoint]]`, followed by `# Handoff` with Objective and scope, Confirmed conclusions, Evidence or artifacts, Unresolved questions, Risks and assumptions, and Recommended next action. This protocol message is hidden from conversation. Do not create it by copying only the last message.\n")
+	staticPrompt.WriteString("Publish this branch's outward Current State after the first meaningful visible reply. Update it only when cross-node-relevant objective, conclusions, evidence, risks, dependencies, unresolved work, or next action materially change. To publish, send one additional protocol message after the visible reply. Its first line must be `[[handoff:checkpoint]]`, followed by `# Handoff` with Objective and scope, Confirmed conclusions, Evidence or artifacts, Unresolved questions, Risks and assumptions, and Recommended next action. This protocol message is hidden from conversation. Current State is a durable handoff, not a mechanical summary or copy of the last message; do not publish it for ordinary follow-up or tool noise.\n")
 	result.StaticPrompt = staticPrompt.String()
 
 	var turnContext strings.Builder

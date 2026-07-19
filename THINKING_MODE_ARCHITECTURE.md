@@ -73,7 +73,8 @@ For manual or automatic splits at depth two and deeper:
 
 - copy the parent's `agent_id` to the child;
 - leave `agent_session_id` empty;
-- mark `fork_handoff_pending` and ask the parent's existing local Agent Session for a child-specific `inherited_handoff`;
+- if the parent has persisted node conversation, mark `fork_handoff_pending` and ask the parent's existing local Agent Session for a child-specific `inherited_handoff`;
+- if the parent has no persisted node conversation, create the child ready with an empty `inherited_handoff`; do not start a local Agent run and do not manufacture context from workspace memory;
 - keep the child read-only until that Handoff arrives; a failed preparation remains retryable instead of falling back to mechanical context;
 - lazily create a distinct runtime Session on the child's first user turn after preparation.
 
@@ -133,7 +134,7 @@ The pointer lives on `thinking_nodes` rather than making `agent_sessions` one-to
 ### 5.3 Unified Handoff semantics
 
 - `inherited_handoff`: immutable, child-specific fork context authored by the parent's existing Agent Session.
-- `checkpoint_handoff`: the latest Agent-authored active-branch checkpoint exposed to siblings. The Agent updates it only when objective, conclusions, evidence, risks, or unresolved work materially change; it is not created by truncating a chat message.
+- `checkpoint_handoff`: stored name for the product concept **Current State**: the latest Agent-authored outward state exposed to siblings. It is a durable handoff, not a mechanical summary. The Agent publishes it after the first meaningful response and updates it only when cross-node-relevant objective, conclusions, evidence, risks, dependencies, or next action materially change.
 - `returned_handoff`: the final Agent-authored transfer to the parent.
 - All three use a bounded Markdown contract: objective/scope, confirmed conclusions, evidence or artifacts, unresolved questions, risks/assumptions, and recommended next action. Detailed material is referenced as an Artifact instead of copied into the Handoff.
 - Handoff protocol messages are authenticated `solo message send` calls from the node's assigned real Agent, but are intercepted as control-plane writes and never inserted into raw node conversation history.
@@ -143,6 +144,15 @@ The pointer lives on `thinking_nodes` rather than making `agent_sessions` one-to
 - Completing Return atomically stores only the authoritative Handoff in `returned_handoff` and inserts one `thinking_handoff` system message in the parent node. That message is rendered with the shared Markdown renderer, while legacy handoff system messages remain detectable by their generated prefix.
 - If the local Agent run fails or completes without posting the handoff, `returning_at` is cleared and the node remains active for retry.
 - After successful Return the daemon closes `thinking:<node_id>` after the completing turn finishes. Persisted Session and Run records remain for provenance, but the node can never resume them.
+
+Current State freshness is derived rather than persisted:
+
+- `missing`: no Current State has been published;
+- `fresh`: `checkpoint_handoff_at` is at or after the latest visible Agent message in that node;
+- `stale`: a newer visible Agent message exists;
+- `final`: the node has returned, so `returned_handoff` is authoritative.
+
+Solo does not use timers, message counts, idle hooks, or last-message truncation to create Current State. A user may explicitly request Refresh Current State. That request reuses the node's existing Agent Session and asks for exactly one checkpoint Handoff; it is rejected for unassigned, empty, preparing, busy, returning, or returned nodes. Failure preserves the previous Current State and therefore leaves it stale/retryable.
 
 Handoff transfer never copies child messages into the parent.
 
@@ -188,13 +198,15 @@ sequenceDiagram
 The runtime input is deliberately split:
 
 1. Persistent Agent system prompt: existing Agent identity, Solo protocol, workspace, and tools. The administrator-defined role stays under `Initial role`; node-scoped static identity/split rules use a separate `Thinking Runtime` section that is absent from normal channel, thread, and task runs.
-2. Turn context: inherited fork Handoff, latest sibling checkpoint/return Handoffs, and returned-child Handoffs loaded at dispatch time.
+2. Turn context: inherited fork Handoff, every direct sibling's latest Current State or final Handoff, and returned-child Handoffs loaded at dispatch time. A sibling without a published state is identified as such; raw sibling dialogue is never substituted.
 3. Raw conversation: only messages whose `thinking_node_id` equals the selected node.
 4. Current user message.
 
 The daemon must not rely on a `system` role inside `Messages` for node context because current persistent Claude/Codex send paths omit system-role messages. Static node instructions and the checkpoint protocol must be part of the runtime system prompt, and changing Handoff awareness must be sent in a clearly delimited runtime turn-context message.
 
 For an already active or successfully resumed Session, only fresh turn context and the new triggering message are delivered. Full recent node history is reserved for a cold start without a resumable provider Session, preventing duplicate history in persistent CLIs.
+
+Sibling awareness is pull-based at the start of each explicit node turn. Publishing or refreshing one node's Current State does not wake siblings and does not mutate an already-running sibling turn. A parent consumes only final Handoffs returned by direct children; active child Current State does not silently enter the parent.
 
 ### 6.2 Visible responses and automatic split
 
@@ -219,6 +231,7 @@ Channel-scoped endpoints:
 - `GET /channels/{channel}/thinking`: load topology and fork/checkpoint/return Handoffs.
 - `POST /channels/{channel}/thinking/nodes/{node}/children`: manual split.
 - `POST /channels/{channel}/thinking/nodes/{node}/handoff/retry`: retry the parent's fork Handoff while a child is pending.
+- `POST /channels/{channel}/thinking/nodes/{node}/handoff/refresh`: explicitly ask the active node Session to publish a fresh Current State.
 - `POST /channels/{channel}/thinking/nodes/{node}/return`: ask the node's existing Agent Session to prepare and return a handoff to its parent.
 - existing message create/list endpoints accept `thinking_node_id` and reject simultaneous thread/task scope.
 
@@ -235,6 +248,8 @@ The server-to-daemon control plane also exposes an internal, idempotent Thinking
 - Thinking is a workspace/view mode, not a replacement route or a new channel type.
 - The URL is the shareable source of navigation state: channel + `view=thinking` + selected `node`.
 - The left conversation panel loads messages with the selected node ID and posts with the same ID.
+- Directly below the selected-branch header, one collapsible Node Context surface renders the semantic cross-node state: From Parent, Current State, Related Branches, and returned Child Handoffs. It reuses the normal message Markdown renderer; long Handoffs remain fully inspectable in an expandable bounded panel.
+- Current State displays `Not published`, `Current`, `Needs refresh`, `Refreshing`, or `Final`. Refresh is available only for the selected non-empty active node and is disabled while preparing, busy, returning, or returned.
 - The right graph renders topology only; selecting a node changes the URL and the left conversation scope.
 - The topology is a center-out brainstorm map, not a top-down organization chart. Each subtree owns one continuous angular sector, deeper nodes move onto outer rings, and the complete layout is recomputed after every split so straight parent-child edges remain non-crossing.
 - Live activity has one canonical client state keyed by `agent_run.id`. Teams derives its latest card stack by `agent_id`; Thinking derives it by `thinking_node_id`. This preserves the existing Human message / Activity / Tool cards and status halo while preventing two independent node Sessions owned by the same Agent from displaying each other's work.
@@ -243,7 +258,7 @@ The server-to-daemon control plane also exposes an internal, idempotent Thinking
 - Entering Thinking mode calls the idempotent ensure endpoint and defaults to the root.
 - Returning to Team mode restores the existing channel behavior and clears node state.
 - Thread and task actions are unavailable in a node conversation because the scopes are mutually exclusive.
-- A fork-pending child keeps its conversation read-only and shows preparation/retry state. A returning node keeps the conversation visible but read-only with a progress state. When Return completes, it stays selected so the completed history remains visible. Returned nodes remain selectable from the graph as read-only historical conversations; selecting one never recreates its Runtime session.
+- A fork-pending child keeps its conversation read-only and shows preparation/retry state without pretending that the child runtime is thinking; the real fork-Handoff activity remains attached to the parent run. An empty-parent child is immediately ready and says no parent context was available. A returning node keeps the conversation visible but read-only with a progress state. When Return completes, it stays selected so the completed history remains visible. Returned nodes remain selectable from the graph as read-only historical conversations; selecting one never recreates its Runtime session.
 - Loading, empty, error, selected, running, and returned states use Solo's existing brutalist tokens, typography, borders, and spacing.
 
 ## 9. Concurrency, failure, and cleanup
@@ -261,6 +276,7 @@ The server-to-daemon control plane also exposes an internal, idempotent Thinking
 - Channel archive blocks further message and Thinking access. Its processes remain under the existing persistent-session lifecycle; daemon shutdown closes all sessions and Agent deletion closes every normal and node-scoped Session owned by that Agent. A hard database channel delete cascades persisted Thinking rows.
 - Node sessions are created lazily, so unopened branches consume no local runtime process. Open non-returned branches release their local process after the Thinking-only idle timeout and resume from their persisted provider Session on demand.
 - Return is rejected while another run owns the node. Its handoff run is the final allowed turn, and successful completion closes that scoped Session.
+- Current State refresh is rejected while another run owns the node. A failed refresh never clears the last successful checkpoint and never inserts protocol text into conversation history.
 - After a successful channel soft-delete, the server loads its Thinking node IDs and asynchronously asks every online daemon to close those scoped processes. Cleanup failure is logged and remains recoverable through idle sleep or daemon shutdown; it does not roll back a successful archive.
 
 ## 10. Compatibility and migration
@@ -282,7 +298,10 @@ The server-to-daemon control plane also exposes an internal, idempotent Thinking
 - concurrent ensure produces exactly one space and one root;
 - team relationships bind Lead/root and first-level Agents correctly;
 - manual/auto children inherit `agent_id` but have no initial runtime session;
+- splitting an empty parent creates a ready child without dispatching a fork-Handoff run;
 - fork/checkpoint/return protocol messages persist dedicated Handoffs and never enter raw messages;
+- Current State freshness moves through missing/fresh/stale/final from real persisted Agent messages and Handoffs;
+- explicit Current State refresh validates lifecycle and reuses the node Session;
 - pending fork Handoffs block child conversation and remain retryable after runtime failure;
 - node message queries cannot leak sibling/channel/thread messages;
 - Return is rejected while any child is active, and the terminal handoff persists exactly one Markdown-capable parent system message;
@@ -313,7 +332,7 @@ Run with the real frontend, API, PostgreSQL, daemon, installed `claude` local CL
 6. Manually split FE; send a child turn; prove the child reuses FE Agent identity but has a different external session ID.
 7. During that real child turn, verify the Thinking node renders the Human message, Activity, Tool, and animated status halo while its same-Agent parent renders none of the child's activity.
 8. Ask the real FE runtime to emit a split directive and verify an automatic child appears without direct test API injection.
-9. Have FE publish an Agent-authored checkpoint, then ask BE about sibling Handoffs; verify awareness without FE raw-message leakage or protocol messages in history.
+9. Have FE publish an Agent-authored Current State, verify Current/Needs refresh transitions after a later visible reply, exercise explicit Refresh through the UI, then ask every sibling about Handoffs; verify run-start awareness without FE raw-message leakage or protocol messages in history.
 10. Verify a parent cannot Return while a child is active; Return the child handoff, verify rendered Markdown in the parent UI, then verify the next parent runtime context.
 11. While the handoff runs, verify the node is read-only. After completion verify direct message/split APIs reject it, clicking it shows the persisted history with a disabled composer without reopening its Runtime, its scoped Runtime is closed, and PostgreSQL contains the terminal handoff and exactly one parent transfer message.
 12. Reload the browser and verify URL selection, topology, messages, all three Handoff roles, and session bindings are restored from PostgreSQL.

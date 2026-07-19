@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -80,6 +81,97 @@ func TestThinkingEnsureConcurrentlyCreatesOneExistingAgentTeam(t *testing.T) {
 	}
 }
 
+func TestThinkingEmptyParentCurrentStateAndCompleteSiblingAwarenessUsePostgres(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, ownerID)
+	channelID := agentRunChannel(t, pool, ownerID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO channel_members (channel_id, member_type, member_id) VALUES ($1, 'agent', $2)`, channelID, agentID); err != nil {
+		t.Fatalf("add channel Agent: %v", err)
+	}
+
+	svc := NewThinkingService(pool)
+	space, err := svc.Ensure(ctx, channelID, ownerID)
+	if err != nil {
+		t.Fatalf("ensure Thinking space: %v", err)
+	}
+	root := space.Nodes[0]
+	children := make([]*ThinkingNode, 0, maxThinkingChildren)
+	for i := range maxThinkingChildren {
+		child, err := svc.CreateChild(ctx, channelID, root.ID, fmt.Sprintf("empty child %d", i+1), ownerID, "manual")
+		if err != nil {
+			t.Fatalf("create empty-parent child %d: %v", i+1, err)
+		}
+		if child.ForkHandoffPending || child.InheritedHandoff != "" || child.AgentSessionID != "" {
+			t.Fatalf("empty-parent child started prepared runtime state: %+v", child)
+		}
+		children = append(children, child)
+	}
+	if _, err := svc.PrepareCheckpointRefresh(ctx, channelID, children[0].ID); err == nil || !strings.Contains(err.Error(), "conversation") {
+		t.Fatalf("empty child refresh error = %v, want conversation requirement", err)
+	}
+
+	runtimeContext, err := (&AgentService{pool: pool}).getThinkingNodeRuntimeContext(ctx, channelID, children[0].ID)
+	if err != nil {
+		t.Fatalf("load child runtime context: %v", err)
+	}
+	if count := strings.Count(runtimeContext.TurnContext, "Current State not published"); count != maxThinkingChildren-1 {
+		t.Fatalf("missing sibling states = %d, want %d in %q", count, maxThinkingChildren-1, runtimeContext.TurnContext)
+	}
+
+	for _, message := range []struct {
+		senderType string
+		senderID   string
+		content    string
+	}{
+		{senderType: "user", senderID: ownerID, content: "explore the branch"},
+		{senderType: "agent", senderID: agentID, content: "first visible result"},
+	} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO messages (id, channel_id, thinking_node_id, sender_type, sender_id, content)
+			VALUES ($1, $2, $3, $4, $5, $6)`, uuid.NewString(), channelID, children[0].ID, message.senderType, message.senderID, message.content); err != nil {
+			t.Fatalf("insert child message: %v", err)
+		}
+	}
+	node, err := svc.GetNodeForChannel(ctx, channelID, children[0].ID)
+	if err != nil || node.CheckpointStatus != "missing" {
+		t.Fatalf("pre-checkpoint node = %+v, err %v; want missing", node, err)
+	}
+	node, err = svc.SaveCheckpointHandoff(ctx, channelID, children[0].ID, agentID, "# Handoff\n## Objective and scope\nExplore the branch")
+	if err != nil || node.CheckpointStatus != "fresh" {
+		t.Fatalf("fresh checkpoint node = %+v, err %v", node, err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO messages (id, channel_id, thinking_node_id, sender_type, sender_id, content, created_at, updated_at)
+		VALUES ($1, $2, $3, 'agent', $4, 'new visible conclusion', now() + interval '1 second', now() + interval '1 second')`,
+		uuid.NewString(), channelID, children[0].ID, agentID); err != nil {
+		t.Fatalf("insert newer Agent message: %v", err)
+	}
+	node, err = svc.PrepareCheckpointRefresh(ctx, channelID, children[0].ID)
+	if err != nil || node.CheckpointStatus != "stale" {
+		t.Fatalf("refreshable stale node = %+v, err %v", node, err)
+	}
+	run, err := NewAgentRunService(pool).StartRun(ctx, StartRunInput{
+		AgentID: agentID, TriggerType: AgentRunTriggerMessage, ChannelID: channelID,
+		ThinkingNodeID: children[0].ID, Status: AgentRunStatusQueued, Source: "claude",
+	})
+	if err != nil {
+		t.Fatalf("start active child run: %v", err)
+	}
+	if _, err := svc.PrepareCheckpointRefresh(ctx, channelID, children[0].ID); !errors.Is(err, ErrThinkingBusy) {
+		t.Fatalf("refresh during run error = %v, want ErrThinkingBusy", err)
+	}
+	if run.ThinkingNodeID != children[0].ID {
+		t.Fatalf("run node = %q, want %q", run.ThinkingNodeID, children[0].ID)
+	}
+}
+
 func TestThinkingChildIsolationAndAgentHandoffReturnUsePostgres(t *testing.T) {
 	pool := agentRunTestPool(t)
 	ctx := context.Background()
@@ -115,9 +207,18 @@ func TestThinkingChildIsolationAndAgentHandoffReturnUsePostgres(t *testing.T) {
 	if feNode.ID == "" {
 		t.Fatal("FE team node not found")
 	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO messages (id, channel_id, thinking_node_id, sender_type, sender_id, content)
+		VALUES ($1, $2, $3, 'agent', $4, 'parent visible conclusion')`, uuid.NewString(), channelID, feNode.ID, feID); err != nil {
+		t.Fatalf("insert FE parent message: %v", err)
+	}
 	parentCheckpoint := "# Handoff\n## Objective and scope\nFE parent\n## Confirmed conclusions\nUse the shared component"
-	if _, err := svc.SaveCheckpointHandoff(ctx, channelID, feNode.ID, feID, parentCheckpoint); err != nil {
+	checkpointNode, err := svc.SaveCheckpointHandoff(ctx, channelID, feNode.ID, feID, parentCheckpoint)
+	if err != nil {
 		t.Fatalf("save FE checkpoint Handoff: %v", err)
+	}
+	if checkpointNode.CheckpointStatus != "fresh" {
+		t.Fatalf("checkpoint status = %q, want fresh", checkpointNode.CheckpointStatus)
 	}
 	child, err := svc.CreateChild(ctx, channelID, feNode.ID, "FE child", ownerID, "manual")
 	if err != nil {
@@ -194,6 +295,9 @@ func TestThinkingChildIsolationAndAgentHandoffReturnUsePostgres(t *testing.T) {
 	}
 	if returnedMessage == nil || returnedNode.ReturningAt != nil || returnedNode.ReturnedAt == nil || returnedNode.ReturnedHandoff != handoff {
 		t.Fatalf("returned node/message = %+v / %+v", returnedNode, returnedMessage)
+	}
+	if returnedNode.CheckpointStatus != "final" {
+		t.Fatalf("returned checkpoint status = %q, want final", returnedNode.CheckpointStatus)
 	}
 	if returnedNode.CheckpointHandoff != childCheckpoint {
 		t.Fatalf("checkpoint Handoff overwritten by terminal Handoff: %q", returnedNode.CheckpointHandoff)
