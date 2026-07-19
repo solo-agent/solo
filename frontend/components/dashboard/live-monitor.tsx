@@ -21,6 +21,7 @@ import type { AgentRunStatus } from '@/lib/agent-run-types';
 import { useWebSocket } from '@/lib/ws-context';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
+import { motionScrollBehavior } from '@/lib/motion';
 
 interface DashboardLive {
   groups: DashboardLiveGroup[];
@@ -218,7 +219,7 @@ export function LiveMonitor({ selectedRunId }: { selectedRunId?: string | null }
   const totals = live?.totals ?? { agents: 0, working: 0, needs_attention: 0, idle_recent: 0 };
 
   return (
-    <div className="flex h-full min-h-0 bg-brutal-cream">
+    <div className="flex h-full min-h-0 bg-brutal-cream animate-fade-in">
       <section className="min-w-0 flex-1 overflow-auto">
         <DashboardTopTabs active="live" />
         <div className="border-b-2 border-black bg-brutal-cream px-5 py-4">
@@ -495,10 +496,12 @@ function AgentWorkPanel({ agent, autoOpenRunId, onClose }: { agent: DashboardLiv
           <div className="flex h-full items-center justify-center">
             <Spinner size="md" />
           </div>
-        ) : mode === 'session' ? (
-          <SessionList sessions={sessions} onOpen={openSession} />
         ) : (
-          <TaskList tasks={tasks} onOpen={openTask} />
+          <div key={mode} className="h-full animate-fade-in">
+            {mode === 'session'
+              ? <SessionList sessions={sessions} onOpen={openSession} />
+              : <TaskList tasks={tasks} onOpen={openTask} />}
+          </div>
         )}
       </div>
     </aside>
@@ -582,7 +585,7 @@ function TimelineViewer({ timeline }: { timeline: AgentTimeline }) {
 
   const scrollToSeq = (seq: number) => {
     setActiveQuestionSeq(seq);
-    document.getElementById(`timeline-entry-${seq}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    document.getElementById(`timeline-entry-${seq}`)?.scrollIntoView({ block: 'start', behavior: motionScrollBehavior() });
   };
 
   return (

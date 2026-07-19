@@ -16,8 +16,8 @@ interface RelationshipEdgeData {
 }
 
 const EDGE_STYLES: Record<RelationshipType, { stroke: string }> = {
-  assigns_to:        { stroke: '#3B7DD8' },
-  collaborates_with: { stroke: '#10B981' },
+  assigns_to:        { stroke: 'var(--color-brutal-info)' },
+  collaborates_with: { stroke: 'var(--color-brutal-success)' },
 };
 
 function relationshipTypeLabel(type: RelationshipType) {
@@ -115,7 +115,7 @@ function RelationshipEdgeComponent({
           className="nodrag nopan"
         >
           <span className={[
-            'inline-block px-2 py-0.5 border-2 border-black',
+            'relationship-edge-label inline-block px-2 py-0.5 border-2 border-black',
             'font-heading text-[9px] font-bold uppercase tracking-wider',
             'cursor-pointer hover:-translate-y-0.5 hover:shadow-brutal-lg active:translate-x-0.5 active:translate-y-0.5 transition-transform duration-100',
             selected

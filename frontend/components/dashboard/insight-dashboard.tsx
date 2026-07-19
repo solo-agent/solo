@@ -104,7 +104,7 @@ export function InsightDashboard() {
   }, [windowDays]);
 
   return (
-    <div className="h-full min-h-0 overflow-auto bg-brutal-cream">
+    <div className="h-full min-h-0 overflow-auto bg-brutal-cream animate-fade-in">
       <DashboardTopTabs active="insight" />
       <div className="border-b-2 border-black bg-brutal-cream px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -269,15 +269,15 @@ function TrendChart({ points }: { points: DashboardSeriesPoint[] }) {
           const y = chartY(tick, maxValue);
           return (
             <g key={tick}>
-              <line x1={CHART_LEFT} x2={chartRight(chartWidth)} y1={y} y2={y} stroke="#000" strokeWidth="1" opacity="0.18" />
+              <line x1={CHART_LEFT} x2={chartRight(chartWidth)} y1={y} y2={y} stroke="var(--skin-ink)" strokeWidth="1" opacity="0.18" />
               <text x={CHART_LEFT - 10} y={y + 4} textAnchor="end" className="fill-muted-foreground font-mono text-[11px]">
                 {formatAxisNumber(tick)}
               </text>
             </g>
           );
         })}
-        <line x1={CHART_LEFT} x2={CHART_LEFT} y1={CHART_TOP} y2={CHART_BOTTOM} stroke="#000" strokeWidth="1" opacity="0.35" />
-        <line x1={CHART_LEFT} x2={chartRight(chartWidth)} y1={CHART_BOTTOM} y2={CHART_BOTTOM} stroke="#000" strokeWidth="1" opacity="0.35" />
+        <line x1={CHART_LEFT} x2={CHART_LEFT} y1={CHART_TOP} y2={CHART_BOTTOM} stroke="var(--skin-ink)" strokeWidth="1" opacity="0.35" />
+        <line x1={CHART_LEFT} x2={chartRight(chartWidth)} y1={CHART_BOTTOM} y2={CHART_BOTTOM} stroke="var(--skin-ink)" strokeWidth="1" opacity="0.35" />
         {paths.map((path) => (
           <polyline key={path.key} points={path.points} fill="none" stroke={path.color} strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" />
         ))}

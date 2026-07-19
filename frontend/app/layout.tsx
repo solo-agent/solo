@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, Space_Grotesk, Space_Mono } from "next/font/google";
+import { Inter, Literata, Space_Grotesk, Space_Mono } from "next/font/google";
 import { AuthProvider } from "@/lib/auth-context";
 import { t } from '@/lib/i18n';
 import { WSProvider } from "@/lib/ws-context";
@@ -27,7 +27,13 @@ const spaceMono = Space_Mono({
   variable: "--font-space-mono",
 });
 
-const themeScript = `try{const skin=localStorage.getItem("solo.skin");document.documentElement.dataset.skin=["classic","blueprint","ultraviolet","seasalt","tomato","matcha","bubblegum","lavender","sky"].includes(skin)?skin:"classic"}catch{}`;
+const literata = Literata({
+  subsets: ["latin"],
+  weight: ["400", "600", "700"],
+  variable: "--font-literata",
+});
+
+const themeScript = `try{const skin=localStorage.getItem("solo.skin");document.documentElement.dataset.skin=["archive","classic"].includes(skin)?skin:"archive"}catch{document.documentElement.dataset.skin="archive"}`;
 
 export const metadata: Metadata = {
   title: t('appTitle'),
@@ -45,9 +51,9 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      data-skin="classic"
+      data-skin="archive"
       suppressHydrationWarning
-      className={`${inter.variable} ${spaceGrotesk.variable} ${spaceMono.variable}`}
+      className={`${inter.variable} ${spaceGrotesk.variable} ${spaceMono.variable} ${literata.variable}`}
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />

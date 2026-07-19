@@ -19,7 +19,7 @@ interface TabBarProps {
 
 export function tabButtonClass(isActive: boolean, className?: string) {
   return cn(
-    'flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold border-2 transition-[transform,box-shadow,border-color,color]',
+    'tab-button flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-bold border-2',
     'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
     isActive
       ? 'bg-brutal-primary text-black border-black shadow-brutal-sm -translate-y-px'
@@ -57,7 +57,7 @@ export function TabBar({
             aria-selected={isActive}
             onClick={() => onChange(tab.key)}
             className={cn(
-              'flex items-center gap-1.5 font-heading text-xs font-bold transition-[transform,box-shadow,border-color,color]',
+              'tab-button flex items-center gap-1.5 font-heading text-xs font-bold',
               'active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
               variant === 'pill'
                 ? cn(

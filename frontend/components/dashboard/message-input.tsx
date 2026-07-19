@@ -614,7 +614,7 @@ export function MessageInput({
               type="button"
               onClick={() => { setAsTask(false); onThinkingModeChange?.(false); }}
               className={cn(
-                'btn-brutal btn-brutal-sm flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] font-bold',
+                'tab-button btn-brutal btn-brutal-sm flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] font-bold',
                 !asTask && !thinkingMode ? 'btn-brutal-primary' : 'bg-white text-muted-foreground hover:text-foreground',
               )}
               aria-pressed={!asTask && !thinkingMode}
@@ -626,7 +626,7 @@ export function MessageInput({
               type="button"
               onClick={() => { setAsTask(true); onThinkingModeChange?.(false); }}
               className={cn(
-                'btn-brutal btn-brutal-sm flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] font-bold',
+                'tab-button btn-brutal btn-brutal-sm flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] font-bold',
                 asTask && !thinkingMode ? 'btn-brutal-primary' : 'bg-white text-muted-foreground hover:text-foreground',
               )}
               aria-pressed={asTask && !thinkingMode}
@@ -638,7 +638,7 @@ export function MessageInput({
               type="button"
               onClick={() => { setAsTask(false); onThinkingModeChange?.(true); }}
               className={cn(
-                'btn-brutal btn-brutal-sm flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] font-bold',
+                'tab-button btn-brutal btn-brutal-sm flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] font-bold',
                 thinkingMode ? 'btn-brutal-primary' : 'bg-white text-muted-foreground hover:text-foreground',
               )}
               aria-pressed={thinkingMode}

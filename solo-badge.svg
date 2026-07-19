@@ -17,8 +17,8 @@
 
   <!-- Hard offset shadow -->
   <rect x="0" y="0" width="392" height="112" rx="6" fill="#000"/>
-  <!-- Main yellow panel -->
-  <rect x="4" y="4" width="392" height="112" rx="6" fill="#FFD23F" stroke="#000" stroke-width="4"/>
+  <!-- Main accent panel -->
+  <rect x="4" y="4" width="392" height="112" rx="6" fill="#D0937F" stroke="#000" stroke-width="4"/>
 
   <!-- Wordmark -->
   <text x="200" y="78" class="title" shape-rendering="crispEdges" font-size="38" fill="#000" text-anchor="middle" letter-spacing="2">SOLO</text>

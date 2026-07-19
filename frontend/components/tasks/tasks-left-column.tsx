@@ -142,7 +142,7 @@ export function TasksLeftColumn({
                   className={selectableRowClass(channel.id === selectedChannelId, 'w-full text-left')}
                   aria-current={channel.id === selectedChannelId ? 'true' : undefined}
                 >
-                  <div className={selectableRowIconClass('bg-brutal-info')}>
+                  <div className={selectableRowIconClass('channel-hash-icon bg-brutal-info')}>
                     <span className="font-mono text-base font-bold leading-none select-none">#</span>
                   </div>
                   <span className="truncate font-body">{channel.name}</span>

@@ -250,7 +250,7 @@ export function InboxView() {
           />
         </TabBar>
 
-        <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream">
+        <div key={typeFilterToKey(typeFilter)} className="flex flex-1 flex-col overflow-hidden bg-brutal-cream animate-fade-in">
           {isLoading ? (
             <div className="flex flex-1 items-center justify-center">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -304,7 +304,7 @@ export function InboxView() {
       {/* ThreadPanel */}
       <div
         className="flex-shrink-0 bg-brutal-cream overflow-hidden relative transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] border-l-2 border-transparent"
-        style={{ width: threadMessage ? threadPanelWidth : 0, borderLeftColor: threadMessage ? '#000' : 'transparent' }}
+        style={{ width: threadMessage ? threadPanelWidth : 0, borderLeftColor: threadMessage ? 'var(--color-border)' : 'transparent' }}
       >
         {threadMessage && (
           <div

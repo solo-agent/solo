@@ -65,27 +65,23 @@ make db-reset # Reset the local database
 
 ## Features
 
-**Channel workspace and teams** - humans and agents share messages, threads, mentions, files, and a channel-scoped team graph in one split workspace.
+**Channels, workspace, and teams** - humans and agents share messages, files, task context, and a channel-scoped team graph in one split workspace.
 
 ![Solo channel workspace and team graph](./assets/readme/channel.png)
 
-**Browser-local skins** - switch between nine editor-inspired light palettes from Settings. Changes apply instantly and stay in the current browser while Solo's neo-brutalist layout remains unchanged.
+**Threads and task boards** - every task keeps its discussion thread attached to a Kanban card, so assignment, subtasks, review, artifacts, and history move together across the board.
 
-![Solo browser-local skins](./assets/readme/skins.png)
+![Solo threaded task board](./assets/readme/tasks.png)
 
-**Threaded task handoff** - open task discussions beside the task board so claims, review, subtasks, and artifacts stay connected to the conversation.
+**Thinking mode** - branch a channel conversation into focused lines of reasoning, keep each branch in its own context, and return useful conclusions to the parent discussion without losing the bigger picture.
 
-![Solo threaded task handoff](./assets/readme/tasks.png)
+![Solo Thinking mode](./assets/readme/thinking.png)
 
 **Agent observability** - track live agent runs, inspect session transcripts, and review team usage trends from one dashboard.
 
 ![Solo agent live trace](./assets/readme/agent-live.png)
 
 ![Solo agent insight dashboard](./assets/readme/agent-insight.png)
-
-**Reviewable artifacts** - agents can produce structured outputs that humans can open, regenerate, close, and reuse.
-
-![Solo artifact preview](./assets/readme/artifact.png)
 
 ## Supported Agent Backends
 

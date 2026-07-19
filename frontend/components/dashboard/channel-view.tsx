@@ -887,7 +887,10 @@ export function ChannelView({
             embedded
           />
         ) : (
-          <>
+          <div
+            key={isThinking ? `thinking-${thinking.selectedNodeId ?? 'root'}` : `channel-${channel.id}`}
+            className="flex min-h-0 flex-1 flex-col animate-fade-in"
+          >
             <div className="sidebar-collapse-offset flex h-14 flex-shrink-0 items-center border-b-2 border-black px-4">
               <div className="flex min-w-0 flex-1 items-center gap-2">
                 <span className="font-heading text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
@@ -952,7 +955,7 @@ export function ChannelView({
               disabled={Boolean(selectedThinkingNode?.fork_handoff_pending || selectedThinkingNode?.returning_at || selectedThinkingNode?.returned_at)}
             />
           </div>
-          </>
+          </div>
         )}
       </div>
 
@@ -1029,6 +1032,7 @@ export function ChannelView({
           </div>
         </div>
 
+        <div key={workspaceView} className="flex min-h-0 flex-1 flex-col overflow-hidden animate-fade-in">
         {workspaceView === 'team' && (
           <RelationshipWorkspace
             embedded
@@ -1105,6 +1109,7 @@ export function ChannelView({
             onReturnNode={thinking.returnNode}
           />
         )}
+        </div>
       </div>
       )}
 

@@ -42,8 +42,8 @@ function FileTreeNode({
         onClick={handleClick}
         className={cn(
           'flex w-full items-center gap-1 border-2 border-transparent px-1.5 py-1 text-left transition-all duration-100',
-          isSelected && 'border-black bg-brutal-primary shadow-[3px_3px_0_0_#000] -translate-x-[1px] -translate-y-[1px]',
-          !isSelected && 'hover:border-black hover:bg-brutal-secondary hover:shadow-[3px_3px_0_0_#000] hover:-translate-x-[1px] hover:-translate-y-[1px]',
+          isSelected && 'border-black bg-brutal-primary shadow-brutal-sm -translate-x-[1px] -translate-y-[1px]',
+          !isSelected && 'hover:border-black hover:bg-brutal-secondary hover:shadow-brutal-sm hover:-translate-x-[1px] hover:-translate-y-[1px]',
         )}
         style={{ paddingLeft: `${depth * 16 + 4}px` }}
         aria-expanded={isDir ? isExpanded : undefined}

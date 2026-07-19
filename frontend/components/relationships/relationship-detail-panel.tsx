@@ -240,14 +240,16 @@ export function RelationshipDetailPanel({
           </Button>
         </div>
 
-        <div className="grid grid-cols-2 border-b-2 border-black">
+        <div className="grid grid-cols-2 border-b-2 border-black" role="tablist">
           <button
             type="button"
             onClick={() => setAgentTab('profile')}
             className={[
-              'border-r-2 border-black px-3 py-2 font-heading text-xs font-bold uppercase tracking-wider',
+              'tab-button border-r-2 border-black px-3 py-2 font-heading text-xs font-bold uppercase tracking-wider',
               agentTab === 'profile' ? 'bg-brutal-primary text-black' : 'bg-white hover:bg-brutal-primary-light',
             ].join(' ')}
+            role="tab"
+            aria-selected={agentTab === 'profile'}
           >
             {t('agentProfileTitle')}
           </button>
@@ -258,15 +260,17 @@ export function RelationshipDetailPanel({
               if (!hasUserResizedPanel) setPanelWidth((width) => Math.max(width, 720));
             }}
             className={[
-              'px-3 py-2 font-heading text-xs font-bold uppercase tracking-wider',
+              'tab-button px-3 py-2 font-heading text-xs font-bold uppercase tracking-wider',
               agentTab === 'workspace' ? 'bg-brutal-primary text-black' : 'bg-white hover:bg-brutal-primary-light',
             ].join(' ')}
+            role="tab"
+            aria-selected={agentTab === 'workspace'}
           >
             {t('navWorkspace')}
           </button>
         </div>
 
-        <div className="flex-1 overflow-hidden">
+        <div key={agentTab} className="flex-1 overflow-hidden animate-fade-in">
           {agentTab === 'profile' ? (
             <TeamsAgentProfile
               agentId={agent.id}
