@@ -71,6 +71,7 @@ export interface ThinkingNode {
   source: ThinkingNodeSource;
   checkpoint_handoff?: string;
   checkpoint_handoff_at?: string;
+  checkpoint_status: 'missing' | 'fresh' | 'stale' | 'final';
   inherited_handoff?: string;
   fork_handoff_pending: boolean;
   fork_handoff_at?: string;

@@ -44,6 +44,7 @@ type ThinkingNode struct {
 	Source              string     `json:"source"`
 	CheckpointHandoff   string     `json:"checkpoint_handoff,omitempty"`
 	CheckpointHandoffAt *time.Time `json:"checkpoint_handoff_at,omitempty"`
+	CheckpointStatus    string     `json:"checkpoint_status"`
 	InheritedHandoff    string     `json:"inherited_handoff,omitempty"`
 	ForkHandoffPending  bool       `json:"fork_handoff_pending"`
 	ForkHandoffAt       *time.Time `json:"fork_handoff_at,omitempty"`
@@ -96,6 +97,18 @@ func (s *ThinkingService) Get(ctx context.Context, channelID string) (*ThinkingS
 		SELECT n.id::text, n.space_id::text, COALESCE(n.parent_id::text, ''),
 		       COALESCE(n.agent_id::text, ''), COALESCE(a.name, ''), COALESCE(n.agent_session_id::text, ''), n.title, n.source,
 		       n.checkpoint_handoff, n.checkpoint_handoff_at, n.inherited_handoff,
+		       CASE
+		         WHEN n.returned_at IS NOT NULL THEN 'final'
+		         WHEN n.checkpoint_handoff = '' OR n.checkpoint_handoff_at IS NULL THEN 'missing'
+		         WHEN EXISTS (
+		           SELECT 1 FROM messages latest
+		            WHERE latest.thinking_node_id = n.id
+		              AND latest.sender_type = 'agent'
+		              AND COALESCE(latest.is_deleted, false) = false
+		              AND latest.created_at > n.checkpoint_handoff_at
+		         ) THEN 'stale'
+		         ELSE 'fresh'
+		       END,
 		       n.fork_handoff_pending, n.fork_handoff_at, n.returned_handoff, n.returning_at, n.returned_at,
 		       n.depth, n.sort_order,
 		       (SELECT COUNT(*) FROM messages m WHERE m.thinking_node_id = n.id
@@ -115,6 +128,7 @@ func (s *ThinkingService) Get(ctx context.Context, channelID string) (*ThinkingS
 		if err := rows.Scan(
 			&node.ID, &node.SpaceID, &node.ParentID, &node.AgentID, &node.AgentName, &node.AgentSessionID,
 			&node.Title, &node.Source, &node.CheckpointHandoff, &node.CheckpointHandoffAt, &node.InheritedHandoff,
+			&node.CheckpointStatus,
 			&node.ForkHandoffPending, &node.ForkHandoffAt, &node.ReturnedHandoff,
 			&node.ReturningAt, &node.ReturnedAt, &node.Depth, &node.SortOrder,
 			&node.MessageCount, &node.CreatedAt, &node.UpdatedAt,
@@ -299,6 +313,18 @@ func (s *ThinkingService) GetNodeForChannel(ctx context.Context, channelID, node
 		SELECT n.id::text, n.space_id::text, COALESCE(n.parent_id::text, ''),
 		       COALESCE(n.agent_id::text, ''), COALESCE(a.name, ''), COALESCE(n.agent_session_id::text, ''), n.title, n.source,
 		       n.checkpoint_handoff, n.checkpoint_handoff_at, n.inherited_handoff,
+		       CASE
+		         WHEN n.returned_at IS NOT NULL THEN 'final'
+		         WHEN n.checkpoint_handoff = '' OR n.checkpoint_handoff_at IS NULL THEN 'missing'
+		         WHEN EXISTS (
+		           SELECT 1 FROM messages latest
+		            WHERE latest.thinking_node_id = n.id
+		              AND latest.sender_type = 'agent'
+		              AND COALESCE(latest.is_deleted, false) = false
+		              AND latest.created_at > n.checkpoint_handoff_at
+		         ) THEN 'stale'
+		         ELSE 'fresh'
+		       END,
 		       n.fork_handoff_pending, n.fork_handoff_at, n.returned_handoff, n.returning_at, n.returned_at,
 		       n.depth, n.sort_order,
 		       (SELECT COUNT(*) FROM messages m WHERE m.thinking_node_id = n.id
@@ -311,6 +337,7 @@ func (s *ThinkingService) GetNodeForChannel(ctx context.Context, channelID, node
 	).Scan(
 		&node.ID, &node.SpaceID, &node.ParentID, &node.AgentID, &node.AgentName, &node.AgentSessionID,
 		&node.Title, &node.Source, &node.CheckpointHandoff, &node.CheckpointHandoffAt, &node.InheritedHandoff,
+		&node.CheckpointStatus,
 		&node.ForkHandoffPending, &node.ForkHandoffAt, &node.ReturnedHandoff,
 		&node.ReturningAt, &node.ReturnedAt, &node.Depth, &node.SortOrder,
 		&node.MessageCount, &node.CreatedAt, &node.UpdatedAt,
@@ -335,14 +362,20 @@ func (s *ThinkingService) CreateChild(ctx context.Context, channelID, parentID, 
 	}
 	defer tx.Rollback(ctx)
 	var parent ThinkingNode
+	var hasConversation bool
 	err = tx.QueryRow(ctx, `
 		SELECT n.id::text, n.space_id::text, COALESCE(n.agent_id::text, ''),
-		       n.fork_handoff_pending, n.returning_at, n.returned_at, n.depth
+		       n.fork_handoff_pending, n.returning_at, n.returned_at, n.depth,
+		       EXISTS (
+		         SELECT 1 FROM messages message
+		          WHERE message.thinking_node_id = n.id
+		            AND COALESCE(message.is_deleted, false) = false
+		       )
 		  FROM thinking_nodes n
 		  JOIN thinking_spaces s ON s.id = n.space_id AND s.channel_id = $1
 		 WHERE n.id = $2
 		 FOR UPDATE OF n`, channelID, parentID,
-	).Scan(&parent.ID, &parent.SpaceID, &parent.AgentID, &parent.ForkHandoffPending, &parent.ReturningAt, &parent.ReturnedAt, &parent.Depth)
+	).Scan(&parent.ID, &parent.SpaceID, &parent.AgentID, &parent.ForkHandoffPending, &parent.ReturningAt, &parent.ReturnedAt, &parent.Depth, &hasConversation)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrThinkingNotFound
 	}
@@ -382,12 +415,13 @@ func (s *ThinkingService) CreateChild(ctx context.Context, channelID, parentID, 
 		return nil, ErrThinkingLimit
 	}
 	nodeID := uuid.NewString()
+	needsHandoff := parent.AgentID != "" && hasConversation
 	_, err = tx.Exec(ctx, `
 		INSERT INTO thinking_nodes
 		    (id, space_id, parent_id, agent_id, title, source, fork_handoff_pending, depth, sort_order, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, $9)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 		nodeID, parent.SpaceID, parent.ID, nullableUUID(parent.AgentID), title, source,
-		parent.Depth+1, childCount, actorID,
+		needsHandoff, parent.Depth+1, childCount, actorID,
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -419,6 +453,62 @@ func (s *ThinkingService) SaveCheckpointHandoff(ctx context.Context, channelID, 
 	}
 	if tag.RowsAffected() != 1 {
 		return nil, ErrThinkingNotFound
+	}
+	return s.GetNodeForChannel(ctx, channelID, nodeID)
+}
+
+func (s *ThinkingService) PrepareCheckpointRefresh(ctx context.Context, channelID, nodeID string) (*ThinkingNode, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var node ThinkingNode
+	var messageCount int
+	err = tx.QueryRow(ctx, `
+		SELECT n.id::text, COALESCE(n.agent_id::text, ''), n.fork_handoff_pending,
+		       n.returning_at, n.returned_at,
+		       (SELECT COUNT(*) FROM messages message
+		         WHERE message.thinking_node_id = n.id
+		           AND COALESCE(message.is_deleted, false) = false)
+		  FROM thinking_nodes n
+		  JOIN thinking_spaces space ON space.id = n.space_id AND space.channel_id = $1
+		 WHERE n.id = $2
+		 FOR UPDATE OF n`, channelID, nodeID,
+	).Scan(&node.ID, &node.AgentID, &node.ForkHandoffPending, &node.ReturningAt, &node.ReturnedAt, &messageCount)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrThinkingNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if node.ReturnedAt != nil {
+		return nil, ErrThinkingReturned
+	}
+	if node.ReturningAt != nil {
+		return nil, ErrThinkingReturning
+	}
+	if node.ForkHandoffPending {
+		return nil, ErrThinkingPreparing
+	}
+	if node.AgentID == "" || messageCount == 0 {
+		return nil, errors.New("node needs an assigned Agent and conversation before refreshing Current State")
+	}
+	var hasActiveRun bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM agent_runs
+			 WHERE thinking_node_id = $1
+			   AND status IN ('queued', 'thinking', 'running', 'streaming', 'waiting_input', 'waiting_approval')
+		)`, nodeID).Scan(&hasActiveRun); err != nil {
+		return nil, err
+	}
+	if hasActiveRun {
+		return nil, ErrThinkingBusy
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
 	}
 	return s.GetNodeForChannel(ctx, channelID, nodeID)
 }

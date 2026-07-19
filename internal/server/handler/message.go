@@ -422,7 +422,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 				slog.Warn("failed to create automatic thinking branch", "node_id", thinkingNodeID, "title", title, "error", err)
 			} else {
 				topologyChanged = true
-				if h.agentSvc != nil {
+				if child.ForkHandoffPending && h.agentSvc != nil {
 					if err := h.agentSvc.TriggerThinkingForkHandoff(r.Context(), channelID, thinkingNodeID, child.ID, child.Title); err != nil {
 						slog.Warn("failed to prepare automatic fork handoff", "node_id", child.ID, "error", err)
 					}

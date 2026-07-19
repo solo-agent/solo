@@ -15,9 +15,16 @@ export function useThinkingSpace(
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshingNodeId, setRefreshingNodeId] = useState<string | null>(null);
   const { onEvent } = useWebSocket();
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const appliedInitialNodeId = useRef<string | null>(null);
+  const refreshingNodeRef = useRef<string | null>(null);
+
+  const setRefreshingNode = useCallback((nodeId: string | null) => {
+    refreshingNodeRef.current = nodeId;
+    setRefreshingNodeId(nodeId);
+  }, []);
 
   const adoptSpace = useCallback((next: ThinkingSpace) => {
     setSpace(next);
@@ -66,6 +73,10 @@ export function useThinkingSpace(
     const unsubscribe = onEvent((event) => {
       const nodeMessage = event.type === 'message.new' && event.channel_id === channelId && Boolean(event.thinking_node_id);
       const topologyUpdate = event.type === 'thinking.updated' && event.channel_id === channelId;
+      const refreshFinished = event.type === 'agent.run.finished'
+        && event.channel_id === channelId
+        && event.thinking_node_id === refreshingNodeRef.current;
+      if (refreshFinished) setRefreshingNode(null);
       if (!nodeMessage && !topologyUpdate) return;
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
       refreshTimer.current = setTimeout(() => { void refresh(); }, 150);
@@ -74,7 +85,7 @@ export function useThinkingSpace(
       unsubscribe();
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
     };
-  }, [channelId, enabled, onEvent, refresh]);
+  }, [channelId, enabled, onEvent, refresh, setRefreshingNode]);
 
   const createChild = useCallback(async (parentId: string, title: string) => {
     const node = await apiClient.post<ThinkingNode>(
@@ -104,6 +115,18 @@ export function useThinkingSpace(
     return node;
   }, [channelId]);
 
+  const refreshCheckpoint = useCallback(async (nodeId: string) => {
+    setRefreshingNode(nodeId);
+    try {
+      return await apiClient.post<ThinkingNode>(
+        `/api/v1/channels/${channelId}/thinking/nodes/${nodeId}/handoff/refresh`,
+      );
+    } catch (err) {
+      setRefreshingNode(null);
+      throw err;
+    }
+  }, [channelId, setRefreshingNode]);
+
   return {
     space,
     selectedNodeId,
@@ -113,6 +136,8 @@ export function useThinkingSpace(
     refresh,
     createChild,
     retryForkHandoff,
+    refreshCheckpoint,
+    refreshingNodeId,
     returnNode,
   } as const;
 }

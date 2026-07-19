@@ -131,7 +131,7 @@ func (h *ThinkingHandler) CreateChild(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:
-		if h.agentSvc != nil {
+		if node.ForkHandoffPending && h.agentSvc != nil {
 			if err := h.agentSvc.TriggerThinkingForkHandoff(r.Context(), channelID, node.ParentID, node.ID, node.Title); err != nil {
 				slog.Warn("failed to prepare manual fork handoff", "node_id", node.ID, "error", err)
 			}
@@ -175,6 +175,40 @@ func (h *ThinkingHandler) RetryForkHandoff(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusAccepted, node)
+}
+
+func (h *ThinkingHandler) RefreshCheckpoint(w http.ResponseWriter, r *http.Request) {
+	_, channelID, ok := h.requireMember(w, r)
+	if !ok {
+		return
+	}
+	nodeID := chi.URLParam(r, "nodeID")
+	if _, err := uuid.Parse(nodeID); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid node ID")
+		return
+	}
+	node, err := h.svc.PrepareCheckpointRefresh(r.Context(), channelID, nodeID)
+	switch {
+	case errors.Is(err, service.ErrThinkingNotFound):
+		writeError(w, http.StatusNotFound, "thinking node not found")
+	case errors.Is(err, service.ErrThinkingReturned),
+		errors.Is(err, service.ErrThinkingReturning),
+		errors.Is(err, service.ErrThinkingBusy),
+		errors.Is(err, service.ErrThinkingPreparing):
+		writeError(w, http.StatusConflict, err.Error())
+	case err != nil:
+		writeError(w, http.StatusConflict, err.Error())
+	default:
+		if h.agentSvc == nil {
+			writeError(w, http.StatusServiceUnavailable, "Agent runtime is unavailable")
+			return
+		}
+		if err := h.agentSvc.TriggerThinkingCheckpointRefresh(r.Context(), channelID, nodeID); err != nil {
+			writeError(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusAccepted, node)
+	}
 }
 
 func (h *ThinkingHandler) ReturnNode(w http.ResponseWriter, r *http.Request) {

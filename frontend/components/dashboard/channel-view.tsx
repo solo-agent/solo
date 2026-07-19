@@ -25,6 +25,7 @@ import { TaskBoard } from '@/components/tasks/task-board';
 import { RelationshipWorkspace } from '@/components/relationships/relationship-workspace';
 import { RelationshipDetailPanel } from '@/components/relationships/relationship-detail-panel';
 import { ThinkingWorkspace } from '@/components/thinking/thinking-workspace';
+import { NodeContextPanel } from '@/components/thinking/node-context-panel';
 import { Button, PanelToggleIcon, panelToggleButtonClass } from '@/components/ui/button';
 import { tabButtonClass } from '@/components/ui/tab-bar';
 import { buildDashboardHref, parseDashboardParams, type DashboardPanel, type DashboardView } from '@/lib/dashboard-url';
@@ -903,6 +904,15 @@ export function ChannelView({
               </div>
             </div>
             <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream">
+            {isThinking && selectedThinkingNode && thinking.space && (
+              <NodeContextPanel
+                node={selectedThinkingNode}
+                space={thinking.space}
+                refreshing={thinking.refreshingNodeId === selectedThinkingNode.id}
+                onRefresh={thinking.refreshCheckpoint}
+                onOpenArtifactReference={handleOpenArtifactReference}
+              />
+            )}
             {showOnboardingWizard && !isThinking && (
               <div className="px-4 pt-4">
                 <WizardCard channelId={channel.id} />

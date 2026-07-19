@@ -2,7 +2,7 @@
 
 import { createContext, useContext, type CSSProperties } from 'react';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Bot, BrainCircuit, Check, GitBranch, Loader2, MessageSquare } from 'lucide-react';
+import { Bot, BrainCircuit, Check, Clock3, GitBranch, Loader2, MessageSquare } from 'lucide-react';
 import {
   RelationshipActivityCard,
   type ActivityCardPlacement,
@@ -70,7 +70,7 @@ export function ThinkingNodeCard({ data, selected }: NodeProps<ThinkingFlowNode>
         )}
         {node.fork_handoff_pending && !node.returning_at && !node.returned_at && (
           <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-black bg-brutal-info-light text-black">
-            <Loader2 className="h-3 w-3 animate-spin" />
+            <Clock3 className="h-3 w-3" />
           </span>
         )}
       </div>

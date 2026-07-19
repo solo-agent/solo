@@ -48,6 +48,8 @@ interface ThinkingNode {
   title: string;
   source: 'root' | 'team' | 'manual' | 'auto';
   checkpoint_handoff?: string;
+  checkpoint_handoff_at?: string;
+  checkpoint_status: 'missing' | 'fresh' | 'stale' | 'final';
   inherited_handoff?: string;
   fork_handoff_pending: boolean;
   fork_handoff_at?: string;
@@ -104,7 +106,8 @@ async function api<T>(
 }
 
 function flowNode(page: Page, title: string) {
-  return page.locator('.react-flow__node').filter({ hasText: title });
+  const exactTitle = new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+  return page.locator('.react-flow__node').filter({ has: page.locator('p').filter({ hasText: exactTitle }) });
 }
 
 async function expectReadableFlowNode(page: Page, title: string) {
@@ -335,12 +338,14 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
   const suffix = Date.now().toString(36);
   const channelName = `thinking-e2e-${suffix}`;
   const manualTitle = `Manual-${suffix}`;
+  const emptyTitle = `Empty-${suffix}`;
   const autoTitle = `Auto-${suffix}`;
   const rootAck = `ROOT_ACK_${suffix}`;
   const legacyRootAck = `LEGACY_ROOT_ACK_${suffix}`;
   const feFirst = `FE_FIRST_${suffix}`;
   const feContinued = `${feFirst}_CONTINUED`;
   const childAck = `CHILD_ACK_${suffix}`;
+  const childLater = `CHILD_LATER_${suffix}`;
   const autoAck = `AUTO_ACK_${suffix}`;
   const siblingAck = `SIBLING_SEEN_${autoAck}`;
   const returnedAck = `RETURNED_SEEN_${childAck}`;
@@ -359,6 +364,7 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
       agents.push(await api<Entity>(request, auth.access_token, 'post', '/api/v1/agents', {
         name: `${role}-${suffix}`,
         model_provider: 'claude',
+        model_name: 'sonnet',
         system_prompt: `You are the ${role} in a real Solo end-to-end test. When a user message starts with E2E:, follow it literally and immediately, including any explicitly requested Bash tool step. Never skip, simulate, background, or replace that tool step. Send the requested visible payload using solo message send to the incoming message's target. If the instruction explicitly requests a second hidden Handoff protocol message, send it separately after the visible payload. Do not add explanations, acknowledgements, punctuation, or any other visible message. When Solo asks for a final Thinking handoff, first run the foreground Bash command sleep 8, wait for it to finish, then follow the requested handoff format exactly and include the branch's concrete payloads.`,
       }));
     }
@@ -407,6 +413,33 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
       return (activeRuns ?? []).some((run) => agents.some((agent) => agent.id === run.agent_id)
         && run.channel_id === channel!.id);
     }, { timeout: 180000, intervals: [1000, 2000, 3000] }).toBe(false);
+
+    // Splitting an untouched parent must not wake its Agent or invent a
+    // Handoff from unrelated workspace memory.
+    await page.getByTestId(`rf__node-${beNode!.id}`).click();
+    await page.getByRole('button', { name: 'Split', exact: true }).click();
+    await page.getByPlaceholder('Name this branch').fill(emptyTitle);
+    await page.getByRole('button', { name: 'Create', exact: true }).click();
+    await expectReadableFlowNode(page, emptyTitle);
+    space = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+    const emptyNode = space.nodes.find((node) => node.title === emptyTitle)!;
+    expect(emptyNode).toMatchObject({ parent_id: beNode!.id, agent_id: be.id, fork_handoff_pending: false, checkpoint_status: 'missing' });
+    expect(emptyNode.inherited_handoff).toBeFalsy();
+    expect(emptyNode.agent_session_id).toBeFalsy();
+    await expect(page.getByPlaceholder('Explore this branch...')).toBeEnabled();
+    const emptyContext = page.locator(`[data-thinking-node-context="${emptyNode.id}"]`);
+    await emptyContext.getByRole('button').first().click();
+    await expect(emptyContext).toContainText('No parent conversation context was available');
+    const emptyPersisted = databaseJSON<{ parent_run_count: number; child_message_count: number }>(`
+      SELECT json_build_object(
+        'parent_run_count', (SELECT COUNT(*) FROM agent_runs run WHERE run.thinking_node_id = child.parent_id),
+        'child_message_count', (SELECT COUNT(*) FROM messages message WHERE message.thinking_node_id = child.id)
+      )::text
+        FROM thinking_nodes child
+       WHERE child.id = '${emptyNode.id}'
+    `);
+    expect(emptyPersisted).toEqual({ parent_run_count: 0, child_message_count: 0 });
+    await page.getByTestId(`rf__node-${root!.id}`).click();
 
     await sendNodeInstructionAndWait(page, request, auth.access_token, channel.id, root!.id, lead.id,
       `E2E: send exactly ${rootAck}`, rootAck);
@@ -499,11 +532,40 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
       return current.nodes.find((node) => node.id === manualNode.id)?.checkpoint_handoff;
     }, { timeout: 60000, intervals: [1000, 2000, 3000] }).toContain(childAck);
     space = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
-    const childSessionID = space.nodes.find((node) => node.id === manualNode.id)?.agent_session_id;
+    const checkpointedChild = space.nodes.find((node) => node.id === manualNode.id)!;
+    expect(checkpointedChild.checkpoint_status).toBe('fresh');
+    const checkpointBeforeRefresh = checkpointedChild.checkpoint_handoff_at;
+    const childSessionID = checkpointedChild.agent_session_id;
     expect(childSessionID).toBeTruthy();
     expect(childSessionID).not.toBe(feSessionID);
     const childProviderSessionID = providerSessionIDForNode(manualNode.id);
     expect(childProviderSessionID).toBeTruthy();
+
+    const childContext = page.locator(`[data-thinking-node-context="${manualNode.id}"]`);
+    await childContext.getByRole('button').first().click();
+    await expect(childContext.locator('[data-handoff-kind="inherited"]')).toBeVisible();
+    await expect(childContext.locator('[data-handoff-kind="active"]')).toContainText(childAck);
+    await expect(childContext).toContainText('Current');
+
+    await sendNodeInstructionAndWait(page, request, auth.access_token, channel.id, manualNode.id, fe.id,
+      `E2E: send exactly ${childLater}. Do not send any hidden Handoff protocol message.`, childLater);
+    await expect.poll(async () => {
+      const current = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+      return current.nodes.find((node) => node.id === manualNode.id)?.checkpoint_status;
+    }, { timeout: 30000, intervals: [500, 1000, 2000] }).toBe('stale');
+    await expect(childContext).toContainText('Needs refresh');
+    await childContext.getByRole('button', { name: 'Refresh Current State' }).click();
+    await expect(childContext).toContainText('Refreshing…');
+    await expect.poll(async () => {
+      const current = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+      const refreshed = current.nodes.find((node) => node.id === manualNode.id);
+      return refreshed?.checkpoint_status === 'fresh'
+        && refreshed.checkpoint_handoff_at !== checkpointBeforeRefresh
+        && refreshed.checkpoint_handoff?.includes(childLater);
+    }, { timeout: 180000, intervals: [1000, 2000, 3000] }).toBe(true);
+    space = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+    expect(space.nodes.find((node) => node.id === manualNode.id)?.agent_session_id).toBe(childSessionID);
+    await expect(childContext).toContainText('Current');
 
     await expect(page.getByRole('button', { name: 'Return', exact: true })).toBeEnabled({ timeout: 30000 });
     await page.getByRole('button', { name: 'Return', exact: true }).click();
@@ -577,6 +639,7 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
     expect(returnedManual.returned_at).toBeTruthy();
     expect(returnedManual.returned_handoff).toContain('# Handoff');
     expect(returnedManual.returned_handoff).toContain(childAck);
+    expect(returnedManual.checkpoint_status).toBe('final');
     const persistedReturn = databaseJSON<{
       checkpoint: string;
       handoff: string;
@@ -610,7 +673,7 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
        WHERE child.id = '${manualNode.id}'
          AND child.returned_at IS NOT NULL
     `);
-    expect(persistedReturn.checkpoint).toContain(childAck);
+    expect(persistedReturn.checkpoint).toContain(childLater);
     expect(persistedReturn.handoff).toContain(childAck);
     expect(persistedReturn.handoff_count).toBe(1);
     expect(persistedReturn.session_isolated).toBe(true);
@@ -721,6 +784,7 @@ test('Thinking idle runtime sleeps and resumes the real provider session', async
     runtimeAgent = await api<Entity>(request, auth.access_token, 'post', '/api/v1/agents', {
       name: `Runtime-${suffix}`,
       model_provider: 'claude',
+      model_name: 'sonnet',
       system_prompt: 'You are a real Solo idle lifecycle test Agent. When a message starts with E2E:, immediately send exactly the requested payload using solo message send to the incoming target. Do not send any other visible text.',
     });
     await api(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/members`, {
