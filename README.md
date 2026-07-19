@@ -15,7 +15,6 @@
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/go-1.22%2B-00ADD8.svg" alt="Go">
   <img src="https://img.shields.io/badge/node-20%2B-339933.svg" alt="Node.js">
-  <a href="https://github.com/solo-agent/solo/stargazers"><img src="https://img.shields.io/github/stars/solo-agent/solo?style=flat" alt="Stars"></a>
 </p>
 
 ## Why Solo
