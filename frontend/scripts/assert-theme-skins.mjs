@@ -113,7 +113,7 @@ for (const { id } of themeOptions) {
 }
 
 const expectedRefresh = {
-  archive: ['Warm Retro', '暖色复古', 'oklch(0.93 0.015 80)', '#d0937f'],
+  archive: ['Warm Retro', '暖色复古', 'oklch(0.955 0.01 80)', '#d0937f'],
   classic: ['Yellow Neo-Brutalism', '黄色新粗野主义', '#ffd23f', '#ff6b6b'],
 };
 const i18n = read('lib/i18n.ts');
