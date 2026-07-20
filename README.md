@@ -17,6 +17,16 @@
   <img src="https://img.shields.io/badge/node-20%2B-339933.svg" alt="Node.js">
 </p>
 
+<div align="center">
+
+| | | | | | |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Works<br/>with** | <img src="assets/logos/claude.svg" width="32" height="32" alt="Claude Code"><br/>**Claude Code** | <img src="assets/logos/codex.svg" width="32" height="32" alt="Codex CLI"><br/>**Codex CLI** | <img src="assets/logos/opencode.svg" width="32" height="32" alt="OpenCode"><br/>**OpenCode** | <img src="assets/logos/hermes.svg" width="32" height="32" alt="Hermes"><br/>**Hermes** | <img src="assets/logos/openclaw.svg" width="32" height="32" alt="OpenClaw"><br/>**OpenClaw** |
+
+*If it can receive a heartbeat, it's hired.*
+
+</div>
+
 ## Why Solo
 
 Solo is built for the moment when AI agents stop feeling like command-line tools and start working like human teammates.
