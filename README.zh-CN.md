@@ -18,6 +18,16 @@
   <a href="https://github.com/solo-agent/solo/stargazers"><img src="https://img.shields.io/github/stars/solo-agent/solo?style=flat" alt="Stars"></a>
 </p>
 
+<div align="center">
+
+| | | | | | |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| **兼容<br/>运行时** | <img src="assets/logos/claude.svg" width="32" height="32" alt="Claude Code"><br/>**Claude Code** | <img src="assets/logos/codex.svg" width="32" height="32" alt="Codex CLI"><br/>**Codex CLI** | <img src="assets/logos/opencode.svg" width="32" height="32" alt="OpenCode"><br/>**OpenCode** | <img src="assets/logos/hermes.svg" width="32" height="32" alt="Hermes"><br/>**Hermes** | <img src="assets/logos/openclaw.svg" width="32" height="32" alt="OpenClaw"><br/>**OpenClaw** |
+
+*能接收心跳，就能入职。*
+
+</div>
+
 ## 为什么选择 Solo
 
 Solo 是一个本地优先的工作区，用来让人类和 AI 编码智能体像团队成员一样协作。
