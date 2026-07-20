@@ -416,17 +416,17 @@
 
 :root[data-skin="archive"],
 [data-skin-preview="archive"] {
-  --skin-canvas: #f1ebdd;
-  --skin-surface: #fbf8f1;
+  --skin-canvas: oklch(0.975 0.008 80);
+  --skin-surface: oklch(0.995 0.003 80);
   --skin-ink: #39342f;
-  --skin-rule: #c9beaf;
+  --skin-rule: oklch(0.865 0.014 75);
   --skin-subtle-text: #6e665e;
   --skin-shadow: rgb(57 52 47 / 16%);
-  --skin-primary: oklch(0.93 0.015 80);
-  --skin-primary-light: oklch(0.965 0.006 80);
+  --skin-primary: oklch(0.955 0.01 80);
+  --skin-primary-light: oklch(0.985 0.004 80);
   --skin-accent: #d0937f;
   --skin-accent-light: #f0ded7;
-  --skin-info: #7794ad;
+  --skin-info: #88a2b9;
   --skin-info-light: #dbe5ed;
   --skin-success: #a9b59a;
   --skin-success-light: #e6eadf;
@@ -434,10 +434,10 @@
   --skin-warning-light: #f2e6cc;
   --skin-danger: #cf8275;
   --skin-danger-light: #f1ddd8;
-  --skin-violet: #a99db0;
+  --skin-violet: #b6abbc;
   --skin-violet-light: #e8e1eb;
-  --skin-muted: #b8afa3;
-  --skin-muted-light: #e7dfd2;
+  --skin-muted: oklch(0.82 0.014 75);
+  --skin-muted-light: oklch(0.93 0.008 80);
 }
 
 :root[data-skin="classic"],
