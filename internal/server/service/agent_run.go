@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/solo-ai/solo/internal/causal"
 	agentruntime "github.com/solo-ai/solo/pkg/agent"
 )
 
@@ -69,6 +70,12 @@ var nonPrimaryTaskRunStatuses = []string{
 }
 
 var ErrAmbiguousAgentRunScope = errors.New("multiple executing runs for one Agent and channel")
+var ErrInvalidAgentRunOrigin = errors.New("origin run does not match active Agent runtime")
+
+const (
+	OriginRunHeader       = causal.RunHeader
+	OriginSignatureHeader = causal.SignatureHeader
+)
 
 type AgentSession struct {
 	ID                string    `json:"id"`
@@ -448,6 +455,58 @@ func (s *AgentRunService) LinkTask(ctx context.Context, input LinkRunTaskInput) 
 		input.RunID, input.TaskID, input.Role, input.Confidence,
 	)
 	return err
+}
+
+// ValidateActionRun verifies daemon-owned turn context forwarded to a mutation.
+// Callers must never derive this value from "latest run" timestamps.
+func (s *AgentRunService) ValidateActionRun(ctx context.Context, runID, agentID, channelID string) error {
+	if runID == "" {
+		return nil
+	}
+	var valid bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM agent_runs
+			 WHERE id = $1 AND agent_id = $2 AND channel_id = $3
+			   AND finished_at IS NULL
+			   AND status = ANY($4)
+		)`,
+		runID,
+		agentID,
+		channelID,
+		[]string{
+			string(AgentRunStatusQueued),
+			string(AgentRunStatusThinking), string(AgentRunStatusRunning),
+			string(AgentRunStatusStreaming), string(AgentRunStatusWaitingInput),
+			string(AgentRunStatusWaitingApproval),
+		},
+	).Scan(&valid)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return ErrInvalidAgentRunOrigin
+	}
+	return nil
+}
+
+func (s *AgentRunService) ValidateActionOrigin(ctx context.Context, runID, signature, agentID, channelID string) error {
+	if runID == "" {
+		return nil
+	}
+	if !causal.Verify(causal.SharedSecret(), runID, agentID, channelID, signature) {
+		return ErrInvalidAgentRunOrigin
+	}
+	return s.ValidateActionRun(ctx, runID, agentID, channelID)
+}
+
+func safeRunTaskAction(action string) bool {
+	switch action {
+	case "claim", "unclaim", "submit", "accept", "reject", "close", "reopen":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *AgentRunService) FinishRun(ctx context.Context, input FinishRunInput) (*AgentRun, error) {

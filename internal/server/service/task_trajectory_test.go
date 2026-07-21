@@ -96,6 +96,19 @@ func TestTaskTrajectoryExportUsesStoredMetadataWithoutInternalContent(t *testing
 	if err := runSvc.LinkTask(ctx, LinkRunTaskInput{RunID: completedRun.ID, TaskID: child.ID, Role: AgentRunTaskRoleRelated, Confidence: 0.75}); err != nil {
 		t.Fatalf("link child task: %v", err)
 	}
+	actionID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO agent_run_task_actions (id, run_id, task_id, actor_id, action)
+		VALUES ($1, $2, $3, $4, 'submit')`, actionID, completedRun.ID, root.ID, agentAID); err != nil {
+		t.Fatalf("insert task action: %v", err)
+	}
+	outboundMessageID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO messages (id, channel_id, origin_run_id, sender_type, sender_id, content, content_type, created_at, updated_at)
+		VALUES ($1, $2, $3, 'agent', $4, 'private outbound content', 'text', now(), now())`,
+		outboundMessageID, channelID, completedRun.ID, agentAID); err != nil {
+		t.Fatalf("insert outbound message: %v", err)
+	}
 	firstEvent, err := runSvc.AppendEvent(ctx, AppendRunEventInput{RunID: completedRun.ID, Type: AgentRunEventRunStarted, Message: "started"})
 	if err != nil {
 		t.Fatalf("append first event: %v", err)
@@ -168,6 +181,15 @@ func TestTaskTrajectoryExportUsesStoredMetadataWithoutInternalContent(t *testing
 	if snapshot.Coverage.ParentRunLinks != "unavailable" || snapshot.Coverage.TranscriptAvailability != "reference_recorded_only_unverified_time_window" || snapshot.Coverage.Completeness != "partial_stored_records" {
 		t.Fatalf("coverage = %+v", snapshot.Coverage)
 	}
+	if snapshot.Coverage.OutboundMessageRuns != "stored_metadata_only" || snapshot.Coverage.TaskLifecycleEvents != "stored_records" {
+		t.Fatalf("causal coverage = %+v", snapshot.Coverage)
+	}
+	if len(snapshot.TaskActions) != 1 || snapshot.TaskActions[0].ID != actionID || snapshot.TaskActions[0].RunID != completedRun.ID {
+		t.Fatalf("task actions = %+v", snapshot.TaskActions)
+	}
+	if len(snapshot.OutboundMessages) != 1 || snapshot.OutboundMessages[0].ID != outboundMessageID || !snapshot.OutboundMessages[0].ContentOmitted {
+		t.Fatalf("outbound messages = %+v", snapshot.OutboundMessages)
+	}
 	if len(snapshot.Artifacts) != 1 || snapshot.Artifacts[0].ID != artifactID || snapshot.Artifacts[0].URL != "/api/v1/artifacts/"+artifactID {
 		t.Fatalf("artifacts = %+v", snapshot.Artifacts)
 	}
@@ -177,7 +199,7 @@ func TestTaskTrajectoryExportUsesStoredMetadataWithoutInternalContent(t *testing
 		t.Fatalf("marshal snapshot: %v", err)
 	}
 	jsonText := string(raw)
-	for _, secret := range []string{"transcript_path", `"raw"`, `"input"`, "reviewed the changelog", "secret event output", "secret-token", "secret-usage", "/private/artifact.html", "cross-channel-secret-task"} {
+	for _, secret := range []string{"transcript_path", `"raw"`, `"input"`, "reviewed the changelog", "secret event output", "secret-token", "secret-usage", "private outbound content", "/private/artifact.html", "cross-channel-secret-task"} {
 		if strings.Contains(jsonText, secret) {
 			t.Fatalf("snapshot leaked internal content %q: %s", secret, jsonText)
 		}

@@ -380,6 +380,9 @@ func proxyRequest(action, channelID, content, threadID, token string, taskNumber
 		return 0, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	client := &http.Client{Timeout: proxyRequestTimeout(action)}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -388,6 +391,10 @@ func proxyRequest(action, channelID, content, threadID, token string, taskNumber
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, respBody, nil
+}
+
+func agentRuntimeConfigured() bool {
+	return strings.TrimSpace(os.Getenv("SOLO_AGENT_ID")) != ""
 }
 
 func handleTask(args []string, baseURL, token string) {
@@ -579,7 +586,7 @@ func handleTaskClaim(args []string, baseURL, token string) {
 	// Try daemon proxy first (uses fresh JWT).
 	// Pass messageID via taskID parameter so the proxy uses it in the URL path.
 	statusCode, body, err := proxyRequest("task_claim", channelID, taskID, "", token, number, "")
-	if err != nil {
+	if err != nil && !agentRuntimeConfigured() {
 		// Fallback to direct API
 		apiURL := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%s/claim", baseURL, channelID, taskID)
 		statusCode, body, err = doHTTP(http.MethodPost, apiURL, token, nil)
@@ -743,7 +750,7 @@ func handleTaskUnclaim(args []string, baseURL, token string) {
 
 	// Try daemon proxy first (uses fresh JWT)
 	statusCode, body, err := proxyRequest("task_unclaim", channelID, "", "", token, number, "")
-	if err != nil {
+	if err != nil && !agentRuntimeConfigured() {
 		// Fallback to direct API
 		url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d/claim", baseURL, channelID, number)
 		statusCode, body, err = doHTTP(http.MethodDelete, url, token, nil)
@@ -792,12 +799,15 @@ func handleTaskLifecycle(args []string, baseURL, token, action string) {
 		doExit(exitBusiness)
 	}
 
-	url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d/%s", baseURL, channelID, number, action)
 	var reqBody []byte
 	if action == "reject" {
 		reqBody, _ = json.Marshal(map[string]string{"reason": strings.TrimSpace(reason)})
 	}
-	statusCode, body, err := doHTTP(http.MethodPost, url, token, reqBody)
+	statusCode, body, err := proxyRequest("task_"+action, channelID, strings.TrimSpace(reason), "", token, number, "")
+	if err != nil && !agentRuntimeConfigured() {
+		url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d/%s", baseURL, channelID, number, action)
+		statusCode, body, err = doHTTP(http.MethodPost, url, token, reqBody)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
 		doExit(exitUsage)
@@ -875,7 +885,7 @@ func handleMessageSend(args []string, baseURL, token string) {
 	body, _ := json.Marshal(reqBody)
 	// Try daemon proxy first
 	statusCode, respBody, err := proxyRequest("message_send", channelID, content, threadID, token, 0, "")
-	if err != nil {
+	if err != nil && !agentRuntimeConfigured() {
 		// Fallback to direct API
 		url := fmt.Sprintf("%s/api/v1/channels/%s/messages", baseURL, channelID)
 		statusCode, respBody, err = doHTTP(http.MethodPost, url, token, body)

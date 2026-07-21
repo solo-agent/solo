@@ -13,11 +13,13 @@ import (
 )
 
 const (
-	TaskTrajectorySchemaVersion = "solo.task_trajectory.v1"
+	TaskTrajectorySchemaVersion = "solo.task_trajectory.v2"
 	maxTrajectoryTasks          = 500
 	maxTrajectoryRunLinkRows    = 2000
 	maxTrajectoryEvents         = 20000
 	maxTrajectoryArtifacts      = 1000
+	maxTrajectoryTaskActions    = 5000
+	maxTrajectoryMessages       = 5000
 	maxTrajectoryShortTextRunes = 500
 	maxTrajectoryBodyTextRunes  = 4000
 )
@@ -104,6 +106,27 @@ type TaskTrajectoryArtifact struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
+type TaskTrajectoryTaskAction struct {
+	ID        string    `json:"id"`
+	RunID     string    `json:"run_id"`
+	TaskID    string    `json:"task_id"`
+	ActorID   string    `json:"actor_id"`
+	Action    string    `json:"action"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type TaskTrajectoryOutboundMessage struct {
+	ID              string    `json:"id"`
+	OriginRunID     string    `json:"origin_run_id"`
+	ChannelID       string    `json:"channel_id"`
+	ThreadID        string    `json:"thread_id,omitempty"`
+	ThinkingNodeID  string    `json:"thinking_node_id,omitempty"`
+	ContentType     string    `json:"content_type"`
+	AttachmentCount int       `json:"attachment_count"`
+	ContentOmitted  bool      `json:"content_omitted"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
 type TaskTrajectoryRun struct {
 	ID                string                   `json:"id"`
 	AgentID           string                   `json:"agent_id"`
@@ -128,14 +151,16 @@ type TaskTrajectoryRun struct {
 }
 
 type TaskTrajectorySnapshot struct {
-	SchemaVersion      string                   `json:"schema_version"`
-	DatabaseCapturedAt time.Time                `json:"database_captured_at"`
-	RootTaskID         string                   `json:"root_task_id"`
-	Coverage           TaskTrajectoryCoverage   `json:"coverage"`
-	Tasks              []TaskTrajectoryTask     `json:"tasks"`
-	Runs               []TaskTrajectoryRun      `json:"runs"`
-	Artifacts          []TaskTrajectoryArtifact `json:"artifacts"`
-	Warnings           []TaskTrajectoryWarning  `json:"warnings"`
+	SchemaVersion      string                          `json:"schema_version"`
+	DatabaseCapturedAt time.Time                       `json:"database_captured_at"`
+	RootTaskID         string                          `json:"root_task_id"`
+	Coverage           TaskTrajectoryCoverage          `json:"coverage"`
+	Tasks              []TaskTrajectoryTask            `json:"tasks"`
+	Runs               []TaskTrajectoryRun             `json:"runs"`
+	Artifacts          []TaskTrajectoryArtifact        `json:"artifacts"`
+	TaskActions        []TaskTrajectoryTaskAction      `json:"task_actions"`
+	OutboundMessages   []TaskTrajectoryOutboundMessage `json:"outbound_messages"`
+	Warnings           []TaskTrajectoryWarning         `json:"warnings"`
 }
 
 type TaskTrajectoryService struct {
@@ -155,6 +180,8 @@ type taskTrajectoryTruncation struct {
 	runLinks  bool
 	events    bool
 	artifacts bool
+	actions   bool
+	messages  bool
 }
 
 func (s *TaskTrajectoryService) Export(ctx context.Context, taskID, userID string) (*TaskTrajectorySnapshot, error) {
@@ -196,6 +223,18 @@ func (s *TaskTrajectoryService) Export(ctx context.Context, taskID, userID strin
 	if err != nil {
 		return nil, err
 	}
+	actions, actionsTruncated, err := loadTaskTrajectoryTaskActions(ctx, tx, taskIDs, rootChannelID)
+	if err != nil {
+		return nil, err
+	}
+	runIDs := make([]string, 0, len(runs))
+	for _, run := range runs {
+		runIDs = append(runIDs, run.ID)
+	}
+	messages, messagesTruncated, err := loadTaskTrajectoryOutboundMessages(ctx, tx, runIDs, rootChannelID)
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
@@ -210,10 +249,12 @@ func (s *TaskTrajectoryService) Export(ctx context.Context, taskID, userID strin
 		runLinks:  runLinksTruncated,
 		events:    eventsTruncated,
 		artifacts: artifactsTruncated,
+		actions:   actionsTruncated,
+		messages:  messagesTruncated,
 	}
 	warnings = append(warnings, trajectoryTruncationWarnings(truncation)...)
 	completeness := "partial_stored_records"
-	if tasksTruncated || runLinksTruncated || eventsTruncated || artifactsTruncated {
+	if tasksTruncated || runLinksTruncated || eventsTruncated || artifactsTruncated || actionsTruncated || messagesTruncated {
 		completeness = "partial_truncated_stored_records"
 	}
 
@@ -231,15 +272,94 @@ func (s *TaskTrajectoryService) Export(ctx context.Context, taskID, userID strin
 			TaskArtifacts:          "stored_selected_metadata",
 			DispatchDecisions:      "unavailable",
 			ParentRunLinks:         "unavailable",
-			OutboundMessageRuns:    "unavailable",
-			TaskLifecycleEvents:    "unavailable",
+			OutboundMessageRuns:    "stored_metadata_only",
+			TaskLifecycleEvents:    "stored_records",
 			RelationshipSnapshots:  "unavailable",
 		},
-		Tasks:     tasks,
-		Runs:      runs,
-		Artifacts: artifacts,
-		Warnings:  warnings,
+		Tasks:            tasks,
+		Runs:             runs,
+		Artifacts:        artifacts,
+		TaskActions:      actions,
+		OutboundMessages: messages,
+		Warnings:         warnings,
 	}, nil
+}
+
+func loadTaskTrajectoryTaskActions(ctx context.Context, tx pgx.Tx, taskIDs []string, rootChannelID string) ([]TaskTrajectoryTaskAction, bool, error) {
+	if len(taskIDs) == 0 {
+		return []TaskTrajectoryTaskAction{}, false, nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT a.id::text, a.run_id::text, a.task_id::text, a.actor_id::text,
+		       left(a.action, $3), a.created_at
+		  FROM agent_run_task_actions a
+		  JOIN tasks t ON t.id = a.task_id
+		  JOIN agent_runs r ON r.id = a.run_id
+		 WHERE a.task_id = ANY($1::uuid[]) AND t.channel_id = $2 AND r.channel_id = $2
+		 ORDER BY a.created_at ASC, a.id ASC
+		 LIMIT $4`, taskIDs, rootChannelID, maxTrajectoryShortTextRunes, maxTrajectoryTaskActions+1)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	actions := []TaskTrajectoryTaskAction{}
+	for rows.Next() {
+		var action TaskTrajectoryTaskAction
+		if err := rows.Scan(&action.ID, &action.RunID, &action.TaskID, &action.ActorID, &action.Action, &action.CreatedAt); err != nil {
+			return nil, false, err
+		}
+		if !safeRunTaskAction(action.Action) {
+			action.Action = "unknown"
+		}
+		actions = append(actions, action)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	truncated := len(actions) > maxTrajectoryTaskActions
+	if truncated {
+		actions = actions[:maxTrajectoryTaskActions]
+	}
+	return actions, truncated, nil
+}
+
+func loadTaskTrajectoryOutboundMessages(ctx context.Context, tx pgx.Tx, runIDs []string, rootChannelID string) ([]TaskTrajectoryOutboundMessage, bool, error) {
+	if len(runIDs) == 0 {
+		return []TaskTrajectoryOutboundMessage{}, false, nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT m.id::text, m.origin_run_id::text, m.channel_id::text,
+		       COALESCE(m.thread_id::text, ''), COALESCE(m.thinking_node_id::text, ''),
+		       left(COALESCE(m.content_type, 'text'), $3), cardinality(COALESCE(m.attachment_ids, '{}')), m.created_at
+		  FROM messages m
+		 WHERE m.origin_run_id = ANY($1::uuid[]) AND m.channel_id = $2
+		 ORDER BY m.created_at ASC, m.id ASC
+		 LIMIT $4`, runIDs, rootChannelID, maxTrajectoryShortTextRunes, maxTrajectoryMessages+1)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	messages := []TaskTrajectoryOutboundMessage{}
+	for rows.Next() {
+		var message TaskTrajectoryOutboundMessage
+		if err := rows.Scan(&message.ID, &message.OriginRunID, &message.ChannelID, &message.ThreadID,
+			&message.ThinkingNodeID, &message.ContentType, &message.AttachmentCount, &message.CreatedAt); err != nil {
+			return nil, false, err
+		}
+		message.ContentOmitted = true
+		if !safeTaskTrajectoryIdentifier(message.ContentType, 128) {
+			message.ContentType = "unknown"
+		}
+		messages = append(messages, message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	truncated := len(messages) > maxTrajectoryMessages
+	if truncated {
+		messages = messages[:maxTrajectoryMessages]
+	}
+	return messages, truncated, nil
 }
 
 func authorizeTaskTrajectory(ctx context.Context, tx pgx.Tx, taskID, userID string) (string, error) {
@@ -683,6 +803,12 @@ func trajectoryTruncationWarnings(truncation taskTrajectoryTruncation) []TaskTra
 	}
 	if truncation.artifacts {
 		warnings = append(warnings, TaskTrajectoryWarning{Code: "artifact_limit_reached", Message: fmt.Sprintf("artifact metadata exceeded the %d-record export limit", maxTrajectoryArtifacts)})
+	}
+	if truncation.actions {
+		warnings = append(warnings, TaskTrajectoryWarning{Code: "task_action_limit_reached", Message: fmt.Sprintf("task lifecycle evidence exceeded the %d-record export limit", maxTrajectoryTaskActions)})
+	}
+	if truncation.messages {
+		warnings = append(warnings, TaskTrajectoryWarning{Code: "outbound_message_limit_reached", Message: fmt.Sprintf("outbound message evidence exceeded the %d-record export limit", maxTrajectoryMessages)})
 	}
 	return warnings
 }

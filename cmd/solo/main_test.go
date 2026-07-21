@@ -604,6 +604,48 @@ func TestHandleTaskLifecycleCloseReopen(t *testing.T) {
 	}
 }
 
+func TestAgentTaskLifecycleUsesDaemonProxy(t *testing.T) {
+	var action string
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		action, _ = body["action"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"1","status":"in_review"}`))
+	}))
+	defer daemon.Close()
+	t.Setenv("SOLO_AGENT_ID", "agent-1")
+	t.Setenv("SOLO_DAEMON_URL", daemon.URL)
+
+	code, _, _ := captureAndRun(t, func() {
+		handleTaskLifecycle([]string{"-n", "1", "-c", "550e8400-e29b-41d4-a716-446655440001"}, "http://127.0.0.1:1", "stale-token", "submit")
+	})
+	if code != exitOK || action != "task_submit" {
+		t.Fatalf("code=%d action=%q, want %d/task_submit", code, action, exitOK)
+	}
+}
+
+func TestAgentTaskLifecycleFailsClosedWhenDaemonUnavailable(t *testing.T) {
+	var directRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		directRequests++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	t.Setenv("SOLO_AGENT_ID", "agent-1")
+	t.Setenv("SOLO_DAEMON_URL", "http://127.0.0.1:1")
+
+	code, _, stderr := captureAndRun(t, func() {
+		handleTaskLifecycle([]string{"-n", "1", "-c", "550e8400-e29b-41d4-a716-446655440001"}, server.URL, "stale-token", "submit")
+	})
+	if code != exitUsage {
+		t.Fatalf("code=%d, want %d; stderr=%s", code, exitUsage, stderr)
+	}
+	if directRequests != 0 {
+		t.Fatalf("agent mutation fell back to direct API: requests=%d", directRequests)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // task create tests
 // ---------------------------------------------------------------------------

@@ -82,6 +82,41 @@ var (
 	ErrTaskLifecyclePatch    = errors.New("task lifecycle status changes must use lifecycle endpoints")
 )
 
+type taskActionOriginKey struct{}
+
+type TaskActionOrigin struct {
+	RunID   string
+	ActorID string
+	Action  string
+}
+
+func WithTaskActionOrigin(ctx context.Context, origin TaskActionOrigin) context.Context {
+	if origin.RunID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, taskActionOriginKey{}, origin)
+}
+
+func recordTaskActionInTx(ctx context.Context, tx pgx.Tx, taskID string) error {
+	origin, ok := ctx.Value(taskActionOriginKey{}).(TaskActionOrigin)
+	if !ok || origin.RunID == "" {
+		return nil
+	}
+	if !safeRunTaskAction(origin.Action) || origin.ActorID == "" {
+		return ErrInvalidAgentRunOrigin
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO agent_run_task_links (run_id, task_id, role, confidence)
+		VALUES ($1, $2, 'executor', 1)
+		ON CONFLICT (run_id, task_id) DO NOTHING`, origin.RunID, taskID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `
+		INSERT INTO agent_run_task_actions (run_id, task_id, actor_id, action)
+		VALUES ($1, $2, $3, $4)`, origin.RunID, taskID, origin.ActorID, origin.Action)
+	return err
+}
+
 // Task represents a task in a channel.
 type Task struct {
 	ID               string     `json:"id"`
@@ -428,6 +463,9 @@ func (s *TaskService) ClaimTask(ctx context.Context, channelID, taskID, userID s
 	if err != nil {
 		return nil, fmt.Errorf("update claim: %w", err)
 	}
+	if err := recordTaskActionInTx(ctx, tx, taskID); err != nil {
+		return nil, fmt.Errorf("record claim origin: %w", err)
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit: %w", err)
@@ -456,30 +494,40 @@ func (s *TaskService) UnclaimTask(ctx context.Context, channelID, taskID, userID
 	if err := s.requireChannelMember(ctx, channelID, userID); err != nil {
 		return nil, err
 	}
-
-	current, err := s.GetTask(ctx, channelID, taskID, userID)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	if current.ClaimerID == "" {
+	defer tx.Rollback(ctx)
+	var currentStatus, currentClaimerID string
+	if err := tx.QueryRow(ctx, `
+		SELECT status, COALESCE(claimer_id::text, '')
+		  FROM tasks WHERE id = $1 AND channel_id = $2 FOR UPDATE`, taskID, channelID,
+	).Scan(&currentStatus, &currentClaimerID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrTaskNotFound
+		}
+		return nil, err
+	}
+	if currentClaimerID != userID {
 		return nil, ErrTaskNotClaimer
 	}
-	if current.ClaimerID != userID {
-		return nil, ErrTaskNotClaimer
-	}
-
-	if TerminalStatuses[current.Status] {
+	if TerminalStatuses[currentStatus] {
 		return nil, ErrTaskInTerminalState
 	}
-
 	now := time.Now()
-	_, err = s.pool.Exec(ctx,
+	_, err = tx.Exec(ctx,
 		`UPDATE tasks SET claimer_id = NULL, status = $1, updated_at = $2
 		 WHERE id = $3 AND channel_id = $4`,
 		TaskStatusTodo, now, taskID, channelID,
 	)
 	if err != nil {
+		return nil, err
+	}
+	if err := recordTaskActionInTx(ctx, tx, taskID); err != nil {
+		return nil, fmt.Errorf("record unclaim origin: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 
@@ -541,6 +589,9 @@ func (s *TaskService) SubmitTask(ctx context.Context, channelID, taskID, userID 
 	if _, err := tx.Exec(ctx, `UPDATE tasks SET status = $1, updated_at = now() WHERE id = $2`, TaskStatusInReview, task.ID); err != nil {
 		return nil, err
 	}
+	if err := recordTaskActionInTx(ctx, tx, task.ID); err != nil {
+		return nil, fmt.Errorf("record submit origin: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
@@ -571,7 +622,7 @@ func (s *TaskService) AcceptTask(ctx context.Context, channelID, taskID, userID 
 	if task.Status != TaskStatusInReview {
 		return nil, ErrTaskNotReviewable
 	}
-	updated, err := s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusDone)
+	updated, err := s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusDone, TaskStatusInReview)
 	if err == nil && s.agentNotifier != nil {
 		if notifyErr := s.agentNotifier.NotifyAccepted(ctx, updated.ID, userID); notifyErr != nil {
 			slog.Warn("notify accepted failed", "task_id", updated.ID, "err", notifyErr)
@@ -595,7 +646,7 @@ func (s *TaskService) RejectTask(ctx context.Context, channelID, taskID, userID,
 	if task.Status != TaskStatusInReview {
 		return nil, ErrTaskNotReviewable
 	}
-	updated, err := s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusInProgress)
+	updated, err := s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusInProgress, TaskStatusInReview)
 	if err == nil && s.agentNotifier != nil {
 		if notifyErr := s.agentNotifier.NotifyRejected(ctx, updated.ID, userID, reason); notifyErr != nil {
 			slog.Warn("notify rejected failed", "task_id", updated.ID, "err", notifyErr)
@@ -619,7 +670,7 @@ func (s *TaskService) CloseTask(ctx context.Context, channelID, taskID, userID s
 	if task.Status == TaskStatusClosed {
 		return nil, ErrTaskInTerminalState
 	}
-	updated, err := s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusClosed)
+	updated, err := s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusClosed, TaskStatusTodo, TaskStatusInProgress, TaskStatusInReview, TaskStatusDone)
 	if err == nil && s.agentNotifier != nil {
 		if notifyErr := s.agentNotifier.NotifyClosed(ctx, updated.ID, userID); notifyErr != nil {
 			slog.Warn("notify closed failed", "task_id", updated.ID, "err", notifyErr)
@@ -646,7 +697,7 @@ func (s *TaskService) ReopenTask(ctx context.Context, channelID, taskID, userID 
 	if task.Status != TaskStatusClosed && task.Status != TaskStatusDone {
 		return nil, ErrTaskInvalidTransition
 	}
-	updated, err := s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusTodo)
+	updated, err := s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusTodo, TaskStatusClosed, TaskStatusDone)
 	if err == nil && s.agentNotifier != nil {
 		if notifyErr := s.agentNotifier.NotifyReopened(ctx, updated.ID, userID); notifyErr != nil {
 			slog.Warn("notify reopened failed", "task_id", updated.ID, "err", notifyErr)
@@ -655,11 +706,33 @@ func (s *TaskService) ReopenTask(ctx context.Context, channelID, taskID, userID 
 	return updated, err
 }
 
-func (s *TaskService) setTaskStatus(ctx context.Context, channelID, taskID, userID, status string) (*Task, error) {
+func (s *TaskService) setTaskStatus(ctx context.Context, channelID, taskID, userID, status string, allowedFrom ...string) (*Task, error) {
 	if err := s.requireChannelMember(ctx, channelID, userID); err != nil {
 		return nil, err
 	}
-	tag, err := s.pool.Exec(ctx,
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	var currentStatus string
+	if err := tx.QueryRow(ctx, `SELECT status FROM tasks WHERE id = $1 AND channel_id = $2 FOR UPDATE`, taskID, channelID).Scan(&currentStatus); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrTaskNotFound
+		}
+		return nil, err
+	}
+	allowed := false
+	for _, candidate := range allowedFrom {
+		if currentStatus == candidate {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return nil, ErrTaskInvalidTransition
+	}
+	tag, err := tx.Exec(ctx,
 		`UPDATE tasks SET status = $1, updated_at = now() WHERE id = $2 AND channel_id = $3`,
 		status, taskID, channelID,
 	)
@@ -668,6 +741,12 @@ func (s *TaskService) setTaskStatus(ctx context.Context, channelID, taskID, user
 	}
 	if tag.RowsAffected() == 0 {
 		return nil, ErrTaskNotFound
+	}
+	if err := recordTaskActionInTx(ctx, tx, taskID); err != nil {
+		return nil, fmt.Errorf("record task action origin: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
 	}
 	return s.GetTask(ctx, channelID, taskID, userID)
 }

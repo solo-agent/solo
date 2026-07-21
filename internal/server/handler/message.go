@@ -125,6 +125,7 @@ type MessageResponse struct {
 	TaskClaimerDeleted bool             `json:"task_claimer_deleted"`
 	HasUnreadThread    bool             `json:"has_unread_thread,omitempty"`
 	ThinkingNodeID     string           `json:"thinking_node_id,omitempty"`
+	OriginRunID        string           `json:"origin_run_id,omitempty"`
 }
 
 type MessageListResponse struct {
@@ -214,6 +215,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		`SELECT EXISTS(SELECT 1 FROM agents WHERE id = $1)`, userID,
 	).Scan(&isAgent)
 	senderType := "user"
+	originRunID := strings.TrimSpace(r.Header.Get(service.OriginRunHeader))
 	if isAgent {
 		senderType = "agent"
 		thinkingNodeID, err = reconcileThinkingNodeScope(r.Context(), h.pool, userID, channelID, thinkingNodeID)
@@ -221,6 +223,13 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeThinkingScopeError(w, err)
 			return
 		}
+		if err := service.NewAgentRunService(h.pool).ValidateActionOrigin(r.Context(), originRunID, r.Header.Get(service.OriginSignatureHeader), userID, channelID); err != nil {
+			writeError(w, http.StatusConflict, "origin run does not match active Agent runtime")
+			return
+		}
+	} else {
+		// Human callers cannot attribute their messages to Agent runtime rows.
+		originRunID = ""
 	}
 	if thinkingNodeID != "" && (req.ThreadID != "" || req.AsTask) {
 		writeError(w, http.StatusBadRequest, "thinking node messages cannot also be threads or tasks")
@@ -404,9 +413,9 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		nullableThreadID = threadID
 	}
 	_, err = h.pool.Exec(r.Context(),
-		`INSERT INTO messages (id, channel_id, thread_id, thinking_node_id, sender_type, sender_id, content, mentioned_agent_ids, attachment_ids, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uuid[], $9::uuid[], $10, $10)`,
-		messageID, channelID, nullableThreadID, nullableUUIDString(thinkingNodeID), senderType, userID, content, formatUUIDArray(mentionedAgentIDs), formatUUIDArray(attachmentIDs), now,
+		`INSERT INTO messages (id, channel_id, thread_id, thinking_node_id, origin_run_id, sender_type, sender_id, content, mentioned_agent_ids, attachment_ids, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10::uuid[], $11, $11)`,
+		messageID, channelID, nullableThreadID, nullableUUIDString(thinkingNodeID), nullableUUIDString(originRunID), senderType, userID, content, formatUUIDArray(mentionedAgentIDs), formatUUIDArray(attachmentIDs), now,
 	)
 	if err != nil {
 		slog.Error("failed to persist message", "error", err)
@@ -485,6 +494,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 				SenderName:    displayName,
 				Content:       content,
 				ContentType:   "text",
+				OriginRunID:   originRunID,
 				AttachmentIDs: attachmentIDs,
 				Attachments:   toWSAttachmentMeta(attachments),
 				CreatedAt:     now.UTC().Format(time.RFC3339),
@@ -558,6 +568,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 			ContentType:       "text",
 			ThreadID:          threadID,
 			ThinkingNodeID:    thinkingNodeID,
+			OriginRunID:       originRunID,
 			MentionedAgentIDs: mentionedAgentIDs,
 			AttachmentIDs:     attachmentIDs,
 			Attachments:       toWSAttachmentMeta(attachments),
@@ -610,7 +621,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	resp := MessageResponse{
 		ID:                messageID,
 		ChannelID:         channelID,
-		SenderType:        "user",
+		SenderType:        senderType,
 		SenderID:          userID,
 		SenderName:        displayName,
 		Content:           content,
@@ -619,6 +630,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		AttachmentIDs:     attachmentIDs,
 		Attachments:       attachments,
 		ThinkingNodeID:    thinkingNodeID,
+		OriginRunID:       originRunID,
 		CreatedAt:         now.Format(time.RFC3339),
 	}
 
@@ -735,8 +747,9 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		                   WHEN m.sender_type = 'system' THEN 'Solo'
 		                   ELSE COALESCE(u.display_name, a.name, m.sender_id::text)
 		                 END as sender_name,
-		                 COALESCE(a.is_active, false) AS sender_active,
-		                 COALESCE(m.thinking_node_id::text, '') AS thinking_node_id,
+	                 COALESCE(a.is_active, false) AS sender_active,
+	                 COALESCE(m.thinking_node_id::text, '') AS thinking_node_id,
+	                 COALESCE(m.origin_run_id::text, '') AS origin_run_id,
 	                 m.content, m.content_type, COALESCE(m.attachment_ids, '{}') as attachment_ids, m.created_at,
 		                 COALESCE(t.reply_count, 0) AS reply_count,
 		                 COALESCE(tasks.task_number, 0) AS task_number,
@@ -783,7 +796,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		var msg MessageResponse
 		var createdAt time.Time
 		err := rows.Scan(&msg.ID, &msg.ChannelID, &msg.SenderType, &msg.SenderID,
-			&msg.SenderName, &msg.SenderActive, &msg.ThinkingNodeID, &msg.Content, &msg.ContentType, &msg.AttachmentIDs, &createdAt,
+			&msg.SenderName, &msg.SenderActive, &msg.ThinkingNodeID, &msg.OriginRunID, &msg.Content, &msg.ContentType, &msg.AttachmentIDs, &createdAt,
 			&msg.ReplyCount, &msg.TaskNumber, &msg.TaskStatus, &msg.TaskClaimerName, &msg.TaskClaimerDeleted, &msg.HasUnreadThread)
 		if err != nil {
 			slog.Error("failed to scan message row", "error", err)
@@ -1093,6 +1106,7 @@ func (h *MessageHandler) broadcastDMIfNeeded(channelID string, msg ws.MessageNew
 		AttachmentIDs: msg.AttachmentIDs,
 		Attachments:   msg.Attachments,
 		ThreadID:      msg.ThreadID,
+		OriginRunID:   msg.OriginRunID,
 		CreatedAt:     msg.CreatedAt,
 	}
 	h.hub.BroadcastToChannel(channelID, ws.Envelope(ws.EventDMMessageNew, dmPayload))

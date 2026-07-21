@@ -45,6 +45,15 @@ type sseSubscriber struct {
 	done   chan struct{}
 }
 
+type actionScope struct {
+	RunID     string
+	AgentID   string
+	ChannelID string
+	ThreadID  string
+	NodeID    string
+	TaskID    string
+}
+
 // taskManager manages task states and SSE subscribers in the daemon.
 type taskManager struct {
 	mu           sync.RWMutex
@@ -52,6 +61,7 @@ type taskManager struct {
 	subscribers  map[string][]*sseSubscriber   // taskID -> subscribers
 	eventHistory map[string][]sseEvent         // taskID -> replayable SSE control events
 	cancelFuncs  map[string]context.CancelFunc // taskID -> cancel func
+	actionScopes map[string]actionScope        // agentID -> current provider turn
 }
 
 // newTaskManager creates a new task manager.
@@ -61,7 +71,36 @@ func newTaskManager() *taskManager {
 		subscribers:  make(map[string][]*sseSubscriber),
 		eventHistory: make(map[string][]sseEvent),
 		cancelFuncs:  make(map[string]context.CancelFunc),
+		actionScopes: make(map[string]actionScope),
 	}
+}
+
+func (tm *taskManager) SetActionScope(scope actionScope) bool {
+	if scope.AgentID == "" || scope.RunID == "" {
+		return false
+	}
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	if _, exists := tm.actionScopes[scope.AgentID]; exists {
+		return false
+	}
+	tm.actionScopes[scope.AgentID] = scope
+	return true
+}
+
+func (tm *taskManager) GetActionScope(agentID string) (actionScope, bool) {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	scope, ok := tm.actionScopes[agentID]
+	return scope, ok
+}
+
+func (tm *taskManager) ClearActionScope(agentID, runID string) {
+	tm.mu.Lock()
+	if scope, ok := tm.actionScopes[agentID]; ok && scope.RunID == runID {
+		delete(tm.actionScopes, agentID)
+	}
+	tm.mu.Unlock()
 }
 
 // AddTask registers a new task.
