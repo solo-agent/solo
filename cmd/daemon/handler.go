@@ -1121,7 +1121,27 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	var fullContent string
 	var messageSentViaCLI bool
 
-	for chunk := range session.Messages {
+	streamOpen := true
+	for streamOpen {
+		var chunk agent.OutputChunk
+		select {
+		case <-ctx.Done():
+			if session.Stop != nil {
+				if stopErr := session.Stop(); stopErr != nil {
+					slog.Warn("task: backend stop failed", "task_id", req.TaskID, "agent_id", req.AgentID, "error", stopErr)
+				}
+			}
+			slog.Info("task cancelled via context", "task_id", req.TaskID, "agent_id", req.AgentID)
+			h.taskManager.UpdateStatus(req.TaskID, taskStatusCancelled)
+			h.taskManager.CloseAllSubscribers(req.TaskID)
+			return
+		case next, ok := <-session.Messages:
+			if !ok {
+				streamOpen = false
+				continue
+			}
+			chunk = next
+		}
 		if chunk.SessionID != "" && chunk.SessionID != providerSessionID {
 			providerSessionID = chunk.SessionID
 			transcriptPath = transcriptPathForProvider(req.ModelConfig.Provider, ws.WorkDir, providerSessionID)

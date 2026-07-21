@@ -195,6 +195,42 @@ func TestSessionManagerSleepsOnlyIdleThinkingSessionsAndResumes(t *testing.T) {
 	}
 }
 
+func TestSessionManagerUsesProtocolResumeWithoutInjectingCLIFlag(t *testing.T) {
+	backend := &scopedRecordingBackend{}
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	cfg := AgentConfig{
+		AgentID:    "agent-1",
+		Name:       "Agent",
+		Provider:   "codex",
+		CustomArgs: []string{"--configured-flag"},
+	}
+
+	resumed, err := mgr.GetOrCreateScopedSession(
+		context.Background(),
+		ThinkingSessionKey("resume-node"),
+		"agent-1",
+		cfg,
+		ChannelContext{},
+		[]Message{{Role: RoleUser, Content: "continue"}},
+		"provider-session-1",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("resume session: %v", err)
+	}
+	<-resumed.Result
+
+	backend.mu.Lock()
+	opts := backend.startOptions[0]
+	backend.mu.Unlock()
+	if opts.ResumeSessionID != "provider-session-1" {
+		t.Fatalf("ResumeSessionID = %q, want provider-session-1", opts.ResumeSessionID)
+	}
+	if len(opts.CustomArgs) != 1 || opts.CustomArgs[0] != "--configured-flag" {
+		t.Fatalf("CustomArgs = %v, want only configured flags", opts.CustomArgs)
+	}
+}
+
 func TestSessionManagerDoesNotSleepThinkingSessionWithActiveTurn(t *testing.T) {
 	backend := newEarlyReturnBackend()
 	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
@@ -426,6 +462,7 @@ type scopedRecordingBackend struct {
 	sendCount       int
 	forceCloseCount int
 	closeCount      int
+	startOptions    []ExecuteOptions
 }
 
 func (b *scopedRecordingBackend) Name() string { return "scoped-recording" }
@@ -437,6 +474,7 @@ func (b *scopedRecordingBackend) Execute(context.Context, *ExecuteRequest, *Exec
 func (b *scopedRecordingBackend) Start(_ context.Context, req *ExecuteRequest, opts *ExecuteOptions) (*PersistentSession, error) {
 	b.mu.Lock()
 	b.startAgentIDs = append(b.startAgentIDs, req.AgentID)
+	b.startOptions = append(b.startOptions, *opts)
 	id := opts.ResumeSessionID
 	if id == "" {
 		id = "session-" + fmt.Sprint(len(b.startAgentIDs))

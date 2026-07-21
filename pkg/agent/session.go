@@ -138,7 +138,10 @@ func (m *AgentSessionManager) GetOrCreateScopedSession(ctx context.Context, sess
 
 	if exists {
 		if m.isSessionAlive(entry) {
-			return m.deliverToSession(ctx, sessionKey, entry, initialMessages)
+			// createSession re-checks the pool entry after acquiring the turn.
+			// Going through it avoids delivering to an entry that crashed while
+			// this caller was waiting behind an in-flight turn.
+			return m.createSession(ctx, sessionKey, agentID, agentCfg, channelCtx, initialMessages, resumeSessionID, mentionedNames)
 		}
 		_, _, resumeID := entry.snapshot()
 		return m.createSession(ctx, sessionKey, agentID, agentCfg, channelCtx, initialMessages, firstNonEmpty(resumeID, resumeSessionID), mentionedNames)
@@ -432,6 +435,16 @@ func (m *AgentSessionManager) deliverToSession(ctx context.Context, sessionKey s
 		}
 	}()
 
+	// The caller resolves an entry before waiting for the session turn. A
+	// crash/restart may replace it during that wait, so never send through a
+	// stale process handle.
+	m.mu.RLock()
+	currentEntry, exists := m.sessions[sessionKey]
+	m.mu.RUnlock()
+	if !exists || currentEntry != entry {
+		return nil, fmt.Errorf("session %s changed while waiting for turn", sessionKey)
+	}
+
 	m.logger.Info("session: delivering message", "agent_id", entry.AgentID, "session_key", sessionKey)
 	previous, asleep, _ := entry.snapshot()
 	if asleep || previous == nil {
@@ -511,7 +524,6 @@ func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, age
 		CustomArgs:   agentCfg.CustomArgs,
 	}
 	if prevSessionID != "" {
-		executeOpts.CustomArgs = append(executeOpts.CustomArgs, "--resume", prevSessionID)
 		executeOpts.ResumeSessionID = prevSessionID
 	}
 
@@ -632,11 +644,8 @@ func (m *AgentSessionManager) watchCrash(sessionKey, agentID string, agentCfg Ag
 
 	<-state.Done()
 
-	m.mu.RLock()
-	currentEntry, exists := m.sessions[sessionKey]
-	m.mu.RUnlock()
 	_, asleep, resumeID := entry.snapshot()
-	if !exists || currentEntry != entry || asleep {
+	if asleep {
 		return
 	}
 
@@ -651,6 +660,11 @@ func (m *AgentSessionManager) watchCrash(sessionKey, agentID string, agentCfg Ag
 	)
 
 	m.mu.Lock()
+	currentEntry, exists := m.sessions[sessionKey]
+	if !exists || currentEntry != entry {
+		m.mu.Unlock()
+		return
+	}
 	delete(m.sessions, sessionKey)
 	m.mu.Unlock()
 

@@ -114,13 +114,15 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 	trySend(msgCh, OutputChunk{Type: string(MessageStatus), Content: "running", SessionID: threadID})
 
 	// First turn.
-	if _, err := c.request(ctx, "turn/start", map[string]any{
+	turnResult, err := c.request(ctx, "turn/start", map[string]any{
 		"threadId": threadID,
 		"input":    []map[string]any{{"type": "text", "text": prompt}},
-	}); err != nil {
+	})
+	if err != nil {
 		runner.close()
 		return nil, fmt.Errorf("codex persistent turn/start: %w", err)
 	}
+	c.recordTurnID(extractCodexTurnID(turnResult))
 
 	state := &codexPersistentState{
 		runner:   runner,
@@ -129,7 +131,18 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 	}
 
 	var stopOnce sync.Once
-	stop := func() error { stopOnce.Do(func() { runner.cancel() }); return nil }
+	var stopErr error
+	stop := func() error {
+		stopOnce.Do(func() {
+			stopErr = c.interruptCurrentTurn()
+			if stopErr != nil {
+				// A broken control channel cannot preserve a reusable process. Kill
+				// it so the turn lock is eventually released by crash handling.
+				runner.cancel()
+			}
+		})
+		return stopErr
+	}
 
 	return &PersistentSession{
 		Messages:  msgCh,
@@ -171,15 +184,21 @@ func (b *CodexBackend) Send(ctx context.Context, ps *PersistentSession, messages
 		},
 	)
 
-	if _, err := state.client.request(ctx, "turn/start", map[string]any{
+	turnResult, err := state.client.request(ctx, "turn/start", map[string]any{
 		"threadId": state.threadID,
 		"input":    []map[string]any{{"type": "text", "text": prompt}},
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, fmt.Errorf("codex persistent turn/start: %w", err)
 	}
+	state.client.recordTurnID(extractCodexTurnID(turnResult))
 
 	var stopOnce sync.Once
-	stop := func() error { stopOnce.Do(func() {}); return nil }
+	var stopErr error
+	stop := func() error {
+		stopOnce.Do(func() { stopErr = state.client.interruptCurrentTurn() })
+		return stopErr
+	}
 
 	return &PersistentSession{
 		Messages:  msgCh,
@@ -837,6 +856,39 @@ func (c *codexClient) prepareTurn(onDone turnDoneCallback, onFailed turnFailedCa
 	c.turnID = ""
 }
 
+func (c *codexClient) recordTurnID(turnID string) {
+	if turnID == "" {
+		return
+	}
+	c.turnDoneMu.Lock()
+	if !c.turnDone {
+		c.turnID = turnID
+	}
+	c.turnDoneMu.Unlock()
+}
+
+func (c *codexClient) interruptCurrentTurn() error {
+	c.turnDoneMu.Lock()
+	threadID, turnID, done := c.threadID, c.turnID, c.turnDone
+	c.turnDoneMu.Unlock()
+	if done {
+		return nil
+	}
+	if threadID == "" || turnID == "" {
+		return fmt.Errorf("codex: cannot interrupt turn without thread and turn IDs")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := c.request(ctx, "turn/interrupt", map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
+	})
+	if err != nil {
+		return fmt.Errorf("codex turn/interrupt: %w", err)
+	}
+	return nil
+}
+
 func (c *codexClient) signalTurnFailure(err error) {
 	c.turnDoneMu.Lock()
 	if c.turnDone {
@@ -942,7 +994,7 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 	case "turn/started":
 		c.turnStarted = true
 		if turnID := extractNestedString(params, "turn", "id"); turnID != "" {
-			c.turnID = turnID
+			c.recordTurnID(turnID)
 		}
 		if c.onChunk != nil {
 			c.onChunk(OutputChunk{Type: string(MessageStatus), Content: "running"})
@@ -1270,6 +1322,18 @@ func extractCodexThreadID(result json.RawMessage) string {
 		return ""
 	}
 	return r.Thread.ID
+}
+
+func extractCodexTurnID(result json.RawMessage) string {
+	var r struct {
+		Turn struct {
+			ID string `json:"id"`
+		} `json:"turn"`
+	}
+	if err := json.Unmarshal(result, &r); err != nil {
+		return ""
+	}
+	return r.Turn.ID
 }
 
 func extractNestedString(m map[string]any, keys ...string) string {
