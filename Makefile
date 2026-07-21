@@ -43,9 +43,9 @@ stop: ## Shut down all services
 	@echo "=== Stopping all services ==="
 	@-for f in .pids/*.pid; do [ -f "$$f" ] || continue; kill "$$(cat "$$f")" 2>/dev/null || true; done
 	@-lsof -t "$$(pwd)/.pids/server" "$$(pwd)/.pids/daemon" 2>/dev/null | xargs kill 2>/dev/null && echo "Stale .pids processes stopped" || true
-	@-lsof -ti :8080 | xargs kill 2>/dev/null && echo "Server stopped" || echo "Server not running"
-	@-lsof -ti :8081 | xargs kill 2>/dev/null && echo "Daemon stopped" || echo "Daemon not running"
-	@-lsof -ti :3000 | xargs kill 2>/dev/null && echo "Frontend stopped" || echo "Frontend not running"
+	@-lsof -ti tcp:8080 -sTCP:LISTEN | xargs kill 2>/dev/null && echo "Server stopped" || echo "Server not running"
+	@-lsof -ti tcp:8081 -sTCP:LISTEN | xargs kill 2>/dev/null && echo "Daemon stopped" || echo "Daemon not running"
+	@-lsof -ti tcp:3000 -sTCP:LISTEN | xargs kill 2>/dev/null && echo "Frontend stopped" || echo "Frontend not running"
 	@rm -f .pids/*.pid
 	@sleep 1
 	@echo "=== All services stopped ==="
