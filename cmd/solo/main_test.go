@@ -268,6 +268,50 @@ func TestHandleTaskListWithChannel(t *testing.T) {
 	}
 }
 
+func TestHandleTaskTrajectoryPrintsVersionedJSON(t *testing.T) {
+	channelID := "550e8400-e29b-41d4-a716-446655440001"
+	taskID := "550e8400-e29b-41d4-a716-446655440002"
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/channels/" + channelID + "/tasks":
+			json.NewEncoder(w).Encode([]map[string]any{{"id": taskID, "task_number": 7}})
+		case "/api/v1/tasks/" + taskID + "/trajectory":
+			json.NewEncoder(w).Encode(map[string]any{
+				"schema_version": "solo.task_trajectory.v1",
+				"root_task_id":   taskID,
+				"tasks":          []any{},
+				"runs":           []any{},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	code, stdout, stderr := captureAndRun(t, func() {
+		handleTaskTrajectory([]string{"-c", channelID, "-n", "7", "--output", "json"}, server.URL, "test-token")
+	})
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	var output map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &output); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout)
+	}
+	if output["schema_version"] != "solo.task_trajectory.v1" || output["root_task_id"] != taskID {
+		t.Fatalf("output = %+v", output)
+	}
+}
+
 func TestHandleTaskListOutputJSON(t *testing.T) {
 	var capturedMethod, capturedPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -308,6 +308,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Get("/api/v1/tasks/{taskID}", taskHandler.GetGlobal)
 		r.Get("/api/v1/tasks/{taskID}/runs", agentRunHandler.TaskRuns)
 		r.Get("/api/v1/tasks/{taskID}/agent-timeline", agentRunHandler.TaskTimeline)
+		r.Get("/api/v1/tasks/{taskID}/trajectory", agentRunHandler.TaskTrajectory)
 		r.Patch("/api/v1/tasks/{taskID}", taskHandler.UpdateGlobal)
 		r.Delete("/api/v1/tasks/{taskID}", taskHandler.DeleteGlobal)
 		r.Post("/api/v1/tasks/{taskID}/accept", taskHandler.AcceptGlobal)

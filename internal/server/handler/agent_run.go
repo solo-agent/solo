@@ -1,20 +1,26 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/solo-ai/solo/internal/server/service"
 )
 
 type AgentRunHandler struct {
-	svc *service.AgentRunService
+	svc           *service.AgentRunService
+	trajectorySvc *service.TaskTrajectoryService
 }
 
 func NewAgentRunHandler(pool *pgxpool.Pool) *AgentRunHandler {
-	return &AgentRunHandler{svc: service.NewAgentRunService(pool)}
+	return &AgentRunHandler{
+		svc:           service.NewAgentRunService(pool),
+		trajectorySvc: service.NewTaskTrajectoryService(pool),
+	}
 }
 
 func (h *AgentRunHandler) Active(w http.ResponseWriter, r *http.Request) {
@@ -143,6 +149,33 @@ func (h *AgentRunHandler) TaskTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, timeline)
+}
+
+func (h *AgentRunHandler) TaskTrajectory(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	taskID := chi.URLParam(r, "taskID")
+	if _, err := uuid.Parse(taskID); err != nil {
+		writeError(w, http.StatusBadRequest, "taskID must be a UUID")
+		return
+	}
+
+	snapshot, err := h.trajectorySvc.Export(r.Context(), taskID, userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrTaskNotFound):
+			writeError(w, http.StatusNotFound, "task not found")
+		case errors.Is(err, service.ErrTaskNotChannelMember):
+			writeError(w, http.StatusForbidden, "not authorized to read this task trajectory")
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to export task trajectory")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, snapshot)
 }
 
 func timelineLimit(r *http.Request) int {
