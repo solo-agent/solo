@@ -20,6 +20,7 @@ interface AgentRun {
   source?: string;
   transcript_path?: string;
   started_at: string;
+  backend_started_at?: string;
   updated_at: string;
 }
 

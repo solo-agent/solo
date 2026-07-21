@@ -4,10 +4,44 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestAcquireTurnCancellationDoesNotLeakSemaphore(t *testing.T) {
+	mgr := NewAgentSessionManager(nil, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	firstRelease, err := mgr.acquireTurn(context.Background(), "agent:one", "one")
+	if err != nil {
+		t.Fatalf("acquire first turn: %v", err)
+	}
+
+	waitCtx, cancel := context.WithCancel(context.Background())
+	waitResult := make(chan error, 1)
+	go func() {
+		_, waitErr := mgr.acquireTurn(waitCtx, "agent:one", "one")
+		waitResult <- waitErr
+	}()
+	cancel()
+	select {
+	case waitErr := <-waitResult:
+		if waitErr == nil || !strings.Contains(waitErr.Error(), context.Canceled.Error()) {
+			t.Fatalf("cancelled waiter error = %v, want context canceled", waitErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled turn waiter did not unblock")
+	}
+
+	firstRelease()
+	nextCtx, nextCancel := context.WithTimeout(context.Background(), time.Second)
+	defer nextCancel()
+	nextRelease, err := mgr.acquireTurn(nextCtx, "agent:one", "one")
+	if err != nil {
+		t.Fatalf("acquire after cancelled waiter: %v", err)
+	}
+	nextRelease()
+}
 
 func TestSessionManagerScopesSessionsWithoutCloningAgent(t *testing.T) {
 	backend := &scopedRecordingBackend{}

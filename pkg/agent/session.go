@@ -421,7 +421,10 @@ func (m *AgentSessionManager) isSessionAlive(entry *agentSessionEntry) bool {
 }
 
 func (m *AgentSessionManager) deliverToSession(ctx context.Context, sessionKey string, entry *agentSessionEntry, messages []Message) (*PersistentSession, error) {
-	release := m.acquireTurn(sessionKey, entry.AgentID)
+	release, err := m.acquireTurn(ctx, sessionKey, entry.AgentID)
+	if err != nil {
+		return nil, err
+	}
 	releaseOnReturn := true
 	defer func() {
 		if releaseOnReturn {
@@ -453,7 +456,10 @@ func (m *AgentSessionManager) deliverToSession(ctx context.Context, sessionKey s
 }
 
 func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, messages []Message, prevSessionID string, mentionedNames []string) (*PersistentSession, error) {
-	release := m.acquireTurn(sessionKey, agentID)
+	release, err := m.acquireTurn(ctx, sessionKey, agentID)
+	if err != nil {
+		return nil, err
+	}
 	releaseOnReturn := true
 	defer func() {
 		if releaseOnReturn {
@@ -514,8 +520,21 @@ func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, age
 	// max 5 concurrent, FIFO queue with 500ms dequeue interval).
 	queueLen := len(m.startSlots)
 	m.logger.Info("session: start queued", "agent_id", agentID, "queue", queueLen, "max", cap(m.startSlots))
-	m.startSlots <- struct{}{}         // acquire slot (blocks if 5 already starting)
-	time.Sleep(500 * time.Millisecond) // dequeue interval
+	select {
+	case m.startSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("wait for session start slot: %w", ctx.Err())
+	}
+	dequeueTimer := time.NewTimer(500 * time.Millisecond)
+	select {
+	case <-dequeueTimer.C:
+	case <-ctx.Done():
+		if !dequeueTimer.Stop() {
+			<-dequeueTimer.C
+		}
+		<-m.startSlots
+		return nil, fmt.Errorf("wait for session start interval: %w", ctx.Err())
+	}
 	m.logger.Info("session: dequeued start", "agent_id", agentID, "queue", len(m.startSlots))
 
 	ps, err := m.backend.Start(ctx, executeReq, executeOpts)
@@ -669,7 +688,7 @@ func (m *AgentSessionManager) notifyInbox(sessionKey string, count int) {
 	_ = state.Notify(notification)
 }
 
-func (m *AgentSessionManager) acquireTurn(sessionKey, agentID string) func() {
+func (m *AgentSessionManager) acquireTurn(ctx context.Context, sessionKey, agentID string) (func(), error) {
 	m.turnsMu.Lock()
 	ch, exists := m.activeTurns[sessionKey]
 	if !exists {
@@ -685,8 +704,17 @@ func (m *AgentSessionManager) acquireTurn(sessionKey, agentID string) func() {
 	}
 	m.turnsMu.Unlock()
 
-	<-ch
-	<-agentCh
+	select {
+	case <-ch:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("wait for session turn: %w", ctx.Err())
+	}
+	select {
+	case <-agentCh:
+	case <-ctx.Done():
+		ch <- struct{}{}
+		return nil, fmt.Errorf("wait for agent turn: %w", ctx.Err())
+	}
 	m.turnsMu.Lock()
 	m.activeAgentScopes[agentID] = sessionKey
 	m.turnsMu.Unlock()
@@ -699,7 +727,7 @@ func (m *AgentSessionManager) acquireTurn(sessionKey, agentID string) func() {
 		m.turnsMu.Unlock()
 		agentCh <- struct{}{}
 		ch <- struct{}{}
-	}
+	}, nil
 }
 
 func (m *AgentSessionManager) tryAcquireScopedTurn(sessionKey string) (func(), bool) {

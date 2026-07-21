@@ -216,6 +216,7 @@ type AgentRunPayload struct {
 	ToolName         string `json:"tool_name,omitempty"`
 	ToolInputSummary string `json:"tool_input_summary,omitempty"`
 	Source           string `json:"source,omitempty"`
+	BackendStartedAt string `json:"backend_started_at,omitempty"`
 	Timestamp        string `json:"timestamp"`
 }
 

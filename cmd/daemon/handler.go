@@ -573,6 +573,7 @@ func (h *daemonHandler) getProvider(providerType string) llm.Provider {
 // runTaskRequest is the payload sent by the server to the daemon.
 type runTaskRequest struct {
 	TaskID                string             `json:"task_id"`
+	RunID                 string             `json:"run_id,omitempty"`
 	AgentID               string             `json:"agent_id"`
 	ChannelID             string             `json:"channel_id"`
 	ThreadID              string             `json:"thread_id,omitempty"`
@@ -634,7 +635,7 @@ func (h *daemonHandler) Run(w http.ResponseWriter, r *http.Request) {
 		AgentID:    req.AgentID,
 		ChannelID:  req.ChannelID,
 		ThreadID:   req.ThreadID,
-		Status:     taskStatusRunning,
+		Status:     taskStatusQueued,
 		ReceivedAt: time.Now(),
 	})
 
@@ -649,7 +650,7 @@ func (h *daemonHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// Return 202 Accepted immediately
 	writeJSON(w, http.StatusAccepted, runTaskResponse{
 		TaskID: req.TaskID,
-		Status: "running",
+		Status: taskStatusQueued,
 	})
 
 	// Process the task asynchronously with streaming
@@ -675,14 +676,7 @@ func (h *daemonHandler) processTaskStreaming(ctx context.Context, req runTaskReq
 // This is the fallback path for providers not supported by the Backend
 // interface (e.g. openai, anthropic).
 func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTaskRequest) {
-	h.taskManager.UpdateStatus(req.TaskID, taskStatusThinking)
 	slog.Info("task processing started (streaming)", "task_id", req.TaskID, "agent_id", req.AgentID)
-
-	// Push thinking event
-	h.pushEventJSON(req.TaskID, "thinking", map[string]string{
-		"agent_id": req.AgentID,
-		"thought":  "Processing request...",
-	})
 
 	// Build LLM request
 	llmMsgs := make([]llm.Message, len(req.Messages))
@@ -732,6 +726,15 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 		h.taskManager.CloseAllSubscribers(req.TaskID)
 		return
 	}
+	h.pushEventJSON(req.TaskID, "backend_started", map[string]string{
+		"agent_id": req.AgentID,
+		"run_id":   req.RunID,
+	})
+	h.taskManager.UpdateStatus(req.TaskID, taskStatusThinking)
+	h.pushEventJSON(req.TaskID, "thinking", map[string]string{
+		"agent_id": req.AgentID,
+		"thought":  "Processing request...",
+	})
 
 	// Collect full content from stream
 	var fullContent string
@@ -844,19 +847,12 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 			}
 		}()
 	}
-	h.taskManager.UpdateStatus(req.TaskID, taskStatusThinking)
 	slog.Info("task processing started (backend)",
 		"task_id", req.TaskID,
 		"agent_id", req.AgentID,
 		"backend", backend.Name(),
 		"model", req.ModelConfig.Model,
 	)
-
-	// Push initial thinking event
-	h.pushEventJSON(req.TaskID, "thinking", map[string]string{
-		"agent_id": req.AgentID,
-		"thought":  "Preparing workspace...",
-	})
 
 	// Fetch agent info from DB for name and system prompt
 	agentInfo, err := h.fetchAgentInfo(ctx, req.AgentID)
@@ -1003,11 +999,6 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		coldStartMsgs = msgs
 	}
 
-	h.pushEventJSON(req.TaskID, "thinking", map[string]string{
-		"agent_id": req.AgentID,
-		"thought":  "Processing...",
-	})
-
 	// Execute via Backend
 	executeReq := &agent.ExecuteRequest{
 		AgentID:  req.AgentID,
@@ -1079,10 +1070,22 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		}
 	}
 
+	if ctx.Err() != nil {
+		slog.Info("task cancelled while waiting for backend turn", "task_id", req.TaskID, "agent_id", req.AgentID)
+		h.taskManager.UpdateStatus(req.TaskID, taskStatusCancelled)
+		h.taskManager.CloseAllSubscribers(req.TaskID)
+		return
+	}
 	if session == nil {
 		var execErr error
 		session, execErr = backend.Execute(ctx, executeReq, executeOpts)
 		if execErr != nil {
+			if ctx.Err() != nil {
+				slog.Info("task cancelled during backend start", "task_id", req.TaskID, "agent_id", req.AgentID)
+				h.taskManager.UpdateStatus(req.TaskID, taskStatusCancelled)
+				h.taskManager.CloseAllSubscribers(req.TaskID)
+				return
+			}
 			slog.Error("task: Backend.Execute failed", "task_id", req.TaskID, "error", execErr)
 			h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
 			h.notifyServerError(req, execErr.Error())
@@ -1097,6 +1100,15 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		providerSessionID = session.SessionID
 		transcriptPath = transcriptPathForProvider(req.ModelConfig.Provider, ws.WorkDir, providerSessionID)
 	}
+	h.pushEventJSON(req.TaskID, "backend_started", map[string]string{
+		"agent_id": req.AgentID,
+		"run_id":   req.RunID,
+	})
+	h.taskManager.UpdateStatus(req.TaskID, taskStatusThinking)
+	h.pushEventJSON(req.TaskID, "thinking", map[string]string{
+		"agent_id": req.AgentID,
+		"thought":  "Processing...",
+	})
 	if providerSessionID != "" || transcriptPath != "" {
 		h.pushEventJSON(req.TaskID, "session", map[string]interface{}{
 			"agent_id":            req.AgentID,

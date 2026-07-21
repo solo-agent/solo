@@ -13,6 +13,7 @@ import (
 
 // Task status constants.
 const (
+	taskStatusQueued    = "queued"
 	taskStatusRunning   = "running"
 	taskStatusThinking  = "thinking"
 	taskStatusCompleted = "completed"
@@ -98,7 +99,7 @@ func (tm *taskManager) ListActiveTasks() []string {
 
 	var active []string
 	for id, t := range tm.tasks {
-		if t.Status == taskStatusRunning || t.Status == taskStatusThinking {
+		if t.Status == taskStatusQueued || t.Status == taskStatusRunning || t.Status == taskStatusThinking {
 			active = append(active, id)
 		}
 	}
@@ -118,7 +119,7 @@ func (tm *taskManager) ActiveAgentIDs() []string {
 	seen := make(map[string]bool)
 	var ids []string
 	for _, t := range tm.tasks {
-		if (t.Status == taskStatusRunning || t.Status == taskStatusThinking) && !seen[t.AgentID] {
+		if (t.Status == taskStatusQueued || t.Status == taskStatusRunning || t.Status == taskStatusThinking) && !seen[t.AgentID] {
 			seen[t.AgentID] = true
 			ids = append(ids, t.AgentID)
 		}

@@ -33,6 +33,7 @@ const (
 	agentRunEventNoProgressWatchdog     = "watchdog_no_progress"
 
 	agentActivityAccepted       = "agent.activity.accepted"
+	agentActivityQueueTimeout   = "agent.activity.queue_timeout"
 	agentActivityNoVisibleReply = "agent.activity.no_visible_reply"
 	agentActivityNoProgress     = "agent.activity.no_progress"
 	agentActivityCompleted      = "agent.activity.completed"
@@ -622,8 +623,9 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 	s.dm.TrackTask(taskReq.TaskID, daemon.ID, ag.ID)
 	defer s.dm.RemoveTask(taskReq.TaskID)
 
-	// Use a timeout context so tasks don't hang indefinitely (e.g., LLM API hang).
-	streamCtx, streamCancel := context.WithTimeout(ctx, agentTaskStreamTimeout)
+	// Queue and backend execution are timed independently by DaemonManager.
+	// This context is cancelled when either phase exceeds its own deadline.
+	streamCtx, streamCancel := context.WithCancel(ctx)
 	defer streamCancel()
 
 	// Pre-generate a message ID for the streaming message
@@ -649,6 +651,7 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 	}
 	if run != nil {
 		s.dm.AttachTaskRun(taskReq.TaskID, run.ID)
+		taskReq.RunID = run.ID
 	}
 	if run != nil && taskReq.OriginTaskID != "" {
 		if err := runSvc.LinkTask(ctx, LinkRunTaskInput{RunID: run.ID, TaskID: taskReq.OriginTaskID, Role: AgentRunTaskRolePrimary, Confidence: 1}); err != nil {
@@ -675,20 +678,6 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 			"trigger_message_id": taskReq.TriggerMessageID,
 			"task_id":            taskReq.OriginTaskID,
 		})
-		if updated, err := runSvc.UpdateStatus(ctx, UpdateRunStatusInput{
-			RunID:        run.ID,
-			Status:       AgentRunStatusThinking,
-			ActivityText: agentActivityAccepted,
-			Source:       taskReq.ModelConfig.Provider,
-		}); err != nil {
-			slog.Warn("failed to acknowledge agent run", "run_id", run.ID, "error", err)
-		} else {
-			run = updated
-			s.appendAndBroadcastRunEvent(ctx, runSvc, run, ag.ID, agentName, AgentRunEventActivity, agentActivityAccepted, "", map[string]any{
-				"status": AgentRunStatusThinking,
-			})
-			s.broadcastAgentRun(taskReq.ChannelID, "agent.run.updated", runPayload(run, ag.ID, agentName, taskReq.OriginTaskID))
-		}
 	}
 
 	slog.Debug("dispatching agent streaming task",
@@ -707,9 +696,6 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 			SenderID: "system",
 		}}, taskReq.Messages...)
 	}
-
-	// Broadcast thinking event immediately
-	s.broadcastAgentThinking(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "Processing request...")
 
 	// Broadcast user trigger message as context for agent view
 	if len(taskReq.Messages) > 0 {
@@ -768,8 +754,33 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 	// and read by the deferred broadcaster. Defaults to "aborted" if the stream
 	// ends without a more specific state.
 	finalState := "aborted"
+	markBackendStarted := func() bool {
+		if run == nil {
+			return false
+		}
+		if run.BackendStartedAt != nil {
+			return true
+		}
+		updated, err := runSvc.MarkBackendStarted(ctx, run.ID)
+		if err != nil {
+			slog.Warn("failed to mark agent backend started", "run_id", run.ID, "error", err)
+			return false
+		}
+		run = updated
+		s.dm.MarkTaskBackendStarted(taskReq.TaskID, run.BackendStartedAt)
+		s.appendAndBroadcastRunEvent(ctx, runSvc, run, ag.ID, agentName, AgentRunEventBackendStarted, "provider backend started", "", map[string]any{
+			"backend_started_at": run.BackendStartedAt,
+		})
+		return true
+	}
 	bindRunSession := func(externalSessionID, transcriptPath string) {
 		if run == nil || (externalSessionID == "" && transcriptPath == "") {
+			return
+		}
+		// A session is only reported after the daemon has acquired the provider
+		// turn. This also keeps mixed-version daemons truthful when they do not
+		// yet emit the explicit backend_started event.
+		if !markBackendStarted() {
 			return
 		}
 		session, err := runSvc.UpsertSession(ctx, UpsertSessionInput{
@@ -812,7 +823,17 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 
 	for event := range eventCh {
 		switch event.Event {
+		case "backend_started":
+			if markBackendStarted() {
+				s.broadcastAgentRun(taskReq.ChannelID, "agent.run.updated", runPayload(run, ag.ID, agentName, taskReq.OriginTaskID))
+			}
+
 		case "thinking":
+			if run != nil && run.BackendStartedAt == nil {
+				// Older daemons may emit preparation text before they acquire a
+				// provider turn. Keep the run and UI queued until session/start proof.
+				continue
+			}
 			var data struct {
 				AgentID string `json:"agent_id"`
 				Thought string `json:"thought"`
@@ -957,6 +978,11 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 					"task_id", taskReq.TaskID, "error", err)
 				continue
 			}
+			current, err := runSvc.GetRun(ctx, run.ID)
+			if err == nil && !isActiveAgentRunStatus(current.Status) {
+				run = current
+				continue
+			}
 			updated, err := runSvc.UpdateStatus(ctx, UpdateRunStatusInput{
 				RunID:            run.ID,
 				Status:           AgentRunStatus(activity.Status),
@@ -1032,6 +1058,7 @@ func runPayload(run *AgentRun, agentID, agentName, taskID string) map[string]any
 		"tool_input_summary": run.ToolInputSummary,
 		"transcript_path":    run.TranscriptPath,
 		"source":             run.Source,
+		"backend_started_at": run.BackendStartedAt,
 		"timestamp":          time.Now().UTC().Format(time.RFC3339),
 	}
 }
@@ -1130,10 +1157,10 @@ func (s *AgentService) CheckAgentRunWatchdogs(ctx context.Context, now time.Time
 func (s *AgentService) listStaleActiveRuns(ctx context.Context, before time.Time) ([]AgentRun, error) {
 	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
 		 WHERE r.status = ANY($1)
-		   AND r.started_at <= $2
-		 ORDER BY r.started_at ASC
+		   AND r.backend_started_at <= $2
+		 ORDER BY r.backend_started_at ASC
 		 LIMIT 100`,
-		activeAgentRunStatuses(),
+		executingAgentRunStatuses(),
 		before,
 	))
 }
@@ -1141,7 +1168,7 @@ func (s *AgentService) listStaleActiveRuns(ctx context.Context, before time.Time
 func (s *AgentService) listRunsWithoutVisibleReply(ctx context.Context, before time.Time) ([]AgentRun, error) {
 	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
 		 WHERE r.status = ANY($1)
-		   AND r.started_at <= $2
+		   AND r.backend_started_at <= $2
 		   AND NOT EXISTS (
 		         SELECT 1 FROM agent_run_events e
 		          WHERE e.run_id = r.id AND e.type = $3
@@ -1152,7 +1179,7 @@ func (s *AgentService) listRunsWithoutVisibleReply(ctx context.Context, before t
 		       )
 		 ORDER BY r.started_at ASC
 		 LIMIT 100`,
-		activeAgentRunStatuses(),
+		executingAgentRunStatuses(),
 		before,
 		AgentRunEventAssistantMessage,
 		agentRunEventNoVisibleReplyWatchdog,
@@ -1162,6 +1189,7 @@ func (s *AgentService) listRunsWithoutVisibleReply(ctx context.Context, before t
 func (s *AgentService) listRunsWithoutProgress(ctx context.Context, before time.Time) ([]AgentRun, error) {
 	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
 		 WHERE r.status = ANY($1)
+		   AND r.backend_started_at IS NOT NULL
 		   AND r.updated_at <= $2
 		   AND NOT EXISTS (
 		         SELECT 1 FROM agent_run_events e
@@ -1169,7 +1197,7 @@ func (s *AgentService) listRunsWithoutProgress(ctx context.Context, before time.
 		       )
 		 ORDER BY r.updated_at ASC
 		 LIMIT 100`,
-		activeAgentRunStatuses(),
+		executingAgentRunStatuses(),
 		before,
 		agentRunEventNoProgressWatchdog,
 	))
@@ -1178,6 +1206,16 @@ func (s *AgentService) listRunsWithoutProgress(ctx context.Context, before time.
 func activeAgentRunStatuses() []string {
 	return []string{
 		string(AgentRunStatusQueued),
+		string(AgentRunStatusThinking),
+		string(AgentRunStatusRunning),
+		string(AgentRunStatusStreaming),
+		string(AgentRunStatusWaitingInput),
+		string(AgentRunStatusWaitingApproval),
+	}
+}
+
+func executingAgentRunStatuses() []string {
+	return []string{
 		string(AgentRunStatusThinking),
 		string(AgentRunStatusRunning),
 		string(AgentRunStatusStreaming),
@@ -2350,6 +2388,7 @@ func (s *AgentService) getChannelOpenTasksSummary(ctx context.Context, channelID
 // daemonTaskRequest is the format for tasks sent from server to daemon.
 type daemonTaskRequest struct {
 	TaskID                string            `json:"task_id"`
+	RunID                 string            `json:"run_id,omitempty"`
 	AgentID               string            `json:"agent_id"`
 	ChannelID             string            `json:"channel_id"`
 	ThreadID              string            `json:"thread_id,omitempty"`

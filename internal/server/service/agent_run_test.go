@@ -88,8 +88,23 @@ func TestAgentRunServiceLifecycle(t *testing.T) {
 	if run.SessionID != session.ID {
 		t.Fatalf("bound run session_id = %q, want %q", run.SessionID, session.ID)
 	}
-	if run.Status != AgentRunStatusRunning {
-		t.Fatalf("bound run status = %q, want %q", run.Status, AgentRunStatusRunning)
+	if run.Status != AgentRunStatusQueued || run.BackendStartedAt != nil {
+		t.Fatalf("bound run = status %q backend_started_at %v, want queued without backend start", run.Status, run.BackendStartedAt)
+	}
+	run, err = svc.MarkBackendStarted(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("MarkBackendStarted: %v", err)
+	}
+	if run.Status != AgentRunStatusRunning || run.BackendStartedAt == nil {
+		t.Fatalf("started run = status %q backend_started_at %v, want running with timestamp", run.Status, run.BackendStartedAt)
+	}
+	firstBackendStartedAt := *run.BackendStartedAt
+	run, err = svc.MarkBackendStarted(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("replay MarkBackendStarted: %v", err)
+	}
+	if run.BackendStartedAt == nil || !run.BackendStartedAt.Equal(firstBackendStartedAt) {
+		t.Fatalf("replayed backend_started_at = %v, want %v", run.BackendStartedAt, firstBackendStartedAt)
 	}
 	activeRuns, err := svc.ListActiveRuns(ctx)
 	if err != nil {
@@ -242,6 +257,9 @@ func TestAgentRunServiceLifecycle(t *testing.T) {
 	}
 	if finished.FinishedAt == nil {
 		t.Fatal("finished_at is nil")
+	}
+	if _, err := svc.MarkBackendStarted(ctx, run.ID); err == nil {
+		t.Fatal("MarkBackendStarted revived a terminal run")
 	}
 	recentRuns, err := svc.ListRecentRuns(ctx)
 	if err != nil {

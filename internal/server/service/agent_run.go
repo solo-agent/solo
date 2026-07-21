@@ -49,6 +49,7 @@ const (
 const (
 	AgentRunEventUserMessageReceived = "user_message_received"
 	AgentRunEventRunStarted          = "run_started"
+	AgentRunEventBackendStarted      = "backend_started"
 	AgentRunEventThinking            = "thinking"
 	AgentRunEventActivity            = "activity"
 	AgentRunEventToolStarted         = "tool_started"
@@ -100,6 +101,7 @@ type AgentRun struct {
 	TranscriptPath   string          `json:"transcript_path,omitempty"`
 	UsageJSON        json.RawMessage `json:"usage_json"`
 	StartedAt        time.Time       `json:"started_at"`
+	BackendStartedAt *time.Time      `json:"backend_started_at,omitempty"`
 	UpdatedAt        time.Time       `json:"updated_at"`
 	FinishedAt       *time.Time      `json:"finished_at,omitempty"`
 }
@@ -304,7 +306,7 @@ func (s *AgentRunService) StartRun(ctx context.Context, input StartRunInput) (*A
 		       COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
 		       COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		       COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
-		       started_at, updated_at, finished_at`,
+		       started_at, backend_started_at, updated_at, finished_at`,
 		uuid.NewString(), input.AgentID, nullableUUID(input.SessionID), input.TriggerType,
 		nullableUUID(input.TriggerMessageID), nullableUUID(input.ChannelID), nullableUUID(input.ThreadID), nullableUUID(input.ThinkingNodeID),
 		string(input.Status), input.ActivityText, nullableStr(input.ToolName),
@@ -327,8 +329,6 @@ func (s *AgentRunService) BindRunSession(ctx context.Context, input BindRunSessi
 	run, err := scanAgentRun(tx.QueryRow(ctx,
 		`UPDATE agent_runs
 		    SET session_id = $2,
-		        status = CASE WHEN status = 'queued' THEN 'running' ELSE status END,
-		        activity_text = CASE WHEN status = 'queued' THEN '执行中' ELSE activity_text END,
 		        updated_at = now()
 		  WHERE id = $1
 		    AND EXISTS (
@@ -341,7 +341,7 @@ func (s *AgentRunService) BindRunSession(ctx context.Context, input BindRunSessi
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
 		        COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''),
-		        usage_json, started_at, updated_at, finished_at`,
+		        usage_json, started_at, backend_started_at, updated_at, finished_at`,
 		input.RunID, input.SessionID,
 	))
 	if err != nil {
@@ -369,6 +369,32 @@ func (s *AgentRunService) BindRunSession(ctx context.Context, input BindRunSessi
 		return nil, err
 	}
 	return run, nil
+}
+
+// MarkBackendStarted records the first authoritative transition from queued to
+// provider execution. Replayed daemon events are idempotent, and terminal runs
+// are never revived.
+func (s *AgentRunService) MarkBackendStarted(ctx context.Context, runID string) (*AgentRun, error) {
+	if runID == "" {
+		return nil, fmt.Errorf("run_id is required")
+	}
+	return scanAgentRun(s.pool.QueryRow(ctx,
+		`UPDATE agent_runs
+		    SET status = CASE WHEN status = 'queued' THEN 'running' ELSE status END,
+		        activity_text = CASE WHEN status = 'queued' THEN '执行中' ELSE activity_text END,
+		        backend_started_at = COALESCE(backend_started_at, now()),
+		        updated_at = CASE WHEN backend_started_at IS NULL THEN now() ELSE updated_at END
+		  WHERE id = $1
+		    AND status = ANY($2)
+		  RETURNING id::text, agent_id::text,
+		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
+		        COALESCE(session_id::text, ''), trigger_type,
+		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
+		        COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
+		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
+		        started_at, backend_started_at, updated_at, finished_at`,
+		runID, activeAgentRunStatuses(),
+	))
 }
 
 func (s *AgentRunService) AppendEvent(ctx context.Context, input AppendRunEventInput) (*AgentRunEvent, error) {
@@ -407,7 +433,7 @@ func (s *AgentRunService) UpdateStatus(ctx context.Context, input UpdateRunStatu
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
 		        COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
-		        started_at, updated_at, finished_at`,
+		        started_at, backend_started_at, updated_at, finished_at`,
 		input.RunID, string(input.Status), input.ActivityText, nullableStr(input.ToolName),
 		nullableStr(input.ToolInputSummary), nullableStr(input.Source), usage,
 	))
@@ -428,7 +454,7 @@ func (s *AgentRunService) UpdateRunTranscript(ctx context.Context, input UpdateR
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
 		        COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''),
-		        usage_json, started_at, updated_at, finished_at`,
+		        usage_json, started_at, backend_started_at, updated_at, finished_at`,
 		input.RunID, nullableStr(input.TranscriptPath),
 	))
 }
@@ -469,7 +495,7 @@ func (s *AgentRunService) FinishRun(ctx context.Context, input FinishRunInput) (
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
 		        COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
-		        started_at, updated_at, finished_at`,
+		        started_at, backend_started_at, updated_at, finished_at`,
 		input.RunID, string(input.Status), input.ActivityText, usage,
 	))
 }
@@ -741,7 +767,7 @@ func baseAgentRunSelect() string {
 	        COALESCE(r.trigger_message_id::text, ''), COALESCE(r.channel_id::text, ''),
 	        COALESCE(r.thread_id::text, ''), COALESCE(r.thinking_node_id::text, ''), r.status, r.activity_text, COALESCE(r.tool_name, ''),
 	        COALESCE(r.tool_input_summary, ''), COALESCE(r.source, ''), COALESCE(r.transcript_path, ''), r.usage_json,
-	        r.started_at, r.updated_at, r.finished_at
+	        r.started_at, r.backend_started_at, r.updated_at, r.finished_at
 	   FROM agent_runs r
 	   LEFT JOIN agents a ON a.id = r.agent_id`
 }
@@ -777,16 +803,19 @@ func scanAgentRun(row interface {
 }) (*AgentRun, error) {
 	var run AgentRun
 	var status string
-	var finished sql.NullTime
+	var backendStarted, finished sql.NullTime
 	if err := row.Scan(
 		&run.ID, &run.AgentID, &run.AgentName, &run.SessionID, &run.TriggerType, &run.TriggerMessageID,
 		&run.ChannelID, &run.ThreadID, &run.ThinkingNodeID, &status, &run.ActivityText, &run.ToolName,
 		&run.ToolInputSummary, &run.Source, &run.TranscriptPath, &run.UsageJSON,
-		&run.StartedAt, &run.UpdatedAt, &finished,
+		&run.StartedAt, &backendStarted, &run.UpdatedAt, &finished,
 	); err != nil {
 		return nil, err
 	}
 	run.Status = AgentRunStatus(status)
+	if backendStarted.Valid {
+		run.BackendStartedAt = &backendStarted.Time
+	}
 	if finished.Valid {
 		run.FinishedAt = &finished.Time
 	}

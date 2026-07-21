@@ -29,11 +29,13 @@ const (
 
 // PendingTaskInfo holds metadata for a task dispatched to a daemon.
 type PendingTaskInfo struct {
-	TaskID    string    `json:"task_id"`
-	AgentID   string    `json:"agent_id"`
-	DaemonID  string    `json:"daemon_id"`
-	RunID     string    `json:"run_id,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	TaskID           string     `json:"task_id"`
+	AgentID          string     `json:"agent_id"`
+	DaemonID         string     `json:"daemon_id"`
+	RunID            string     `json:"run_id,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	BackendStartedAt *time.Time `json:"backend_started_at,omitempty"`
+	TimeoutPhase     string     `json:"-"`
 }
 
 // DaemonInfo holds runtime state for a registered daemon instance.
@@ -68,9 +70,10 @@ type DaemonManager struct {
 	// Pending tasks indexed by taskID for cleanup when daemons go offline.
 	pendingTasks map[string]PendingTaskInfo
 
-	// taskTimeout dictates how long a pending task can remain without
-	// completion before it is considered stale and removed.
-	taskTimeout time.Duration
+	// Queue wait and provider execution have distinct clocks. A task waiting
+	// for a persistent-session turn must not consume its execution budget.
+	queueTimeout     time.Duration
+	executionTimeout time.Duration
 
 	stopCh chan struct{}
 }
@@ -85,7 +88,8 @@ func NewDaemonManager(pool *pgxpool.Pool, hub realtime.Broadcaster) *DaemonManag
 		httpClient:        &http.Client{Timeout: 10 * time.Second},
 		heartbeatInterval: 30 * time.Second,
 		maxMissedHB:       3,
-		taskTimeout:       6 * time.Minute,
+		queueTimeout:      20 * time.Minute,
+		executionTimeout:  6 * time.Minute,
 		stopCh:            make(chan struct{}),
 	}
 }
@@ -225,6 +229,26 @@ func (dm *DaemonManager) AttachTaskRun(taskID, runID string) {
 		return
 	}
 	task.RunID = runID
+	dm.pendingTasks[taskID] = task
+}
+
+// MarkTaskBackendStarted moves pending-task timeout accounting from queue wait
+// to provider execution. Replayed events keep the first authoritative time.
+func (dm *DaemonManager) MarkTaskBackendStarted(taskID string, startedAt *time.Time) {
+	if taskID == "" {
+		return
+	}
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+	task, ok := dm.pendingTasks[taskID]
+	if !ok || task.BackendStartedAt != nil {
+		return
+	}
+	started := time.Now()
+	if startedAt != nil {
+		started = *startedAt
+	}
+	task.BackendStartedAt = &started
 	dm.pendingTasks[taskID] = task
 }
 
@@ -637,7 +661,7 @@ func (dm *DaemonManager) checkHealth() {
 		}
 	}
 
-	// Remove tasks that have exceeded the timeout threshold.
+	// Remove tasks that have exceeded their phase-specific timeout threshold.
 	timedOutTasks = append(timedOutTasks, dm.removeStaleTasks(now)...)
 	dm.mu.Unlock()
 
@@ -646,12 +670,22 @@ func (dm *DaemonManager) checkHealth() {
 	}
 }
 
-// removeStaleTasks removes pending tasks that have exceeded the timeout duration.
+// removeStaleTasks removes pending tasks that have exceeded the timeout for
+// their current phase.
 func (dm *DaemonManager) removeStaleTasks(now time.Time) []PendingTaskInfo {
 	cleaned := 0
 	timedOutTasks := make([]PendingTaskInfo, 0)
 	for taskID, task := range dm.pendingTasks {
-		if now.Sub(task.CreatedAt) > dm.taskTimeout {
+		deadlineBase := task.CreatedAt
+		timeout := dm.queueTimeout
+		phase := "queue"
+		if task.BackendStartedAt != nil {
+			deadlineBase = *task.BackendStartedAt
+			timeout = dm.executionTimeout
+			phase = "execution"
+		}
+		if now.Sub(deadlineBase) > timeout {
+			task.TimeoutPhase = phase
 			timedOutTasks = append(timedOutTasks, task)
 			delete(dm.pendingTasks, taskID)
 			cleaned++
@@ -660,7 +694,8 @@ func (dm *DaemonManager) removeStaleTasks(now time.Time) []PendingTaskInfo {
 	if cleaned > 0 {
 		slog.Warn("cleaned up stale pending tasks",
 			"task_count", cleaned,
-			"timeout", dm.taskTimeout,
+			"queue_timeout", dm.queueTimeout,
+			"execution_timeout", dm.executionTimeout,
 		)
 	}
 	return timedOutTasks
@@ -682,10 +717,14 @@ func (dm *DaemonManager) timeoutPendingTaskRun(task PendingTaskInfo) {
 	if !isActiveAgentRunStatus(run.Status) {
 		return
 	}
+	activity := agentActivityTimeout
+	if task.TimeoutPhase == "queue" {
+		activity = agentActivityQueueTimeout
+	}
 	finished, err := runSvc.FinishRun(ctx, FinishRunInput{
 		RunID:        run.ID,
 		Status:       AgentRunStatusTimeout,
-		ActivityText: agentActivityTimeout,
+		ActivityText: activity,
 	})
 	if err != nil {
 		slog.Warn("failed to timeout pending task run", "task_id", task.TaskID, "run_id", task.RunID, "error", err)
@@ -694,6 +733,22 @@ func (dm *DaemonManager) timeoutPendingTaskRun(task PendingTaskInfo) {
 	if dm.hub != nil {
 		dm.hub.Broadcast(realtime.Envelope("agent.run.finished", runPayload(finished, finished.AgentID, finished.AgentName, "")))
 	}
+	if daemon := dm.daemonByID(task.DaemonID); daemon != nil {
+		if err := dm.CancelTask(ctx, daemon, task.TaskID); err != nil {
+			slog.Warn("failed to cancel timed out daemon task", "task_id", task.TaskID, "daemon_id", task.DaemonID, "error", err)
+		}
+	}
+}
+
+func (dm *DaemonManager) daemonByID(daemonID string) *DaemonInfo {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+	daemon := dm.daemons[daemonID]
+	if daemon == nil {
+		return nil
+	}
+	copy := *daemon
+	return &copy
 }
 
 func hasCapability(caps []string, cap string) bool {

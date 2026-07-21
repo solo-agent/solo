@@ -26,6 +26,7 @@ interface AgentRunResponse {
   tool_input_summary?: string;
   source?: string;
   started_at?: string;
+  backend_started_at?: string;
   updated_at?: string;
 }
 
