@@ -114,10 +114,12 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 	trySend(msgCh, OutputChunk{Type: string(MessageStatus), Content: "running", SessionID: threadID})
 
 	// First turn.
-	turnResult, err := c.request(ctx, "turn/start", map[string]any{
+	turnCtx, cancelTurnStart := context.WithTimeout(context.Background(), 10*time.Second)
+	turnResult, err := c.request(turnCtx, "turn/start", map[string]any{
 		"threadId": threadID,
 		"input":    []map[string]any{{"type": "text", "text": prompt}},
 	})
+	cancelTurnStart()
 	if err != nil {
 		runner.close()
 		return nil, fmt.Errorf("codex persistent turn/start: %w", err)
@@ -184,10 +186,12 @@ func (b *CodexBackend) Send(ctx context.Context, ps *PersistentSession, messages
 		},
 	)
 
-	turnResult, err := state.client.request(ctx, "turn/start", map[string]any{
+	turnCtx, cancelTurnStart := context.WithTimeout(context.Background(), 10*time.Second)
+	turnResult, err := state.client.request(turnCtx, "turn/start", map[string]any{
 		"threadId": state.threadID,
 		"input":    []map[string]any{{"type": "text", "text": prompt}},
 	})
+	cancelTurnStart()
 	if err != nil {
 		return nil, fmt.Errorf("codex persistent turn/start: %w", err)
 	}
@@ -884,6 +888,14 @@ func (c *codexClient) interruptCurrentTurn() error {
 		"turnId":   turnID,
 	})
 	if err != nil {
+		// The provider can finish a turn before its terminal notification is
+		// observed locally. In that case, "no active turn" is authoritative
+		// confirmation that there is nothing left to interrupt; converge the
+		// local channels so the session turn lock can be released.
+		if strings.Contains(strings.ToLower(err.Error()), "no active turn to interrupt") {
+			c.signalTurnDone(true)
+			return nil
+		}
 		return fmt.Errorf("codex turn/interrupt: %w", err)
 	}
 	return nil

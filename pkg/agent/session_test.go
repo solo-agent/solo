@@ -231,6 +231,35 @@ func TestSessionManagerUsesProtocolResumeWithoutInjectingCLIFlag(t *testing.T) {
 	}
 }
 
+func TestSessionCrashWaitsForNextTrackedRequestToResume(t *testing.T) {
+	backend := &scopedRecordingBackend{}
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	done := make(chan struct{})
+	close(done)
+	state := earlyReturnState{doneCh: done, sessionID: "provider-session-1"}
+	ps := &PersistentSession{SessionID: "provider-session-1", state: state}
+	entry := &agentSessionEntry{
+		SessionKey: "agent:agent-1",
+		AgentID:    "agent-1",
+		Session:    ps,
+		sessionID:  "provider-session-1",
+	}
+	mgr.sessions[entry.SessionKey] = entry
+
+	mgr.watchCrash(entry.SessionKey, entry.AgentID, AgentConfig{}, ChannelContext{}, entry, state)
+
+	current, asleep, resumeID := entry.snapshot()
+	if current != nil || !asleep || resumeID != "provider-session-1" {
+		t.Fatalf("crashed entry = session:%v asleep:%v resume:%q", current, asleep, resumeID)
+	}
+	backend.mu.Lock()
+	starts := len(backend.startAgentIDs)
+	backend.mu.Unlock()
+	if starts != 0 {
+		t.Fatalf("crash recovery started %d untracked turns, want 0", starts)
+	}
+}
+
 func TestSessionManagerDoesNotSleepThinkingSessionWithActiveTurn(t *testing.T) {
 	backend := newEarlyReturnBackend()
 	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())

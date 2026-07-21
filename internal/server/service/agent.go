@@ -1122,6 +1122,16 @@ func (s *AgentService) StartAgentRunWatchdogLoop(ctx context.Context) {
 
 func (s *AgentService) CheckAgentRunWatchdogs(ctx context.Context, now time.Time) error {
 	runSvc := NewAgentRunService(s.pool)
+	staleQueuedRuns, err := s.listStaleQueuedRuns(ctx, now.Add(-agentTaskStreamTimeout))
+	if err != nil {
+		return err
+	}
+	for i := range staleQueuedRuns {
+		if err := s.timeoutStaleQueuedAgentRun(ctx, runSvc, &staleQueuedRuns[i]); err != nil {
+			return err
+		}
+	}
+
 	staleRuns, err := s.listStaleActiveRuns(ctx, now.Add(-agentRunStaleAfter))
 	if err != nil {
 		return err
@@ -1152,6 +1162,18 @@ func (s *AgentService) CheckAgentRunWatchdogs(ctx context.Context, now time.Time
 		}
 	}
 	return nil
+}
+
+func (s *AgentService) listStaleQueuedRuns(ctx context.Context, before time.Time) ([]AgentRun, error) {
+	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
+		 WHERE r.status = $1
+		   AND r.backend_started_at IS NULL
+		   AND r.started_at <= $2
+		 ORDER BY r.started_at ASC
+		 LIMIT 100`,
+		AgentRunStatusQueued,
+		before,
+	))
 }
 
 func (s *AgentService) listStaleActiveRuns(ctx context.Context, before time.Time) ([]AgentRun, error) {
@@ -1234,15 +1256,23 @@ func isActiveAgentRunStatus(status AgentRunStatus) bool {
 }
 
 func (s *AgentService) timeoutStaleAgentRun(ctx context.Context, runSvc *AgentRunService, run *AgentRun) error {
+	return s.finishTimedOutAgentRun(ctx, runSvc, run, agentActivityTimeout)
+}
+
+func (s *AgentService) timeoutStaleQueuedAgentRun(ctx context.Context, runSvc *AgentRunService, run *AgentRun) error {
+	return s.finishTimedOutAgentRun(ctx, runSvc, run, agentActivityQueueTimeout)
+}
+
+func (s *AgentService) finishTimedOutAgentRun(ctx context.Context, runSvc *AgentRunService, run *AgentRun, activity string) error {
 	finished, err := runSvc.FinishRun(ctx, FinishRunInput{
 		RunID:        run.ID,
 		Status:       AgentRunStatusTimeout,
-		ActivityText: agentActivityTimeout,
+		ActivityText: activity,
 	})
 	if err != nil {
 		return err
 	}
-	s.appendAndBroadcastRunEvent(ctx, runSvc, finished, finished.AgentID, finished.AgentName, AgentRunEventError, agentActivityTimeout, "", map[string]any{
+	s.appendAndBroadcastRunEvent(ctx, runSvc, finished, finished.AgentID, finished.AgentName, AgentRunEventError, activity, "", map[string]any{
 		"status": AgentRunStatusTimeout,
 	})
 	s.broadcastAgentRun(finished.ChannelID, "agent.run.finished", runPayload(finished, finished.AgentID, finished.AgentName, ""))

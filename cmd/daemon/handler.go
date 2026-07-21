@@ -656,7 +656,10 @@ func (h *daemonHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// Process the task asynchronously with streaming
 	ctx, cancel := context.WithCancel(context.Background())
 	h.taskManager.SetCancelFunc(req.TaskID, cancel)
-	go h.processTaskStreaming(ctx, req)
+	go func() {
+		defer h.taskManager.ClearCancelFunc(req.TaskID)
+		h.processTaskStreaming(ctx, req)
+	}()
 }
 
 // processTaskStreaming executes the LLM call in streaming mode and pushes events.
@@ -1071,6 +1074,11 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	}
 
 	if ctx.Err() != nil {
+		if session != nil && session.Stop != nil {
+			if stopErr := session.Stop(); stopErr != nil {
+				slog.Warn("task: backend stop failed after cancelled start", "task_id", req.TaskID, "agent_id", req.AgentID, "error", stopErr)
+			}
+		}
 		slog.Info("task cancelled while waiting for backend turn", "task_id", req.TaskID, "agent_id", req.AgentID)
 		h.taskManager.UpdateStatus(req.TaskID, taskStatusCancelled)
 		h.taskManager.CloseAllSubscribers(req.TaskID)

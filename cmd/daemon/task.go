@@ -197,7 +197,7 @@ func (tm *taskManager) CloseAllSubscribers(taskID string) {
 
 func isReplayableSSEEvent(event string) bool {
 	switch event {
-	case "session", "complete", "error", "done":
+	case "backend_started", "session", "complete", "error", "done":
 		return true
 	default:
 		return false
@@ -211,6 +211,14 @@ func (tm *taskManager) SetCancelFunc(taskID string, cancel context.CancelFunc) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	tm.cancelFuncs[taskID] = cancel
+}
+
+// ClearCancelFunc removes task-scoped cancellation after processing ends. A
+// completed task must never retain authority over a reused persistent process.
+func (tm *taskManager) ClearCancelFunc(taskID string) {
+	tm.mu.Lock()
+	delete(tm.cancelFuncs, taskID)
+	tm.mu.Unlock()
 }
 
 // CancelTask cancels a running task using its stored cancel function.

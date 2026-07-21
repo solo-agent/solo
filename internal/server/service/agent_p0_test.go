@@ -131,7 +131,7 @@ func TestAgentRunWatchdogsWarnOnce(t *testing.T) {
 	}
 }
 
-func TestAgentRunWatchdogsIgnoreQueuedRun(t *testing.T) {
+func TestAgentRunWatchdogsTimeoutOrphanedQueuedRun(t *testing.T) {
 	pool := agentRunTestPool(t)
 	ctx := context.Background()
 	ownerID := agentRunUser(t, pool)
@@ -165,11 +165,11 @@ func TestAgentRunWatchdogsIgnoreQueuedRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun: %v", err)
 	}
-	if current.Status != AgentRunStatusQueued || current.BackendStartedAt != nil {
-		t.Fatalf("queued run changed by watchdog: %+v", current)
+	if current.Status != AgentRunStatusTimeout || current.BackendStartedAt != nil || current.FinishedAt == nil {
+		t.Fatalf("orphaned queued run did not converge to timeout: %+v", current)
 	}
-	if len(rec.broadcastMessages) != 0 {
-		t.Fatalf("queued run emitted watchdog events: %q", rec.broadcastMessages)
+	if !rec.hasBroadcastEvent("agent.run.finished", agentActivityQueueTimeout) {
+		t.Fatalf("queued timeout finish not broadcast: %q", rec.broadcastMessages)
 	}
 }
 

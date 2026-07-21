@@ -635,8 +635,9 @@ func (m *AgentSessionManager) inFailedCooldown(agentID string) bool {
 	return true
 }
 
-// watchCrash monitors a session. On unexpected exit (crash, not sleep),
-// auto-restarts with --resume to recover context.
+// watchCrash monitors a session. On unexpected exit (crash, not sleep), it
+// preserves the provider session ID but does not start an untracked recovery
+// turn. The next task-scoped request performs the resume.
 func (m *AgentSessionManager) watchCrash(sessionKey, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, entry *agentSessionEntry, state SessionStater) {
 	if state == nil {
 		return
@@ -653,7 +654,7 @@ func (m *AgentSessionManager) watchCrash(sessionKey, agentID string, agentCfg Ag
 		resumeID = sid
 	}
 
-	m.logger.Warn("session: crashed, auto-restarting",
+	m.logger.Warn("session: crashed, marking asleep for tracked resume",
 		"agent_id", agentID,
 		"session_key", sessionKey,
 		"session_id", resumeID,
@@ -665,18 +666,14 @@ func (m *AgentSessionManager) watchCrash(sessionKey, agentID string, agentCfg Ag
 		m.mu.Unlock()
 		return
 	}
-	delete(m.sessions, sessionKey)
+	entry.mu.Lock()
+	entry.Session = nil
+	entry.asleep = true
+	if resumeID != "" {
+		entry.sessionID = resumeID
+	}
+	entry.mu.Unlock()
 	m.mu.Unlock()
-
-	restartMsg := Message{
-		Role:    RoleUser,
-		Content: "Your session has been restored after a restart. Context is preserved via --resume. Continue from where you left off.",
-	}
-
-	_, err := m.createSession(context.Background(), sessionKey, agentID, agentCfg, channelCtx, []Message{restartMsg}, resumeID, nil)
-	if err != nil {
-		m.logger.Error("session: crash recovery failed", "agent_id", agentID, "session_key", sessionKey, "error", err)
-	}
 }
 
 // notifyInbox writes a lightweight notification to the agent's stdin,
