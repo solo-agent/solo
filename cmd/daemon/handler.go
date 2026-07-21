@@ -923,9 +923,15 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	if err != nil {
 		slog.Warn("task: failed to generate agent token — agent cannot call APIs", "agent_id", req.AgentID, "error", err)
 	}
+	localDaemonPort := strings.TrimSpace(os.Getenv("DAEMON_PORT"))
+	if localDaemonPort == "" {
+		localDaemonPort = "8081"
+	}
 	agentEnv := map[string]string{
 		"SOLO_AGENT_ID":   req.AgentID,
 		"SOLO_AGENT_NAME": agentInfo.Name,
+		"SOLO_API_URL":    h.serverURL,
+		"SOLO_DAEMON_URL": "http://127.0.0.1:" + localDaemonPort,
 	}
 	if req.NodeID != "" {
 		agentEnv["SOLO_NODE_ID"] = req.NodeID
