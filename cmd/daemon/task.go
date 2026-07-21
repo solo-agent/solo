@@ -238,7 +238,6 @@ func (tm *taskManager) CancelTask(taskID string) bool {
 	cancel()
 
 	tm.UpdateStatus(taskID, taskStatusCancelled)
-	tm.CloseAllSubscribers(taskID)
 
 	slog.Info("task cancelled", "task_id", taskID)
 	return true

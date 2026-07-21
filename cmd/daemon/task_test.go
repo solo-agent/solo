@@ -39,6 +39,36 @@ func TestTaskManagerClearsCompletedTaskCancellation(t *testing.T) {
 	}
 }
 
+func TestTaskManagerCancellationLeavesStreamForTerminalEvent(t *testing.T) {
+	tm := newTaskManager()
+	tm.AddTask("task-1", &taskState{TaskID: "task-1"})
+	sub := tm.SubscribeSSE("task-1")
+	tm.SetCancelFunc("task-1", func() {})
+	if !tm.CancelTask("task-1") {
+		t.Fatal("CancelTask = false, want true")
+	}
+	select {
+	case _, ok := <-sub.events:
+		if !ok {
+			t.Fatal("cancellation closed stream before processor terminal event")
+		}
+	default:
+	}
+
+	h := &daemonHandler{taskManager: tm}
+	h.finishCancelledTask(runTaskRequest{TaskID: "task-1", AgentID: "agent-1"})
+	got := drainEvents(sub.events)
+	want := []string{"error", "done"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}
+
 func TestTaskManagerCloseDrainsQueuedEvents(t *testing.T) {
 	tm := newTaskManager()
 	taskID := "task-1"

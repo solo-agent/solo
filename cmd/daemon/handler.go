@@ -675,6 +675,18 @@ func (h *daemonHandler) processTaskStreaming(ctx context.Context, req runTaskReq
 	h.processTaskWithProvider(ctx, req)
 }
 
+func (h *daemonHandler) finishCancelledTask(req runTaskRequest) {
+	h.taskManager.UpdateStatus(req.TaskID, taskStatusCancelled)
+	h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
+		"agent_id":  req.AgentID,
+		"error":     "execution cancelled",
+		"status":    "cancelled",
+		"retryable": false,
+	})
+	h.pushEventJSON(req.TaskID, "done", map[string]interface{}{})
+	h.taskManager.CloseAllSubscribers(req.TaskID)
+}
+
 // processTaskWithProvider runs a task using the old LLM provider interface.
 // This is the fallback path for providers not supported by the Backend
 // interface (e.g. openai, anthropic).
@@ -782,8 +794,7 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 	// Check if context was cancelled (user stop)
 	if ctx.Err() != nil {
 		slog.Info("task cancelled via context", "task_id", req.TaskID, "agent_id", req.AgentID)
-		h.taskManager.UpdateStatus(req.TaskID, taskStatusCancelled)
-		h.taskManager.CloseAllSubscribers(req.TaskID)
+		h.finishCancelledTask(req)
 		return
 	}
 	if !sawDone {
@@ -1080,8 +1091,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 			}
 		}
 		slog.Info("task cancelled while waiting for backend turn", "task_id", req.TaskID, "agent_id", req.AgentID)
-		h.taskManager.UpdateStatus(req.TaskID, taskStatusCancelled)
-		h.taskManager.CloseAllSubscribers(req.TaskID)
+		h.finishCancelledTask(req)
 		return
 	}
 	if session == nil {
@@ -1090,8 +1100,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		if execErr != nil {
 			if ctx.Err() != nil {
 				slog.Info("task cancelled during backend start", "task_id", req.TaskID, "agent_id", req.AgentID)
-				h.taskManager.UpdateStatus(req.TaskID, taskStatusCancelled)
-				h.taskManager.CloseAllSubscribers(req.TaskID)
+				h.finishCancelledTask(req)
 				return
 			}
 			slog.Error("task: Backend.Execute failed", "task_id", req.TaskID, "error", execErr)
@@ -1140,8 +1149,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 				}
 			}
 			slog.Info("task cancelled via context", "task_id", req.TaskID, "agent_id", req.AgentID)
-			h.taskManager.UpdateStatus(req.TaskID, taskStatusCancelled)
-			h.taskManager.CloseAllSubscribers(req.TaskID)
+			h.finishCancelledTask(req)
 			return
 		case next, ok := <-session.Messages:
 			if !ok {
@@ -1243,8 +1251,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	// Check context cancellation
 	if ctx.Err() != nil {
 		slog.Info("task cancelled via context", "task_id", req.TaskID, "agent_id", req.AgentID)
-		h.taskManager.UpdateStatus(req.TaskID, taskStatusCancelled)
-		h.taskManager.CloseAllSubscribers(req.TaskID)
+		h.finishCancelledTask(req)
 		return
 	}
 
