@@ -54,12 +54,8 @@ trap cleanup_on_exit EXIT
 SERVER_PORT="${SERVER_PORT:-8080}"
 DAEMON_PORT="${DAEMON_PORT:-8081}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
-NEXT_DEV_ARGS="${NEXT_DEV_ARGS:-}"
-SERVER_URL="${DAEMON_SERVER_URL:-http://127.0.0.1:$SERVER_PORT}"
+SERVER_URL="http://127.0.0.1:$SERVER_PORT"
 FRONTEND_URL="http://127.0.0.1:$FRONTEND_PORT"
-if [ "$SERVER_URL" = "http://localhost:$SERVER_PORT" ]; then
-  SERVER_URL="http://127.0.0.1:$SERVER_PORT"
-fi
 
 is_running() {
   local pidfile="$1"
@@ -143,14 +139,10 @@ if is_running "$PID_DIR/frontend.pid"; then
   echo "Frontend already running"
 else
   require_free_port "Frontend" "$FRONTEND_PORT"
-  FRONTEND_DEV_ARGS=()
-  if [ -n "$NEXT_DEV_ARGS" ]; then
-    read -r -a FRONTEND_DEV_ARGS <<< "$NEXT_DEV_ARGS"
-  fi
   cd frontend
   nohup env PORT="$FRONTEND_PORT" \
     NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-http://127.0.0.1:$SERVER_PORT}" \
-    npm run dev -- "${FRONTEND_DEV_ARGS[@]}" > "$REPO_ROOT/frontend.log" 2>&1 &
+    npm run dev > "$REPO_ROOT/frontend.log" 2>&1 &
   FRONTEND_PID=$!
   cd "$REPO_ROOT"
   echo "$FRONTEND_PID" > "$PID_DIR/frontend.pid"
