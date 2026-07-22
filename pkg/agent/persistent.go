@@ -104,7 +104,10 @@ func startPersistent(
 		logger = slog.Default()
 	}
 
-	runCtx, cancel := context.WithCancel(ctx)
+	// A persistent subprocess belongs to the pooled Agent session, not to the
+	// task that happened to create it. Task cancellation is handled at the turn
+	// protocol layer; only Close/ForceClose should terminate this process.
+	runCtx, cancel := context.WithCancel(context.Background())
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	cmd.WaitDelay = 10 * time.Second

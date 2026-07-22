@@ -266,6 +266,200 @@ done
 	}
 }
 
+func TestCodexPersistentStopAcknowledgementReleasesTurnWithoutNotification(t *testing.T) {
+	tempDir := t.TempDir()
+	fake := filepath.Join(tempDir, "codex")
+
+	script := `#!/bin/sh
+turn_count=0
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"id":1,"result":{}}\n'
+      ;;
+    *'"method":"thread/start"'*)
+      printf '{"id":2,"result":{"thread":{"id":"codex-session-1"}}}\n'
+      ;;
+    *'"method":"turn/start"'*)
+      turn_count=$((turn_count + 1))
+      if [ "$turn_count" -eq 1 ]; then
+        printf '{"id":3,"result":{"turn":{"id":"turn-1"}}}\n'
+      else
+        printf '{"id":5,"result":{"turn":{"id":"turn-2"}}}\n'
+        printf '{"method":"turn/completed","params":{"threadId":"codex-session-1","turn":{"id":"turn-2","status":"completed"}}}\n'
+      fi
+      ;;
+    *'"method":"turn/interrupt"'*)
+      case "$line" in
+        *'"threadId":"codex-session-1"'*'"turnId":"turn-1"'*) ;;
+        *) exit 9 ;;
+	      esac
+	      printf '{"id":4,"result":{}}\n'
+	      ;;
+  esac
+done
+`
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake Codex CLI: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	backend := NewCodexBackend(fake, slog.Default())
+	taskCtx, cancelTask := context.WithCancel(ctx)
+	initial, err := backend.Start(taskCtx, &ExecuteRequest{
+		AgentID:  "agent-1",
+		Messages: []Message{{Role: RoleUser, Content: "first"}},
+	}, &ExecuteOptions{})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer backend.Close(initial)
+	cancelTask()
+
+	if err := initial.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if result := readTurnResult(t, initial.Result); result.Status != "cancelled" {
+		t.Fatalf("interrupted result = %+v, want cancelled", result)
+	}
+	if !initial.state.(SessionStater).IsAlive() {
+		t.Fatal("Codex process exited after interrupting only the active turn")
+	}
+
+	second, err := backend.Send(ctx, initial, []Message{{Role: RoleUser, Content: "second"}})
+	if err != nil {
+		t.Fatalf("Send after interrupt: %v", err)
+	}
+	if result := readTurnResult(t, second.Result); result.Status != "completed" {
+		t.Fatalf("second result = %+v, want completed", result)
+	}
+}
+
+func TestCodexPersistentStopConvergesWhenProviderTurnAlreadyEnded(t *testing.T) {
+	tempDir := t.TempDir()
+	fake := filepath.Join(tempDir, "codex")
+
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"id":1,"result":{}}\n'
+      ;;
+    *'"method":"thread/start"'*)
+      printf '{"id":2,"result":{"thread":{"id":"codex-session-1"}}}\n'
+      ;;
+    *'"method":"turn/start"'*)
+      printf '{"id":3,"result":{"turn":{"id":"turn-1"}}}\n'
+      ;;
+    *'"method":"turn/interrupt"'*)
+      printf '{"id":4,"error":{"code":-32600,"message":"no active turn to interrupt"}}\n'
+      ;;
+  esac
+done
+`
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake Codex CLI: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	backend := NewCodexBackend(fake, slog.Default())
+	initial, err := backend.Start(ctx, &ExecuteRequest{
+		AgentID:  "agent-1",
+		Messages: []Message{{Role: RoleUser, Content: "first"}},
+	}, &ExecuteOptions{})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer backend.Close(initial)
+
+	if err := initial.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if result := readTurnResult(t, initial.Result); result.Status != "cancelled" {
+		t.Fatalf("converged result = %+v, want cancelled", result)
+	}
+	if !initial.state.(SessionStater).IsAlive() {
+		t.Fatal("Codex process exited while converging an already-ended turn")
+	}
+}
+
+func TestCodexPersistentSendAcknowledgesAcceptedTurnAfterTaskCancellation(t *testing.T) {
+	tempDir := t.TempDir()
+	fake := filepath.Join(tempDir, "codex")
+
+	script := `#!/bin/sh
+turn_count=0
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"id":1,"result":{}}\n'
+      ;;
+    *'"method":"thread/start"'*)
+      printf '{"id":2,"result":{"thread":{"id":"codex-session-1"}}}\n'
+      ;;
+    *'"method":"turn/start"'*)
+      turn_count=$((turn_count + 1))
+      if [ "$turn_count" -eq 1 ]; then
+        printf '{"id":3,"result":{"turn":{"id":"turn-1"}}}\n'
+        printf '{"method":"turn/completed","params":{"threadId":"codex-session-1","turn":{"id":"turn-1","status":"completed"}}}\n'
+      else
+        sleep 0.2
+        printf '{"id":4,"result":{"turn":{"id":"turn-2"}}}\n'
+      fi
+      ;;
+    *'"method":"turn/interrupt"'*)
+      printf '{"id":5,"result":{}}\n'
+      printf '{"method":"turn/completed","params":{"threadId":"codex-session-1","turn":{"id":"turn-2","status":"interrupted"}}}\n'
+      ;;
+  esac
+done
+`
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake Codex CLI: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	backend := NewCodexBackend(fake, slog.Default())
+	initial, err := backend.Start(ctx, &ExecuteRequest{
+		AgentID:  "agent-1",
+		Messages: []Message{{Role: RoleUser, Content: "first"}},
+	}, &ExecuteOptions{})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer backend.Close(initial)
+	if result := readTurnResult(t, initial.Result); result.Status != "completed" {
+		t.Fatalf("initial result = %+v", result)
+	}
+
+	taskCtx, cancelTask := context.WithCancel(ctx)
+	type sendOutcome struct {
+		ps  *PersistentSession
+		err error
+	}
+	sent := make(chan sendOutcome, 1)
+	go func() {
+		ps, sendErr := backend.Send(taskCtx, initial, []Message{{Role: RoleUser, Content: "second"}})
+		sent <- sendOutcome{ps: ps, err: sendErr}
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancelTask()
+
+	outcome := <-sent
+	if outcome.err != nil {
+		t.Fatalf("Send after accepted turn cancellation: %v", outcome.err)
+	}
+	if err := outcome.ps.Stop(); err != nil {
+		t.Fatalf("Stop accepted turn: %v", err)
+	}
+	if result := readTurnResult(t, outcome.ps.Result); result.Status != "cancelled" {
+		t.Fatalf("cancelled accepted turn result = %+v", result)
+	}
+}
+
 func runACPPersistentProviderTurnContract(t *testing.T, provider string, factory func(string) PersistentBackend) {
 	t.Helper()
 	tempDir := t.TempDir()

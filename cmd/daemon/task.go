@@ -13,6 +13,7 @@ import (
 
 // Task status constants.
 const (
+	taskStatusQueued    = "queued"
 	taskStatusRunning   = "running"
 	taskStatusThinking  = "thinking"
 	taskStatusCompleted = "completed"
@@ -98,7 +99,7 @@ func (tm *taskManager) ListActiveTasks() []string {
 
 	var active []string
 	for id, t := range tm.tasks {
-		if t.Status == taskStatusRunning || t.Status == taskStatusThinking {
+		if t.Status == taskStatusQueued || t.Status == taskStatusRunning || t.Status == taskStatusThinking {
 			active = append(active, id)
 		}
 	}
@@ -118,7 +119,7 @@ func (tm *taskManager) ActiveAgentIDs() []string {
 	seen := make(map[string]bool)
 	var ids []string
 	for _, t := range tm.tasks {
-		if (t.Status == taskStatusRunning || t.Status == taskStatusThinking) && !seen[t.AgentID] {
+		if (t.Status == taskStatusQueued || t.Status == taskStatusRunning || t.Status == taskStatusThinking) && !seen[t.AgentID] {
 			seen[t.AgentID] = true
 			ids = append(ids, t.AgentID)
 		}
@@ -196,7 +197,7 @@ func (tm *taskManager) CloseAllSubscribers(taskID string) {
 
 func isReplayableSSEEvent(event string) bool {
 	switch event {
-	case "session", "complete", "error", "done":
+	case "backend_started", "session", "complete", "error", "done":
 		return true
 	default:
 		return false
@@ -210,6 +211,14 @@ func (tm *taskManager) SetCancelFunc(taskID string, cancel context.CancelFunc) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	tm.cancelFuncs[taskID] = cancel
+}
+
+// ClearCancelFunc removes task-scoped cancellation after processing ends. A
+// completed task must never retain authority over a reused persistent process.
+func (tm *taskManager) ClearCancelFunc(taskID string) {
+	tm.mu.Lock()
+	delete(tm.cancelFuncs, taskID)
+	tm.mu.Unlock()
 }
 
 // CancelTask cancels a running task using its stored cancel function.
@@ -229,7 +238,6 @@ func (tm *taskManager) CancelTask(taskID string) bool {
 	cancel()
 
 	tm.UpdateStatus(taskID, taskStatusCancelled)
-	tm.CloseAllSubscribers(taskID)
 
 	slog.Info("task cancelled", "task_id", taskID)
 	return true
