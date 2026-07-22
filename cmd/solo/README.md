@@ -79,6 +79,21 @@ solo task reopen -n <number> -c <channel_id>
 
 `submit` moves claimed work to review. `accept` marks reviewed work done. `reject` sends reviewed work back to progress. `close` and `reopen` are human lifecycle actions.
 
+### task trajectory -- export task evidence
+
+```bash
+solo task trajectory -n <number> -c <channel_id> \
+  [--output json]
+```
+
+Exports a versioned JSON snapshot containing the requested task and its
+descendants, linked Agent runs, metadata-only ordered run events, transcript
+source-availability metadata, and selected artifact metadata. Run-event
+messages, transcript text, and tool input/output payload fields are not
+exported. The snapshot declares unavailable or unverified correlations instead
+of inferring them from timestamps. This command always writes the snapshot JSON
+object directly to stdout so it can be archived or processed with `jq`.
+
 ### message send -- send a message to a channel
 
 ```bash
