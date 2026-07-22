@@ -22,6 +22,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/solo-ai/solo/internal/auth"
+	"github.com/solo-ai/solo/internal/causal"
 	"github.com/solo-ai/solo/pkg/agent"
 	"github.com/solo-ai/solo/pkg/llm"
 	"github.com/solo-ai/solo/pkg/skillloader"
@@ -399,6 +400,22 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var originRunID string
+	if isRuntimeMutation(req.Action) {
+		scope, ok := h.taskManager.GetActionScope(req.AgentID)
+		if !ok || scope.ChannelID != req.ChannelID || scope.NodeID != req.NodeID {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "no matching active provider turn for mutation"})
+			return
+		}
+		originRunID = scope.RunID
+	}
+	proxyToken := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	claims, authErr := auth.ValidateToken(proxyToken)
+	if authErr != nil || claims.Subject != req.AgentID {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "proxy caller does not match agent_id"})
+		return
+	}
+
 	// Generate or reuse auth token for this agent (SOLO-254-B: token store).
 	token, err := h.getOrGenerateToken(r.Context(), req.AgentID)
 	if err != nil {
@@ -431,6 +448,12 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		serverBody, _ = json.Marshal(map[string]string{"status": req.Status})
 	case "task_unclaim":
 		serverPath = fmt.Sprintf("/api/v1/channels/%s/tasks/%d/claim", req.ChannelID, req.TaskNumber)
+	case "task_submit", "task_accept", "task_reject", "task_close", "task_reopen":
+		action := strings.TrimPrefix(req.Action, "task_")
+		serverPath = fmt.Sprintf("/api/v1/channels/%s/tasks/%d/%s", req.ChannelID, req.TaskNumber, action)
+		if req.Action == "task_reject" {
+			serverBody, _ = json.Marshal(map[string]string{"reason": req.Content})
+		}
 	case "channel_members":
 		serverPath = fmt.Sprintf("/api/v1/channels/%s/members", req.ChannelID)
 	case "server_info":
@@ -465,8 +488,11 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		method := "GET"
 		var fwdBody io.Reader
 		switch req.Action {
-		case "task_claim":
+		case "task_claim", "task_submit", "task_accept", "task_reject", "task_close", "task_reopen":
 			method = "POST"
+			if serverBody != nil {
+				fwdBody = bytes.NewReader(serverBody)
+			}
 		case "task_update":
 			method = "PATCH"
 			fwdBody = bytes.NewReader(serverBody)
@@ -486,6 +512,10 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			httpReq.Header.Set("Content-Type", "application/json")
 		}
 		httpReq.Header.Set("Authorization", "Bearer "+tok)
+		if originRunID != "" {
+			httpReq.Header.Set(causal.RunHeader, originRunID)
+			httpReq.Header.Set(causal.SignatureHeader, causal.Sign(h.internalToken, originRunID, req.AgentID, req.ChannelID))
+		}
 
 		client := h.httpClient
 		if req.Action == "team_form" {
@@ -526,6 +556,15 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	w.Write(body)
+}
+
+func isRuntimeMutation(action string) bool {
+	switch action {
+	case "message_send", "task_claim", "task_unclaim", "task_submit", "task_accept", "task_reject", "task_close", "task_reopen":
+		return true
+	default:
+		return false
+	}
 }
 
 func cloneHTTPClientWithTimeout(client *http.Client, timeout time.Duration) *http.Client {
@@ -573,6 +612,7 @@ func (h *daemonHandler) getProvider(providerType string) llm.Provider {
 // runTaskRequest is the payload sent by the server to the daemon.
 type runTaskRequest struct {
 	TaskID                string             `json:"task_id"`
+	RunID                 string             `json:"run_id,omitempty"`
 	AgentID               string             `json:"agent_id"`
 	ChannelID             string             `json:"channel_id"`
 	ThreadID              string             `json:"thread_id,omitempty"`
@@ -584,7 +624,8 @@ type runTaskRequest struct {
 	SystemPrompt          string             `json:"system_prompt"`
 	ThinkingRuntimePrompt string             `json:"thinking_runtime_prompt,omitempty"`
 	ModelConfig           modelConfigPayload `json:"model_config"`
-	TaskContext           string             `json:"task_context,omitempty"`    // SOLO-221-B: summary of pending tasks in channel
+	TaskContext           string             `json:"task_context,omitempty"` // SOLO-221-B: summary of pending tasks in channel
+	OriginTaskID          string             `json:"origin_task_id,omitempty"`
 	MentionedNames        []string           `json:"mentioned_names,omitempty"` // v1.3: names of @mentioned agents
 }
 
@@ -714,6 +755,12 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 
 	// Select the provider matching the agent type and stream
 	provider := h.getProvider(req.ModelConfig.Provider)
+	clearActionScope, ok := h.activateActionScope(req)
+	if !ok {
+		h.failActionScopeConflict(req)
+		return
+	}
+	defer clearActionScope()
 	streamCh, err := provider.CompleteStream(ctx, llmReq)
 	if err != nil {
 		slog.Error("task: streaming LLM call failed to start",
@@ -732,7 +779,6 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 		h.taskManager.CloseAllSubscribers(req.TaskID)
 		return
 	}
-
 	// Collect full content from stream
 	var fullContent string
 	var usage llm.Usage
@@ -1035,6 +1081,13 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		// ExtraArgs: daemonConfig.ExtraArgs[backend.Name()], // P1 reserved
 	}
 
+	clearActionScope, ok := h.activateActionScope(req)
+	if !ok {
+		h.failActionScopeConflict(req)
+		return
+	}
+	defer clearActionScope()
+
 	// v1.3: Session-aware dispatch. Thinking nodes use a node-scoped pool key
 	// while retaining the real Agent identity, workspace, and configuration.
 	var session *agent.Session
@@ -1272,6 +1325,33 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	// Push done sentinel and close. The done event is consumed by SSE
 	// subscribers in order, eliminating the need for a delay.
 	h.pushEventJSON(req.TaskID, "done", map[string]interface{}{})
+	h.taskManager.CloseAllSubscribers(req.TaskID)
+}
+
+func (h *daemonHandler) activateActionScope(req runTaskRequest) (func(), bool) {
+	// Keep rolling upgrades compatible: an older server may omit run_id.
+	// The turn can execute, but every runtime mutation will fail closed because
+	// no causal scope is registered.
+	if req.RunID == "" {
+		return func() {}, true
+	}
+	scope := actionScope{
+		RunID: req.RunID, AgentID: req.AgentID, ChannelID: req.ChannelID,
+		ThreadID: req.ThreadID, NodeID: req.NodeID, TaskID: req.OriginTaskID,
+	}
+	if !h.taskManager.SetActionScope(scope) {
+		return func() {}, false
+	}
+	return func() { h.taskManager.ClearActionScope(req.AgentID, req.RunID) }, true
+}
+
+func (h *daemonHandler) failActionScopeConflict(req runTaskRequest) {
+	errText := "another provider turn is already active for this agent"
+	h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
+	h.notifyServerError(req, errText)
+	h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
+		"agent_id": req.AgentID, "error": errText, "retryable": true,
+	})
 	h.taskManager.CloseAllSubscribers(req.TaskID)
 }
 

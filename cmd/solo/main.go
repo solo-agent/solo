@@ -16,6 +16,7 @@
 //	solo task reject   -n <number> -c <channel_id> --reason <reason>
 //	solo task close    -n <number> -c <channel_id>
 //	solo task reopen   -n <number> -c <channel_id>
+//	solo task trajectory -n <number> -c <channel_id> [--output json]
 //	solo artifact publish --task <task_id> --file <artifact.html> [--mode latest|final]
 //	solo channel members -c <channel_id> [--output json]
 //	solo channel join  --target <#channel-name>
@@ -379,6 +380,9 @@ func proxyRequest(action, channelID, content, threadID, token string, taskNumber
 		return 0, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	client := &http.Client{Timeout: proxyRequestTimeout(action)}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -389,9 +393,13 @@ func proxyRequest(action, channelID, content, threadID, token string, taskNumber
 	return resp.StatusCode, respBody, nil
 }
 
+func agentRuntimeConfigured() bool {
+	return strings.TrimSpace(os.Getenv("SOLO_AGENT_ID")) != ""
+}
+
 func handleTask(args []string, baseURL, token string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "solo: error: task subcommand required (list, claim, update, create, unclaim, submit, accept, reject, close, reopen)")
+		fmt.Fprintln(os.Stderr, "solo: error: task subcommand required (list, claim, update, create, unclaim, submit, accept, reject, close, reopen, trajectory)")
 		printUsage()
 		doExit(exitUsage)
 	}
@@ -409,11 +417,72 @@ func handleTask(args []string, baseURL, token string) {
 		handleTaskUnclaim(args[1:], baseURL, token)
 	case "submit", "accept", "reject", "close", "reopen":
 		handleTaskLifecycle(args[1:], baseURL, token, args[0])
+	case "trajectory":
+		handleTaskTrajectory(args[1:], baseURL, token)
 	default:
 		fmt.Fprintf(os.Stderr, "solo: error: unknown task subcommand %q\n", args[0])
 		printUsage()
 		doExit(exitUsage)
 	}
+}
+
+// --- task trajectory ---
+
+func handleTaskTrajectory(args []string, baseURL, token string) {
+	var channel, output string
+	var number int
+	fs := flag.NewFlagSet("task trajectory", flag.ExitOnError)
+	fs.StringVar(&channel, "c", "", "Channel ID or #name (required)")
+	fs.StringVar(&channel, "channel", "", "Channel ID or #name (required)")
+	fs.IntVar(&number, "n", 0, "Task number (required)")
+	fs.IntVar(&number, "number", 0, "Task number (required)")
+	fs.StringVar(&output, "output", "json", "Output format: json")
+	fs.Parse(args)
+
+	if fs.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "solo: error: unexpected argument: %s\n", fs.Arg(0))
+		doExit(exitUsage)
+	}
+	if channel == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: -c <channel_id> is required")
+		doExit(exitUsage)
+	}
+	if number <= 0 {
+		fmt.Fprintln(os.Stderr, "solo: error: -n <number> must be a positive integer")
+		doExit(exitUsage)
+	}
+	if output != "json" {
+		fmt.Fprintf(os.Stderr, "solo: error: invalid --output value %q (only \"json\" is supported)\n", output)
+		doExit(exitUsage)
+	}
+
+	channelID, err := resolveChannelParam(baseURL, token, channel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", err)
+		doExit(exitBusiness)
+	}
+	taskID, err := resolveTaskNumberToID(baseURL, token, channelID, number)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", err)
+		doExit(exitBusiness)
+	}
+
+	requestURL := fmt.Sprintf("%s/api/v1/tasks/%s/trajectory", baseURL, url.PathEscape(taskID))
+	statusCode, body, err := doHTTP(http.MethodGet, requestURL, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		printJSONError(statusCode, extractErrorMessage(body))
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	if !json.Valid(body) {
+		fmt.Fprintln(os.Stderr, "solo: error: trajectory endpoint returned invalid JSON")
+		doExit(exitUsage)
+	}
+	fmt.Println(string(body))
+	doExit(exitOK)
 }
 
 // --- task list ---
@@ -517,7 +586,7 @@ func handleTaskClaim(args []string, baseURL, token string) {
 	// Try daemon proxy first (uses fresh JWT).
 	// Pass messageID via taskID parameter so the proxy uses it in the URL path.
 	statusCode, body, err := proxyRequest("task_claim", channelID, taskID, "", token, number, "")
-	if err != nil {
+	if err != nil && !agentRuntimeConfigured() {
 		// Fallback to direct API
 		apiURL := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%s/claim", baseURL, channelID, taskID)
 		statusCode, body, err = doHTTP(http.MethodPost, apiURL, token, nil)
@@ -681,7 +750,7 @@ func handleTaskUnclaim(args []string, baseURL, token string) {
 
 	// Try daemon proxy first (uses fresh JWT)
 	statusCode, body, err := proxyRequest("task_unclaim", channelID, "", "", token, number, "")
-	if err != nil {
+	if err != nil && !agentRuntimeConfigured() {
 		// Fallback to direct API
 		url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d/claim", baseURL, channelID, number)
 		statusCode, body, err = doHTTP(http.MethodDelete, url, token, nil)
@@ -730,12 +799,15 @@ func handleTaskLifecycle(args []string, baseURL, token, action string) {
 		doExit(exitBusiness)
 	}
 
-	url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d/%s", baseURL, channelID, number, action)
 	var reqBody []byte
 	if action == "reject" {
 		reqBody, _ = json.Marshal(map[string]string{"reason": strings.TrimSpace(reason)})
 	}
-	statusCode, body, err := doHTTP(http.MethodPost, url, token, reqBody)
+	statusCode, body, err := proxyRequest("task_"+action, channelID, strings.TrimSpace(reason), "", token, number, "")
+	if err != nil && !agentRuntimeConfigured() {
+		url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d/%s", baseURL, channelID, number, action)
+		statusCode, body, err = doHTTP(http.MethodPost, url, token, reqBody)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
 		doExit(exitUsage)
@@ -813,7 +885,7 @@ func handleMessageSend(args []string, baseURL, token string) {
 	body, _ := json.Marshal(reqBody)
 	// Try daemon proxy first
 	statusCode, respBody, err := proxyRequest("message_send", channelID, content, threadID, token, 0, "")
-	if err != nil {
+	if err != nil && !agentRuntimeConfigured() {
 		// Fallback to direct API
 		url := fmt.Sprintf("%s/api/v1/channels/%s/messages", baseURL, channelID)
 		statusCode, respBody, err = doHTTP(http.MethodPost, url, token, body)
@@ -1466,6 +1538,7 @@ func printUsage() {
   solo task reject   -n <number> -c <channel_id> --reason <reason>
   solo task close    -n <number> -c <channel_id>
   solo task reopen   -n <number> -c <channel_id>
+  solo task trajectory -n <number> -c <channel_id> [--output json]
   solo artifact publish --task <task_id> --file <artifact.html> [--mode latest|final]
   solo channel members -c <channel_id> [--output json]
   solo channel join  --target <#channel-name>

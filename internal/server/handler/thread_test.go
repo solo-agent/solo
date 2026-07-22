@@ -196,6 +196,7 @@ func TestThreadHandler_ResponseFormat(t *testing.T) {
 		SenderName:  "Test User",
 		Content:     "This is a thread reply!",
 		ContentType: "text",
+		OriginRunID: "run-1",
 		CreatedAt:   "2025-01-01T00:00:00Z",
 	}
 
@@ -217,6 +218,9 @@ func TestThreadHandler_ResponseFormat(t *testing.T) {
 	}
 	if decoded.Content != "This is a thread reply!" {
 		t.Errorf("expected content 'This is a thread reply!', got %s", decoded.Content)
+	}
+	if decoded.OriginRunID != "run-1" {
+		t.Errorf("expected origin_run_id run-1, got %s", decoded.OriginRunID)
 	}
 }
 

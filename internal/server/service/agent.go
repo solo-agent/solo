@@ -649,6 +649,7 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 	}
 	if run != nil {
 		s.dm.AttachTaskRun(taskReq.TaskID, run.ID)
+		taskReq.RunID = run.ID
 	}
 	if run != nil && taskReq.OriginTaskID != "" {
 		if err := runSvc.LinkTask(ctx, LinkRunTaskInput{RunID: run.ID, TaskID: taskReq.OriginTaskID, Role: AgentRunTaskRolePrimary, Confidence: 1}); err != nil {
@@ -2350,6 +2351,7 @@ func (s *AgentService) getChannelOpenTasksSummary(ctx context.Context, channelID
 // daemonTaskRequest is the format for tasks sent from server to daemon.
 type daemonTaskRequest struct {
 	TaskID                string            `json:"task_id"`
+	RunID                 string            `json:"run_id,omitempty"`
 	AgentID               string            `json:"agent_id"`
 	ChannelID             string            `json:"channel_id"`
 	ThreadID              string            `json:"thread_id,omitempty"`

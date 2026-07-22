@@ -268,6 +268,50 @@ func TestHandleTaskListWithChannel(t *testing.T) {
 	}
 }
 
+func TestHandleTaskTrajectoryPrintsVersionedJSON(t *testing.T) {
+	channelID := "550e8400-e29b-41d4-a716-446655440001"
+	taskID := "550e8400-e29b-41d4-a716-446655440002"
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/channels/" + channelID + "/tasks":
+			json.NewEncoder(w).Encode([]map[string]any{{"id": taskID, "task_number": 7}})
+		case "/api/v1/tasks/" + taskID + "/trajectory":
+			json.NewEncoder(w).Encode(map[string]any{
+				"schema_version": "solo.task_trajectory.v1",
+				"root_task_id":   taskID,
+				"tasks":          []any{},
+				"runs":           []any{},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	code, stdout, stderr := captureAndRun(t, func() {
+		handleTaskTrajectory([]string{"-c", channelID, "-n", "7", "--output", "json"}, server.URL, "test-token")
+	})
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	var output map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &output); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout)
+	}
+	if output["schema_version"] != "solo.task_trajectory.v1" || output["root_task_id"] != taskID {
+		t.Fatalf("output = %+v", output)
+	}
+}
+
 func TestHandleTaskListOutputJSON(t *testing.T) {
 	var capturedMethod, capturedPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -557,6 +601,48 @@ func TestHandleTaskLifecycleCloseReopen(t *testing.T) {
 	}
 	if fmt.Sprint(paths) != fmt.Sprint(want) {
 		t.Errorf("unexpected paths: got %v want %v", paths, want)
+	}
+}
+
+func TestAgentTaskLifecycleUsesDaemonProxy(t *testing.T) {
+	var action string
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		action, _ = body["action"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"1","status":"in_review"}`))
+	}))
+	defer daemon.Close()
+	t.Setenv("SOLO_AGENT_ID", "agent-1")
+	t.Setenv("SOLO_DAEMON_URL", daemon.URL)
+
+	code, _, _ := captureAndRun(t, func() {
+		handleTaskLifecycle([]string{"-n", "1", "-c", "550e8400-e29b-41d4-a716-446655440001"}, "http://127.0.0.1:1", "stale-token", "submit")
+	})
+	if code != exitOK || action != "task_submit" {
+		t.Fatalf("code=%d action=%q, want %d/task_submit", code, action, exitOK)
+	}
+}
+
+func TestAgentTaskLifecycleFailsClosedWhenDaemonUnavailable(t *testing.T) {
+	var directRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		directRequests++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	t.Setenv("SOLO_AGENT_ID", "agent-1")
+	t.Setenv("SOLO_DAEMON_URL", "http://127.0.0.1:1")
+
+	code, _, stderr := captureAndRun(t, func() {
+		handleTaskLifecycle([]string{"-n", "1", "-c", "550e8400-e29b-41d4-a716-446655440001"}, server.URL, "stale-token", "submit")
+	})
+	if code != exitUsage {
+		t.Fatalf("code=%d, want %d; stderr=%s", code, exitUsage, stderr)
+	}
+	if directRequests != 0 {
+		t.Fatalf("agent mutation fell back to direct API: requests=%d", directRequests)
 	}
 }
 

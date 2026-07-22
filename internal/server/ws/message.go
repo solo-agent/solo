@@ -157,6 +157,7 @@ type MessageNewPayload struct {
 	ContentType        string           `json:"content_type"`
 	ThreadID           string           `json:"thread_id,omitempty"`
 	ThinkingNodeID     string           `json:"thinking_node_id,omitempty"`
+	OriginRunID        string           `json:"origin_run_id,omitempty"`
 	MentionedAgentIDs  []string         `json:"mentioned_agent_ids,omitempty"`
 	AttachmentIDs      []string         `json:"attachment_ids,omitempty"`
 	Attachments        []AttachmentMeta `json:"attachments,omitempty"`
@@ -252,6 +253,7 @@ type ThreadMessageItem struct {
 	SenderName    string           `json:"sender_name,omitempty"`
 	Content       string           `json:"content"`
 	ContentType   string           `json:"content_type"`
+	OriginRunID   string           `json:"origin_run_id,omitempty"`
 	AttachmentIDs []string         `json:"attachment_ids,omitempty"`
 	Attachments   []AttachmentMeta `json:"attachments,omitempty"`
 	CreatedAt     string           `json:"created_at"`
@@ -333,6 +335,7 @@ type DMMessageNewPayload struct {
 	AttachmentIDs []string         `json:"attachment_ids,omitempty"`
 	Attachments   []AttachmentMeta `json:"attachments,omitempty"`
 	ThreadID      string           `json:"thread_id,omitempty"`
+	OriginRunID   string           `json:"origin_run_id,omitempty"`
 	CreatedAt     string           `json:"created_at"`
 }
 
