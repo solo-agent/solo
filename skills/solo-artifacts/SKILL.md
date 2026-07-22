@@ -8,7 +8,7 @@ description: >-
 
 # solo-artifacts
 
-Solo-brutal fork of `work-canvas`: produce or publish **one self-contained HTML file** that renders a Solo task/thread for a human to understand and act on. Prefer the real deliverable over a summary page.
+Warm Archive fork of `work-canvas`: produce or publish **one self-contained HTML file** that renders a Solo task/thread for a human to understand and act on. Prefer the real deliverable over a summary page.
 
 ## Workflow
 
@@ -58,7 +58,7 @@ Solo-brutal fork of `work-canvas`: produce or publish **one self-contained HTML 
 
 ## Non-Negotiables
 
-- Keep work-canvas structure and interactions intact; only the visual skin is Solo-brutal.
+- Keep work-canvas structure and interactions intact; use Solo's default Warm Archive visual skin.
 - Real deliverables beat summaries. Never replace an explicit deliverable file with a conversation recap.
 - Surface only real human decisions. If nothing needs the user, say so.
 - Add a legend wherever color, letters, or symbols encode meaning.
@@ -68,6 +68,6 @@ Solo-brutal fork of `work-canvas`: produce or publish **one self-contained HTML 
 ## Files
 
 - `assets/starter.html` — the skeleton to copy.
-- `assets/base.css` — class-compatible Solo-brutal design system.
+- `assets/base.css` — class-compatible Solo Warm Archive design system.
 - `assets/interactions.js` — optional vanilla-JS modules: print, tabs, tables, lightbox, copy, scrollspy, persist.
 - `references/*.md` — work-canvas section order, component recipes, and guardrails.

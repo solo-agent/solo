@@ -1,6 +1,6 @@
 # Review / decision memo
 
-Solo-brutal review-decision variant: use the yellow/cream light skin from `assets/base.css`; keep boxes square, bordered, and decision-first.
+Solo Warm Archive review-decision variant: use the warm paper palette from `assets/base.css`; keep surfaces softly bordered, restrained, and decision-first.
 
 **Use when** you need to present analysis, a status write-up, a multi-perspective review, or a
 plan/architecture proposal so the user can **read it, mark it up, and adjudicate decisions**
