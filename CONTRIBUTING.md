@@ -32,6 +32,18 @@ Daily commands (run `make help` for the full menu):
 | `make stop`    | Shut everything down                                  |
 | `make migrate` | Apply pending database migrations                     |
 
+If the default ports are already in use, update `.env` before rebuilding:
+
+```dotenv
+FRONTEND_PORT=3001
+SERVER_PORT=18080
+DAEMON_PORT=18081
+```
+
+Run `make rebuild` after changing them. The make-managed frontend, API server,
+and daemon use these ports consistently, and `make stop` only stops processes
+recorded by the current checkout.
+
 ## Project layout
 
 See the [Project Structure](./README.md#project-structure) section in README
