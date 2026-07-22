@@ -898,6 +898,10 @@ func (c *codexClient) interruptCurrentTurn() error {
 		}
 		return fmt.Errorf("codex turn/interrupt: %w", err)
 	}
+	// The JSON-RPC response acknowledges that the provider accepted the
+	// interrupt. Release the local turn immediately; a late notification is
+	// deduplicated by signalTurnDone.
+	c.signalTurnDone(true)
 	return nil
 }
 
@@ -922,18 +926,30 @@ func (c *codexClient) signalTurnFailure(err error) {
 }
 
 func (c *codexClient) signalTurnDone(aborted bool) {
+	c.signalTurnDoneForID("", aborted)
+}
+
+func (c *codexClient) signalTurnDoneForID(turnID string, aborted bool) {
 	c.turnDoneMu.Lock()
+	completedID := turnID
+	if completedID == "" {
+		completedID = c.turnID
+	}
+	if completedID != "" {
+		if c.completedTurnIDs == nil {
+			c.completedTurnIDs = map[string]bool{}
+		}
+		if c.completedTurnIDs[completedID] {
+			c.turnDoneMu.Unlock()
+			return
+		}
+		c.completedTurnIDs[completedID] = true
+	}
 	if c.turnDone {
 		c.turnDoneMu.Unlock()
 		return
 	}
 	c.turnDone = true
-	if c.turnID != "" {
-		if c.completedTurnIDs == nil {
-			c.completedTurnIDs = map[string]bool{}
-		}
-		c.completedTurnIDs[c.turnID] = true
-	}
 	onDone := c.onTurnDone
 	c.turnDoneMu.Unlock()
 	if onDone != nil {
@@ -1025,23 +1041,13 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 			c.setTurnError(errMsg)
 		}
 
-		if c.completedTurnIDs == nil {
-			c.completedTurnIDs = map[string]bool{}
-		}
-		if turnID != "" {
-			if c.completedTurnIDs[turnID] {
-				return
-			}
-			c.completedTurnIDs[turnID] = true
-		}
-
 		if turn, ok := params["turn"].(map[string]any); ok {
 			c.extractUsageFromMap(turn)
 		}
 
 		aborted := status == "cancelled" || status == "canceled" ||
 			status == "aborted" || status == "interrupted"
-		c.signalTurnDone(aborted)
+		c.signalTurnDoneForID(turnID, aborted)
 
 	case "error":
 		willRetry, _ := params["willRetry"].(bool)

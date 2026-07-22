@@ -151,7 +151,7 @@ func TestAgentRunWatchdogsTimeoutOrphanedQueuedRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartRun: %v", err)
 	}
-	old := time.Now().Add(-agentTaskStreamTimeout - agentRunWatchdogInterval - time.Minute)
+	old := time.Now().Add(-agentRunQueueTimeout - time.Minute)
 	if _, err := pool.Exec(ctx, `UPDATE agent_runs SET started_at = $2, updated_at = $2 WHERE id = $1`, run.ID, old); err != nil {
 		t.Fatalf("age queued run: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestAgentRunWatchdogTimesOutStaleActiveRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartRun: %v", err)
 	}
-	old := time.Now().Add(-agentTaskStreamTimeout - agentRunWatchdogInterval - time.Second)
+	old := time.Now().Add(-agentRunExecutionTimeout - agentRunWatchdogInterval - time.Second)
 	_, err = pool.Exec(ctx, `UPDATE agent_runs SET started_at = $2, backend_started_at = $2, updated_at = $2 WHERE id = $1`, run.ID, old)
 	if err != nil {
 		t.Fatalf("age run: %v", err)

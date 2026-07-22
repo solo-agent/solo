@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -88,8 +89,8 @@ func NewDaemonManager(pool *pgxpool.Pool, hub realtime.Broadcaster) *DaemonManag
 		httpClient:        &http.Client{Timeout: 10 * time.Second},
 		heartbeatInterval: 30 * time.Second,
 		maxMissedHB:       3,
-		queueTimeout:      20 * time.Minute,
-		executionTimeout:  6 * time.Minute,
+		queueTimeout:      agentRunQueueTimeout,
+		executionTimeout:  agentRunExecutionTimeout,
 		stopCh:            make(chan struct{}),
 	}
 }
@@ -726,6 +727,9 @@ func (dm *DaemonManager) timeoutPendingTaskRun(task PendingTaskInfo) {
 		Status:       AgentRunStatusTimeout,
 		ActivityText: activity,
 	})
+	if errors.Is(err, ErrAgentRunAlreadyFinished) {
+		return
+	}
 	if err != nil {
 		slog.Warn("failed to timeout pending task run", "task_id", task.TaskID, "run_id", task.RunID, "error", err)
 		return
@@ -733,22 +737,11 @@ func (dm *DaemonManager) timeoutPendingTaskRun(task PendingTaskInfo) {
 	if dm.hub != nil {
 		dm.hub.Broadcast(realtime.Envelope("agent.run.finished", runPayload(finished, finished.AgentID, finished.AgentName, "")))
 	}
-	if daemon := dm.daemonByID(task.DaemonID); daemon != nil {
+	if daemon, ok := dm.GetDaemon(task.DaemonID); ok {
 		if err := dm.CancelTask(ctx, daemon, task.TaskID); err != nil {
 			slog.Warn("failed to cancel timed out daemon task", "task_id", task.TaskID, "daemon_id", task.DaemonID, "error", err)
 		}
 	}
-}
-
-func (dm *DaemonManager) daemonByID(daemonID string) *DaemonInfo {
-	dm.mu.RLock()
-	defer dm.mu.RUnlock()
-	daemon := dm.daemons[daemonID]
-	if daemon == nil {
-		return nil
-	}
-	copy := *daemon
-	return &copy
 }
 
 func hasCapability(caps []string, cap string) bool {

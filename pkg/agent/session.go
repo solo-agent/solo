@@ -137,14 +137,16 @@ func (m *AgentSessionManager) GetOrCreateScopedSession(ctx context.Context, sess
 	m.mu.RUnlock()
 
 	if exists {
+		resumeID := resumeSessionID
 		if m.isSessionAlive(entry) {
 			// createSession re-checks the pool entry after acquiring the turn.
 			// Going through it avoids delivering to an entry that crashed while
 			// this caller was waiting behind an in-flight turn.
-			return m.createSession(ctx, sessionKey, agentID, agentCfg, channelCtx, initialMessages, resumeSessionID, mentionedNames)
+		} else {
+			_, _, storedResumeID := entry.snapshot()
+			resumeID = firstNonEmpty(storedResumeID, resumeSessionID)
 		}
-		_, _, resumeID := entry.snapshot()
-		return m.createSession(ctx, sessionKey, agentID, agentCfg, channelCtx, initialMessages, firstNonEmpty(resumeID, resumeSessionID), mentionedNames)
+		return m.createSession(ctx, sessionKey, agentID, agentCfg, channelCtx, initialMessages, resumeID, mentionedNames)
 	}
 
 	// Check retry cooldown for agents with recent failed starts.

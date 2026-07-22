@@ -69,7 +69,10 @@ var nonPrimaryTaskRunStatuses = []string{
 	string(AgentRunStatusCancelled),
 }
 
-var ErrAmbiguousAgentRunScope = errors.New("multiple executing runs for one Agent and channel")
+var (
+	ErrAmbiguousAgentRunScope  = errors.New("multiple executing runs for one Agent and channel")
+	ErrAgentRunAlreadyFinished = errors.New("agent run already finished")
+)
 
 type AgentSession struct {
 	ID                string    `json:"id"`
@@ -417,7 +420,7 @@ func (s *AgentRunService) UpdateStatus(ctx context.Context, input UpdateRunStatu
 	if err != nil {
 		return nil, err
 	}
-	return scanAgentRun(s.pool.QueryRow(ctx,
+	return s.scanAgentRunUpdate(ctx, input.RunID, s.pool.QueryRow(ctx,
 		`UPDATE agent_runs
 		    SET status = $2,
 		        activity_text = $3,
@@ -427,6 +430,7 @@ func (s *AgentRunService) UpdateStatus(ctx context.Context, input UpdateRunStatu
 		        usage_json = CASE WHEN $7::jsonb = '{}'::jsonb THEN usage_json ELSE $7::jsonb END,
 		        updated_at = now()
 		  WHERE id = $1
+		    AND finished_at IS NULL
 		  RETURNING id::text, agent_id::text,
 		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
 		        COALESCE(session_id::text, ''), trigger_type,
@@ -481,7 +485,7 @@ func (s *AgentRunService) FinishRun(ctx context.Context, input FinishRunInput) (
 	if err != nil {
 		return nil, err
 	}
-	return scanAgentRun(s.pool.QueryRow(ctx,
+	return s.scanAgentRunUpdate(ctx, input.RunID, s.pool.QueryRow(ctx,
 		`UPDATE agent_runs
 		    SET status = $2,
 		        activity_text = $3,
@@ -489,6 +493,7 @@ func (s *AgentRunService) FinishRun(ctx context.Context, input FinishRunInput) (
 		        updated_at = now(),
 		        finished_at = now()
 		  WHERE id = $1
+		    AND finished_at IS NULL
 		  RETURNING id::text, agent_id::text,
 		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
 		        COALESCE(session_id::text, ''), trigger_type,
@@ -498,6 +503,26 @@ func (s *AgentRunService) FinishRun(ctx context.Context, input FinishRunInput) (
 		        started_at, backend_started_at, updated_at, finished_at`,
 		input.RunID, string(input.Status), input.ActivityText, usage,
 	))
+}
+
+// scanAgentRunUpdate turns the database's finished_at guard into an explicit
+// first-terminal-wins result for callers. The extra read only happens for a
+// late update after the run has already finished.
+func (s *AgentRunService) scanAgentRunUpdate(ctx context.Context, runID string, row interface {
+	Scan(dest ...any) error
+}) (*AgentRun, error) {
+	run, err := scanAgentRun(row)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return run, err
+	}
+	current, currentErr := s.GetRun(ctx, runID)
+	if currentErr != nil {
+		return nil, currentErr
+	}
+	if current.FinishedAt != nil {
+		return current, ErrAgentRunAlreadyFinished
+	}
+	return nil, err
 }
 
 func (s *AgentRunService) GetRun(ctx context.Context, runID string) (*AgentRun, error) {

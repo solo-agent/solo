@@ -258,6 +258,29 @@ func TestAgentRunServiceLifecycle(t *testing.T) {
 	if finished.FinishedAt == nil {
 		t.Fatal("finished_at is nil")
 	}
+	finishedAt := *finished.FinishedAt
+	lateUpdate, err := svc.UpdateStatus(ctx, UpdateRunStatusInput{
+		RunID:        run.ID,
+		Status:       AgentRunStatusRunning,
+		ActivityText: "迟到的运行事件",
+	})
+	if !errors.Is(err, ErrAgentRunAlreadyFinished) {
+		t.Fatalf("late UpdateStatus error = %v, want ErrAgentRunAlreadyFinished", err)
+	}
+	if lateUpdate.Status != AgentRunStatusCompleted || lateUpdate.ActivityText != "已完成" {
+		t.Fatalf("late update changed terminal run: %+v", lateUpdate)
+	}
+	lateFinish, err := svc.FinishRun(ctx, FinishRunInput{
+		RunID:        run.ID,
+		Status:       AgentRunStatusTimeout,
+		ActivityText: "迟到的超时",
+	})
+	if !errors.Is(err, ErrAgentRunAlreadyFinished) {
+		t.Fatalf("late FinishRun error = %v, want ErrAgentRunAlreadyFinished", err)
+	}
+	if lateFinish.Status != AgentRunStatusCompleted || lateFinish.FinishedAt == nil || !lateFinish.FinishedAt.Equal(finishedAt) {
+		t.Fatalf("late finisher replaced first terminal state: %+v", lateFinish)
+	}
 	if _, err := svc.MarkBackendStarted(ctx, run.ID); err == nil {
 		t.Fatal("MarkBackendStarted revived a terminal run")
 	}

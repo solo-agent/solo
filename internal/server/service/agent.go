@@ -28,6 +28,8 @@ const (
 	agentNoVisibleReplyAfter = 30 * time.Second
 	agentNoProgressAfter     = 5 * time.Minute
 	agentRunWatchdogInterval = 30 * time.Second
+	agentRunQueueTimeout     = 20 * time.Minute
+	agentRunExecutionTimeout = 6 * time.Minute
 
 	agentRunEventNoVisibleReplyWatchdog = "watchdog_no_visible_reply"
 	agentRunEventNoProgressWatchdog     = "watchdog_no_progress"
@@ -588,11 +590,6 @@ func (s *AgentService) broadcastAgentError(threadID, channelID, agentID, agentNa
 	}
 }
 
-const (
-	agentTaskStreamTimeout = 20 * time.Minute
-	agentRunStaleAfter     = agentTaskStreamTimeout + agentRunWatchdogInterval
-)
-
 // handleStreamingAgentTask dispatches a task to a daemon via SSE streaming
 // and forwards events to WebSocket subscribers.
 func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *DaemonInfo, taskReq daemonTaskRequest, ag agentChannelInfo) {
@@ -717,6 +714,10 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 			Status:       status,
 			ActivityText: finalStateActivityText(status),
 		})
+		if errors.Is(err, ErrAgentRunAlreadyFinished) {
+			run = finished
+			return
+		}
 		if err != nil {
 			slog.Warn("failed to finish agent run", "run_id", run.ID, "status", status, "error", err)
 			finished = run
@@ -991,6 +992,10 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 				ToolInputSummary: activity.ToolInputSummary,
 				Source:           activity.Source,
 			})
+			if errors.Is(err, ErrAgentRunAlreadyFinished) {
+				run = updated
+				continue
+			}
 			if err != nil {
 				slog.Warn("agent.run.updated: failed to update run", "run_id", run.ID, "status", activity.Status, "error", err)
 				continue
@@ -1122,7 +1127,7 @@ func (s *AgentService) StartAgentRunWatchdogLoop(ctx context.Context) {
 
 func (s *AgentService) CheckAgentRunWatchdogs(ctx context.Context, now time.Time) error {
 	runSvc := NewAgentRunService(s.pool)
-	staleQueuedRuns, err := s.listStaleQueuedRuns(ctx, now.Add(-agentTaskStreamTimeout))
+	staleQueuedRuns, err := s.listStaleQueuedRuns(ctx, now.Add(-agentRunQueueTimeout))
 	if err != nil {
 		return err
 	}
@@ -1132,7 +1137,7 @@ func (s *AgentService) CheckAgentRunWatchdogs(ctx context.Context, now time.Time
 		}
 	}
 
-	staleRuns, err := s.listStaleActiveRuns(ctx, now.Add(-agentRunStaleAfter))
+	staleRuns, err := s.listStaleActiveRuns(ctx, now.Add(-agentRunExecutionTimeout-agentRunWatchdogInterval))
 	if err != nil {
 		return err
 	}
@@ -1269,6 +1274,9 @@ func (s *AgentService) finishTimedOutAgentRun(ctx context.Context, runSvc *Agent
 		Status:       AgentRunStatusTimeout,
 		ActivityText: activity,
 	})
+	if errors.Is(err, ErrAgentRunAlreadyFinished) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -1286,6 +1294,9 @@ func (s *AgentService) warnAgentRun(ctx context.Context, runSvc *AgentRunService
 		ActivityText: message,
 		Source:       run.Source,
 	})
+	if errors.Is(err, ErrAgentRunAlreadyFinished) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

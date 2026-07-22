@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestGetDashboardLiveUsesLatestStartedRunStatus(t *testing.T) {
+func TestGetDashboardLiveUsesLatestStartedRunStatusWhenIdle(t *testing.T) {
 	pool := agentRunTestPool(t)
 	ctx := context.Background()
 	ownerID := agentRunUser(t, pool)
@@ -98,6 +98,69 @@ func TestGetDashboardLiveUsesLatestStartedRunStatus(t *testing.T) {
 	if !foundCurrent {
 		t.Fatal("agent not found in live dashboard")
 	}
+}
+
+func TestGetDashboardLivePrioritizesExecutingRunOverNewerQueue(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, ownerID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	svc := NewAgentRunService(pool)
+	executing, err := svc.StartRun(ctx, StartRunInput{
+		AgentID:      agentID,
+		TriggerType:  AgentRunTriggerTask,
+		Status:       AgentRunStatusQueued,
+		ActivityText: "等待执行",
+	})
+	if err != nil {
+		t.Fatalf("StartRun executing: %v", err)
+	}
+	executing, err = svc.MarkBackendStarted(ctx, executing.ID)
+	if err != nil {
+		t.Fatalf("MarkBackendStarted: %v", err)
+	}
+	queued, err := svc.StartRun(ctx, StartRunInput{
+		AgentID:      agentID,
+		TriggerType:  AgentRunTriggerTask,
+		Status:       AgentRunStatusQueued,
+		ActivityText: "等待执行",
+	})
+	if err != nil {
+		t.Fatalf("StartRun queued: %v", err)
+	}
+	base := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
+	if _, err := pool.Exec(ctx, `UPDATE agent_runs SET started_at = $2, updated_at = $2 WHERE id = $1`, executing.ID, base); err != nil {
+		t.Fatalf("adjust executing run time: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agent_runs SET started_at = $2, updated_at = $2 WHERE id = $1`, queued.ID, base.Add(time.Minute)); err != nil {
+		t.Fatalf("adjust queued run time: %v", err)
+	}
+
+	live, err := svc.GetDashboardLive(ctx, ownerID)
+	if err != nil {
+		t.Fatalf("GetDashboardLive: %v", err)
+	}
+	for _, group := range live.Groups {
+		for _, item := range group.Items {
+			if item.AgentID != agentID {
+				continue
+			}
+			if item.RunID != executing.ID || item.Status != AgentRunStatusRunning {
+				t.Fatalf("live item = %+v, want executing run %s instead of newer queue %s", item, executing.ID, queued.ID)
+			}
+			if item.ActiveCount != 2 || item.RunCount != 2 {
+				t.Fatalf("live counts = active %d runs %d, want 2 and 2", item.ActiveCount, item.RunCount)
+			}
+			return
+		}
+	}
+	t.Fatal("agent not found in live dashboard")
 }
 
 func TestGetDashboardInsightFiltersAgentsAndReadsTranscriptUsage(t *testing.T) {

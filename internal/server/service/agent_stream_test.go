@@ -16,9 +16,12 @@ import (
 	"github.com/solo-ai/solo/pkg/agent"
 )
 
-func TestAgentTaskStreamTimeoutAllowsLongAgentRuns(t *testing.T) {
-	if agentTaskStreamTimeout != 20*time.Minute {
-		t.Fatalf("agentTaskStreamTimeout = %s, want 20m", agentTaskStreamTimeout)
+func TestAgentRunPhaseTimeouts(t *testing.T) {
+	if agentRunQueueTimeout != 20*time.Minute {
+		t.Fatalf("agentRunQueueTimeout = %s, want 20m", agentRunQueueTimeout)
+	}
+	if agentRunExecutionTimeout != 6*time.Minute {
+		t.Fatalf("agentRunExecutionTimeout = %s, want 6m", agentRunExecutionTimeout)
 	}
 }
 

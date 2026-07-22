@@ -266,7 +266,7 @@ done
 	}
 }
 
-func TestCodexPersistentStopInterruptsTurnAndKeepsProcess(t *testing.T) {
+func TestCodexPersistentStopAcknowledgementReleasesTurnWithoutNotification(t *testing.T) {
 	tempDir := t.TempDir()
 	fake := filepath.Join(tempDir, "codex")
 
@@ -293,10 +293,9 @@ while IFS= read -r line; do
       case "$line" in
         *'"threadId":"codex-session-1"'*'"turnId":"turn-1"'*) ;;
         *) exit 9 ;;
-      esac
-      printf '{"id":4,"result":{}}\n'
-      printf '{"method":"turn/completed","params":{"threadId":"codex-session-1","turn":{"id":"turn-1","status":"interrupted"}}}\n'
-      ;;
+	      esac
+	      printf '{"id":4,"result":{}}\n'
+	      ;;
   esac
 done
 `
