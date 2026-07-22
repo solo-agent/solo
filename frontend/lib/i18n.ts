@@ -61,6 +61,7 @@ const en = {
   navCollapseDMs: 'Expand or collapse direct messages',
   workspaceCollapsePanel: 'Collapse workspace',
   workspaceExpandPanel: 'Expand workspace',
+  workspaceResizePanels: 'Resize conversation and workspace panels',
   workspaceFullscreenPanel: 'Fullscreen workspace',
   workspaceExitFullscreenPanel: 'Exit fullscreen workspace',
 
@@ -902,6 +903,7 @@ const zhCN = {
   navCollapseDMs: '展开或收起私信',
   workspaceCollapsePanel: '收起工作区',
   workspaceExpandPanel: '展开工作区',
+  workspaceResizePanels: '调整消息区和工作区宽度',
   workspaceFullscreenPanel: '全屏工作区',
   workspaceExitFullscreenPanel: '退出全屏工作区',
   deleteChannelTitle: '删除频道',

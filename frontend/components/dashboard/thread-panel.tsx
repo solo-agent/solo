@@ -39,6 +39,7 @@ import { useWebSocket } from '@/lib/ws-context';
 import { useToast } from '@/components/ui/toast';
 import { MentionDropdown, type DropdownAnchor } from './mention-dropdown';
 import { t } from '@/lib/i18n';
+import { formatMessageTimestamp } from '@/lib/utils/time';
 import type { AgentDetailTarget, Message, ChannelMember, Task, TaskStatus } from '@/lib/types';
 
 interface ThreadPanelProps {
@@ -73,10 +74,7 @@ function ParentMessageBlock({
 }) {
   const isAgent = message.sender_type === 'agent';
   const displayName = task?.creator_name || message.display_name;
-  const time = new Date(message.created_at).toLocaleString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const time = formatMessageTimestamp(message.created_at);
 
   return (
     <div className={`flex gap-3 px-6 py-4 border-b-2 border-black ${isAgent ? 'border-l-2 border-l-brutal-primary' : ''}`}>
@@ -102,9 +100,9 @@ function ParentMessageBlock({
           <span className="font-heading text-sm font-bold text-foreground">
             {displayName}
           </span>
-          <span className="font-mono text-[11px] text-muted-foreground">
+          <time dateTime={message.created_at} className="font-mono text-[11px] text-muted-foreground">
             {time}
-          </span>
+          </time>
         </div>
         <div className="font-body text-sm leading-relaxed space-y-1">
           <ReactMarkdown
@@ -283,10 +281,7 @@ function ReplyItem({
   const isStreaming = message.status === 'streaming';
   const isAgent = message.sender_type === 'agent';
 
-  const time = new Date(message.created_at).toLocaleString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const time = formatMessageTimestamp(message.created_at);
 
   return (
     <div
@@ -319,9 +314,9 @@ function ReplyItem({
           <span className="font-heading text-sm font-bold text-foreground">
             {message.display_name}
           </span>
-          <span className="font-mono text-[11px] text-muted-foreground">
+          <time dateTime={message.created_at} className="font-mono text-[11px] text-muted-foreground">
             {time}
-          </span>
+          </time>
           {isAgent && (
             <span className="badge-brutal bg-brutal-primary text-black">
               {t('agent')}

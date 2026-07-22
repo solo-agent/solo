@@ -49,6 +49,7 @@ import { MessageAttachments } from './message-attachments';
 import type { AgentDetailTarget, ChannelMember, Message } from '@/lib/types';
 import { sanitizeHtml } from '@/lib/sanitize';
 import { t } from '@/lib/i18n';
+import { formatMessageTimestamp } from '@/lib/utils/time';
 // Agent activity now lives in team/observability surfaces, not inline typing badges.
 interface MessageListProps {
   messages: Message[];
@@ -200,10 +201,7 @@ const MessageItem = memo(function MessageItem({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isHovered, onEdit, onDelete, message.content, message.id, isEditing, isFailed, isSending]);
 
-  const time = new Date(message.created_at).toLocaleString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const time = formatMessageTimestamp(message.created_at);
 
   const handleSaveEdit = useCallback(async () => {
     if (isSaving) return;
@@ -312,9 +310,9 @@ const MessageItem = memo(function MessageItem({
               {t('deleted')}
             </span>
           )}
-          <span className="font-mono text-[11px] text-muted-foreground">
+          <time dateTime={message.created_at} className="font-mono text-[11px] text-muted-foreground">
             {time}
-          </span>
+          </time>
           {isEditing && (
             <span className="font-mono text-[11px] text-brutal-primary animate-pulse ml-auto">
               {t('editingMessage')}

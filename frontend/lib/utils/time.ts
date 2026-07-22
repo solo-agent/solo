@@ -1,4 +1,4 @@
-import { t } from '@/lib/i18n';
+import { getLocale, t } from '@/lib/i18n';
 
 /**
  * Returns a human-readable relative time string.
@@ -30,6 +30,29 @@ export function relativeTime(
   const d = new Date(iso);
   const pad = (n: number) => n.toString().padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Formats chat timestamps using local calendar days and a 24-hour clock. */
+export function formatMessageTimestamp(iso: string | null | undefined, now = new Date()): string {
+  if (!iso) return t('unknown');
+
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return t('unknown');
+
+  const locale = getLocale();
+  const time = new Intl.DateTimeFormat(locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(date);
+  if (date.toDateString() === now.toDateString()) return time;
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const day = date.toDateString() === yesterday.toDateString()
+    ? t('yesterday')
+    : new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(date);
+  return `${day} ${time}`;
 }
 
 /**

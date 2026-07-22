@@ -31,7 +31,7 @@ func TestRenderPendingArtifactHTML_DoesNotCloneThread(t *testing.T) {
 	}
 
 	html := renderPendingArtifactHTML(data)
-	for _, want := range []string{"Generating artifact", "&lt;script&gt;alert(1)&lt;/script&gt;", "Task task-1"} {
+	for _, want := range []string{"Generating artifact", "&lt;script&gt;alert(1)&lt;/script&gt;", "Task task-1", "oklch(0.975 0.008 80)", "#dbe5ed"} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("expected pending HTML to contain %q, got:\n%s", want, html)
 		}
@@ -196,7 +196,7 @@ func TestRenderArtifactAgentPrompt_InstructsPublishWithContext(t *testing.T) {
 		"E2E coverage",
 		"solo task list -c channel-1 --output json",
 		"solo message read",
-		"Solo-brutal",
+		"default Warm Archive skin",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("expected artifact agent prompt to contain %q, got:\n%s", want, prompt)
