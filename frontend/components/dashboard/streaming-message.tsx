@@ -13,6 +13,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
+import { formatMessageTimestamp } from '@/lib/utils/time';
 import type { AgentDetailTarget, Message } from '@/lib/types';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 
@@ -90,10 +91,7 @@ function TypingDots() {
 }
 
 export function StreamingMessage({ message, onAgentClick }: StreamingMessageProps) {
-  const time = new Date(message.created_at).toLocaleString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const time = formatMessageTimestamp(message.created_at);
 
   const unclosedCodeBlock = hasUnclosedCodeBlock(message.content);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -142,9 +140,9 @@ export function StreamingMessage({ message, onAgentClick }: StreamingMessageProp
               {t('deleted')}
             </span>
           )}
-          <span className="font-mono text-[11px] text-muted-foreground">
+          <time dateTime={message.created_at} className="font-mono text-[11px] text-muted-foreground">
             {time}
-          </span>
+          </time>
           <span className="badge-brutal bg-brutal-primary/20 text-brutal-primary">
             {t('streaming')}
           </span>
