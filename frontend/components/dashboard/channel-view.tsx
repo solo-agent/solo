@@ -4,7 +4,7 @@
 
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Users, Loader2, SquareCheckBig, Plus, Network, Maximize2, Minimize2, BrainCircuit } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -44,6 +44,13 @@ import type { AgentDetailTarget, AgentRelationship, Channel, Message, Task, Task
 type ArtifactPreview = TaskArtifact & { previewUrl: string };
 type WorkspaceDetail = { relationship: AgentRelationship | null; agent: AgentDetailTarget | null };
 const TEAM_TASK_VISIBLE_STATUSES = new Set<TaskStatus>(['in_progress', 'in_review']);
+const MIN_SPLIT_PANE_WIDTH = 320;
+const SPLIT_KEYBOARD_STEP = 2;
+
+function clampSplitPercent(percent: number, containerWidth: number) {
+  const minPercent = Math.min(50, (MIN_SPLIT_PANE_WIDTH / containerWidth) * 100);
+  return Math.max(minPercent, Math.min(100 - minPercent, percent));
+}
 
 // SOLO-63-F: Lazy-load ThreadPanel (only rendered when a thread is open)
 const ThreadPanel = lazy(() =>
@@ -155,6 +162,18 @@ export function ChannelView({
   const [isMemberPopoverOpen, setIsMemberPopoverOpen] = useState(false);
   const [isWorkspaceCollapsed, setIsWorkspaceCollapsed] = useState(false);
   const [isWorkspaceFullscreen, setIsWorkspaceFullscreen] = useState(false);
+  const [conversationPanelPercent, setConversationPanelPercent] = useState(50);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+  const conversationPanelRef = useRef<HTMLDivElement>(null);
+  const splitSeparatorRef = useRef<HTMLDivElement>(null);
+  const splitDragRef = useRef({
+    active: false,
+    left: 0,
+    width: 0,
+    pendingClientX: 0,
+    percent: 50,
+    frame: 0,
+  });
 
   const { showToast } = useToast();
   const { generateArtifact, regenerateArtifact, fetchArtifactHTML, listArtifacts, isGeneratingTask } = useTaskArtifact();
@@ -842,13 +861,63 @@ export function ChannelView({
     }
   }, [artifactPreview, regenerateArtifact, isGeneratingTask, refreshArtifactHistory, showArtifactPreview, showToast]);
 
+  const applySplitClientX = useCallback((clientX: number) => {
+    const drag = splitDragRef.current;
+    if (!drag.active || drag.width <= 0) return drag.percent;
+    const percent = clampSplitPercent(((clientX - drag.left) / drag.width) * 100, drag.width);
+    drag.percent = percent;
+    if (conversationPanelRef.current) conversationPanelRef.current.style.flexBasis = `${percent}%`;
+    splitSeparatorRef.current?.setAttribute('aria-valuenow', String(Math.round(percent)));
+    return percent;
+  }, []);
+
+  const scheduleSplitResize = useCallback((clientX: number) => {
+    const drag = splitDragRef.current;
+    drag.pendingClientX = clientX;
+    if (drag.frame) return;
+    drag.frame = requestAnimationFrame(() => {
+      drag.frame = 0;
+      applySplitClientX(drag.pendingClientX);
+    });
+  }, [applySplitClientX]);
+
+  const finishSplitResize = useCallback((clientX?: number) => {
+    const drag = splitDragRef.current;
+    if (!drag.active) return;
+    if (drag.frame) {
+      cancelAnimationFrame(drag.frame);
+      drag.frame = 0;
+    }
+    const percent = clientX === undefined ? drag.percent : applySplitClientX(clientX);
+    drag.active = false;
+    setConversationPanelPercent(percent);
+  }, [applySplitClientX]);
+
+  useEffect(() => () => {
+    if (splitDragRef.current.frame) cancelAnimationFrame(splitDragRef.current.frame);
+  }, []);
+
+  const handleSplitKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const direction = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0;
+    if (direction === 0) return;
+    const width = splitContainerRef.current?.getBoundingClientRect().width ?? 0;
+    if (width <= 0) return;
+    event.preventDefault();
+    setConversationPanelPercent((current) => clampSplitPercent(current + direction * SPLIT_KEYBOARD_STEP, width));
+  }, []);
+
   return (
-    <div className={cn(
+    <div ref={splitContainerRef} className={cn(
       'relative flex flex-1 overflow-hidden',
       isWorkspaceCollapsed && '[&_.sidebar-collapse-offset]:pr-14',
     )}>
       {/* Left: conversation/thread/detail */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden border-r-2 border-black">
+      <div
+        ref={conversationPanelRef}
+        id="channel-conversation-panel"
+        className="flex min-w-0 flex-1 flex-col overflow-hidden"
+        style={!isWorkspaceCollapsed && !isWorkspaceFullscreen ? { flexBasis: `${conversationPanelPercent}%`, flexGrow: 0 } : undefined}
+      >
         {mainPanel === 'thread' && threadMessage ? (
           <Suspense
             fallback={
@@ -981,12 +1050,61 @@ export function ChannelView({
         </button>
       )}
 
+      {!isWorkspaceCollapsed && !isWorkspaceFullscreen && (
+        <div
+          ref={splitSeparatorRef}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t('workspaceResizePanels')}
+          aria-controls="channel-conversation-panel channel-workspace-panel"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(conversationPanelPercent)}
+          tabIndex={0}
+          className="group relative z-20 -mx-1 w-2 shrink-0 cursor-col-resize touch-none outline-none"
+          onKeyDown={handleSplitKeyDown}
+          onPointerDown={(event) => {
+            const bounds = splitContainerRef.current?.getBoundingClientRect();
+            if (!bounds || bounds.width <= 0) return;
+            event.preventDefault();
+            Object.assign(splitDragRef.current, {
+              active: true,
+              left: bounds.left,
+              width: bounds.width,
+              pendingClientX: event.clientX,
+              percent: conversationPanelPercent,
+            });
+            event.currentTarget.setPointerCapture(event.pointerId);
+            scheduleSplitResize(event.clientX);
+          }}
+          onPointerMove={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) scheduleSplitResize(event.clientX);
+          }}
+          onPointerUp={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              finishSplitResize(event.clientX);
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }
+          }}
+          onPointerCancel={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              finishSplitResize();
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }
+          }}
+          onLostPointerCapture={() => finishSplitResize()}
+        >
+          <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-brutal-info group-focus-visible:bg-brutal-info" />
+          <span className="pointer-events-none absolute left-1/2 top-1/2 h-10 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-black bg-brutal-info-light opacity-0 shadow-brutal-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
+        </div>
+      )}
+
       {/* Right: channel workspace */}
       {!isWorkspaceCollapsed && (
       <div className={cn(
         'flex min-w-0 flex-1 flex-col overflow-hidden bg-brutal-cream',
         isWorkspaceFullscreen && 'fixed inset-0 z-[80] h-screen border-4 border-black',
-      )}>
+      )} id="channel-workspace-panel">
         <div className="flex h-14 flex-shrink-0 items-center justify-between gap-3 border-b-2 border-black px-4">
           <div className="flex min-w-0 items-center gap-3">
             <button

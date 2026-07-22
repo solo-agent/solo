@@ -118,7 +118,13 @@ func (s *AgentRunService) GetDashboardLive(ctx context.Context, ownerID string) 
 		             LIMIT 1
 		          ), '') AS task_id
 		     FROM agent_runs r
-		    ORDER BY r.agent_id, r.started_at DESC, r.updated_at DESC
+		    ORDER BY r.agent_id,
+		             CASE
+		               WHEN r.status IN ('thinking', 'running', 'streaming', 'waiting_input', 'waiting_approval') THEN 0
+		               WHEN r.status = 'queued' THEN 1
+		               ELSE 2
+		             END,
+		             r.started_at DESC, r.updated_at DESC
 		 ),
 		 counts AS (
 		   SELECT agent_id,

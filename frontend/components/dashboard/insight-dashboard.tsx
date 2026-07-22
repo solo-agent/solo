@@ -69,13 +69,19 @@ const RANGE_OPTIONS = [
 ];
 
 const SERIES_CONFIG: Record<SeriesKey, { label: string; color: string }> = {
-  agent_runs: { label: t('observabilitySeriesSessions'), color: '#74B9FF' },
-  messages: { label: t('observabilitySeriesMessages'), color: '#88D498' },
-  tokens: { label: t('observabilitySeriesTokens'), color: '#FF6B6B' },
-  tasks: { label: t('observabilitySeriesTasks'), color: '#bbafe6' },
+  agent_runs: { label: t('observabilitySeriesSessions'), color: 'var(--color-brutal-info)' },
+  messages: { label: t('observabilitySeriesMessages'), color: 'var(--color-brutal-success)' },
+  tokens: { label: t('observabilitySeriesTokens'), color: 'var(--color-brutal-accent)' },
+  tasks: { label: t('observabilitySeriesTasks'), color: 'var(--color-brutal-violet)' },
 };
 
-const WORD_COLORS = ['#74B9FF', '#88D498', '#FF6B6B', '#bbafe6', '#f8a16f'];
+const WORD_COLORS = [
+  'color-mix(in srgb, var(--color-brutal-info) 72%, var(--skin-ink))',
+  'color-mix(in srgb, var(--color-brutal-success) 72%, var(--skin-ink))',
+  'color-mix(in srgb, var(--color-brutal-accent) 72%, var(--skin-ink))',
+  'color-mix(in srgb, var(--color-brutal-violet) 72%, var(--skin-ink))',
+  'color-mix(in srgb, var(--color-brutal-warning) 72%, var(--skin-ink))',
+];
 const CHART_LEFT = 72;
 const CHART_TOP = 32;
 const CHART_BOTTOM = 204;
@@ -151,7 +157,7 @@ export function InsightDashboard() {
                 label: item.name,
                 detail: formatDate(item.last_at),
                 count: item.count,
-                color: '#74B9FF',
+                color: 'var(--color-brutal-info)',
               }))} />
             </InsightPanel>
             <InsightPanel title={t('observabilityTaskUsageTop')}>
@@ -207,7 +213,7 @@ function InsightMetric({ icon, label, value }: { icon: ReactNode; label: string;
 
 function InsightPanel({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="border-2 border-black bg-white shadow-brutal-sm">
+    <section className="overflow-hidden border-2 border-black bg-white shadow-brutal-sm">
       <div className="flex items-center gap-2 border-b-2 border-black bg-brutal-cream px-3 py-2">
         <h2 className="font-heading text-base font-black">{title}</h2>
       </div>
@@ -251,9 +257,10 @@ function TrendChart({ points }: { points: DashboardSeriesPoint[] }) {
             <button
               key={key}
               type="button"
+              aria-pressed={visible[key]}
               onClick={() => setVisible((current) => ({ ...current, [key]: !current[key] }))}
               className={cn(
-                'inline-flex items-center gap-2 border-2 border-black bg-white px-2 py-1 font-mono text-xs shadow-brutal-sm transition-all hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
+                'tab-button inline-flex items-center gap-2 border-2 border-black bg-white px-2 py-1 font-mono text-xs shadow-brutal-sm transition-all hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
                 !visible[key] && 'opacity-40',
               )}
             >
@@ -353,7 +360,7 @@ function CountBars({ items }: { items: DashboardCount[] }) {
             <span>{item.label}</span>
             <span>{item.count}</span>
           </div>
-          <div className="h-3 border-2 border-black bg-brutal-cream">
+          <div className="h-3 overflow-hidden border-2 border-black bg-brutal-cream">
             <div className="h-full" style={{ width: `${Math.max(6, (item.count / max) * 100)}%`, backgroundColor: taskColor(item.key) }} />
           </div>
         </div>
@@ -377,7 +384,7 @@ function UsageBars({ items }: { items: { id: string; label: string; detail: stri
             </div>
             <span className="font-heading text-base font-black">{item.count}</span>
           </div>
-          <div className="h-3 border-2 border-black bg-brutal-cream">
+          <div className="h-3 overflow-hidden border-2 border-black bg-brutal-cream">
             <div className="h-full" style={{ width: `${Math.max(6, (item.count / max) * 100)}%`, backgroundColor: item.color }} />
           </div>
         </div>
@@ -415,17 +422,17 @@ function EmptyText({ text }: { text: string }) {
 function taskColor(status: string) {
   switch (status) {
   case 'todo':
-    return '#f8a16f';
+    return 'var(--color-brutal-warning)';
   case 'in_progress':
-    return '#74B9FF';
+    return 'var(--color-brutal-info)';
   case 'in_review':
-    return '#bbafe6';
+    return 'var(--color-brutal-violet)';
   case 'done':
-    return '#88D498';
+    return 'var(--color-brutal-success)';
   case 'closed':
-    return '#c0b9b1';
+    return 'var(--color-brutal-muted)';
   default:
-    return '#FFD23F';
+    return 'var(--color-brutal-accent)';
   }
 }
 

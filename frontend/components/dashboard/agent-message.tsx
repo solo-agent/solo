@@ -13,6 +13,7 @@ import type { AgentDetailTarget, Message } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { t } from '@/lib/i18n';
+import { formatMessageTimestamp } from '@/lib/utils/time';
 import { MessageMarkdown } from './message-markdown';
 
 interface AgentMessageProps {
@@ -26,10 +27,7 @@ interface AgentMessageProps {
 }
 
 export function AgentMessage({ message, onReply, validNames = [], isHighlighted, onOpenArtifactReference, onAgentClick }: AgentMessageProps) {
-  const time = new Date(message.created_at).toLocaleString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const time = formatMessageTimestamp(message.created_at);
 
   const hasUnreadThread = message.has_unread_thread === true && (message.reply_count ?? 0) > 0;
   return (
@@ -67,9 +65,9 @@ export function AgentMessage({ message, onReply, validNames = [], isHighlighted,
               {t('agent')}
             </span>
           )}
-          <span className="font-mono text-[11px] text-muted-foreground">
+          <time dateTime={message.created_at} className="font-mono text-[11px] text-muted-foreground">
             {time}
-          </span>
+          </time>
         </div>
         <MessageMarkdown
           content={message.content}

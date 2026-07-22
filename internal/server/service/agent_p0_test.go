@@ -47,7 +47,7 @@ func TestTriggerAgentResponseBroadcastsErrorWhenNoDaemonAvailable(t *testing.T) 
 	}
 }
 
-func TestStreamingAgentTaskBroadcastsAckRunUpdate(t *testing.T) {
+func TestStreamingAgentTaskStaysQueuedWithoutBackendStart(t *testing.T) {
 	pool := agentRunTestPool(t)
 	ctx := context.Background()
 	ownerID := agentRunUser(t, pool)
@@ -77,8 +77,12 @@ func TestStreamingAgentTaskBroadcastsAckRunUpdate(t *testing.T) {
 		ModelConfig:      agentModelConfigForTest(),
 	}, agentChannelInfo{ID: agentID, Name: "Test Agent"})
 
-	if !rec.hasBroadcastEvent("agent.run.updated", agentActivityAccepted) {
-		t.Fatalf("ack agent.run.updated not broadcast: %q", rec.broadcastMessages)
+	joined := strings.Join(rec.broadcastMessages, "\n")
+	if !strings.Contains(joined, `"type":"agent.run.started"`) || !strings.Contains(joined, `"status":"queued"`) {
+		t.Fatalf("queued agent.run.started not broadcast: %q", rec.broadcastMessages)
+	}
+	if rec.hasBroadcastEvent("agent.run.updated", agentActivityAccepted) {
+		t.Fatalf("run was acknowledged before backend start: %q", rec.broadcastMessages)
 	}
 }
 
@@ -107,7 +111,7 @@ func TestAgentRunWatchdogsWarnOnce(t *testing.T) {
 		t.Fatalf("StartRun: %v", err)
 	}
 	old := time.Now().Add(-agentNoVisibleReplyAfter - time.Second)
-	_, err = pool.Exec(ctx, `UPDATE agent_runs SET started_at = $2, updated_at = $2 WHERE id = $1`, run.ID, old)
+	_, err = pool.Exec(ctx, `UPDATE agent_runs SET started_at = $2, backend_started_at = $2, updated_at = $2 WHERE id = $1`, run.ID, old)
 	if err != nil {
 		t.Fatalf("age run: %v", err)
 	}
@@ -124,6 +128,48 @@ func TestAgentRunWatchdogsWarnOnce(t *testing.T) {
 	assertRunEventCount(t, pool, run.ID, agentRunEventNoVisibleReplyWatchdog, 1)
 	if !rec.hasBroadcastEvent("agent.run.updated", agentActivityNoVisibleReply) {
 		t.Fatalf("no-visible watchdog update not broadcast: %q", rec.broadcastMessages)
+	}
+}
+
+func TestAgentRunWatchdogsTimeoutOrphanedQueuedRun(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, ownerID)
+	channelID := agentRunChannel(t, pool, ownerID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	run, err := NewAgentRunService(pool).StartRun(ctx, StartRunInput{
+		AgentID: agentID, TriggerType: AgentRunTriggerMessage, ChannelID: channelID,
+		Status: AgentRunStatusQueued, ActivityText: "等待执行",
+	})
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+	old := time.Now().Add(-agentRunQueueTimeout - time.Minute)
+	if _, err := pool.Exec(ctx, `UPDATE agent_runs SET started_at = $2, updated_at = $2 WHERE id = $1`, run.ID, old); err != nil {
+		t.Fatalf("age queued run: %v", err)
+	}
+
+	rec := newRecordingBroadcaster()
+	svc := NewAgentService(pool, NewDaemonManager(pool, rec), rec, nil)
+	if err := svc.CheckAgentRunWatchdogs(ctx, time.Now()); err != nil {
+		t.Fatalf("CheckAgentRunWatchdogs: %v", err)
+	}
+	current, err := NewAgentRunService(pool).GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if current.Status != AgentRunStatusTimeout || current.BackendStartedAt != nil || current.FinishedAt == nil {
+		t.Fatalf("orphaned queued run did not converge to timeout: %+v", current)
+	}
+	if !rec.hasBroadcastEvent("agent.run.finished", agentActivityQueueTimeout) {
+		t.Fatalf("queued timeout finish not broadcast: %q", rec.broadcastMessages)
 	}
 }
 
@@ -160,7 +206,7 @@ func TestAgentRunProgressWatchdogWarnsOnce(t *testing.T) {
 		t.Fatalf("AppendEvent assistant: %v", err)
 	}
 	old := time.Now().Add(-agentNoProgressAfter - time.Second)
-	_, err = pool.Exec(ctx, `UPDATE agent_runs SET updated_at = $2 WHERE id = $1`, run.ID, old)
+	_, err = pool.Exec(ctx, `UPDATE agent_runs SET backend_started_at = $2, updated_at = $2 WHERE id = $1`, run.ID, old)
 	if err != nil {
 		t.Fatalf("age run: %v", err)
 	}
@@ -204,8 +250,8 @@ func TestAgentRunWatchdogTimesOutStaleActiveRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartRun: %v", err)
 	}
-	old := time.Now().Add(-agentTaskStreamTimeout - agentRunWatchdogInterval - time.Second)
-	_, err = pool.Exec(ctx, `UPDATE agent_runs SET started_at = $2, updated_at = $2 WHERE id = $1`, run.ID, old)
+	old := time.Now().Add(-agentRunExecutionTimeout - agentRunWatchdogInterval - time.Second)
+	_, err = pool.Exec(ctx, `UPDATE agent_runs SET started_at = $2, backend_started_at = $2, updated_at = $2 WHERE id = $1`, run.ID, old)
 	if err != nil {
 		t.Fatalf("age run: %v", err)
 	}

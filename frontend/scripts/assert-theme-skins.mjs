@@ -172,6 +172,7 @@ const channelView = read('components/dashboard/channel-view.tsx');
 const tabBar = read('components/ui/tab-bar.tsx');
 const agentActivity = read('lib/agent-activity.ts');
 const taskActionButtons = read('components/tasks/task-action-buttons.tsx');
+const insightDashboard = read('components/dashboard/insight-dashboard.tsx');
 for (const needle of [
   ':root[data-skin="archive"] .relationship-agent-node',
   ':root[data-skin="archive"] .relationship-task-card',
@@ -193,6 +194,14 @@ if (!agentActivity.includes("completed: 'var(--color-brutal-success)'")) {
 }
 if (!taskActionButtons.includes('data-tone={tone}')) {
   throw new Error('Task action tones must be exposed to archive skin styles');
+}
+if (/#(?:[0-9a-f]{3}|[0-9a-f]{6})\b/i.test(insightDashboard)) {
+  throw new Error('Insight dashboard colors must come from the active skin');
+}
+for (const color of ['info', 'success', 'accent', 'violet', 'warning', 'muted']) {
+  if (!insightDashboard.includes(`var(--color-brutal-${color})`)) {
+    throw new Error(`Insight dashboard is missing the shared ${color} color`);
+  }
 }
 for (const source of [relationshipWorkspace, thinkingWorkspace]) {
   if (!source.includes('proOptions={{ hideAttribution: true }}')) {

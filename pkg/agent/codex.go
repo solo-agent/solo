@@ -114,13 +114,17 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 	trySend(msgCh, OutputChunk{Type: string(MessageStatus), Content: "running", SessionID: threadID})
 
 	// First turn.
-	if _, err := c.request(ctx, "turn/start", map[string]any{
+	turnCtx, cancelTurnStart := context.WithTimeout(context.Background(), 10*time.Second)
+	turnResult, err := c.request(turnCtx, "turn/start", map[string]any{
 		"threadId": threadID,
 		"input":    []map[string]any{{"type": "text", "text": prompt}},
-	}); err != nil {
+	})
+	cancelTurnStart()
+	if err != nil {
 		runner.close()
 		return nil, fmt.Errorf("codex persistent turn/start: %w", err)
 	}
+	c.recordTurnID(extractCodexTurnID(turnResult))
 
 	state := &codexPersistentState{
 		runner:   runner,
@@ -129,7 +133,18 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 	}
 
 	var stopOnce sync.Once
-	stop := func() error { stopOnce.Do(func() { runner.cancel() }); return nil }
+	var stopErr error
+	stop := func() error {
+		stopOnce.Do(func() {
+			stopErr = c.interruptCurrentTurn()
+			if stopErr != nil {
+				// A broken control channel cannot preserve a reusable process. Kill
+				// it so the turn lock is eventually released by crash handling.
+				runner.cancel()
+			}
+		})
+		return stopErr
+	}
 
 	return &PersistentSession{
 		Messages:  msgCh,
@@ -171,15 +186,23 @@ func (b *CodexBackend) Send(ctx context.Context, ps *PersistentSession, messages
 		},
 	)
 
-	if _, err := state.client.request(ctx, "turn/start", map[string]any{
+	turnCtx, cancelTurnStart := context.WithTimeout(context.Background(), 10*time.Second)
+	turnResult, err := state.client.request(turnCtx, "turn/start", map[string]any{
 		"threadId": state.threadID,
 		"input":    []map[string]any{{"type": "text", "text": prompt}},
-	}); err != nil {
+	})
+	cancelTurnStart()
+	if err != nil {
 		return nil, fmt.Errorf("codex persistent turn/start: %w", err)
 	}
+	state.client.recordTurnID(extractCodexTurnID(turnResult))
 
 	var stopOnce sync.Once
-	stop := func() error { stopOnce.Do(func() {}); return nil }
+	var stopErr error
+	stop := func() error {
+		stopOnce.Do(func() { stopErr = state.client.interruptCurrentTurn() })
+		return stopErr
+	}
 
 	return &PersistentSession{
 		Messages:  msgCh,
@@ -837,6 +860,51 @@ func (c *codexClient) prepareTurn(onDone turnDoneCallback, onFailed turnFailedCa
 	c.turnID = ""
 }
 
+func (c *codexClient) recordTurnID(turnID string) {
+	if turnID == "" {
+		return
+	}
+	c.turnDoneMu.Lock()
+	if !c.turnDone {
+		c.turnID = turnID
+	}
+	c.turnDoneMu.Unlock()
+}
+
+func (c *codexClient) interruptCurrentTurn() error {
+	c.turnDoneMu.Lock()
+	threadID, turnID, done := c.threadID, c.turnID, c.turnDone
+	c.turnDoneMu.Unlock()
+	if done {
+		return nil
+	}
+	if threadID == "" || turnID == "" {
+		return fmt.Errorf("codex: cannot interrupt turn without thread and turn IDs")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := c.request(ctx, "turn/interrupt", map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
+	})
+	if err != nil {
+		// The provider can finish a turn before its terminal notification is
+		// observed locally. In that case, "no active turn" is authoritative
+		// confirmation that there is nothing left to interrupt; converge the
+		// local channels so the session turn lock can be released.
+		if strings.Contains(strings.ToLower(err.Error()), "no active turn to interrupt") {
+			c.signalTurnDone(true)
+			return nil
+		}
+		return fmt.Errorf("codex turn/interrupt: %w", err)
+	}
+	// The JSON-RPC response acknowledges that the provider accepted the
+	// interrupt. Release the local turn immediately; a late notification is
+	// deduplicated by signalTurnDone.
+	c.signalTurnDone(true)
+	return nil
+}
+
 func (c *codexClient) signalTurnFailure(err error) {
 	c.turnDoneMu.Lock()
 	if c.turnDone {
@@ -858,18 +926,30 @@ func (c *codexClient) signalTurnFailure(err error) {
 }
 
 func (c *codexClient) signalTurnDone(aborted bool) {
+	c.signalTurnDoneForID("", aborted)
+}
+
+func (c *codexClient) signalTurnDoneForID(turnID string, aborted bool) {
 	c.turnDoneMu.Lock()
+	completedID := turnID
+	if completedID == "" {
+		completedID = c.turnID
+	}
+	if completedID != "" {
+		if c.completedTurnIDs == nil {
+			c.completedTurnIDs = map[string]bool{}
+		}
+		if c.completedTurnIDs[completedID] {
+			c.turnDoneMu.Unlock()
+			return
+		}
+		c.completedTurnIDs[completedID] = true
+	}
 	if c.turnDone {
 		c.turnDoneMu.Unlock()
 		return
 	}
 	c.turnDone = true
-	if c.turnID != "" {
-		if c.completedTurnIDs == nil {
-			c.completedTurnIDs = map[string]bool{}
-		}
-		c.completedTurnIDs[c.turnID] = true
-	}
 	onDone := c.onTurnDone
 	c.turnDoneMu.Unlock()
 	if onDone != nil {
@@ -942,7 +1022,7 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 	case "turn/started":
 		c.turnStarted = true
 		if turnID := extractNestedString(params, "turn", "id"); turnID != "" {
-			c.turnID = turnID
+			c.recordTurnID(turnID)
 		}
 		if c.onChunk != nil {
 			c.onChunk(OutputChunk{Type: string(MessageStatus), Content: "running"})
@@ -961,23 +1041,13 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 			c.setTurnError(errMsg)
 		}
 
-		if c.completedTurnIDs == nil {
-			c.completedTurnIDs = map[string]bool{}
-		}
-		if turnID != "" {
-			if c.completedTurnIDs[turnID] {
-				return
-			}
-			c.completedTurnIDs[turnID] = true
-		}
-
 		if turn, ok := params["turn"].(map[string]any); ok {
 			c.extractUsageFromMap(turn)
 		}
 
 		aborted := status == "cancelled" || status == "canceled" ||
 			status == "aborted" || status == "interrupted"
-		c.signalTurnDone(aborted)
+		c.signalTurnDoneForID(turnID, aborted)
 
 	case "error":
 		willRetry, _ := params["willRetry"].(bool)
@@ -1270,6 +1340,18 @@ func extractCodexThreadID(result json.RawMessage) string {
 		return ""
 	}
 	return r.Thread.ID
+}
+
+func extractCodexTurnID(result json.RawMessage) string {
+	var r struct {
+		Turn struct {
+			ID string `json:"id"`
+		} `json:"turn"`
+	}
+	if err := json.Unmarshal(result, &r); err != nil {
+		return ""
+	}
+	return r.Turn.ID
 }
 
 func extractNestedString(m map[string]any, keys ...string) string {

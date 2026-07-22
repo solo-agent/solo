@@ -4,10 +4,44 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestAcquireTurnCancellationDoesNotLeakSemaphore(t *testing.T) {
+	mgr := NewAgentSessionManager(nil, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	firstRelease, err := mgr.acquireTurn(context.Background(), "agent:one", "one")
+	if err != nil {
+		t.Fatalf("acquire first turn: %v", err)
+	}
+
+	waitCtx, cancel := context.WithCancel(context.Background())
+	waitResult := make(chan error, 1)
+	go func() {
+		_, waitErr := mgr.acquireTurn(waitCtx, "agent:one", "one")
+		waitResult <- waitErr
+	}()
+	cancel()
+	select {
+	case waitErr := <-waitResult:
+		if waitErr == nil || !strings.Contains(waitErr.Error(), context.Canceled.Error()) {
+			t.Fatalf("cancelled waiter error = %v, want context canceled", waitErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled turn waiter did not unblock")
+	}
+
+	firstRelease()
+	nextCtx, nextCancel := context.WithTimeout(context.Background(), time.Second)
+	defer nextCancel()
+	nextRelease, err := mgr.acquireTurn(nextCtx, "agent:one", "one")
+	if err != nil {
+		t.Fatalf("acquire after cancelled waiter: %v", err)
+	}
+	nextRelease()
+}
 
 func TestSessionManagerScopesSessionsWithoutCloningAgent(t *testing.T) {
 	backend := &scopedRecordingBackend{}
@@ -158,6 +192,71 @@ func TestSessionManagerSleepsOnlyIdleThinkingSessionsAndResumes(t *testing.T) {
 	}
 	if closes != 1 {
 		t.Fatalf("graceful close count = %d, want 1 idle Thinking process", closes)
+	}
+}
+
+func TestSessionManagerUsesProtocolResumeWithoutInjectingCLIFlag(t *testing.T) {
+	backend := &scopedRecordingBackend{}
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	cfg := AgentConfig{
+		AgentID:    "agent-1",
+		Name:       "Agent",
+		Provider:   "codex",
+		CustomArgs: []string{"--configured-flag"},
+	}
+
+	resumed, err := mgr.GetOrCreateScopedSession(
+		context.Background(),
+		ThinkingSessionKey("resume-node"),
+		"agent-1",
+		cfg,
+		ChannelContext{},
+		[]Message{{Role: RoleUser, Content: "continue"}},
+		"provider-session-1",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("resume session: %v", err)
+	}
+	<-resumed.Result
+
+	backend.mu.Lock()
+	opts := backend.startOptions[0]
+	backend.mu.Unlock()
+	if opts.ResumeSessionID != "provider-session-1" {
+		t.Fatalf("ResumeSessionID = %q, want provider-session-1", opts.ResumeSessionID)
+	}
+	if len(opts.CustomArgs) != 1 || opts.CustomArgs[0] != "--configured-flag" {
+		t.Fatalf("CustomArgs = %v, want only configured flags", opts.CustomArgs)
+	}
+}
+
+func TestSessionCrashWaitsForNextTrackedRequestToResume(t *testing.T) {
+	backend := &scopedRecordingBackend{}
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	done := make(chan struct{})
+	close(done)
+	state := earlyReturnState{doneCh: done, sessionID: "provider-session-1"}
+	ps := &PersistentSession{SessionID: "provider-session-1", state: state}
+	entry := &agentSessionEntry{
+		SessionKey: "agent:agent-1",
+		AgentID:    "agent-1",
+		Session:    ps,
+		sessionID:  "provider-session-1",
+	}
+	mgr.sessions[entry.SessionKey] = entry
+
+	mgr.watchCrash(entry.SessionKey, entry.AgentID, AgentConfig{}, ChannelContext{}, entry, state)
+
+	current, asleep, resumeID := entry.snapshot()
+	if current != nil || !asleep || resumeID != "provider-session-1" {
+		t.Fatalf("crashed entry = session:%v asleep:%v resume:%q", current, asleep, resumeID)
+	}
+	backend.mu.Lock()
+	starts := len(backend.startAgentIDs)
+	backend.mu.Unlock()
+	if starts != 0 {
+		t.Fatalf("crash recovery started %d untracked turns, want 0", starts)
 	}
 }
 
@@ -392,6 +491,7 @@ type scopedRecordingBackend struct {
 	sendCount       int
 	forceCloseCount int
 	closeCount      int
+	startOptions    []ExecuteOptions
 }
 
 func (b *scopedRecordingBackend) Name() string { return "scoped-recording" }
@@ -403,6 +503,7 @@ func (b *scopedRecordingBackend) Execute(context.Context, *ExecuteRequest, *Exec
 func (b *scopedRecordingBackend) Start(_ context.Context, req *ExecuteRequest, opts *ExecuteOptions) (*PersistentSession, error) {
 	b.mu.Lock()
 	b.startAgentIDs = append(b.startAgentIDs, req.AgentID)
+	b.startOptions = append(b.startOptions, *opts)
 	id := opts.ResumeSessionID
 	if id == "" {
 		id = "session-" + fmt.Sprint(len(b.startAgentIDs))

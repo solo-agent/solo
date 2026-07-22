@@ -36,6 +36,7 @@ const teamsHumanItem = read('components/teams/teams-human-item.tsx');
 const navbar = read('components/ui/navbar.tsx');
 const tabBar = read('components/ui/tab-bar.tsx');
 const brutalCss = read('app/globals.brutal.css');
+const splitDragHotPath = channelView.match(/const scheduleSplitResize[\s\S]*?\n  }, \[[^\]]*\]\);/)?.[0] ?? '';
 
 assert(
   !exists('app/relationships/page.tsx'),
@@ -88,6 +89,18 @@ assert(
 assert(
   detailPanel.includes('panelWidth') && detailPanel.includes('cursor-col-resize'),
   'agent detail panel should be resizable like the channel thread panel',
+);
+assert(
+  channelView.includes('role="separator"') &&
+    channelView.includes('aria-orientation="vertical"') &&
+    channelView.includes('setPointerCapture') &&
+    channelView.includes('MIN_SPLIT_PANE_WIDTH') &&
+    channelView.includes('handleSplitKeyDown') &&
+    channelView.includes('requestAnimationFrame') &&
+    channelView.includes("conversationPanelRef.current.style.flexBasis = `${percent}%`") &&
+    splitDragHotPath.includes('requestAnimationFrame') &&
+    !splitDragHotPath.includes('setConversationPanelPercent'),
+  'channel conversation and workspace panes should share an accessible draggable divider',
 );
 assert(
   detailPanel.includes('showProfileHeader={false}'),
