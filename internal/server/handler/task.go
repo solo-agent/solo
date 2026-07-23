@@ -548,7 +548,11 @@ func (h *TaskHandler) Claim(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	task, err := h.svc.ClaimTask(r.Context(), channelID, t.ID, userID)
+	actionCtx, ok := h.taskActionContext(w, r, userID, channelID, "claim")
+	if !ok {
+		return
+	}
+	task, err := h.svc.ClaimTask(actionCtx, channelID, t.ID, userID)
 	if err != nil {
 		switch {
 		case err == service.ErrTaskNotFound:
@@ -631,7 +635,11 @@ func (h *TaskHandler) Unclaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.svc.UnclaimTask(r.Context(), channelID, t.ID, userID)
+	actionCtx, ok := h.taskActionContext(w, r, userID, channelID, "unclaim")
+	if !ok {
+		return
+	}
+	task, err := h.svc.UnclaimTask(actionCtx, channelID, t.ID, userID)
 	if err != nil {
 		switch {
 		case err == service.ErrTaskNotFound:
@@ -688,11 +696,11 @@ func (h *TaskHandler) Unclaim(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) Submit(w http.ResponseWriter, r *http.Request) {
-	h.lifecycleAction(w, r, h.svc.SubmitTask)
+	h.lifecycleAction(w, r, "submit", h.svc.SubmitTask)
 }
 
 func (h *TaskHandler) Accept(w http.ResponseWriter, r *http.Request) {
-	h.lifecycleAction(w, r, h.svc.AcceptTask)
+	h.lifecycleAction(w, r, "accept", h.svc.AcceptTask)
 }
 
 func (h *TaskHandler) Reject(w http.ResponseWriter, r *http.Request) {
@@ -714,7 +722,11 @@ func (h *TaskHandler) Reject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	task, err := h.svc.RejectTask(r.Context(), channelID, taskID, userID, strings.TrimSpace(req.Reason))
+	actionCtx, ok := h.taskActionContext(w, r, userID, channelID, "reject")
+	if !ok {
+		return
+	}
+	task, err := h.svc.RejectTask(actionCtx, channelID, taskID, userID, strings.TrimSpace(req.Reason))
 	if err != nil {
 		h.writeTaskLifecycleError(w, err)
 		return
@@ -723,11 +735,11 @@ func (h *TaskHandler) Reject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) Close(w http.ResponseWriter, r *http.Request) {
-	h.lifecycleAction(w, r, h.svc.CloseTask)
+	h.lifecycleAction(w, r, "close", h.svc.CloseTask)
 }
 
 func (h *TaskHandler) Reopen(w http.ResponseWriter, r *http.Request) {
-	h.lifecycleAction(w, r, h.svc.ReopenTask)
+	h.lifecycleAction(w, r, "reopen", h.svc.ReopenTask)
 }
 
 func (h *TaskHandler) AcceptGlobal(w http.ResponseWriter, r *http.Request) {
@@ -765,6 +777,7 @@ func (h *TaskHandler) ReopenGlobal(w http.ResponseWriter, r *http.Request) {
 func (h *TaskHandler) lifecycleAction(
 	w http.ResponseWriter,
 	r *http.Request,
+	actionName string,
 	action func(context.Context, string, string, string) (*service.Task, error),
 ) {
 	userID, ok := requireUserID(r)
@@ -779,13 +792,33 @@ func (h *TaskHandler) lifecycleAction(
 		return
 	}
 
-	task, err := action(r.Context(), channelID, taskID, userID)
+	actionCtx, ok := h.taskActionContext(w, r, userID, channelID, actionName)
+	if !ok {
+		return
+	}
+	task, err := action(actionCtx, channelID, taskID, userID)
 	if err != nil {
 		h.writeTaskLifecycleError(w, err)
 		return
 	}
 
 	h.writeTaskUpdate(w, task)
+}
+
+func (h *TaskHandler) taskActionContext(w http.ResponseWriter, r *http.Request, actorID, channelID, action string) (context.Context, bool) {
+	runID := strings.TrimSpace(r.Header.Get(service.OriginRunHeader))
+	if runID == "" {
+		return r.Context(), true
+	}
+	if err := service.NewAgentRunService(h.pool).ValidateActionOrigin(r.Context(), runID, r.Header.Get(service.OriginSignatureHeader), actorID, channelID); err != nil {
+		writeError(w, http.StatusConflict, "origin run is not the active agent turn")
+		return nil, false
+	}
+	return service.WithTaskActionOrigin(r.Context(), service.TaskActionOrigin{
+		RunID:   runID,
+		ActorID: actorID,
+		Action:  action,
+	}), true
 }
 
 func (h *TaskHandler) lifecycleActionGlobal(
@@ -838,6 +871,8 @@ func (h *TaskHandler) writeTaskLifecycleError(w http.ResponseWriter, err error) 
 		writeError(w, http.StatusConflict, err.Error())
 	case err == service.ErrTaskReasonRequired:
 		writeError(w, http.StatusBadRequest, err.Error())
+	case err == service.ErrInvalidAgentRunOrigin:
+		writeError(w, http.StatusConflict, err.Error())
 	default:
 		slog.Error("failed task lifecycle action", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to update task")
