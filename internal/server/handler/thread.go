@@ -64,6 +64,7 @@ type ThreadReplyResponse struct {
 	SenderActive  bool             `json:"sender_active"`
 	Content       string           `json:"content"`
 	ContentType   string           `json:"content_type"`
+	OriginRunID   string           `json:"origin_run_id,omitempty"`
 	AttachmentIDs []string         `json:"attachment_ids,omitempty"`
 	Attachments   []AttachmentMeta `json:"attachments,omitempty"`
 	CreatedAt     string           `json:"created_at"`
@@ -472,7 +473,8 @@ func (h *ThreadHandler) ListThreadMessages(w http.ResponseWriter, r *http.Reques
 	query := `SELECT m.id, m.channel_id, m.thread_id, m.sender_type, m.sender_id,
 	                 COALESCE(u.display_name, a.name, '') as sender_name,
 	                 COALESCE(a.is_active, false) AS sender_active,
-	                 m.content, m.content_type, COALESCE(m.attachment_ids, '{}') as attachment_ids,
+	                 m.content, m.content_type, COALESCE(m.origin_run_id::text, '') AS origin_run_id,
+	                 COALESCE(m.attachment_ids, '{}') as attachment_ids,
                  m.created_at
 	          FROM messages m
 	          LEFT JOIN users u ON m.sender_type = 'user' AND m.sender_id = u.id
@@ -506,7 +508,7 @@ func (h *ThreadHandler) ListThreadMessages(w http.ResponseWriter, r *http.Reques
 		err := rows.Scan(&msg.ID, &msg.ChannelID, &msg.ThreadID,
 			&msg.SenderType, &msg.SenderID, &msg.SenderName,
 			&msg.SenderActive,
-			&msg.Content, &msg.ContentType, &msg.AttachmentIDs, &createdAt)
+			&msg.Content, &msg.ContentType, &msg.OriginRunID, &msg.AttachmentIDs, &createdAt)
 		if err != nil {
 			slog.Error("failed to scan thread message row", "error", err)
 			continue

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/solo-ai/solo/internal/auth"
+	"github.com/solo-ai/solo/internal/causal"
 	"github.com/solo-ai/solo/pkg/agent"
 	"github.com/solo-ai/solo/pkg/llm"
 )
@@ -213,6 +215,118 @@ func TestCloneHTTPClientWithTimeoutPreservesTransport(t *testing.T) {
 	}
 	if original.Timeout != 10*time.Second {
 		t.Fatalf("original timeout changed to %s", original.Timeout)
+	}
+}
+
+func TestProxyMutationRequiresMatchingActiveTurn(t *testing.T) {
+	tm := newTaskManager()
+	h := newDaemonHandler(nil, tm, fakeStreamProvider{}, "http://example.invalid", "")
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/daemon/proxy", bytes.NewBufferString(`{
+		"agent_id":"agent-1","action":"message_send","channel_id":"channel-1","content":"hello"
+	}`))
+	req.RemoteAddr = "127.0.0.1:12345"
+	resp := httptest.NewRecorder()
+	h.ProxyRequest(resp, req)
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusConflict, resp.Body.String())
+	}
+
+	tm.SetActionScope(actionScope{RunID: "run-1", AgentID: "agent-1", ChannelID: "other-channel"})
+	req = httptest.NewRequest(http.MethodPost, "/internal/daemon/proxy", bytes.NewBufferString(`{
+		"agent_id":"agent-1","action":"task_claim","channel_id":"channel-1","task_number":1
+	}`))
+	req.RemoteAddr = "127.0.0.1:12345"
+	resp = httptest.NewRecorder()
+	h.ProxyRequest(resp, req)
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("wrong-channel status = %d, want %d; body=%s", resp.Code, http.StatusConflict, resp.Body.String())
+	}
+}
+
+func TestProxyMutationInjectsDaemonOwnedOriginRun(t *testing.T) {
+	var gotRunID string
+	var gotSignature string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRunID = r.Header.Get(causal.RunHeader)
+		gotSignature = r.Header.Get(causal.SignatureHeader)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"message-1"}`))
+	}))
+	defer upstream.Close()
+
+	tm := newTaskManager()
+	tm.SetActionScope(actionScope{RunID: "run-actual", AgentID: "agent-1", ChannelID: "channel-1"})
+	h := newDaemonHandler(nil, tm, fakeStreamProvider{}, upstream.URL, "test-internal-secret")
+	agentToken, err := auth.GenerateAgentToken("agent-1", "Agent One")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.agentTokens["agent-1"] = &agentTokenState{accessToken: agentToken, expiresAt: time.Now().Add(time.Hour)}
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/daemon/proxy", bytes.NewBufferString(`{
+		"agent_id":"agent-1","action":"message_send","channel_id":"channel-1","content":"hello"
+	}`))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Authorization", "Bearer "+agentToken)
+	resp := httptest.NewRecorder()
+	h.ProxyRequest(resp, req)
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusCreated, resp.Body.String())
+	}
+	if gotRunID != "run-actual" {
+		t.Fatalf("origin header = %q, want %q", gotRunID, "run-actual")
+	}
+	if !causal.Verify("test-internal-secret", gotRunID, "agent-1", "channel-1", gotSignature) {
+		t.Fatalf("invalid daemon origin signature %q", gotSignature)
+	}
+}
+
+func TestProxyRejectsCallerTokenForDifferentAgent(t *testing.T) {
+	tm := newTaskManager()
+	tm.SetActionScope(actionScope{RunID: "run-1", AgentID: "agent-1", ChannelID: "channel-1"})
+	h := newDaemonHandler(nil, tm, fakeStreamProvider{}, "http://example.invalid", "test-internal-secret")
+	otherToken, err := auth.GenerateAgentToken("agent-2", "Agent Two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/internal/daemon/proxy", bytes.NewBufferString(`{
+		"agent_id":"agent-1","action":"message_send","channel_id":"channel-1","content":"hello"
+	}`))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Authorization", "Bearer "+otherToken)
+	resp := httptest.NewRecorder()
+	h.ProxyRequest(resp, req)
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusUnauthorized, resp.Body.String())
+	}
+}
+
+func TestClearActionScopeDoesNotDeleteNewerTurn(t *testing.T) {
+	tm := newTaskManager()
+	tm.SetActionScope(actionScope{RunID: "run-old", AgentID: "agent-1"})
+	tm.ClearActionScope("agent-1", "run-old")
+	tm.SetActionScope(actionScope{RunID: "run-new", AgentID: "agent-1"})
+	tm.ClearActionScope("agent-1", "run-old")
+
+	scope, ok := tm.GetActionScope("agent-1")
+	if !ok || scope.RunID != "run-new" {
+		t.Fatalf("scope = %+v, ok=%v; want run-new", scope, ok)
+	}
+}
+
+func TestSetActionScopeRejectsConcurrentTurn(t *testing.T) {
+	tm := newTaskManager()
+	if !tm.SetActionScope(actionScope{RunID: "run-old", AgentID: "agent-1"}) {
+		t.Fatal("first scope was rejected")
+	}
+	if tm.SetActionScope(actionScope{RunID: "run-new", AgentID: "agent-1"}) {
+		t.Fatal("concurrent scope was accepted")
+	}
+	scope, ok := tm.GetActionScope("agent-1")
+	if !ok || scope.RunID != "run-old" {
+		t.Fatalf("scope = %+v, ok=%v; want run-old", scope, ok)
 	}
 }
 
