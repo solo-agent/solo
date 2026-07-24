@@ -37,6 +37,7 @@ type Member struct {
 	MemberType  string    `json:"member_type"`
 	MemberID    string    `json:"member_id"`
 	DisplayName string    `json:"display_name,omitempty"`
+	AvatarURL   string    `json:"avatar_url,omitempty"`
 	Email       string    `json:"email,omitempty"`
 	Role        string    `json:"role"`
 	JoinedAt    time.Time `json:"joined_at"`
@@ -140,10 +141,12 @@ func (s *ChannelService) AddMember(ctx context.Context, channelID, requesterID, 
 			return ErrUserNotFound
 		}
 	case "agent":
-		var agentOwnerID string
+		var agentOwnerID, homeChannelID, kind string
 		err = s.pool.QueryRow(ctx,
-			`SELECT owner_id FROM agents WHERE id = $1 AND is_active = true`, memberID,
-		).Scan(&agentOwnerID)
+			`SELECT owner_id, home_channel_id, kind
+			   FROM agents
+			  WHERE id = $1 AND is_active = true`, memberID,
+		).Scan(&agentOwnerID, &homeChannelID, &kind)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrAgentNotFound
@@ -151,7 +154,7 @@ func (s *ChannelService) AddMember(ctx context.Context, channelID, requesterID, 
 			return err
 		}
 		// Verify the agent belongs to the requesting user
-		if agentOwnerID != requesterID {
+		if agentOwnerID != requesterID || kind != "agent" || homeChannelID != channelID {
 			return ErrAgentNotFound
 		}
 	}
@@ -182,7 +185,7 @@ func (s *ChannelService) AddMember(ctx context.Context, channelID, requesterID, 
 
 // RemoveMember removes a member from a channel. Only owners and admins can remove members.
 // Members can remove themselves.
-func (s *ChannelService) RemoveMember(ctx context.Context, channelID, requesterID, memberID string) error {
+func (s *ChannelService) RemoveMember(ctx context.Context, channelID, requesterID, memberID string) (string, error) {
 	// Verify member exists in channel
 	var memberType, currentRole string
 	err := s.pool.QueryRow(ctx,
@@ -192,9 +195,9 @@ func (s *ChannelService) RemoveMember(ctx context.Context, channelID, requesterI
 	).Scan(&memberType, &currentRole)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrMemberNotFound
+			return "", ErrMemberNotFound
 		}
-		return err
+		return "", err
 	}
 
 	// Check permissions
@@ -208,26 +211,95 @@ func (s *ChannelService) RemoveMember(ctx context.Context, channelID, requesterI
 		).Scan(&requesterRole)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return ErrNotChannelMember
+				return "", ErrNotChannelMember
 			}
-			return err
+			return "", err
 		}
 		if requesterRole != "owner" && requesterRole != "admin" {
-			return ErrPermissionDenied
+			return "", ErrPermissionDenied
 		}
 
 		// Only owners can remove other owners/admins
 		if (currentRole == "owner" || currentRole == "admin") && requesterRole != "owner" {
-			return ErrPermissionDenied
+			return "", ErrPermissionDenied
 		}
 	}
 
-	_, err = s.pool.Exec(ctx,
-		`DELETE FROM channel_members
-		 WHERE channel_id = $1 AND member_id = $2`,
-		channelID, memberID,
-	)
-	return err
+	if memberType == "agent" {
+		tx, txErr := s.pool.Begin(ctx)
+		if txErr != nil {
+			return "", txErr
+		}
+		defer tx.Rollback(ctx)
+		result, txErr := tx.Exec(ctx, `
+			UPDATE agents
+			   SET is_active = false, updated_at = now()
+			 WHERE id = $2
+			   AND home_channel_id = $1
+			   AND kind = 'agent'
+			   AND is_active = true
+		`, channelID, memberID)
+		if txErr != nil {
+			return "", txErr
+		}
+		if result.RowsAffected() == 0 {
+			return "", ErrMemberNotFound
+		}
+		if _, txErr = tx.Exec(ctx, `
+			UPDATE tasks
+			   SET status = 'todo', claimer_id = NULL, updated_at = now()
+			 WHERE channel_id = $1
+			   AND claimer_id = $2
+			   AND status IN ('in_progress', 'in_review')
+		`, channelID, memberID); txErr != nil {
+			return "", txErr
+		}
+		if _, txErr = tx.Exec(ctx, `
+			UPDATE agent_runs
+			   SET status = 'cancelled',
+			       activity_text = 'Cancelled because the Agent was removed',
+			       updated_at = now(),
+			       finished_at = COALESCE(finished_at, now())
+			 WHERE agent_id = $1
+			   AND status IN (
+			       'queued', 'thinking', 'running', 'streaming',
+			       'waiting_input', 'waiting_approval'
+			   )
+		`, memberID); txErr != nil {
+			return "", txErr
+		}
+		if _, txErr = tx.Exec(ctx, `
+			UPDATE agent_sessions
+			   SET status = 'closed', last_active_at = now()
+			 WHERE agent_id = $1 AND status = 'active'
+		`, memberID); txErr != nil {
+			return "", txErr
+		}
+		if _, txErr = tx.Exec(ctx, `
+			UPDATE computers
+			   SET agent_ids = array_remove(agent_ids, $1::uuid), updated_at = now()
+			 WHERE $1::uuid = ANY(agent_ids)
+		`, memberID); txErr != nil {
+			return "", txErr
+		}
+		if _, txErr = tx.Exec(ctx, `
+			DELETE FROM channel_members
+			 WHERE channel_id = $1
+			   AND member_type = 'agent'
+			   AND member_id = $2
+		`, channelID, memberID); txErr != nil {
+			return "", txErr
+		}
+		if txErr = tx.Commit(ctx); txErr != nil {
+			return "", txErr
+		}
+		return memberType, nil
+	}
+	_, err = s.pool.Exec(ctx, `
+		DELETE FROM channel_members
+		 WHERE channel_id = $1 AND member_id = $2
+	`, channelID, memberID)
+	return memberType, err
 }
 
 // ListMembers returns all members of a channel.
@@ -251,6 +323,7 @@ func (s *ChannelService) ListMembers(ctx context.Context, channelID, requesterID
 	rows, err := s.pool.Query(ctx,
 		`SELECT cm.channel_id, cm.member_type, cm.member_id,
 				COALESCE(u.display_name, a.name, 'Unknown'), COALESCE(u.email, ''),
+				COALESCE(u.avatar_url, a.avatar_url, ''),
 				cm.role, cm.joined_at
 		 FROM channel_members cm
 		 LEFT JOIN users u ON cm.member_type = 'user' AND cm.member_id = u.id
@@ -269,7 +342,7 @@ func (s *ChannelService) ListMembers(ctx context.Context, channelID, requesterID
 	for rows.Next() {
 		var m Member
 		if err := rows.Scan(&m.ChannelID, &m.MemberType, &m.MemberID,
-			&m.DisplayName, &m.Email, &m.Role, &m.JoinedAt); err != nil {
+			&m.DisplayName, &m.Email, &m.AvatarURL, &m.Role, &m.JoinedAt); err != nil {
 			return nil, err
 		}
 		members = append(members, m)

@@ -120,6 +120,7 @@ export function StreamingMessage({ message, onAgentClick }: StreamingMessageProp
     >
       <PixelAvatar
         agentId={message.user_id}
+        avatarUrl={message.avatar_url}
         size="md"
         className="mt-0.5 flex-shrink-0"
         onClick={onAgentClick ? () => onAgentClick?.({

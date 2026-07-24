@@ -68,6 +68,8 @@ interface MessageInputProps {
   thinkingMode?: boolean;
   onThinkingModeChange?: (active: boolean) => void;
   disabled?: boolean;
+  suggestedContent?: string | null;
+  onSuggestedContentApplied?: () => void;
 }
 
 // ---- Upload helper ----
@@ -112,6 +114,8 @@ export function MessageInput({
   thinkingMode = false,
   onThinkingModeChange,
   disabled = false,
+  suggestedContent = null,
+  onSuggestedContentApplied,
 }: MessageInputProps) {
   const [content, setContent] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -464,6 +468,21 @@ export function MessageInput({
     },
     [],
   );
+
+  useEffect(() => {
+    if (!suggestedContent) return;
+    setContent(suggestedContent);
+    setCursorPosition(suggestedContent.length);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(suggestedContent.length, suggestedContent.length);
+      el.style.height = 'auto';
+      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    });
+    onSuggestedContentApplied?.();
+  }, [onSuggestedContentApplied, suggestedContent]);
 
   // ---- Drag overlay container events ----
   // Attach drag enter/leave to the outer wrapper so the overlay covers all input area

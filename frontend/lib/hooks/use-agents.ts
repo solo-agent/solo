@@ -7,7 +7,6 @@
 import { t } from '@/lib/i18n';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
-import { getNextPixelAvatarIndex } from '@/components/ui/pixel-avatar';
 import type { Agent, CreateAgentInput, UpdateAgentInput } from '@/lib/types';
 
 // ---- Backend response shape ----
@@ -17,6 +16,8 @@ interface AgentResponse {
   name: string;
   description: string;
   owner_id: string;
+  home_channel_id: string;
+  kind: 'agent' | 'lucy';
   model_provider: string;
   model_name: string;
   system_prompt: string;
@@ -36,6 +37,8 @@ function mapAgent(resp: AgentResponse): Agent {
     name: resp.name,
     description: resp.description || '',
     owner_id: resp.owner_id,
+    home_channel_id: resp.home_channel_id,
+    kind: resp.kind,
     model_provider: resp.model_provider as Agent['model_provider'],
     model_name: resp.model_name,
     system_prompt: resp.system_prompt,
@@ -50,17 +53,22 @@ function mapAgent(resp: AgentResponse): Agent {
 
 // ---- Hook ----
 
-export function useAgents() {
+export function useAgents(channelId?: string | null) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   const loadAgents = useCallback(async () => {
+    if (!channelId) {
+      setAgents([]);
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {
-      const res = await apiClient.get<AgentResponse[]>('/api/v1/agents');
+      const res = await apiClient.get<AgentResponse[]>(`/api/v1/channels/${channelId}/agents`);
       if (mountedRef.current) {
         setAgents(res.map(mapAgent));
       }
@@ -70,7 +78,7 @@ export function useAgents() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [channelId]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -82,21 +90,22 @@ export function useAgents() {
   }, [loadAgents]);
 
   const createAgent = useCallback(async (input: CreateAgentInput): Promise<Agent> => {
-    const nextIndex = getNextPixelAvatarIndex(agents.map(a => a.avatar_url));
-    const res = await apiClient.post<AgentResponse>('/api/v1/agents', {
+    if (!channelId) {
+      throw new Error('A home Channel is required to create an Agent.');
+    }
+    const res = await apiClient.post<AgentResponse>(`/api/v1/channels/${channelId}/agents`, {
       name: input.name,
       description: input.description || '',
       model_provider: input.model_provider,
       model_name: input.model_name,
       system_prompt: input.system_prompt || '',
-      avatar_url: input.avatar_url || `pixel:${nextIndex}`,
       custom_env: input.custom_env || {},
       custom_args: input.custom_args || [],
     });
     const agent = mapAgent(res);
     setAgents((prev) => [...prev, agent]);
     return agent;
-  }, []);
+  }, [channelId]);
 
   const updateAgent = useCallback(async (id: string, input: UpdateAgentInput): Promise<Agent> => {
     const res = await apiClient.patch<AgentResponse>(`/api/v1/agents/${id}`, {

@@ -400,7 +400,8 @@ func writeCLICommands(b *strings.Builder, channel ChannelContext) {
 	fmt.Fprintf(b, "14. **%s** — Reject reviewed work you created back to progress.\n", bt("solo task reject -n <number> -c <channel_id> --reason <reason>"))
 	fmt.Fprintf(b, "15. **%s** — Close a task. Human-only lifecycle action.\n", bt("solo task close -n <number> -c <channel_id>"))
 	fmt.Fprintf(b, "16. **%s** — Reopen a closed or done task. Human-only lifecycle action.\n", bt("solo task reopen -n <number> -c <channel_id>"))
-	fmt.Fprintf(b, "17. **%s** — Lucy-only: atomically create a specialist team from a clear owner request in a welcome channel. The JSON plan is read from stdin unless `--plan` is provided.\n", bt("solo team form --source-channel <id> --source-message <msg> [--plan <file>]"))
+	fmt.Fprintf(b, "17. **%s** — List the current official Agent team templates and their roles. Lucy must run this before recommending or creating a team.\n", bt("solo template list --json"))
+	fmt.Fprintf(b, "18. **%s** — Lucy-only: atomically create a fresh Channel-scoped team from an official template after an explicit owner request. The JSON plan is read from stdin unless `--plan` is provided.\n", bt("solo team form --source-channel <id> --source-message <msg> [--plan <file>]"))
 }
 
 func triggerDescription(t TriggerType) string {

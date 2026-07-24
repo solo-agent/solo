@@ -1099,27 +1099,6 @@
   word-break: normal;
 }
 
-/* ============================================================
-   Pixel Avatar — 7×7 CSS grid pixel art (3px per cell)
-   ============================================================ */
-
-.pixel-avatar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 3px);
-  grid-template-rows: repeat(7, 3px);
-  gap: 0;
-  width: 21px;
-  height: 21px;
-}
-
-.pixel-avatar-cell {
-  width: 3px;
-  height: 3px;
-}
-
-.pixel-avatar-cell-filled { background: var(--pixel-fill, #000); }
-.pixel-avatar-cell-empty { background: transparent; }
-
 /* Pixel avatar wrapper sizes */
 .pixel-avatar-sm { width: 28px; height: 28px; }
 .pixel-avatar-md { width: 32px; height: 32px; }
@@ -1477,7 +1456,13 @@
   border-width: 1px;
   border-color: var(--skin-rule) !important;
   border-radius: 0.75rem;
+  background: var(--skin-surface);
   box-shadow: inset 0 3px 0 var(--team-agent-status-color), var(--archive-shadow-md);
+}
+
+:root[data-skin="archive"] .relationship-agent-node-selected {
+  background: var(--skin-accent-light);
+  box-shadow: inset 0 3px 0 var(--skin-accent), var(--archive-shadow-lg);
 }
 
 :root[data-skin="archive"] .relationship-agent-node:hover {
@@ -1495,6 +1480,14 @@
 :root[data-skin="archive"] .relationship-agent-node .team-agent-running-dot {
   border: 0;
   border-radius: 999px;
+}
+
+:root[data-skin="archive"] .relationship-agent-run-button {
+  border-width: 1px;
+  border-color: var(--skin-rule);
+  border-radius: 0.625rem;
+  background: var(--skin-info-light);
+  box-shadow: var(--archive-shadow-sm);
 }
 
 :root[data-skin="archive"] .relationship-task-connector {
@@ -1537,13 +1530,19 @@
 }
 
 :root[data-skin="archive"] .relationship-edge-label {
+  border-color: var(--skin-rule);
   background: var(--skin-surface);
-  box-shadow: var(--archive-shadow-sm);
+  box-shadow: none;
 }
 
-:root[data-skin="archive"] .relationship-edge-label:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--archive-shadow-md);
+:root[data-skin="archive"] .relationship-edge-label-selected {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--relationship-edge-color) 28%, transparent);
+  transform: scale(1.12);
+}
+
+:root[data-skin="archive"] .relationship-edge-hit-target:focus-visible .relationship-edge-label {
+  outline: 2px solid var(--skin-ink);
+  outline-offset: 2px;
 }
 
 :root[data-skin="archive"] :is(.relationship-flow, .thinking-flow) .react-flow__controls {
@@ -1554,6 +1553,29 @@
 }
 
 :root[data-skin="archive"] :is(.relationship-flow, .thinking-flow) .react-flow__controls-button {
+  border-color: var(--skin-rule);
+  background: var(--skin-surface);
+  fill: var(--skin-ink);
+}
+
+:root[data-skin="archive"] .template-role-node {
+  border-width: 1px !important;
+  border-radius: 0.75rem !important;
+  box-shadow: var(--archive-shadow-md) !important;
+}
+
+:root[data-skin="archive"] .template-role-node-selected {
+  box-shadow: inset 0 3px 0 var(--skin-accent), var(--archive-shadow-lg) !important;
+}
+
+:root[data-skin="archive"] .template-flow .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid var(--skin-rule) !important;
+  border-radius: 0.625rem;
+  box-shadow: var(--archive-shadow-sm) !important;
+}
+
+:root[data-skin="archive"] .template-flow .react-flow__controls-button {
   border-color: var(--skin-rule);
   background: var(--skin-surface);
   fill: var(--skin-ink);

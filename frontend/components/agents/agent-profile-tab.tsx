@@ -2,7 +2,6 @@
 // AgentProfileTab — inline-edit Agent profile fields (v1.5)
 // - Each editable field has a pencil icon -> click to edit -> save/cancel
 // - Read-only: computer name, created_at, created_by
-// - Status toggle: enable/disable switch
 // ============================================================================
 
 'use client';
@@ -24,13 +23,13 @@ import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Decoration } from '@/components/ui/decoration';
 import { useComputers } from '@/lib/hooks/use-computers';
 import { useComputerForAgent } from '@/lib/hooks/use-computer-for-agent';
-import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 import type { Agent } from '@/lib/types';
 
 interface AgentProfileTabProps {
   agentId: string;
   showHeader?: boolean;
+  onUpdated?: (field: string, value: string | boolean | number) => void;
 }
 
 // ---- Inline editable field component ----
@@ -81,6 +80,7 @@ function InlineTextField({
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            aria-label={label}
             className="input-brutal min-h-[80px] w-full resize-y font-body text-sm"
             disabled={saving}
           />
@@ -90,6 +90,7 @@ function InlineTextField({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder={placeholder}
+            aria-label={label}
             className="input-brutal h-9 w-full font-body text-sm"
             disabled={saving}
           />
@@ -149,69 +150,6 @@ function InlineTextField({
   );
 }
 
-// ---- Status toggle ----
-
-function StatusToggle({
-  active,
-  onToggle,
-}: {
-  active: boolean;
-  onToggle: (active: boolean) => Promise<void>;
-}) {
-  const [loading, setLoading] = useState(false);
-
-  const handleToggle = async () => {
-    setLoading(true);
-    try {
-      await onToggle(!active);
-    } catch {
-      // handled
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const statusColor = active
-    ? 'bg-brutal-success'
-    : 'bg-brutal-muted';
-
-  return (
-    <div className="flex items-center justify-between">
-      {/* v3.3: status pill is now a chunky badge-brutal instead of a
-          thin dot + muted text — adds a saturated status color block
-          to the panel without changing the toggle's interaction. */}
-      <span
-        className={cn(
-          'inline-flex items-center gap-1.5 border-2 border-black px-2 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider',
-          active ? 'bg-brutal-success text-black' : 'bg-brutal-muted text-black',
-        )}
-      >
-        <span
-          className={cn(
-            'h-2 w-2 border border-black',
-            active ? 'bg-white' : 'bg-black',
-          )}
-          aria-hidden
-        />
-        {active ? t('agentProfileEnabled') : t('agentProfileDisabled')}
-      </span>
-      <button
-        type="button"
-        onClick={handleToggle}
-        disabled={loading}
-        className={`relative flex h-7 w-11 flex-shrink-0 items-center border-2 border-black transition-colors ${statusColor}`}
-        role="switch"
-        aria-checked={active}
-        aria-label={active ? t('agentProfileDisable') : t('agentProfileEnable')}
-      >
-        <span
-          className={`absolute h-7 w-[18px] border-r-2 border-l-2 border-black bg-white transition-all ${active ? 'left-[calc(100%-18px)]' : 'left-0'}`}
-        />
-      </button>
-    </div>
-  );
-}
-
 // ---- Date formatting ----
 
 function formatDate(iso: string): string {
@@ -226,7 +164,7 @@ function formatDate(iso: string): string {
 
 // ---- Component ----
 
-export function AgentProfileTab({ agentId, showHeader = true }: AgentProfileTabProps) {
+export function AgentProfileTab({ agentId, showHeader = true, onUpdated }: AgentProfileTabProps) {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -279,12 +217,18 @@ export function AgentProfileTab({ agentId, showHeader = true }: AgentProfileTabP
 
   const handleUpdate = useCallback(
     async (field: string, value: string | boolean | number) => {
-      const body: Record<string, unknown> = { [field]: value };
-      await apiClient.patch(`/api/v1/agents/${agentId}`, body);
-      setAgent((prev) => prev ? { ...prev, [field]: value } : null);
-      showToast(t('agentProfileUpdateSuccess'), 'success');
+      try {
+        const body: Record<string, unknown> = { [field]: value };
+        await apiClient.patch(`/api/v1/agents/${agentId}`, body);
+        setAgent((prev) => prev ? { ...prev, [field]: value } : null);
+        onUpdated?.(field, value);
+        showToast(t('agentProfileUpdateSuccess'), 'success');
+      } catch (err) {
+        showToast(err instanceof ApiError ? err.message : t('agentProfileUpdateError'), 'error');
+        throw err;
+      }
     },
-    [agentId, showToast],
+    [agentId, onUpdated, showToast],
   );
 
   if (isLoading) {
@@ -348,24 +292,20 @@ export function AgentProfileTab({ agentId, showHeader = true }: AgentProfileTabP
         </>
       )}
 
-      {/* Status toggle */}
-      <div className={detailSectionClass()}>
-        <StatusToggle
-          active={agent.is_active}
-          onToggle={(active) => handleUpdate('is_active', active)}
-        />
-      </div>
-
-      {/* v3.3: Name field removed (the avatar/header above already
-          shows the name). Description + System Prompt are grouped under
-          a single `★ INFO` tilted sticker section. */}
       <div className={detailSectionClass('space-y-3')}>
         <h4>
           <span className={detailSectionTitleClass()}>
-            ★ {t('agentProfileInfo')}
+            ★ {t('agentRoleConfig')}
           </span>
         </h4>
         <div className="space-y-4">
+          <InlineTextField
+            label={t('agentFormName')}
+            value={agent.name}
+            onSave={(val) => handleUpdate('name', val)}
+            placeholder={t('agentFormNamePlaceholder')}
+          />
+
           <InlineTextField
             label={t('agentFormDesc')}
             value={agent.description}

@@ -153,6 +153,7 @@ type MessageNewPayload struct {
 	SenderType         string           `json:"sender_type"`
 	SenderID           string           `json:"sender_id"`
 	SenderName         string           `json:"sender_name,omitempty"`
+	SenderAvatar       string           `json:"sender_avatar,omitempty"`
 	Content            string           `json:"content"`
 	ContentType        string           `json:"content_type"`
 	ThreadID           string           `json:"thread_id,omitempty"`
@@ -251,6 +252,7 @@ type ThreadMessageItem struct {
 	SenderType    string           `json:"sender_type"`
 	SenderID      string           `json:"sender_id"`
 	SenderName    string           `json:"sender_name,omitempty"`
+	SenderAvatar  string           `json:"sender_avatar,omitempty"`
 	Content       string           `json:"content"`
 	ContentType   string           `json:"content_type"`
 	AttachmentIDs []string         `json:"attachment_ids,omitempty"`
@@ -329,6 +331,7 @@ type DMMessageNewPayload struct {
 	SenderType    string           `json:"sender_type"`
 	SenderID      string           `json:"sender_id"`
 	SenderName    string           `json:"sender_name,omitempty"`
+	SenderAvatar  string           `json:"sender_avatar,omitempty"`
 	Content       string           `json:"content"`
 	ContentType   string           `json:"content_type"`
 	AttachmentIDs []string         `json:"attachment_ids,omitempty"`
@@ -395,7 +398,8 @@ type TeamFormedPayload struct {
 	ChannelID             string   `json:"channel_id"`
 	ChannelName           string   `json:"channel_name"`
 	MemberCount           int      `json:"member_count"`
-	TaskCount             int      `json:"task_count"`
+	TemplateID            string   `json:"template_id"`
+	RelationshipCount     int      `json:"relationship_count"`
 	RelationshipDocsReady bool     `json:"relationship_docs_ready"`
 	Warnings              []string `json:"warnings,omitempty"`
 	DashboardURL          string   `json:"dashboard_url"`

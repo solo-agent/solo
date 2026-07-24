@@ -66,16 +66,12 @@ export default function RegisterPage() {
     clearError();
     submittingRef.current = true;
     try {
-      const onboardingChannelId = await authRegister({
+      await authRegister({
         email: data.email,
         password: data.password,
         display_name: data.displayName || data.email.split("@")[0],
       });
-      if (onboardingChannelId) {
-        router.push(`/dashboard?channel=${onboardingChannelId}`);
-      } else {
-        router.push("/dashboard");
-      }
+      router.push("/dashboard?lucy=1");
     } catch {
       submittingRef.current = false;
       // Error is set in auth context, displayed below

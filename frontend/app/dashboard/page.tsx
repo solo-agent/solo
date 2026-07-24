@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
-import { MessageSquare, AlertCircle, RefreshCw } from "lucide-react";
+import { MessageSquare, RefreshCw } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { t } from '@/lib/i18n';
 import { useChannels } from "@/lib/hooks/use-channels";
@@ -71,21 +71,24 @@ function DashboardContent() {
   const threadFromUrl = searchParams.get('thread');
   const messageFromUrl = searchParams.get('message');
   const inboxFromUrl = searchParams.has('inbox');
-
-  // Derive view mode entirely from URL
-  const viewMode = channelFromUrl ? 'channel' as const : dmFromUrl ? 'dm' as const : inboxFromUrl ? 'inbox' as const : null;
-  const selectedChannelId = channelFromUrl;
-  const selectedDmId = dmFromUrl;
+  const lucyFromUrl = searchParams.has('lucy');
 
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const {
     channels,
+    lucyChannel,
     isLoading: channelsLoading,
     error: channelsError,
     createChannel,
     deleteChannel,
     refetch: refetchChannels,
   } = useChannels();
+
+  // Derive view mode entirely from URL. The stable `?lucy=1` entry point
+  // resolves to Lucy's real Channel once it has loaded.
+  const selectedChannelId = channelFromUrl ?? (lucyFromUrl ? lucyChannel?.id ?? null : null);
+  const selectedDmId = dmFromUrl;
+  const viewMode = selectedChannelId ? 'channel' as const : dmFromUrl ? 'dm' as const : inboxFromUrl ? 'inbox' as const : null;
 
   const {
     dmChannels,
@@ -158,11 +161,12 @@ function DashboardContent() {
   // ---- Onboarding wizard detection ----
   const { agents: channelAgents } = useChannelMembers(selectedChannelId);
 
-  const selectedChannel: Channel | undefined = channels.find(
-    (c) => c.id === selectedChannelId,
-  );
+  const selectedChannel: Channel | undefined = selectedChannelId === lucyChannel?.id
+    ? lucyChannel
+    : channels.find((c) => c.id === selectedChannelId);
 
-  const isOnboardingChannel = selectedChannel?.name?.startsWith('welcome-') ?? false;
+  const isOnboardingChannel = selectedChannel?.name?.startsWith('welcome-')
+    || (selectedChannel?.type === 'lucy' && channelAgents.length === 0);
   const showOnboardingWizard = isOnboardingChannel && channelAgents.length === 0;
 
   const selectedDM: DMChannel | undefined = dmChannels.find(
@@ -371,10 +375,10 @@ function DashboardContent() {
   return (
     <div className="flex h-screen min-w-[1024px] overflow-hidden bg-brutal-cream">
       <Sidebar
-        routeTitle={t('navChannels')}
         isCollapsed={isSidebarCollapsed}
         onToggleCollapsed={() => setIsSidebarCollapsed((value) => !value)}
         channels={channels}
+        lucyChannel={lucyChannel}
         isLoading={channelsLoading}
         selectedChannelId={selectedChannelId}
         onSelectChannel={handleSelectChannel}
@@ -400,6 +404,8 @@ function DashboardContent() {
         open={isCreateModalOpen}
         onOpenChange={setIsCreateModalOpen}
         onSubmit={handleCreateChannel}
+        onChooseTemplate={() => router.push('/templates?create=1')}
+        onAskLucy={() => router.push('/dashboard?lucy=1')}
       />
 
       <CreateDMModal

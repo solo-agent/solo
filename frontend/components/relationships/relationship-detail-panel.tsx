@@ -99,6 +99,7 @@ export function RelationshipDetailPanel({
   const [isOpeningDM, setIsOpeningDM] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editedAgentName, setEditedAgentName] = useState<string | null>(null);
 
   // ---- Edit handler ----
 
@@ -113,7 +114,7 @@ export function RelationshipDetailPanel({
       setIsEditing(false);
       onUpdate();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to update relationship');
+      setError(err instanceof ApiError ? err.message : t('relationshipUpdateError'));
     } finally {
       setIsSaving(false);
     }
@@ -130,7 +131,7 @@ export function RelationshipDetailPanel({
       setIsEditingInstruction(false);
       onUpdate();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to update instruction');
+      setError(err instanceof ApiError ? err.message : t('relationshipInstructionUpdateError'));
     } finally {
       setIsSaving(false);
     }
@@ -147,7 +148,7 @@ export function RelationshipDetailPanel({
       onDelete(relationship.id);
       onClose();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to delete relationship');
+      setError(err instanceof ApiError ? err.message : t('relationshipDeleteError'));
       setIsDeleting(false);
     }
   }, [relationship, onDelete, onClose]);
@@ -160,7 +161,7 @@ export function RelationshipDetailPanel({
       const dm = await createOrGetDM({ agent_id: agent.id });
       router.push(`/dashboard?dm=${dm.id}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to open message');
+      setError(err instanceof ApiError ? err.message : t('agentMessageOpenError'));
     } finally {
       setIsOpeningDM(false);
     }
@@ -170,6 +171,7 @@ export function RelationshipDetailPanel({
 
   if (agent) {
     const isActive = agent.isActive ?? (agent.is_active ?? false);
+    const agentName = editedAgentName ?? agent.name;
     return (
       <div
         className={embedded
@@ -216,7 +218,7 @@ export function RelationshipDetailPanel({
           <PixelAvatar agentId={agent.id} avatarUrl={agent.avatar_url} size="md" />
           <div className="min-w-0 flex-1">
             <div className="truncate font-heading text-base font-bold text-black">
-              {agent.name}
+              {agentName}
             </div>
             <div className="font-mono text-[10px] font-bold uppercase tracking-wider">
               {isActive ? (
@@ -233,7 +235,7 @@ export function RelationshipDetailPanel({
             variant="primary"
             size="sm"
             className="flex-shrink-0 gap-1.5 px-2.5 text-[10px] font-black uppercase tracking-wider"
-            aria-label={`${t('teamsMessage')} ${agent.name}`}
+            aria-label={`${t('teamsMessage')} ${agentName}`}
           >
             <MessageSquare className="h-3.5 w-3.5" />
             <span>{t('teamsMessage')}</span>
@@ -274,9 +276,13 @@ export function RelationshipDetailPanel({
           {agentTab === 'profile' ? (
             <TeamsAgentProfile
               agentId={agent.id}
-              redirectAfterDelete={false}
+              agentName={agentName}
               showProfileHeader={false}
               showObservability={false}
+              onAgentUpdated={(field, value) => {
+                if (field === 'name' && typeof value === 'string') setEditedAgentName(value);
+                onUpdate();
+              }}
               onAgentDeleted={(deletedId) => {
                 onAgentDeleted?.(deletedId);
                 onClose();

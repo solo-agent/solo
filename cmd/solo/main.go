@@ -19,6 +19,7 @@
 //	solo artifact publish --task <task_id> --file <artifact.html> [--mode latest|final]
 //	solo channel members -c <channel_id> [--output json]
 //	solo channel join  --target <#channel-name>
+//	solo template list --json
 //	solo team form     -c <channel_id> -m <message_id> [--plan <file>] [--output json]
 //	solo thread unfollow --target <#channel:shortid>
 //
@@ -96,6 +97,8 @@ func runCLI(args []string) int {
 		handleChannel(args[1:], baseURL, token)
 	case "team":
 		handleTeam(args[1:], baseURL, token)
+	case "template":
+		handleTemplate(args[1:], baseURL, token)
 	case "artifact":
 		handleArtifact(args[1:], baseURL, token)
 	case "server":
@@ -109,6 +112,55 @@ func runCLI(args []string) int {
 	}
 	// Handlers call doExit internally; this return is a safety net.
 	return exitOK
+}
+
+// ---------------------------------------------------------------------------
+// template
+// ---------------------------------------------------------------------------
+
+func handleTemplate(args []string, baseURL, token string) {
+	if len(args) < 1 || args[0] != "list" {
+		fmt.Fprintln(os.Stderr, "solo: error: template subcommand required: list")
+		printUsage()
+		doExit(exitUsage)
+	}
+	fs := flag.NewFlagSet("template list", flag.ExitOnError)
+	jsonOutput := fs.Bool("json", false, "Print compact JSON")
+	fs.Parse(args[1:])
+
+	statusCode, body, err := doHTTP(http.MethodGet, baseURL+"/api/v1/templates", token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+	if *jsonOutput {
+		fmt.Println(string(body))
+		doExit(exitOK)
+	}
+
+	var templates []struct {
+		ID          string   `json:"id"`
+		Name        string   `json:"name"`
+		Description string   `json:"description"`
+		Category    string   `json:"category"`
+		Roles       []string `json:"roles"`
+	}
+	if err := json.Unmarshal(body, &templates); err != nil {
+		fmt.Println(string(body))
+		doExit(exitOK)
+	}
+	for _, template := range templates {
+		fmt.Printf("%s\t%s\t%s\t%s\n",
+			template.ID,
+			template.Name,
+			strings.Join(template.Roles, ","),
+			template.Description,
+		)
+	}
+	doExit(exitOK)
 }
 
 // ---------------------------------------------------------------------------
@@ -214,8 +266,7 @@ func handleTeamForm(args []string, baseURL, token string) {
 			Name string `json:"name"`
 			Role string `json:"role"`
 		} `json:"members"`
-		RelationshipTemplate  string   `json:"relationship_template"`
-		RelationshipOverrides int      `json:"relationship_override_count"`
+		TemplateID            string   `json:"template_id"`
 		RelationshipDocsReady bool     `json:"relationship_docs_ready"`
 		Warnings              []string `json:"warnings"`
 	}
@@ -232,12 +283,8 @@ func handleTeamForm(args []string, baseURL, token string) {
 	for _, member := range result.Members {
 		fmt.Printf("- @%s (%s)\n", member.Name, member.Role)
 	}
-	if result.RelationshipTemplate != "" {
-		fmt.Printf("Relationships: %s", result.RelationshipTemplate)
-		if result.RelationshipOverrides > 0 {
-			fmt.Printf(" (+%d Lucy adjustment(s))", result.RelationshipOverrides)
-		}
-		fmt.Println()
+	if result.TemplateID != "" {
+		fmt.Printf("Template: %s\n", result.TemplateID)
 	}
 	for _, warning := range result.Warnings {
 		fmt.Printf("Warning: %s\n", warning)
@@ -1469,6 +1516,7 @@ func printUsage() {
   solo artifact publish --task <task_id> --file <artifact.html> [--mode latest|final]
   solo channel members -c <channel_id> [--output json]
   solo channel join  --target <#channel-name>
+  solo template list --json
   solo team form     -c <channel_id> -m <message_id> [--plan <file>] [--output json]
   solo thread unfollow --target <#channel:shortid>
 

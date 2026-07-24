@@ -107,6 +107,13 @@ func AgentSessionKey(agentID string) string {
 	return "agent:" + agentID
 }
 
+// ChannelSessionKey isolates one Agent's provider context per Channel. Hidden
+// DMs therefore never share a provider Session with the Agent's visible home
+// Channel, even though both use the same Agent identity and workspace.
+func ChannelSessionKey(agentID, channelID string) string {
+	return "channel:" + channelID + ":agent:" + agentID
+}
+
 // ThinkingSessionKey is the stable pool key for one isolated Thinking node session.
 func ThinkingSessionKey(nodeID string) string {
 	return "thinking:" + nodeID

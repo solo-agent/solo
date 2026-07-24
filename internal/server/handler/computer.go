@@ -281,6 +281,7 @@ func (h *ComputerHandler) Claim(w http.ResponseWriter, r *http.Request) {
 type ComputerAgentResponse struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
+	AvatarURL   string `json:"avatar_url,omitempty"`
 	Status      string `json:"status"`
 	ActiveTasks int    `json:"active_tasks"`
 }
@@ -334,7 +335,7 @@ func (h *ComputerHandler) ListAgents(w http.ResponseWriter, r *http.Request) {
 
 	// Query agents persistently bound to this computer, filtered by owner.
 	rows, err := h.pool.Query(r.Context(),
-		`SELECT a.id, a.name
+		`SELECT a.id, a.name, COALESCE(a.avatar_url, '')
 		 FROM agents a
 		 WHERE a.runtime_id = $1 AND a.owner_id = $2 AND a.is_active = true
 		 ORDER BY a.created_at ASC`,
@@ -349,8 +350,8 @@ func (h *ComputerHandler) ListAgents(w http.ResponseWriter, r *http.Request) {
 
 	agents := make([]ComputerAgentResponse, 0)
 	for rows.Next() {
-		var id, name string
-		if err := rows.Scan(&id, &name); err != nil {
+		var id, name, avatarURL string
+		if err := rows.Scan(&id, &name, &avatarURL); err != nil {
 			continue
 		}
 
@@ -379,6 +380,7 @@ func (h *ComputerHandler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		agents = append(agents, ComputerAgentResponse{
 			ID:          id,
 			Name:        name,
+			AvatarURL:   avatarURL,
 			Status:      status,
 			ActiveTasks: activeTasks,
 		})

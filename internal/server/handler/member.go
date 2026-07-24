@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,14 +18,19 @@ import (
 type MemberHandler struct {
 	svc      *service.ChannelService
 	agentSvc *service.AgentService
+	dm       *service.DaemonManager
 }
 
 // NewMemberHandler creates a new MemberHandler.
-func NewMemberHandler(pool *pgxpool.Pool, agentSvc *service.AgentService) *MemberHandler {
-	return &MemberHandler{
+func NewMemberHandler(pool *pgxpool.Pool, agentSvc *service.AgentService, daemonManagers ...*service.DaemonManager) *MemberHandler {
+	handler := &MemberHandler{
 		svc:      service.NewChannelService(pool),
 		agentSvc: agentSvc,
 	}
+	if len(daemonManagers) > 0 {
+		handler.dm = daemonManagers[0]
+	}
+	return handler
 }
 
 // --- Request types ---
@@ -119,7 +125,7 @@ func (h *MemberHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.svc.RemoveMember(r.Context(), channelID, requesterID, memberID)
+	memberType, err := h.svc.RemoveMember(r.Context(), channelID, requesterID, memberID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrMemberNotFound):
@@ -142,7 +148,16 @@ func (h *MemberHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if h.agentSvc != nil {
-		h.agentSvc.BroadcastMemberEvent(channelID, "member.removed", "", memberID, "")
+		h.agentSvc.BroadcastMemberEvent(channelID, "member.removed", memberType, memberID, "")
+	}
+	if memberType == "agent" && h.dm != nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := h.dm.CleanupAgents(ctx, []string{memberID}); err != nil {
+				slog.Warn("failed to clean removed Agent session", "agent_id", memberID, "error", err)
+			}
+		}()
 	}
 
 	w.WriteHeader(http.StatusNoContent)

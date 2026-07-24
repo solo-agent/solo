@@ -61,6 +61,7 @@ type ThreadReplyResponse struct {
 	SenderType    string           `json:"sender_type"`
 	SenderID      string           `json:"sender_id"`
 	SenderName    string           `json:"sender_name,omitempty"`
+	SenderAvatar  string           `json:"sender_avatar,omitempty"`
 	SenderActive  bool             `json:"sender_active"`
 	Content       string           `json:"content"`
 	ContentType   string           `json:"content_type"`
@@ -282,17 +283,23 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Get sender name (resolved from both users and agents tables)
-	var displayName string
+	// Get sender identity (resolved from both users and agents tables)
+	var displayName, senderAvatar string
 	err = h.pool.QueryRow(r.Context(),
 		`SELECT COALESCE(
 			(SELECT display_name FROM users WHERE id = $1),
 			(SELECT name FROM agents WHERE id = $1),
 			'Unknown'
+		),
+		COALESCE(
+			(SELECT avatar_url FROM users WHERE id = $1),
+			(SELECT avatar_url FROM agents WHERE id = $1),
+			''
 		)`, userID,
-	).Scan(&displayName)
+	).Scan(&displayName, &senderAvatar)
 	if err != nil {
 		displayName = "Unknown"
+		senderAvatar = ""
 	}
 	// Read the new reply_count for WS broadcasts
 	var replyCount int
@@ -347,6 +354,7 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 				SenderType:    senderType,
 				SenderID:      userID,
 				SenderName:    displayName,
+				SenderAvatar:  senderAvatar,
 				Content:       content,
 				ContentType:   "text",
 				AttachmentIDs: attachmentIDs,
@@ -369,6 +377,7 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 		SenderType:    senderType,
 		SenderID:      userID,
 		SenderName:    displayName,
+		SenderAvatar:  senderAvatar,
 		Content:       content,
 		ContentType:   "text",
 		AttachmentIDs: attachmentIDs,
@@ -471,6 +480,7 @@ func (h *ThreadHandler) ListThreadMessages(w http.ResponseWriter, r *http.Reques
 	// then reversed to ASC for natural reading order.
 	query := `SELECT m.id, m.channel_id, m.thread_id, m.sender_type, m.sender_id,
 	                 COALESCE(u.display_name, a.name, '') as sender_name,
+	                 COALESCE(u.avatar_url, a.avatar_url, '') AS sender_avatar,
 	                 COALESCE(a.is_active, false) AS sender_active,
 	                 m.content, m.content_type, COALESCE(m.attachment_ids, '{}') as attachment_ids,
                  m.created_at
@@ -505,7 +515,7 @@ func (h *ThreadHandler) ListThreadMessages(w http.ResponseWriter, r *http.Reques
 		var createdAt time.Time
 		err := rows.Scan(&msg.ID, &msg.ChannelID, &msg.ThreadID,
 			&msg.SenderType, &msg.SenderID, &msg.SenderName,
-			&msg.SenderActive,
+			&msg.SenderAvatar, &msg.SenderActive,
 			&msg.Content, &msg.ContentType, &msg.AttachmentIDs, &createdAt)
 		if err != nil {
 			slog.Error("failed to scan thread message row", "error", err)

@@ -8,9 +8,9 @@
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { AlertTriangle, ArrowLeftRight, Loader2 } from 'lucide-react';
-import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { useState, useEffect } from 'react';
+import { ArrowLeftRight, Loader2 } from 'lucide-react';
+import { Dialog, DialogCloseButton, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Select, type SelectOption } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -19,8 +19,8 @@ import { t } from '@/lib/i18n';
 import type { RelationshipType, AgentDetailTarget } from '@/lib/types';
 
 const TYPE_OPTIONS: { type: RelationshipType; labelKey: string; color: string; dash: string }[] = [
-  { type: 'assigns_to', labelKey: 'assignsTo', color: '#4A90D9', dash: '' },
-  { type: 'collaborates_with', labelKey: 'collaboratesWith', color: '#10B981', dash: '8,4' },
+  { type: 'assigns_to', labelKey: 'assignsTo', color: 'var(--color-brutal-info)', dash: '' },
+  { type: 'collaborates_with', labelKey: 'collaboratesWith', color: 'var(--color-brutal-success)', dash: '8,4' },
 ];
 
 // ---- Component ----
@@ -49,7 +49,6 @@ export function CreateRelationshipModal({
   const [instruction, setInstruction] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [cycleWarning, setCycleWarning] = useState<string | null>(null);
 
   // Reset form on open
   useEffect(() => {
@@ -59,39 +58,8 @@ export function CreateRelationshipModal({
       setRelType('assigns_to');
       setInstruction('');
       setError(null);
-      setCycleWarning(null);
     }
   }, [open, preselectedFrom, preselectedTo]);
-
-  // Check for cycles when assigns_to is selected and both agents are chosen
-  const checkCycle = useCallback(async () => {
-    if (!fromAgentId || !toAgentId || relType !== 'assigns_to') {
-      setCycleWarning(null);
-      return;
-    }
-    try {
-      // Lightweight cycle detection: if the "to" agent already reports to the "from" agent
-      // (or any of its ancestors), that would create a cycle.
-      const res = await apiClient.post<{ has_cycle: boolean; path: string[] }>(
-        '/api/v1/agent-relationships/check-cycle',
-        { from_agent_id: fromAgentId, to_agent_id: toAgentId, rel_type: 'assigns_to' },
-      );
-      if (res.has_cycle) {
-        setCycleWarning(
-          `Cycle detected: adding this relationship would create a reporting loop involving ${res.path.join(' -> ')}`,
-        );
-      } else {
-        setCycleWarning(null);
-      }
-    } catch {
-      // Cycle check endpoint may not exist yet — fail silently
-      setCycleWarning(null);
-    }
-  }, [fromAgentId, toAgentId, relType]);
-
-  useEffect(() => {
-    checkCycle();
-  }, [checkCycle]);
 
   // Build agent select options
   const agentOptions: SelectOption[] = agents
@@ -111,8 +79,7 @@ export function CreateRelationshipModal({
     fromAgentId &&
     toAgentId &&
     fromAgentId !== toAgentId &&
-    !isSubmitting &&
-    !cycleWarning;
+    !isSubmitting;
 
   const handleSwapAgents = () => {
     if (!fromAgentId && !toAgentId) return;
@@ -146,16 +113,15 @@ export function CreateRelationshipModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange} width="lg">
       <DialogHeader>
-        <DialogTitle className="font-heading text-base font-black uppercase tracking-wider">
-          {t('relationshipEditorCreateRelationship')}
-        </DialogTitle>
+        <DialogTitle>{t('relationshipEditorCreateRelationship')}</DialogTitle>
+        <DialogCloseButton onClick={() => onOpenChange(false)} />
       </DialogHeader>
 
       <div className="space-y-4">
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           {/* From Agent */}
           <div>
-            <label className="block font-heading text-xs font-bold uppercase tracking-wider mb-1.5">
+            <label className="mb-1.5 block font-heading text-xs font-bold">
               {t('relationshipEditorFrom')}
             </label>
             <Select
@@ -171,7 +137,7 @@ export function CreateRelationshipModal({
 
           {/* To Agent */}
           <div>
-            <label className="block font-heading text-xs font-bold uppercase tracking-wider mb-1.5">
+            <label className="mb-1.5 block font-heading text-xs font-bold">
               {t('relationshipEditorTo')}
             </label>
             <Select
@@ -185,22 +151,24 @@ export function CreateRelationshipModal({
             />
           </div>
 
-          <Button
+        </div>
+        <Button
             type="button"
             onClick={handleSwapAgents}
             disabled={!fromAgentId && !toAgentId}
             variant="outline"
-            size="icon"
+            size="sm"
+            className="gap-2"
             aria-label={t('relationshipSwapAgents')}
             title={t('relationshipSwapAgents')}
           >
             <ArrowLeftRight className="h-4 w-4" />
+            {t('relationshipSwapAgents')}
           </Button>
-        </div>
 
         {/* Relationship Type */}
         <div>
-          <label className="block font-heading text-xs font-bold uppercase tracking-wider mb-1.5">
+          <label className="mb-1.5 block font-heading text-xs font-bold">
             {t('relationshipEditorType')}
           </label>
           <div className="grid grid-cols-2 gap-2">
@@ -225,7 +193,7 @@ export function CreateRelationshipModal({
                     strokeDasharray={opt.dash || undefined}
                   />
                 </svg>
-                <span className="font-heading text-xs font-bold uppercase tracking-wider text-black">
+                <span className="font-heading text-xs font-bold text-black">
                   {t(opt.labelKey as Parameters<typeof t>[0])}
                 </span>
               </button>
@@ -235,7 +203,7 @@ export function CreateRelationshipModal({
 
         {/* Instruction */}
         <div>
-          <label className="block font-heading text-xs font-bold uppercase tracking-wider mb-1.5">
+          <label className="mb-1.5 block font-heading text-xs font-bold">
             {relType === 'assigns_to' ? t('relationshipCriteriaDelegation') : t('relationshipCriteriaCollaboration')}
           </label>
           <Textarea
@@ -245,7 +213,7 @@ export function CreateRelationshipModal({
               ? t('relationshipDelegationPlaceholder')
               : t('relationshipCollaborationPlaceholder')
             }
-            className="min-h-[100px] font-mono text-xs resize-y"
+            className="min-h-[100px] resize-y font-body text-sm"
             rows={4}
           />
           <p className="mt-1 font-mono text-[10px] text-muted-foreground">
@@ -255,17 +223,9 @@ export function CreateRelationshipModal({
           </p>
         </div>
 
-        {/* Cycle warning */}
-        {cycleWarning && (
-          <div className="flex items-start gap-2 px-3 py-2 border-2 border-brutal-danger bg-brutal-danger-light">
-            <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5 text-brutal-danger" />
-            <p className="font-mono text-[11px] text-brutal-danger font-bold">{cycleWarning}</p>
-          </div>
-        )}
-
         {/* Submit error */}
         {error && (
-          <p className="font-mono text-xs text-brutal-danger">{error}</p>
+          <p className="font-mono text-xs text-brutal-danger" role="alert">{error}</p>
         )}
       </div>
 
@@ -282,7 +242,7 @@ export function CreateRelationshipModal({
         <Button
           type="button"
           onClick={handleSubmit}
-          disabled={!canSubmit || !!cycleWarning}
+          disabled={!canSubmit}
           variant="success"
           size="sm"
           className="px-4"

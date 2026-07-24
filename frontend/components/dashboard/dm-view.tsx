@@ -24,6 +24,7 @@ import { TaskBoard } from '@/components/tasks/task-board';
 import { RelationshipDetailPanel } from '@/components/relationships/relationship-detail-panel';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
+import { UserAvatar } from '@/components/ui/user-avatar';
 import { tabButtonClass } from '@/components/ui/tab-bar';
 import { useToast } from '@/components/ui/toast';
 const ThreadPanel = lazy(() =>
@@ -544,18 +545,27 @@ export function DMView({
         <div className="sidebar-collapse-offset flex h-14 flex-shrink-0 items-center border-b-2 border-black px-4">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             {/* Avatar */}
-            <PixelAvatar
-              agentId={dm.other_agent?.id ?? dm.other_user?.id ?? dm.id}
-              size="md"
-              avatarUrl={dm.other_agent?.avatar_url ?? null}
-              onClick={dm.other_agent ? () => openAgentDetail({
-                id: dm.other_agent!.id,
-                name: dm.other_agent!.name,
-                avatar_url: dm.other_agent!.avatar_url,
-                is_active: dm.other_agent!.is_active,
-              }) : undefined}
-              ariaLabel={dm.other_agent ? t('viewAgentDetail', { name }) : undefined}
-            />
+            {dm.other_agent ? (
+              <PixelAvatar
+                agentId={dm.other_agent.id}
+                size="md"
+                avatarUrl={dm.other_agent.avatar_url}
+                onClick={() => openAgentDetail({
+                  id: dm.other_agent!.id,
+                  name: dm.other_agent!.name,
+                  avatar_url: dm.other_agent!.avatar_url,
+                  is_active: dm.other_agent!.is_active,
+                })}
+                ariaLabel={t('viewAgentDetail', { name })}
+              />
+            ) : (
+              <UserAvatar
+                userId={dm.other_user?.id ?? dm.id}
+                name={dm.other_user?.display_name ?? name}
+                avatarUrl={dm.other_user?.avatar_url}
+                size="md"
+              />
+            )}
             {/* Name + status */}
             <div className="flex items-center gap-2 min-w-0">
               <h2 className="font-bold text-foreground truncate">

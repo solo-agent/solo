@@ -19,6 +19,7 @@ interface ChannelResponse {
   type: string;
   created_by: string;
   is_archived: boolean;
+  source_template_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -30,6 +31,8 @@ function mapChannel(resp: ChannelResponse): Channel {
     id: resp.id,
     name: resp.name,
     description: resp.description || '',
+    type: resp.type as Channel['type'],
+    source_template_id: resp.source_template_id,
     member_count: 0, // Backend channel list doesn't include member_count
     created_at: resp.created_at,
     created_by: resp.created_by,
@@ -40,6 +43,7 @@ function mapChannel(resp: ChannelResponse): Channel {
 
 export function useChannels() {
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [lucyChannel, setLucyChannel] = useState<Channel | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
@@ -52,6 +56,22 @@ export function useChannels() {
       const res = await apiClient.get<ChannelResponse[]>('/api/v1/channels');
       if (mountedRef.current) {
         setChannels(res.map(mapChannel));
+      }
+      try {
+        const lucy = await apiClient.get<ChannelResponse>('/api/v1/channels/lucy');
+        if (mountedRef.current) {
+          setLucyChannel({
+            ...mapChannel(lucy),
+            name: 'Lucy',
+            type: 'lucy',
+          });
+        }
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          if (mountedRef.current) setLucyChannel(null);
+        } else {
+          throw err;
+        }
       }
     } catch (err) {
       const message = err instanceof ApiError ? err.message : `${t('channelLoadError')}`;
@@ -83,6 +103,7 @@ export function useChannels() {
       const res = await apiClient.post<ChannelResponse>('/api/v1/channels', {
         name: input.name,
         description: input.description || '',
+        template_id: input.template_id || undefined,
       });
       const channel = mapChannel(res);
       // Add to local state so the sidebar updates immediately
@@ -100,6 +121,7 @@ export function useChannels() {
 
   return {
     channels,
+    lucyChannel,
     isLoading,
     error,
     createChannel,

@@ -11,6 +11,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
+import { useAuth } from '@/lib/auth-context';
 import { t } from '@/lib/i18n';
 import type { Attachment, Message } from '@/lib/types';
 
@@ -26,8 +27,10 @@ interface MessageResponse {
   sender_type: string;
   sender_id: string;
   sender_name: string;
+  sender_avatar?: string | null;
   content: string;
   content_type: string;
+  metadata?: Record<string, unknown>;
   thread_id?: string;
   thinking_node_id?: string;
   reply_count?: number;
@@ -56,8 +59,10 @@ function mapMessageResponse(resp: MessageResponse): Message {
     channel_id: resp.channel_id,
     user_id: resp.sender_id,
     display_name: resp.sender_name || resp.sender_id,
+    avatar_url: resp.sender_avatar,
     content: resp.content,
     content_type: resp.content_type,
+    metadata: resp.metadata,
     created_at: resp.created_at,
     status: 'sent',
     thread_id: resp.thread_id,
@@ -82,8 +87,10 @@ function flatToMessage(event: {
   sender_type: string;
   sender_id: string;
   sender_name?: string;
+  sender_avatar?: string | null;
   content: string;
   content_type?: string;
+  metadata?: Record<string, unknown>;
   thread_id?: string;
   thinking_node_id?: string;
   reply_count?: number;
@@ -101,8 +108,10 @@ function flatToMessage(event: {
     channel_id: event.channel_id,
     user_id: event.sender_id,
     display_name: event.sender_name || event.sender_id,
+    avatar_url: event.sender_avatar,
     content: event.content,
     content_type: event.content_type,
+    metadata: event.metadata,
     created_at: event.created_at,
     status: 'sent',
     thread_parent_id: event.thread_id,
@@ -123,6 +132,7 @@ function flatToMessage(event: {
 // ---- Hook ----
 
 export function useMessages(channelId: string | null, thinkingNodeId: string | null = null) {
+  const { user } = useAuth();
   const { subscribe, unsubscribe, onEvent, isConnected } = useWebSocket();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -507,11 +517,13 @@ export function useMessages(channelId: string | null, thinkingNodeId: string | n
       const optimisticMessage: Message = {
         id: tempId,
         channel_id: id,
-        user_id: 'user-1',
-        display_name: 'You',
+        user_id: user?.id || 'local-user',
+        display_name: user?.display_name || 'You',
+        avatar_url: user?.avatar_url,
         content: trimmedContent,
         created_at: new Date().toISOString(),
         status: 'sending',
+        sender_type: 'user',
         thinking_node_id: nodeID ?? undefined,
       };
 
@@ -622,7 +634,7 @@ export function useMessages(channelId: string | null, thinkingNodeId: string | n
         return null;
       }
     },
-    [],
+    [user],
   );
 
   // ---- Retry failed message ----

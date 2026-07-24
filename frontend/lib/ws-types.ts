@@ -18,6 +18,7 @@ export interface WSMessage {
   sender_type: WSMessageSource;
   sender_id: string;
   sender_name?: string;
+  sender_avatar?: string | null;
   /** 发送者是否活跃（agent 被删除后为 false） */
   sender_active?: boolean;
   /** 前端渲染别名 */
@@ -26,6 +27,7 @@ export interface WSMessage {
   agent_id?: string;
   content: string;
   content_type?: string;
+  metadata?: Record<string, unknown>;
   thread_parent_id?: string;
   thinking_node_id?: string;
   created_at: string;
@@ -47,13 +49,13 @@ export type WSServerEvent =
   | { type: 'connected'; user_id: string }
   | { type: 'error'; code: string; message: string }
   // ---- 消息事件 ----
-  | { type: 'message.new'; id: string; channel_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; thread_id?: string; thinking_node_id?: string; created_at: string; attachments?: Attachment[] }
+  | { type: 'message.new'; id: string; channel_id: string; sender_type: string; sender_id: string; sender_name?: string; sender_avatar?: string | null; content: string; content_type: string; metadata?: Record<string, unknown>; thread_id?: string; thinking_node_id?: string; created_at: string; attachments?: Attachment[] }
   | { type: 'message.updated'; id: string; channel_id: string; content: string; sender_type?: string; sender_id?: string; updated_at: string; task_number?: number; task_title?: string; task_status?: string; task_claimer_name?: string; task_claimer_deleted?: boolean; reply_count?: number }
   | { type: 'message.deleted'; channel_id: string; message_id: string }
   | { type: 'thinking.updated'; channel_id: string; space_id?: string; node_id?: string }
   // ---- 线程事件 ----
   // thread.message.new: 后端 ThreadMessageNewPayload 为 {message:{...}, thread:{...}} 嵌套结构
-  | { type: 'thread.message.new'; message: { id: string; channel_id: string; thread_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; created_at: string; attachments?: Attachment[] }; thread: { thread_id: string; reply_count: number; last_reply_at: string } }
+  | { type: 'thread.message.new'; message: { id: string; channel_id: string; thread_id: string; sender_type: string; sender_id: string; sender_name?: string; sender_avatar?: string | null; content: string; content_type: string; created_at: string; attachments?: Attachment[] }; thread: { thread_id: string; reply_count: number; last_reply_at: string } }
   // thread.reply: 后端 ThreadReplyNotifyPayload 包含 latest_reply 子对象
   | { type: 'thread.reply'; channel_id: string; thread_id: string; root_message_id?: string; reply_count: number; last_reply_at: string; latest_reply?: { id: string; sender_id: string; sender_name: string; content: string; created_at: string } }
   // ---- 输入状态 ----
@@ -84,12 +86,12 @@ export type WSServerEvent =
   | { type: 'relationship_deleted'; id: string; from_agent_id: string; to_agent_id: string }
   | { type: 'agent_deleted'; agent_id: string }
   // ---- DM 事件 ----
-  | { type: 'dm.message.new'; id: string; dm_id: string; sender_type: string; sender_id: string; sender_name?: string; content: string; content_type: string; created_at: string; attachments?: Attachment[]; thread_id?: string }
+  | { type: 'dm.message.new'; id: string; dm_id: string; sender_type: string; sender_id: string; sender_name?: string; sender_avatar?: string | null; content: string; content_type: string; created_at: string; attachments?: Attachment[]; thread_id?: string }
   | { type: 'dm.updated'; dm_id: string; last_message?: { content: string; sender_id: string; sender_name: string; created_at: string }; last_reply_at?: string; unread_count: number }
   // ---- Inbox events (v1.5) ----
   | { type: 'inbox.updated'; }
   // ---- Lucy automatic team formation ----
-  | { type: 'team.formed'; formation_id: string; source_channel_id: string; source_message_id: string; channel_id: string; channel_name: string; member_count: number; task_count: number; relationship_template?: string; relationship_overrides?: number; relationship_docs_ready: boolean; warnings?: string[]; dashboard_url: string; created_at: string };
+  | { type: 'team.formed'; formation_id: string; source_channel_id: string; source_message_id: string; channel_id: string; channel_name: string; member_count: number; relationship_count: number; template_id: string; relationship_docs_ready: boolean; warnings?: string[]; dashboard_url: string; created_at: string };
 
 /** 客户端发送的 WebSocket 命令 */
 export type WSClientCommand =

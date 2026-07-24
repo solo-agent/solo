@@ -6,10 +6,10 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Plus } from 'lucide-react';
+import { Plus, Sparkles } from 'lucide-react';
 import { ChannelList } from './channel-list';
 import { NAV_ITEMS } from '@/components/ui/navbar';
-import { PixelAvatar } from '@/components/ui/pixel-avatar';
+import { UserAvatar } from '@/components/ui/user-avatar';
 import { PanelToggleIcon, panelToggleButtonClass } from '@/components/ui/button';
 import { selectableRowClass, selectableRowIconClass } from '@/components/ui/selectable-row';
 import { t } from '@/lib/i18n';
@@ -19,6 +19,7 @@ import type { Channel, DMChannel } from '@/lib/types';
 
 interface SidebarProps {
   channels: Channel[];
+  lucyChannel?: Channel | null;
   isLoading: boolean;
   selectedChannelId: string | null;
   onSelectChannel: (channelId: string) => void;
@@ -33,20 +34,18 @@ interface SidebarProps {
   /** Inbox props */
   inboxSelected: boolean;
   onSelectInbox: () => void;
-  /** Page label rendered at the top of the sidebar. */
-  routeTitle?: string;
   isCollapsed?: boolean;
   onToggleCollapsed?: () => void;
 }
 
 export function Sidebar({
   channels,
+  lucyChannel,
   isLoading,
   selectedChannelId,
   onSelectChannel,
   onCreateChannel,
   onDeleteChannel,
-  routeTitle = t('navChannels'),
   isCollapsed = false,
   onToggleCollapsed,
 }: SidebarProps) {
@@ -75,7 +74,7 @@ export function Sidebar({
       className="navbar-brutal flex h-full w-[240px] flex-shrink-0 flex-col border-r-2 border-black py-3"
     >
       <div className="flex flex-col gap-2">
-        <div className="flex w-full items-start gap-3 px-3">
+        <div className="flex w-full items-center gap-3 px-3">
           <Link
             href="/dashboard"
             className="flex h-9 w-9 shrink-0 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm"
@@ -83,11 +82,8 @@ export function Sidebar({
           >
             <span className="font-heading text-sm font-black text-black">S</span>
           </Link>
-          <div className="min-w-0 flex-1 pt-0.5">
+          <div className="min-w-0 flex-1">
             <div className="truncate font-heading text-xl font-black text-black">Solo</div>
-            <div className="font-mono text-[10px] font-bold uppercase tracking-wider text-black/55">
-              {routeTitle}
-            </div>
           </div>
           <button
             type="button"
@@ -103,6 +99,31 @@ export function Sidebar({
         <div className="mx-3 h-px bg-black/20" />
 
         <div className="space-y-0.5">
+          {lucyChannel && (
+            <button
+              type="button"
+              onClick={() => onSelectChannel(lucyChannel.id)}
+              className={selectableRowClass(
+                selectedChannelId === lucyChannel.id,
+                cn(
+                  'w-full text-left',
+                  selectedChannelId === lucyChannel.id ? 'bg-white' : 'hover:bg-white/50',
+                ),
+              )}
+              aria-label="Lucy"
+              aria-current={selectedChannelId === lucyChannel.id ? 'true' : undefined}
+            >
+              <span className={selectableRowIconClass('bg-brutal-accent-light')}>
+                <Sparkles className="h-4 w-4 text-brutal-accent" />
+              </span>
+              <span>
+                <span className="block font-heading text-sm font-black">Lucy</span>
+                <span className="block font-mono text-[9px] font-bold uppercase text-black/55">
+                  {t('lucyStewardChannel')}
+                </span>
+              </span>
+            </button>
+          )}
           {NAV_ITEMS.map((item) => {
             const isActive = item.key === 'dashboard'
               ? pathname.startsWith('/observability')
@@ -178,7 +199,12 @@ export function Sidebar({
           aria-current={pathname.startsWith('/settings') ? 'page' : undefined}
         >
           {user ? (
-            <PixelAvatar agentId={user.id || 'user'} size="sm" />
+            <UserAvatar
+              userId={user.id || 'user'}
+              name={user.display_name}
+              avatarUrl={user.avatar_url}
+              size="sm"
+            />
           ) : (
             <span className={selectableRowIconClass('bg-white font-heading text-sm font-black')}>
               S

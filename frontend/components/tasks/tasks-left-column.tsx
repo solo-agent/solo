@@ -17,6 +17,7 @@ import { useState, useCallback } from 'react';
 import { ChevronDown, AlertCircle, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
+import { UserAvatar } from '@/components/ui/user-avatar';
 import { Button } from '@/components/ui/button';
 import { selectableRowClass, selectableRowIconClass } from '@/components/ui/selectable-row';
 import type { Channel, DMChannel } from '@/lib/types';
@@ -48,10 +49,6 @@ function getDmDisplayName(dm: DMChannel): string {
   if (dm.other_user) return dm.other_user.display_name;
   if (dm.other_agent) return dm.other_agent.name;
   return t('unknown');
-}
-
-function getDmAvatarId(dm: DMChannel): string {
-  return dm.other_user?.id || dm.other_agent?.id || dm.id;
 }
 
 export function TasksLeftColumn({
@@ -202,7 +199,20 @@ export function TasksLeftColumn({
                     className={selectableRowClass(dm.id === selectedDmId, 'w-full text-left')}
                     aria-current={dm.id === selectedDmId ? 'true' : undefined}
                   >
-                    <PixelAvatar agentId={getDmAvatarId(dm)} size="sm" />
+                    {dm.other_agent ? (
+                      <PixelAvatar
+                        agentId={dm.other_agent.id}
+                        avatarUrl={dm.other_agent.avatar_url}
+                        size="sm"
+                      />
+                    ) : (
+                      <UserAvatar
+                        userId={dm.other_user?.id ?? dm.id}
+                        name={dm.other_user?.display_name ?? displayName}
+                        avatarUrl={dm.other_user?.avatar_url}
+                        size="sm"
+                      />
+                    )}
                     <span className="truncate font-body">{displayName}</span>
                   </button>
                 );

@@ -27,6 +27,7 @@ export interface User {
   id: string;
   email: string;
   display_name: string;
+  avatar_url?: string | null;
   role: string;
   created_at: string;
   updated_at?: string;
@@ -48,6 +49,11 @@ export interface AuthResponse {
   refresh_token: string;
   user: User;
   onboarding_channel_id?: string;
+}
+
+export interface UpdateProfileRequest {
+  display_name?: string;
+  avatar_url?: string | null;
 }
 
 // ---- 状态管理 ----
@@ -100,6 +106,7 @@ export interface AuthContextValue {
   error: string | null;
   login: (req: LoginRequest) => Promise<void>;
   register: (req: RegisterRequest) => Promise<string | undefined>;
+  updateProfile: (req: UpdateProfileRequest) => Promise<User>;
   logout: () => Promise<void>;
   clearError: () => void;
 }
@@ -183,6 +190,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, []);
 
+  const updateProfile = useCallback(async (req: UpdateProfileRequest): Promise<User> => {
+    const user = await apiClient.patch<User>('/api/v1/users/me', {
+      ...req,
+      ...(req.avatar_url === null ? { avatar_url: '' } : {}),
+    });
+    dispatch({ type: 'SET_USER', user });
+    return user;
+  }, []);
+
   // ---- Logout ----
 
   const logout = useCallback(async () => {
@@ -212,10 +228,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       error: state.error,
       login,
       register,
+      updateProfile,
       logout,
       clearError,
     }),
-    [state, login, register, logout, clearError],
+    [state, login, register, updateProfile, logout, clearError],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

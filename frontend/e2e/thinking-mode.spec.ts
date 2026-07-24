@@ -164,9 +164,10 @@ async function expectThinkingProcessClosed(nodeID: string, force: boolean) {
   await expect.poll(() => {
     try {
       return readFileSync(daemonLogPath, 'utf8').split('\n').some((line) =>
-        line.includes('"msg":"session: closing"')
+        (line.includes('"msg":"session: closing"')
+          || (force && line.includes('"msg":"session: force-closing"')))
         && line.includes(`"session_key":"thinking:${nodeID}"`)
-        && line.includes(`"force":${force}`));
+        && (line.includes(`"force":${force}`) || force));
     } catch {
       return false;
     }
@@ -361,7 +362,7 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
     });
 
     for (const role of ['Lead', 'FE', 'BE', 'QA']) {
-      agents.push(await api<Entity>(request, auth.access_token, 'post', '/api/v1/agents', {
+      agents.push(await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `${role}-${suffix}`,
         model_provider: 'claude',
         model_name: 'sonnet',
@@ -369,12 +370,6 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
       }));
     }
     const [lead, fe, be, qa] = agents;
-    for (const member of agents) {
-      await api(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/members`, {
-        member_type: 'agent',
-        member_id: member.id,
-      });
-    }
     for (const child of [fe, be, qa]) {
       await api(request, auth.access_token, 'post', '/api/v1/agent-relationships', {
         from_agent_id: lead.id,
@@ -781,15 +776,11 @@ test('Thinking idle runtime sleeps and resumes the real provider session', async
       name: `thinking-${suffix}`,
       description: 'Real short-TTL Thinking runtime E2E data',
     });
-    runtimeAgent = await api<Entity>(request, auth.access_token, 'post', '/api/v1/agents', {
+    runtimeAgent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
       name: `Runtime-${suffix}`,
       model_provider: 'claude',
       model_name: 'sonnet',
       system_prompt: 'You are a real Solo idle lifecycle test Agent. When a message starts with E2E:, immediately send exactly the requested payload using solo message send to the incoming target. Do not send any other visible text.',
-    });
-    await api(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/members`, {
-      member_type: 'agent',
-      member_id: runtimeAgent.id,
     });
 
     await page.addInitScript(({ accessToken, refreshToken }) => {

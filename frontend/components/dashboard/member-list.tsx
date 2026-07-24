@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { Users, Bot, Circle, Plus, User as UserIcon, X } from 'lucide-react';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
+import { UserAvatar } from '@/components/ui/user-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import {
@@ -24,8 +25,8 @@ interface MemberListProps {
   users: ChannelMember[];
   agents: ChannelMember[];
   isLoading: boolean;
-  onAddAgent: () => void;
-  onRemoveAgent?: (memberId: string) => void;
+  onAddAgent?: () => void;
+  onRemoveAgent?: (memberId: string) => Promise<void>;
   onAgentClick?: (agent: AgentDetailTarget) => void;
   showHeader?: boolean;
   canAddAgent?: boolean;
@@ -37,11 +38,13 @@ function MemberItem({
   onAgentClick,
 }: {
   member: ChannelMember;
-  onRemove?: (id: string) => void;
+  onRemove?: (id: string) => Promise<void>;
   onAgentClick?: (agent: AgentDetailTarget) => void;
 }) {
   const isAgent = member.member_type === 'agent';
   const [confirming, setConfirming] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const statusColor = {
     online: 'fill-brutal-success text-brutal-success',
     offline: 'fill-brutal-muted text-brutal-muted',
@@ -56,17 +59,27 @@ function MemberItem({
     typing: t('typing'),
   }[member.status] || t('offline');
 
-  const handleRemove = () => {
-    onRemove?.(member.member_id);
-    setConfirming(false);
+  const handleRemove = async () => {
+    if (!onRemove) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await onRemove(member.member_id);
+      setConfirming(false);
+    } catch {
+      setDeleteError(t('agentDeleteError'));
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   return (
-    <div className="group flex items-center gap-3 border-2 border-transparent bg-white p-2 transition-all hover:border-black hover:bg-brutal-primary-light hover:shadow-brutal-sm">
+    <div className="group flex items-center gap-3 border-2 border-transparent bg-white p-2 transition-[background-color,border-color,box-shadow] hover:border-black hover:bg-brutal-primary-light hover:shadow-brutal-sm">
       {/* Icon / Avatar */}
       {isAgent ? (
         <PixelAvatar
           agentId={member.member_id}
+          avatarUrl={member.avatar_url}
           size="md"
           onClick={onAgentClick ? () => onAgentClick?.({
             id: member.member_id,
@@ -76,11 +89,12 @@ function MemberItem({
           ariaLabel={t('viewAgentDetail', { name: member.display_name })}
         />
       ) : (
-        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-muted shadow-brutal-sm">
-          <span className="font-heading text-[10px] font-bold text-black">
-            {member.display_name?.charAt(0)?.toUpperCase() || '?'}
-          </span>
-        </div>
+        <UserAvatar
+          userId={member.member_id}
+          name={member.display_name}
+          avatarUrl={member.avatar_url}
+          size="md"
+        />
       )}
 
       {/* Info */}
@@ -104,9 +118,15 @@ function MemberItem({
         {isAgent && (
           onRemove && (
             <button
-              onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
-              className="flex-shrink-0 border-2 border-black bg-white px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-all shadow-brutal-sm hover:bg-brutal-danger hover:text-black"
-              title={t('removeAgent')}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setDeleteError(null);
+                setConfirming(true);
+              }}
+              className="flex-shrink-0 border-2 border-black bg-white px-1.5 py-0.5 opacity-100 shadow-brutal-sm transition-[background-color,color,opacity] hover:bg-brutal-danger hover:text-black md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
+              aria-label={`${t('agentDeleteButton')}: ${member.display_name}`}
+              title={t('agentDeleteButton')}
             >
               <X className="h-3 w-3" />
             </button>
@@ -114,19 +134,30 @@ function MemberItem({
         )}
       </div>
 
-      <Dialog open={confirming} onOpenChange={setConfirming}>
+      <Dialog
+        open={confirming}
+        onOpenChange={(next) => {
+          if (!isDeleting) setConfirming(next);
+        }}
+      >
         <DialogHeader>
-          <DialogTitle>{t('removeAgent')}</DialogTitle>
-          <DialogCloseButton onClick={() => setConfirming(false)} />
+          <DialogTitle>{t('agentDeleteTitle')}</DialogTitle>
+          <DialogCloseButton onClick={() => !isDeleting && setConfirming(false)} />
         </DialogHeader>
         <DialogDescription>
-          Remove {member.display_name} from this channel?
+          {t('agentDeleteDesc', { name: member.display_name })}
         </DialogDescription>
+        {deleteError && (
+          <p className="border-2 border-black bg-brutal-danger-light p-2 font-mono text-xs text-brutal-danger" role="alert">
+            {deleteError}
+          </p>
+        )}
         <DialogFooter>
           <Button
             type="button"
             variant="outline"
             onClick={() => setConfirming(false)}
+            disabled={isDeleting}
           >
             {t('cancel')}
           </Button>
@@ -134,8 +165,9 @@ function MemberItem({
             type="button"
             variant="danger"
             onClick={handleRemove}
+            disabled={isDeleting}
           >
-            {t('confirm')}
+            {isDeleting ? t('deleting') : t('agentDeleteButton')}
           </Button>
         </DialogFooter>
       </Dialog>
@@ -169,7 +201,7 @@ export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent
             {users.length + agents.length}
           </span>
         </div>
-        {canAddAgent && (
+        {canAddAgent && onAddAgent && (
           <Button
             type="button"
             onClick={onAddAgent}

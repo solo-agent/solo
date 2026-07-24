@@ -1,5 +1,5 @@
 // ============================================================================
-// RelationshipWorkspace — graph editor embedded in Teams
+// RelationshipWorkspace — graph editor embedded in a channel workspace
 // - ReactFlow-based drag-and-drop relationship graph
 // - Create/delete relationships by connecting agent nodes
 // - 4 edge types with distinct visuals
@@ -16,6 +16,7 @@ import {
   Controls,
   useNodesState,
   useEdgesState,
+  MarkerType,
   type Connection,
   type Edge,
   type Node,
@@ -24,11 +25,12 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import dagre from 'dagre';
-import { ArrowLeft, Loader2, Plus, LayoutGrid, Undo2, Redo2, Layers } from 'lucide-react';
+import { GitFork, Handshake, Loader2, Plus, LayoutGrid, LayoutTemplate, Undo2, Redo2 } from 'lucide-react';
 import { AppFrame } from '@/components/layout/app-frame';
 import { Button } from '@/components/ui/button';
 import { RelationshipNode, type AgentNodeTask } from '@/components/relationships/relationship-node';
 import { RelationshipEdge } from '@/components/relationships/relationship-edge';
+import { orderCollaboratingIds, reorderRankX } from '@/components/relationships/relationship-layout';
 import { CreateRelationshipModal } from '@/components/relationships/create-relationship-modal';
 import { RelationshipDetailPanel } from '@/components/relationships/relationship-detail-panel';
 import { AgentForm, type AgentFormValues } from '@/components/agents/agent-form';
@@ -38,16 +40,13 @@ import {
   DialogTitle,
   DialogCloseButton,
 } from '@/components/ui/dialog';
-import { Select } from '@/components/ui/select';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
 import { useToast } from '@/components/ui/toast';
 import { t } from '@/lib/i18n';
-import type { Agent, AgentBackendDetectItem, AgentDetailTarget, AgentRelationship, RelationshipType } from '@/lib/types';
+import type { AgentDetailTarget, AgentRelationship, RelationshipType } from '@/lib/types';
 import { useAgents } from '@/lib/hooks/use-agents';
 import { useTeamAgentActivity } from '@/lib/hooks/use-team-agent-activity';
-import { listTemplates, applyTemplate, type Template } from '@/lib/templates-api';
-import { useCliDetection } from '@/lib/hooks/use-cli-detection';
 import { motionDuration } from '@/lib/motion';
 
 // ---- Node/Edge types ----
@@ -62,6 +61,48 @@ function isEditableTarget(target: EventTarget | null) {
 
 function relationshipTypeLabel(type: RelationshipType | string) {
   return type === 'assigns_to' ? t('assignsTo') : t('collaboratesWith');
+}
+
+function relationshipEdgeGeometry(
+  type: RelationshipType,
+  from: string,
+  to: string,
+  nodes: Node[],
+) {
+  if (type === 'assigns_to') {
+    return {
+      source: from,
+      target: to,
+      sourceHandle: 'bottom',
+      targetHandle: 'top',
+      markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--skin-ink)' },
+    };
+  }
+
+  const centers = new Map(nodes.map((node) => {
+    const hasTask = !!(node.data as { task?: unknown }).task;
+    const width = node.measured?.width ?? (hasTask ? 280 : 204);
+    const height = node.measured?.height ?? (hasTask ? 220 : 76);
+    return [node.id, {
+      x: node.position.x + width / 2,
+      y: node.position.y + height / 2,
+    }];
+  }));
+  const fromPoint = centers.get(from);
+  const toPoint = centers.get(to);
+  if (!fromPoint || !toPoint) {
+    return { source: from, target: to, sourceHandle: 'right', targetHandle: 'left', markerEnd: undefined };
+  }
+
+  const horizontal = Math.abs(toPoint.x - fromPoint.x) >= Math.abs(toPoint.y - fromPoint.y);
+  const reverse = horizontal ? fromPoint.x > toPoint.x : fromPoint.y > toPoint.y;
+  return {
+    source: reverse ? to : from,
+    target: reverse ? from : to,
+    sourceHandle: horizontal ? 'right' : 'bottom',
+    targetHandle: horizontal ? 'left' : 'top',
+    markerEnd: undefined,
+  };
 }
 
 // ---- Helpers ----
@@ -82,12 +123,16 @@ type AgentRunListItem = { id: string };
 interface RelationshipWorkspaceProps {
   title?: string;
   embedded?: boolean;
+  isFullscreen?: boolean;
   channelFilterId?: string;
   channelTeam?: ChannelTeam | null;
   agentTasks?: Record<string, AgentNodeTask | undefined>;
   onOpenTask?: (taskId: string) => void;
   onOpenTaskArtifact?: (taskId: string) => void;
   onChannelTeamRefresh?: () => void;
+  refreshKey?: number;
+  onAddAgent?: () => void;
+  onChooseTemplate?: () => void;
   onDetailOpen?: (detail: { relationship: AgentRelationship | null; agent: GraphAgent | null }) => void;
   onDetailClose?: () => void;
   embeddedActions?: ReactNode;
@@ -96,37 +141,35 @@ interface RelationshipWorkspaceProps {
 export function RelationshipWorkspace({
   title = t('relationshipEditor'),
   embedded = false,
+  isFullscreen = false,
   channelFilterId,
   channelTeam,
   agentTasks,
   onOpenTask,
   onOpenTaskArtifact,
   onChannelTeamRefresh,
+  refreshKey = 0,
+  onAddAgent,
+  onChooseTemplate,
   onDetailOpen,
   onDetailClose,
   embeddedActions,
 }: RelationshipWorkspaceProps = {}) {
   const router = useRouter();
-  const { agents, isLoading: agentsLoading, refetch: refetchAgents, createAgent } = useAgents();
+  const activeChannelFilterId = channelFilterId ?? '';
+  const { agents, isLoading: agentsLoading, refetch: refetchAgents, createAgent } = useAgents(activeChannelFilterId);
   const { liveByAgent, getLatestRunId } = useTeamAgentActivity();
   const { showToast } = useToast();
-  const { results: detection, isLoading: detectionLoading } = useCliDetection();
   const [relationships, setRelationships] = useState<AgentRelationship[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showChoiceDialog, setShowChoiceDialog] = useState(false);
   const [showCreateAgentModal, setShowCreateAgentModal] = useState(false);
   const [isCreatingAgent, setIsCreatingAgent] = useState(false);
-  const [showTemplateModal, setShowTemplateModal] = useState(false);
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [templatesLoading, setTemplatesLoading] = useState(false);
-  const [applyingTemplate, setApplyingTemplate] = useState<string | null>(null);
-  const [templateError, setTemplateError] = useState<string | null>(null);
-  const [selectedModelProvider, setSelectedModelProvider] = useState('');
   const [preselectedFrom, setPreselectedFrom] = useState<string | null>(null);
   const [preselectedTo, setPreselectedTo] = useState<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [detailRel, setDetailRel] = useState<AgentRelationship | null>(null);
   const [detailAgent, setDetailAgent] = useState<GraphAgent | null>(null);
   const [detailPanelWidth, setDetailPanelWidth] = useState(400);
@@ -135,13 +178,16 @@ export function RelationshipWorkspace({
   const edgeToRelationshipMap = useRef<Map<string, AgentRelationship>>(new Map());
   const flowRef = useRef<ReactFlowInstance | null>(null);
   const detailPanelOpen = !!detailRel || !!detailAgent;
-  const activeChannelFilterId = channelFilterId ?? '';
 
   const fitGraph = useCallback(() => {
     requestAnimationFrame(() => {
-      flowRef.current?.fitView({ padding: 0.25, maxZoom: 0.85, duration: motionDuration(420) });
+      flowRef.current?.fitView({ padding: 0.2, maxZoom: 1, duration: motionDuration(420) });
     });
   }, []);
+
+  useEffect(() => {
+    fitGraph();
+  }, [fitGraph, isFullscreen]);
 
   const handleOpenLatestRun = useCallback(async (agentId: string) => {
     const runId = getLatestRunId(agentId);
@@ -174,6 +220,14 @@ export function RelationshipWorkspace({
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const previousRefreshKey = useRef(refreshKey);
+  useEffect(() => {
+    if (previousRefreshKey.current === refreshKey) return;
+    previousRefreshKey.current = refreshKey;
+    void refetchAgents();
+    void loadData();
+  }, [loadData, refetchAgents, refreshKey]);
 
   // ---- Position persistence ----
 
@@ -257,6 +311,7 @@ export function RelationshipWorkspace({
       data: {
         agentId: a.id,
         agentName: a.name,
+        avatarUrl: a.avatar_url,
         isActive: a.is_active,
         task: agentTasks?.[a.id],
         onOpenRun: handleOpenLatestRun,
@@ -270,17 +325,15 @@ export function RelationshipWorkspace({
     const map = new Map<string, AgentRelationship>();
     const edges = visibleRelationships.map((r) => {
       map.set(r.id, r);
-      const isCollab = r.rel_type === 'collaborates_with';
       return {
         id: r.id,
-        source: r.from_agent_id,
-        target: r.to_agent_id,
+        ...relationshipEdgeGeometry(
+          r.rel_type,
+          r.from_agent_id,
+          r.to_agent_id,
+          initialNodes,
+        ),
         type: 'relationship',
-        // Collaboration is horizontal; assignment is vertical and starts below
-        // any mounted task card.
-        ...(isCollab
-          ? { sourceHandle: 'right', targetHandle: 'left' }
-          : { sourceHandle: 'bottom', targetHandle: 'top' }),
         data: {
           relType: r.rel_type,
           channelName: r.channel_name,
@@ -289,10 +342,35 @@ export function RelationshipWorkspace({
     });
     edgeToRelationshipMap.current = map;
     return edges;
-  }, [visibleRelationships]);
+  }, [initialNodes, visibleRelationships]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
+  useEffect(() => {
+    setEdges((current) => {
+      let changed = false;
+      const next = current.map((edge) => {
+        const relationship = edgeToRelationshipMap.current.get(edge.id);
+        if (!relationship || relationship.rel_type !== 'collaborates_with') return edge;
+        const geometry = relationshipEdgeGeometry(
+          relationship.rel_type,
+          relationship.from_agent_id,
+          relationship.to_agent_id,
+          nodes,
+        );
+        if (
+          edge.source === geometry.source
+          && edge.target === geometry.target
+          && edge.sourceHandle === geometry.sourceHandle
+          && edge.targetHandle === geometry.targetHandle
+        ) return edge;
+        changed = true;
+        return { ...edge, ...geometry };
+      });
+      return changed ? next : current;
+    });
+  }, [nodes, setEdges]);
 
   // Sync when data reloads — keep existing node positions, only add new / remove deleted.
   useEffect(() => {
@@ -357,16 +435,17 @@ export function RelationshipWorkspace({
             channel_id: event.channel_id,
           };
           edgeToRelationshipMap.current.set(event.id, newRel);
-          const isCollab = event.rel_type === 'collaborates_with';
+          const relType = event.rel_type as RelationshipType;
           return [...prev, {
             id: event.id,
-            source: event.from_agent_id,
-            target: event.to_agent_id,
+            ...relationshipEdgeGeometry(
+              relType,
+              event.from_agent_id,
+              event.to_agent_id,
+              flowRef.current?.getNodes() ?? [],
+            ),
             type: 'relationship',
-            ...(isCollab
-              ? { sourceHandle: 'right', targetHandle: 'left' }
-              : { sourceHandle: 'bottom', targetHandle: 'top' }),
-            data: { relType: event.rel_type as RelationshipType, channelName: (event as { channel_name?: string }).channel_name },
+            data: { relType, channelName: (event as { channel_name?: string }).channel_name },
           }];
         });
       }
@@ -380,6 +459,12 @@ export function RelationshipWorkspace({
           }
           return {
             ...e,
+            ...(existing ? relationshipEdgeGeometry(
+              existing.rel_type,
+              existing.from_agent_id,
+              existing.to_agent_id,
+              flowRef.current?.getNodes() ?? [],
+            ) : {}),
             data: { ...e.data, relType: event.rel_type as RelationshipType, channelName: (event as { channel_name?: string }).channel_name },
           };
         }));
@@ -398,8 +483,8 @@ export function RelationshipWorkspace({
         setDetailRel((prev) => prev?.id === event.id ? null : prev);
       }
 
-      // agent_deleted — server cascaded the agent's relationships and
-      // dropped the agent row's active flag. Drop every edge / node that
+      // agent_deleted — the server deactivated the agent, so its preserved
+      // relationships are no longer part of the active team. Drop every edge / node that
       // referenced it locally so the graph doesn't show ghost nodes, then
       // refetch agents to keep the agents list in sync.
       if (event.type === 'agent_deleted') {
@@ -506,49 +591,6 @@ export function RelationshipWorkspace({
     }
   }, [createAgent, isCreatingAgent, refetchAgents, showToast]);
 
-  const loadTemplates = useCallback(async () => {
-    setTemplatesLoading(true);
-    setTemplateError(null);
-    try {
-      setTemplates(await listTemplates());
-    } catch (err) {
-      setTemplateError(err instanceof Error ? err.message : t('relationshipTemplateLoadError'));
-    } finally {
-      setTemplatesLoading(false);
-    }
-  }, []);
-
-  const handleOpenTemplates = useCallback(() => {
-    setShowChoiceDialog(false);
-    setShowTemplateModal(true);
-    void loadTemplates();
-    if (!selectedModelProvider) {
-      const available = (Object.values(detection) as AgentBackendDetectItem[]).find((rt) => rt.available);
-      if (available) setSelectedModelProvider(available.type);
-    }
-  }, [detection, loadTemplates, selectedModelProvider]);
-
-  const handleApplyTemplate = useCallback(async (templateID: string) => {
-    if (!selectedModelProvider) {
-      setTemplateError(t('relationshipRuntimeRequiredError'));
-      return;
-    }
-    setApplyingTemplate(templateID);
-    setTemplateError(null);
-    try {
-      await applyTemplate(templateID, selectedModelProvider);
-      await refetchAgents();
-      await loadData();
-      refreshChannelFilter();
-      setShowTemplateModal(false);
-      showToast(t('relationshipTemplateApplied'), 'success');
-    } catch (err) {
-      setTemplateError(err instanceof Error ? err.message : t('relationshipTemplateApplyError'));
-    } finally {
-      setApplyingTemplate(null);
-    }
-  }, [loadData, refetchAgents, refreshChannelFilter, selectedModelProvider, showToast]);
-
   // ---- Edge click → show detail panel ----
 
   const agentNameMap = useMemo(() => {
@@ -558,6 +600,7 @@ export function RelationshipWorkspace({
   }, [visibleAgents]);
 
   const onEdgeClick = useCallback((_event: React.MouseEvent, edge: Edge) => {
+    setSelectedAgentId(null);
     setSelectedEdge(edge);
     setEdges((prev) => prev.map((e) => ({ ...e, selected: e.id === edge.id })));
     const rel = edgeToRelationshipMap.current.get(edge.id);
@@ -581,7 +624,29 @@ export function RelationshipWorkspace({
     }
   }, [agentNameMap, onDetailOpen, setEdges]);
 
+  const interactiveEdges = useMemo<Edge[]>(() => edges.map((edge) => {
+    const relationship = edgeToRelationshipMap.current.get(edge.id);
+    const fromName = relationship ? agentNameMap.get(relationship.from_agent_id)?.name : undefined;
+    const toName = relationship ? agentNameMap.get(relationship.to_agent_id)?.name : undefined;
+    return {
+      ...edge,
+      selected: selectedEdge?.id === edge.id,
+      data: {
+        ...edge.data,
+        ariaLabel: relationship
+          ? `${relationshipTypeLabel(relationship.rel_type)}: ${fromName ?? ''} → ${toName ?? ''}`
+          : relationshipTypeLabel((edge.data as { relType?: RelationshipType })?.relType ?? ''),
+        onSelect: (event: React.MouseEvent<HTMLButtonElement>) => onEdgeClick(event, edge),
+      },
+    };
+  }), [agentNameMap, edges, onEdgeClick, selectedEdge]);
+  const interactiveNodes = useMemo<Node[]>(() => nodes.map((node) => ({
+    ...node,
+    selected: selectedAgentId === node.id,
+  })), [nodes, selectedAgentId]);
+
   const onNodeClick: NodeMouseHandler = useCallback((_event, node) => {
+    setSelectedAgentId(node.id);
     setSelectedEdge(null);
     setEdges((prev) => prev.map((e) => ({ ...e, selected: false })));
     const agent = visibleAgents.find((a) => a.id === node.id);
@@ -599,15 +664,17 @@ export function RelationshipWorkspace({
   const closeDetailPanel = useCallback(() => {
     setDetailRel(null);
     setDetailAgent(null);
+    setSelectedAgentId(null);
     setSelectedEdge(null);
     setEdges((prev) => prev.map((e) => ({ ...e, selected: false })));
     onDetailClose?.();
   }, [onDetailClose, setEdges]);
 
   const handleDetailUpdate = useCallback(() => {
+    void refetchAgents();
     loadData();
     refreshChannelFilter();
-  }, [loadData, refreshChannelFilter]);
+  }, [loadData, refetchAgents, refreshChannelFilter]);
 
   const handleDetailDelete = useCallback((id: string) => {
     setEdges((prev) => prev.filter((e) => e.id !== id));
@@ -674,15 +741,30 @@ export function RelationshipWorkspace({
     if (recordUndo) pushUndo();
     try { localStorage.removeItem(posStorageKey); } catch { /* noop */ }
     setNodes((prev) => {
+      const hasTaskCards = prev.some((node) => !!(node.data as { task?: unknown }).task);
       const nodeSize = (node: Node) => {
         const hasTask = !!(node.data as { task?: unknown }).task;
-        return hasTask ? { width: 280, height: 220 } : { width: 180, height: 100 };
+        return hasTask ? { width: 280, height: 220 } : { width: 204, height: 76 };
       };
       const g = new dagre.graphlib.Graph({ compound: true });
-      g.setGraph({ rankdir: 'TB', nodesep: 100, ranksep: 140, marginx: 80, marginy: 80 });
+      g.setGraph({
+        rankdir: 'TB',
+        nodesep: 60,
+        ranksep: hasTaskCards ? 140 : 88,
+        marginx: hasTaskCards ? 80 : 24,
+        marginy: hasTaskCards ? 80 : 24,
+      });
       g.setDefaultEdgeLabel(() => ({}));
 
-      for (const n of prev) {
+      const nodeById = new Map(prev.map((node) => [node.id, node]));
+      const orderedNodeIds = orderCollaboratingIds(
+        prev.map((node) => node.id),
+        edges
+          .filter((edge) => edge.data?.relType === 'collaborates_with')
+          .map((edge) => [edge.source, edge.target]),
+      );
+      for (const id of orderedNodeIds) {
+        const n = nodeById.get(id)!;
         g.setNode(n.id, nodeSize(n));
       }
 
@@ -745,6 +827,12 @@ export function RelationshipWorkspace({
       }
 
       dagre.layout(g);
+      const rankX = hasTaskCards
+        ? new Map<string, number>()
+        : reorderRankX(
+          orderedNodeIds,
+          new Map(orderedNodeIds.map((id) => [id, g.node(id)])),
+        );
 
       const laidOut = prev.map((n) => {
         const pos = g.node(n.id);
@@ -752,7 +840,7 @@ export function RelationshipWorkspace({
         const size = nodeSize(n);
         return {
           ...n,
-          position: { x: pos.x - size.width / 2, y: pos.y - size.height / 2 },
+          position: { x: (rankX.get(n.id) ?? pos.x) - size.width / 2, y: pos.y - size.height / 2 },
         };
       });
       const connectedBottom = Math.max(
@@ -890,7 +978,7 @@ export function RelationshipWorkspace({
             </Button>
             <Button
               type="button"
-              onClick={() => setShowChoiceDialog(true)}
+              onClick={() => setShowCreateAgentModal(true)}
               variant="success"
               size="sm"
               className="gap-1.5 uppercase tracking-wider"
@@ -922,13 +1010,13 @@ export function RelationshipWorkspace({
         <div className="flex-1 relative">
           <ReactFlow
             className="relationship-flow"
-            nodes={nodes}
-            edges={edges}
+            nodes={interactiveNodes}
+            edges={interactiveEdges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onEdgeClick={onEdgeClick}
-            onPaneClick={() => { setSelectedEdge(null); closeDetailPanel(); }}
+            onPaneClick={closeDetailPanel}
             onNodeClick={onNodeClick}
             onNodeDragStop={(_event, node) => {
               setNodes((prev) => {
@@ -940,7 +1028,7 @@ export function RelationshipWorkspace({
             nodeTypes={NODE_TYPES}
             edgeTypes={EDGE_TYPES}
             fitView
-            fitViewOptions={{ padding: 0.25, maxZoom: 0.85 }}
+            fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
             onInit={(instance) => {
               flowRef.current = instance;
               fitGraph();
@@ -951,11 +1039,11 @@ export function RelationshipWorkspace({
             proOptions={{ hideAttribution: true }}
             deleteKeyCode={null}
           >
-            <Background color="var(--color-border)" gap={20} />
+            <Background color="var(--skin-rule)" gap={24} size={1} />
             <Controls
               className="flow-controls"
               position="bottom-right"
-              style={{ border: '2px solid var(--color-brutal-black)', boxShadow: '3px 3px 0 var(--color-brutal-shadow)' }}
+              style={{ border: '2px solid var(--skin-rule)', boxShadow: '3px 3px 0 var(--color-brutal-shadow)' }}
             />
           </ReactFlow>
 
@@ -969,40 +1057,6 @@ export function RelationshipWorkspace({
             agents={visibleAgents}
           />
 
-          <Dialog open={showChoiceDialog} onOpenChange={setShowChoiceDialog} width="sm">
-            <DialogHeader>
-              <DialogTitle>{t('relationshipCreateAgent')}</DialogTitle>
-              <DialogCloseButton onClick={() => setShowChoiceDialog(false)} />
-            </DialogHeader>
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowChoiceDialog(false);
-                  setShowCreateAgentModal(true);
-                }}
-                className="w-full flex items-center gap-3 p-4 border-2 border-black bg-white hover:bg-brutal-primary-light text-left"
-              >
-                <Plus className="h-5 w-5 flex-shrink-0" />
-                <div>
-                  <div className="font-heading text-sm font-bold">{t('relationshipSingleAgent')}</div>
-                  <p className="font-sans text-xs text-muted-foreground mt-0.5">{t('relationshipSingleAgentDesc')}</p>
-                </div>
-              </button>
-              <button
-                type="button"
-                onClick={handleOpenTemplates}
-                className="w-full flex items-center gap-3 p-4 border-2 border-black bg-white hover:bg-brutal-accent-light text-left"
-              >
-                <Layers className="h-5 w-5 flex-shrink-0" />
-                <div>
-                  <div className="font-heading text-sm font-bold">{t('relationshipFromTemplate')}</div>
-                  <p className="font-sans text-xs text-muted-foreground mt-0.5">{t('relationshipFromTemplateDesc')}</p>
-                </div>
-              </button>
-            </div>
-          </Dialog>
-
           <Dialog
             open={showCreateAgentModal}
             onOpenChange={(open) => {
@@ -1014,19 +1068,6 @@ export function RelationshipWorkspace({
               <DialogTitle>{t('teamsCreateAgent')}</DialogTitle>
               <DialogCloseButton onClick={() => setShowCreateAgentModal(false)} />
             </DialogHeader>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setShowCreateAgentModal(false);
-                setShowChoiceDialog(true);
-              }}
-              className="mb-4 gap-1.5"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              {t('back')}
-            </Button>
             <AgentForm
               onSubmit={handleCreateAgent}
               isSubmitting={isCreatingAgent}
@@ -1034,102 +1075,33 @@ export function RelationshipWorkspace({
             />
           </Dialog>
 
-          <Dialog open={showTemplateModal} onOpenChange={setShowTemplateModal} width="lg">
-            <DialogHeader>
-              <DialogTitle>{t('relationshipCreateFromTemplate')}</DialogTitle>
-              <DialogCloseButton onClick={() => setShowTemplateModal(false)} />
-            </DialogHeader>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setShowTemplateModal(false);
-                setShowChoiceDialog(true);
-              }}
-              className="mb-4 gap-1.5"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              {t('back')}
-            </Button>
-            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
-              <div>
-                <label className="block font-heading text-xs font-bold uppercase tracking-wider mb-1.5">
-                  {t('relationshipRuntimeRequired')}
-                </label>
-                {detectionLoading ? (
-                  <p className="font-mono text-xs text-muted-foreground">{t('relationshipDetectingRuntimes')}</p>
-                ) : (
-                  <Select
-                    value={selectedModelProvider}
-                    onChange={setSelectedModelProvider}
-                    options={(Object.values(detection) as AgentBackendDetectItem[]).map((rt) => ({
-                      value: rt.type,
-                      label: `${rt.available ? '●' : '○'} ${rt.display_name}${rt.version ? ` (${rt.version})` : ''}`,
-                      disabled: !rt.available,
-                    }))}
-                    placeholder={t('relationshipSelectRuntime')}
-                    size="md"
-                    className="w-full"
-                  />
-                )}
-              </div>
-
-              {templatesLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                </div>
-              ) : templates.length === 0 ? (
-                <p className="font-mono text-sm text-muted-foreground text-center py-4">{t('relationshipNoTemplates')}</p>
-              ) : (
-                [...new Set(templates.map((tmpl) => tmpl.category))].map((category) => (
-                  <div key={category}>
-                    <h3 className="font-heading text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2 border-b-2 border-black pb-1">
-                      {category}
-                    </h3>
-                    <div className="space-y-2">
-                      {templates.filter((tmpl) => tmpl.category === category).map((tmpl) => (
-                        <div key={tmpl.id} className="flex items-start gap-3 p-3 border-2 border-black bg-white">
-                          <span className="text-2xl flex-shrink-0">{tmpl.icon}</span>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-heading text-sm font-bold text-black">{tmpl.name}</span>
-                              <span className="inline-flex items-center justify-center h-5 min-w-[1.25rem] px-1 border-2 border-black bg-brutal-cream font-mono text-[10px] font-bold text-black">
-                                {tmpl.member_count}
-                              </span>
-                            </div>
-                            <p className="font-sans text-xs text-muted-foreground mt-0.5">{tmpl.description}</p>
-                          </div>
-                          <Button
-                            type="button"
-                            onClick={() => handleApplyTemplate(tmpl.id)}
-                            disabled={applyingTemplate === tmpl.id}
-                            variant="success"
-                            size="sm"
-                            className="flex-shrink-0"
-                          >
-                            {applyingTemplate === tmpl.id ? <Loader2 className="h-3 w-3 animate-spin" /> : t('relationshipApplyTemplate')}
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              )}
-              {templateError && (
-                <p className="font-mono text-xs text-brutal-danger">{templateError}</p>
-              )}
-            </div>
-          </Dialog>
-
           {/* Empty state overlay */}
           {visibleAgents.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-              <div className="flex flex-col items-center gap-3 p-8 border-4 border-black bg-white shadow-brutal-xl">
-                <Plus className="h-10 w-10 text-muted-foreground" />
-                <p className="font-heading text-sm text-muted-foreground max-w-xs text-center">
+              <div className="pointer-events-auto flex max-w-sm flex-col items-center gap-3 border-4 border-black bg-brutal-cream p-8 text-center shadow-brutal-xl">
+                <span className="flex h-12 w-12 items-center justify-center border-2 border-black bg-white shadow-brutal-sm">
+                  <Plus className="h-6 w-6" />
+                </span>
+                <h3 className="font-heading text-lg font-black">
+                  {t('relationshipEditorEmptyTitle')}
+                </h3>
+                <p className="max-w-xs font-body text-sm text-muted-foreground">
                   {t('relationshipEditorEmpty')}
                 </p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {onAddAgent && (
+                    <Button type="button" variant="success" size="sm" onClick={onAddAgent}>
+                      <Plus className="mr-1.5 h-3.5 w-3.5" />
+                      {t('relationshipEditorCreateFirstAgent')}
+                    </Button>
+                  )}
+                  {onChooseTemplate && (
+                    <Button type="button" variant="outline" size="sm" onClick={onChooseTemplate}>
+                      <LayoutTemplate className="mr-1.5 h-3.5 w-3.5" />
+                      {t('relationshipEditorChooseTemplate')}
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -1141,11 +1113,17 @@ export function RelationshipWorkspace({
             {t('relationshipLegend')}:
           </span>
           {[
-            { type: 'assigns_to', color: 'var(--color-brutal-info)', dash: '' },
-            { type: 'collaborates_with', color: 'var(--color-brutal-success)', dash: '8,4' },
-          ].map(({ type, color, dash }) => (
+            { type: 'assigns_to', color: 'var(--skin-accent)', assignment: true },
+            { type: 'collaborates_with', color: 'var(--skin-success)', assignment: false },
+          ].map(({ type, color, assignment }) => (
             <span key={type} className="flex items-center gap-1.5 font-mono text-[10px]">
-              <svg width="24" height="8"><line x1="0" y1="4" x2="24" y2="4" stroke={color} strokeWidth={2} strokeDasharray={dash || undefined} /></svg>
+              <span
+                className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[var(--skin-rule)] bg-[var(--skin-surface)]"
+                style={{ color }}
+                aria-hidden="true"
+              >
+                {assignment ? <GitFork className="h-3 w-3" /> : <Handshake className="h-3 w-3" />}
+              </span>
               {relationshipTypeLabel(type)}
             </span>
           ))}

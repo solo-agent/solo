@@ -14,7 +14,7 @@ import { useState, useCallback } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Bot, Wrench, Terminal } from 'lucide-react';
+import { Bot, ChevronDown, Wrench, Terminal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
@@ -146,6 +146,7 @@ export function AgentForm({
   // Role template selection state (SOLO-210-F)
   const [selectedTemplateKey, setSelectedTemplateKey] = useState<string | null>(null);
   const [pendingTemplate, setPendingTemplate] = useState<RoleTemplate | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // v1.4: separate local state for complex editors, synced to form values
   const [envValues, setEnvValues] = useState<Record<string, string>>(
@@ -211,7 +212,7 @@ export function AgentForm({
 
   return (
     <>
-    <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-6">
+    <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4">
       {/* Name */}
       <div className="space-y-2">
         <Label htmlFor="name">
@@ -250,7 +251,7 @@ export function AgentForm({
       {/* Runtime Selection (v1.4: dynamic, based on CLI detection) */}
       <div className="space-y-3">
         <Label>
-          Runtime <span className="text-brutal-danger">*</span>
+          {t('agentFormRuntimeLabel')} <span className="text-brutal-danger">*</span>
         </Label>
 
         {/* Loading state */}
@@ -338,40 +339,59 @@ export function AgentForm({
         <Textarea
           id="system_prompt"
           placeholder={t('agentFormSystemPromptPlaceholder')}
-          className="min-h-[120px] resize-y"
-          aria-label="System Prompt"
+          className="min-h-24 resize-y"
+          aria-label={t('agentFormSystemPrompt')}
           {...register('system_prompt')}
         />
       </div>
 
-      {/* v1.4: Custom Environment Variables */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <Terminal className="h-4 w-4" />
-          <Label>{t('agentFormEnv')}</Label>
-        </div>
-        <EnvEditor
-          value={envValues}
-          onChange={handleEnvChange}
-          disabled={isSubmitting}
-        />
-      </div>
+      <div className="border-y-2 border-black py-3">
+        <button
+          type="button"
+          onClick={() => setShowAdvanced((current) => !current)}
+          className="flex w-full items-center gap-3 text-left"
+          aria-expanded={showAdvanced}
+        >
+          <span className="flex h-8 w-8 items-center justify-center border-2 border-black bg-brutal-primary-light shadow-brutal-sm">
+            <Wrench className="h-3.5 w-3.5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-heading text-sm font-bold">{t('agentFormAdvancedSettings')}</span>
+            <span className="block font-body text-xs text-muted-foreground">{t('agentFormAdvancedSettingsDesc')}</span>
+          </span>
+          <ChevronDown className={cn('h-4 w-4 transition-transform', showAdvanced && 'rotate-180')} />
+        </button>
 
-      {/* v1.4: Custom CLI Arguments */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <Wrench className="h-4 w-4" />
-          <Label>{t('agentFormCustomArgs')}</Label>
-        </div>
-        <ArgsEditor
-          value={argsValues}
-          onChange={handleArgsChange}
-          disabled={isSubmitting}
-        />
+        {showAdvanced && (
+          <div className="mt-5 space-y-6">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Terminal className="h-4 w-4" />
+                <Label>{t('agentFormEnv')}</Label>
+              </div>
+              <EnvEditor
+                value={envValues}
+                onChange={handleEnvChange}
+                disabled={isSubmitting}
+              />
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Wrench className="h-4 w-4" />
+                <Label>{t('agentFormCustomArgs')}</Label>
+              </div>
+              <ArgsEditor
+                value={argsValues}
+                onChange={handleArgsChange}
+                disabled={isSubmitting}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Submit */}
-      <div className="flex items-center gap-3 pt-2">
+      <div className="flex items-center justify-end border-t-2 border-black pt-3">
         <Button
           type="submit"
           variant="success"

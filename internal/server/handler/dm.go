@@ -55,6 +55,7 @@ type DMChannelResponse struct {
 	OtherMemberType   string  `json:"other_member_type"`
 	OtherMemberID     string  `json:"other_member_id"`
 	OtherMemberName   string  `json:"other_member_name"`
+	OtherMemberAvatar string  `json:"other_member_avatar,omitempty"`
 	OtherMemberActive bool    `json:"other_member_active"`
 	IsArchived        bool    `json:"is_archived"`
 	CreatedAt         string  `json:"created_at"`
@@ -69,6 +70,7 @@ type DMListResponse struct {
 	OtherMemberType   string  `json:"other_member_type"`
 	OtherMemberID     string  `json:"other_member_id"`
 	OtherMemberName   string  `json:"other_member_name"`
+	OtherMemberAvatar string  `json:"other_member_avatar,omitempty"`
 	OtherMemberActive bool    `json:"other_member_active"`
 	LastMessage       string  `json:"last_message,omitempty"`
 	LastMessageAt     *string `json:"last_message_at,omitempty"`
@@ -109,13 +111,13 @@ func (h *DMHandler) CreateOrGetDM(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify target member exists
-	var targetName string
+	var targetName, targetAvatar string
 	switch req.MemberType {
 	case "user":
 		err := h.pool.QueryRow(r.Context(),
-			`SELECT display_name FROM users WHERE id = $1 AND is_active = true`,
+			`SELECT display_name, COALESCE(avatar_url, '') FROM users WHERE id = $1 AND is_active = true`,
 			req.MemberID,
-		).Scan(&targetName)
+		).Scan(&targetName, &targetAvatar)
 		if err != nil {
 			if isNotFound(err) {
 				writeError(w, http.StatusNotFound, "user not found")
@@ -130,9 +132,9 @@ func (h *DMHandler) CreateOrGetDM(w http.ResponseWriter, r *http.Request) {
 		// Verify agent exists and belongs to the requesting user
 		var agentName, ownerID string
 		err := h.pool.QueryRow(r.Context(),
-			`SELECT name, owner_id FROM agents WHERE id = $1 AND is_active = true`,
+			`SELECT name, owner_id, COALESCE(avatar_url, '') FROM agents WHERE id = $1 AND is_active = true`,
 			req.MemberID,
-		).Scan(&agentName, &ownerID)
+		).Scan(&agentName, &ownerID, &targetAvatar)
 		if err != nil {
 			if isNotFound(err) {
 				writeError(w, http.StatusNotFound, "agent not found")
@@ -176,6 +178,7 @@ func (h *DMHandler) CreateOrGetDM(w http.ResponseWriter, r *http.Request) {
 			OtherMemberType:   req.MemberType,
 			OtherMemberID:     req.MemberID,
 			OtherMemberName:   targetName,
+			OtherMemberAvatar: targetAvatar,
 			OtherMemberActive: true, // target was verified active above
 			IsArchived:        false,
 			CreatedAt:         existingCreatedAt.Format(time.RFC3339),
@@ -271,6 +274,7 @@ func (h *DMHandler) CreateOrGetDM(w http.ResponseWriter, r *http.Request) {
 		OtherMemberType:   req.MemberType,
 		OtherMemberID:     req.MemberID,
 		OtherMemberName:   targetName,
+		OtherMemberAvatar: targetAvatar,
 		OtherMemberActive: true, // target was verified active above
 		IsArchived:        false,
 		CreatedAt:         createdAt.Format(time.RFC3339),
@@ -293,6 +297,7 @@ func (h *DMHandler) ListDMs(w http.ResponseWriter, r *http.Request) {
 		`SELECT c.id, c.name,
 		        dm_other.member_type AS other_type, dm_other.member_id AS other_id,
 		        COALESCE(u.display_name, a.name, '') AS other_name,
+		        COALESCE(u.avatar_url, a.avatar_url, '') AS other_avatar,
 		        COALESCE(a.is_active, true) AS other_active,
 		        COALESCE(msg.content, '') AS last_content,
 		        msg.created_at AS last_at,
@@ -329,6 +334,7 @@ func (h *DMHandler) ListDMs(w http.ResponseWriter, r *http.Request) {
 
 		err := rows.Scan(&d.ID, &d.Name,
 			&d.OtherMemberType, &d.OtherMemberID, &d.OtherMemberName,
+			&d.OtherMemberAvatar,
 			&d.OtherMemberActive,
 			&lastContent, &lastAt, &createdAt)
 		if err != nil {
@@ -380,6 +386,7 @@ func (h *DMHandler) GetDM(w http.ResponseWriter, r *http.Request) {
 		otherType            string
 		otherID              string
 		otherName            string
+		otherAvatar          string
 		otherActive          bool
 	)
 	err := h.pool.QueryRow(r.Context(),
@@ -387,6 +394,7 @@ func (h *DMHandler) GetDM(w http.ResponseWriter, r *http.Request) {
 		        c.created_at, c.updated_at,
 		        dm_other.member_type, dm_other.member_id,
 		        COALESCE(u.display_name, a.name, '') AS other_name,
+		        COALESCE(u.avatar_url, a.avatar_url, '') AS other_avatar,
 		        COALESCE(a.is_active, true) AS other_active
 		 FROM channels c
 		 INNER JOIN dm_members dm_self ON dm_self.channel_id = c.id
@@ -399,7 +407,7 @@ func (h *DMHandler) GetDM(w http.ResponseWriter, r *http.Request) {
 		userID, dmID,
 	).Scan(&channelID, &channelName, &description, &createdBy, &isArchived,
 		&createdAt, &updatedAt,
-		&otherType, &otherID, &otherName, &otherActive)
+		&otherType, &otherID, &otherName, &otherAvatar, &otherActive)
 	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "DM not found")
@@ -419,6 +427,7 @@ func (h *DMHandler) GetDM(w http.ResponseWriter, r *http.Request) {
 		OtherMemberType:   otherType,
 		OtherMemberID:     otherID,
 		OtherMemberName:   otherName,
+		OtherMemberAvatar: otherAvatar,
 		OtherMemberActive: otherActive,
 		IsArchived:        isArchived,
 		CreatedAt:         createdAt.Format(time.RFC3339),
@@ -488,6 +497,7 @@ func (h *DMHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	// Build message query with cursor pagination (same pattern as MessageHandler.List)
 	query := `SELECT m.id, m.channel_id, m.sender_type, m.sender_id,
 	                 CASE WHEN m.sender_type = 'system' THEN 'Solo' ELSE COALESCE(u.display_name, a.name, m.sender_id::text) END as sender_name,
+	                 COALESCE(u.avatar_url, a.avatar_url, '') AS sender_avatar,
 	                 COALESCE(a.is_active, false) AS sender_active,
 	                 m.content, m.content_type, COALESCE(m.attachment_ids, '{}') as attachment_ids,
                  COALESCE(t.task_number, 0) AS task_number,
@@ -528,7 +538,7 @@ func (h *DMHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 		var msg MessageResponse
 		var createdAt time.Time
 		err := rows.Scan(&msg.ID, &msg.ChannelID, &msg.SenderType, &msg.SenderID,
-			&msg.SenderName, &msg.SenderActive, &msg.Content, &msg.ContentType, &msg.AttachmentIDs,
+			&msg.SenderName, &msg.SenderAvatar, &msg.SenderActive, &msg.Content, &msg.ContentType, &msg.AttachmentIDs,
 			&msg.TaskNumber, &msg.TaskStatus, &msg.TaskClaimerName, &msg.TaskClaimerDeleted, &msg.ReplyCount, &createdAt)
 		if err != nil {
 			slog.Error("failed to scan message row", "error", err)
@@ -693,14 +703,14 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get sender name (resolved from both users and agents tables)
-	var displayName string
+	var displayName, senderAvatar string
 	err = h.pool.QueryRow(r.Context(),
-		`SELECT COALESCE(
-			(SELECT display_name FROM users WHERE id = $1),
-			(SELECT name FROM agents WHERE id = $1),
-			'Unknown'
-		)`, userID,
-	).Scan(&displayName)
+		`SELECT COALESCE(u.display_name, a.name, 'Unknown'),
+		        COALESCE(u.avatar_url, a.avatar_url, '')
+		   FROM (SELECT $1::uuid AS id) sender
+		   LEFT JOIN users u ON u.id = sender.id
+		   LEFT JOIN agents a ON a.id = sender.id`, userID,
+	).Scan(&displayName, &senderAvatar)
 	if err != nil {
 		displayName = "Unknown"
 	}
@@ -727,6 +737,7 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 				SenderType:    senderType,
 				SenderID:      userID,
 				SenderName:    displayName,
+				SenderAvatar:  senderAvatar,
 				Content:       content,
 				ContentType:   "text",
 				AttachmentIDs: attachmentIDs,
@@ -794,6 +805,7 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		SenderType:    senderType,
 		SenderID:      userID,
 		SenderName:    displayName,
+		SenderAvatar:  senderAvatar,
 		Content:       content,
 		ContentType:   "text",
 		AttachmentIDs: attachmentIDs,
@@ -810,6 +822,7 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		SenderType:    senderType,
 		SenderID:      userID,
 		SenderName:    displayName,
+		SenderAvatar:  senderAvatar,
 		Content:       content,
 		ContentType:   "text",
 		AttachmentIDs: attachmentIDs,
@@ -858,6 +871,7 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		SenderType:    senderType,
 		SenderID:      userID,
 		SenderName:    displayName,
+		SenderAvatar:  senderAvatar,
 		Content:       content,
 		ContentType:   "text",
 		AttachmentIDs: attachmentIDs,

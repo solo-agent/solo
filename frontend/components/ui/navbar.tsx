@@ -5,15 +5,15 @@ import { t } from '@/lib/i18n';
 import { usePathname } from 'next/navigation';
 import {
   Gauge,
-  Users,
+  LayoutTemplate,
   Monitor,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
-import { PixelAvatar } from '@/components/ui/pixel-avatar';
+import { UserAvatar } from '@/components/ui/user-avatar';
 
 export const NAV_ITEMS = [
-  { href: '/teams', icon: Users, labelKey: 'navTeams', key: 'teams' },
+  { href: '/templates', icon: LayoutTemplate, labelKey: 'navTemplates', key: 'templates' },
   { href: '/observability/live', icon: Gauge, labelKey: 'observabilityDashboard', key: 'dashboard' },
   { href: '/computers', icon: Monitor, labelKey: 'navComputers', key: 'computers' },
 ] as const;
@@ -89,8 +89,10 @@ export function NavBar({ onLogoClick, logoLabel }: NavBarProps = {}) {
             aria-label={t('navSettings')}
             title={t('navSettings')}
           >
-            <PixelAvatar
-              agentId={user.id || 'user'}
+            <UserAvatar
+              userId={user.id || 'user'}
+              name={user.display_name}
+              avatarUrl={user.avatar_url}
               size="sm"
             />
           </Link>
