@@ -1,5 +1,5 @@
 // ============================================================================
-// TeamsAgentProfile — Profile tab content for an agent on /teams.
+// TeamsAgentProfile — Profile tab content for an agent detail drawer.
 // Stacks three existing sub-components vertically:
 //   - AgentProfileTab  (display name, description, info, status)
 //   - AgentRuntimeTab  (model, reasoning, env vars)
@@ -13,7 +13,6 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import { Trash2 } from 'lucide-react';
 import { AgentProfileTab } from '@/components/agents/agent-profile-tab';
 import { AgentRuntimeTab } from '@/components/agents/agent-runtime-tab';
@@ -29,13 +28,13 @@ import {
   DialogFooter,
   DialogCloseButton,
 } from '@/components/ui/dialog';
-import { useAgents } from '@/lib/hooks/use-agents';
 import { useToast } from '@/components/ui/toast';
 import { t } from '@/lib/i18n';
+import { apiClient } from '@/lib/api-client';
 
 interface TeamsAgentProfileProps {
   agentId: string;
-  redirectAfterDelete?: boolean;
+  agentName?: string;
   showProfileHeader?: boolean;
   showObservability?: boolean;
   /**
@@ -44,49 +43,39 @@ interface TeamsAgentProfileProps {
    * selection so the deleted agent disappears without a manual refresh.
    */
   onAgentDeleted?: (deletedId: string) => void;
+  onAgentUpdated?: (field: string, value: string | boolean | number) => void;
 }
 
 export function TeamsAgentProfile({
   agentId,
-  redirectAfterDelete = true,
+  agentName = 'this agent',
   showProfileHeader = true,
   showObservability = false,
   onAgentDeleted,
+  onAgentUpdated,
 }: TeamsAgentProfileProps) {
-  const router = useRouter();
-  const { agents, deleteAgent } = useAgents();
   const { showToast } = useToast();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const agentName = agents.find((a) => a.id === agentId)?.name ?? 'this agent';
-
   const handleConfirmDelete = useCallback(async () => {
     setDeleting(true);
     try {
-      await deleteAgent(agentId);
+      await apiClient.delete(`/api/v1/agents/${agentId}`);
       showToast(t('agentDeleteSuccess'), 'success');
       onAgentDeleted?.(agentId);
-      if (redirectAfterDelete) {
-        const remaining = agents.filter((a) => a.id !== agentId);
-        if (remaining.length > 0) {
-          router.replace(`/teams?agent=${remaining[0].id}&tab=profile`, { scroll: false });
-        } else {
-          router.replace('/teams', { scroll: false });
-        }
-      }
     } catch {
       showToast(t('agentDeleteError'), 'error');
     } finally {
       setDeleting(false);
       setConfirmOpen(false);
     }
-  }, [agentId, agents, deleteAgent, onAgentDeleted, redirectAfterDelete, router, showToast]);
+  }, [agentId, onAgentDeleted, showToast]);
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        <AgentProfileTab agentId={agentId} showHeader={showProfileHeader} />
+        <AgentProfileTab agentId={agentId} showHeader={showProfileHeader} onUpdated={onAgentUpdated} />
         {showObservability && (
           <div className={detailSectionClass()}>
             <AgentObservabilityTab agentId={agentId} />

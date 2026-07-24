@@ -1198,8 +1198,8 @@ func TestHandleTeamFormSendsDeclarativePlan(t *testing.T) {
 		if !bytes.Contains(req.Plan, []byte(`"intent_summary":"Ship billing"`)) {
 			t.Fatalf("plan missing intent: %s", req.Plan)
 		}
-		if !bytes.Contains(req.Plan, []byte(`"relationship_template":"dev-team"`)) || bytes.Contains(req.Plan, []byte(`"tasks"`)) {
-			t.Fatalf("plan must select a relationship template without tasks: %s", req.Plan)
+		if !bytes.Contains(req.Plan, []byte(`"template_id":"dev-team"`)) || bytes.Contains(req.Plan, []byte(`"members"`)) {
+			t.Fatalf("plan must select an exact template without custom members: %s", req.Plan)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if requestCount == 1 {
@@ -1208,12 +1208,12 @@ func TestHandleTeamFormSendsDeclarativePlan(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
-		fmt.Fprint(w, `{"formation_id":"formation-1","channel_id":"team-1","channel_name":"billing-team","dashboard_url":"/dashboard?channel=team-1","members":[{"name":"Lead","role":"leader"},{"name":"Engineer","role":"engineer"}],"tasks":[],"relationship_template":"dev-team","relationship_override_count":1,"relationship_docs_ready":false,"warnings":["relationship docs pending"]}`)
+		fmt.Fprint(w, `{"formation_id":"formation-1","channel_id":"team-1","channel_name":"billing-team","dashboard_url":"/dashboard?channel=team-1","members":[{"name":"Lead","role":"leader"},{"name":"Engineer","role":"engineer"}],"template_id":"dev-team","relationship_docs_ready":false,"warnings":["relationship docs pending"]}`)
 	}))
 	defer server.Close()
 
 	planFile := filepath.Join(t.TempDir(), "plan.json")
-	plan := `{"intent_summary":"Ship billing","channel":{"name":"billing-team","description":""},"relationship_template":"dev-team","members":[{"ref":"lead","role":"leader","name":"Lead","description":"Lead","instructions":"Coordinate"},{"ref":"engineer","role":"engineer","name":"Engineer","description":"Build","instructions":"Implement"}],"relationship_overrides":[]}`
+	plan := `{"intent_summary":"Ship billing","channel":{"name":"billing-team","description":""},"template_id":"dev-team"}`
 	if err := os.WriteFile(planFile, []byte(plan), 0o600); err != nil {
 		t.Fatalf("write plan: %v", err)
 	}
@@ -1231,7 +1231,7 @@ func TestHandleTeamFormSendsDeclarativePlan(t *testing.T) {
 	if requestCount != 2 {
 		t.Fatalf("request count = %d, want 2", requestCount)
 	}
-	for _, want := range []string{"Team formed: #billing-team", "@Lead (leader)", "Relationships: dev-team (+1 Lucy adjustment(s))", "Warning: relationship docs pending", "/dashboard?channel=team-1"} {
+	for _, want := range []string{"Team formed: #billing-team", "@Lead (leader)", "Template: dev-team", "Warning: relationship docs pending", "/dashboard?channel=team-1"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("stdout %q does not contain %q", stdout, want)
 		}

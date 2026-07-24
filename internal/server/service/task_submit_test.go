@@ -144,9 +144,11 @@ func taskSubmitUser(t *testing.T, pool *pgxpool.Pool) string {
 func taskSubmitAgent(t *testing.T, pool *pgxpool.Pool, ownerID string) string {
 	t.Helper()
 	id := uuid.NewString()
+	channelID := taskSubmitChannel(t, pool, ownerID)
 	_, err := pool.Exec(context.Background(),
-		`INSERT INTO agents (id, name, owner_id, model_name) VALUES ($1, $2, $3, 'test-model')`,
-		id, "submit-agent-"+id[:8], ownerID,
+		`INSERT INTO agents (id, name, owner_id, model_name, home_channel_id)
+		 VALUES ($1, $2, $3, 'test-model', $4)`,
+		id, "submit-agent-"+id[:8], ownerID, channelID,
 	)
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
@@ -156,6 +158,24 @@ func taskSubmitAgent(t *testing.T, pool *pgxpool.Pool, ownerID string) string {
 
 func taskSubmitChannel(t *testing.T, pool *pgxpool.Pool, creatorID string) string {
 	t.Helper()
+	var existingID string
+	if err := pool.QueryRow(context.Background(), `
+		SELECT COALESCE((
+			SELECT id::text
+			  FROM channels
+			 WHERE created_by = $1
+			   AND type = 'channel'
+			   AND name LIKE 'submit-test-%'
+			 ORDER BY created_at ASC
+			 LIMIT 1
+		), '')
+	`, creatorID).Scan(&existingID); err != nil {
+		t.Fatalf("find channel: %v", err)
+	}
+	if existingID != "" {
+		return existingID
+	}
+
 	id := uuid.NewString()
 	_, err := pool.Exec(context.Background(),
 		`INSERT INTO channels (id, name, created_by) VALUES ($1, $2, $3)`,

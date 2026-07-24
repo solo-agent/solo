@@ -15,15 +15,12 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Monitor,
-  Plus,
-  AlertCircle,
   Edit3,
   Check,
   X,
   Apple,
   MonitorDot,
   Server,
-  Cpu,
   ChevronDown,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
@@ -43,18 +40,10 @@ import {
   detailSectionClass,
   detailSectionTitleClass,
 } from '@/components/ui/detail-section';
-import { useAgents } from '@/lib/hooks/use-agents';
-import { AgentForm, type AgentFormValues } from '@/components/agents/agent-form';
 import { AppFrame } from '@/components/layout/app-frame';
 import { ComputersLeftColumn } from '@/components/computers/computers-left-column';
 import { relativeTime, formatDateTime } from '@/lib/utils/time';
 import { cn } from '@/lib/utils';
-import {
-  Dialog,
-  DialogHeader,
-  DialogTitle,
-  DialogCloseButton,
-} from '@/components/ui/dialog';
 import type { Computer } from '@/lib/types';
 
 // ---- OS icon helper ----
@@ -104,32 +93,7 @@ function AgentStatusDot({ status }: { status: string }) {
 export default function ComputersPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { computers, isLoading, error, updateComputer, refetch } = useComputers();
-  const { createAgent } = useAgents();
   const { showToast } = useToast();
-
-  // Create agent dialog
-  const [showCreateAgent, setShowCreateAgent] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-  // Increment after agent creation to force ConnectedAgents remount
-  const [agentVersion, setAgentVersion] = useState(0);
-
-  const handleCreateAgent = useCallback(async (values: AgentFormValues) => {
-    setIsCreating(true);
-    try {
-      await createAgent(values);
-      setShowCreateAgent(false);
-      showToast(t('teamsAgentCreated'), 'success');
-      refetch();
-      setAgentVersion((v) => v + 1);
-    } catch {
-      showToast(t('teamsAgentCreateError'), 'error');
-    } finally {
-      setIsCreating(false);
-    }
-  }, [isCreating, createAgent, showToast, refetch]);
-
-  // Add computer dialog
-  const [showAddDialog, setShowAddDialog] = useState(false);
 
   // Inline edit state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -309,29 +273,11 @@ export default function ComputersPage() {
                 onSaveName={handleSaveName}
                 onEditKeyDown={handleEditKeyDown}
                 onEditNameChange={setEditName}
-                onCreateAgent={() => setShowCreateAgent(true)}
-                agentVersion={agentVersion}
               />
             )}
           </div>
         </div>
       </main>
-
-      {/* Create Agent dialog */}
-      <Dialog
-        open={showCreateAgent}
-        onOpenChange={(open) => { if (!open) setShowCreateAgent(false); }}
-      >
-        <DialogHeader>
-          <DialogTitle>{t('teamsCreateAgent')}</DialogTitle>
-          <DialogCloseButton onClick={() => setShowCreateAgent(false)} />
-        </DialogHeader>
-        <AgentForm
-          onSubmit={handleCreateAgent}
-          isSubmitting={isCreating}
-          submitLabel={t('teamsCreateAgent')}
-        />
-      </Dialog>
 
       </div>
     </AppFrame>
@@ -351,13 +297,9 @@ interface ComputerCardProps {
   onSaveName: (id: string) => void;
   onEditKeyDown: (e: React.KeyboardEvent<HTMLInputElement>, id: string) => void;
   onEditNameChange: (name: string) => void;
-  onCreateAgent?: () => void;
-  agentVersion?: number;
 }
 
 function ComputerCard({
-  onCreateAgent,
-  agentVersion,
   computer,
   editingId,
   editName,
@@ -536,7 +478,7 @@ function ComputerCard({
 
           {/* Section: Connected Agents (v1.5) */}
           <section className={detailSectionClass()}>
-            <ConnectedAgents key={agentVersion} computerId={computer.id} onCreateAgent={onCreateAgent} />
+            <ConnectedAgents computerId={computer.id} />
           </section>
 
         </div>
@@ -547,7 +489,7 @@ function ComputerCard({
 
 // ---- Connected Agents sub-component (lazy-loaded on expand) ----
 
-function ConnectedAgents({ computerId, onCreateAgent }: { computerId: string | null; onCreateAgent?: () => void }) {
+function ConnectedAgents({ computerId }: { computerId: string | null }) {
   const { agents, isLoading, error } = useComputerAgents(computerId);
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
@@ -602,19 +544,9 @@ function ConnectedAgents({ computerId, onCreateAgent }: { computerId: string | n
   return (
     <div className="space-y-3">
       {Header}
-      <div className="flex items-center justify-between">
-        <p className="font-body text-sm text-muted-foreground">
-          {t('computersAgentCount', { n: agents.length })}
-        </p>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 px-2"
-          onClick={() => onCreateAgent?.()}
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </Button>
-      </div>
+      <p className="font-body text-sm text-muted-foreground">
+        {t('computersAgentCount', { n: agents.length })}
+      </p>
       {agents.length === 0 ? (
         <p className="font-body text-sm text-muted-foreground">{t('computersNoConnectedAgents')}</p>
       ) : (
@@ -624,9 +556,9 @@ function ConnectedAgents({ computerId, onCreateAgent }: { computerId: string | n
               <button
                 type="button"
                 className="flex w-full items-center gap-3 border-2 border-black bg-brutal-cream p-2.5 text-left transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal"
-                onClick={() => router.push('/teams')}
+                onClick={() => router.push('/dashboard')}
               >
-                <PixelAvatar agentId={agent.id} size="sm" />
+                <PixelAvatar agentId={agent.id} avatarUrl={agent.avatar_url} size="sm" />
                 <div className="flex-1 min-w-0">
                   <span className="block truncate font-body text-sm font-medium text-foreground">
                     {agent.name}

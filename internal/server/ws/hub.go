@@ -80,15 +80,15 @@ type broadcastMsg struct {
 // (needed to avoid circular dependency during initialization).
 func NewHub(pool *pgxpool.Pool, agentSvc *service.AgentService) *Hub {
 	return &Hub{
-		channels:    make(map[string]map[*Client]bool),
-		threads:     make(map[string]map[*Client]bool),
-		register:    make(chan *Client, 256),
-		unregister:  make(chan *Client, 256),
-		broadcast:   make(chan *broadcastMsg, 256),
-		clients:     make(map[*Client]bool),
-		pool:        pool,
-		agentSvc:    agentSvc,
-		mentionSvc:  service.NewMentionService(pool),
+		channels:   make(map[string]map[*Client]bool),
+		threads:    make(map[string]map[*Client]bool),
+		register:   make(chan *Client, 256),
+		unregister: make(chan *Client, 256),
+		broadcast:  make(chan *broadcastMsg, 256),
+		clients:    make(map[*Client]bool),
+		pool:       pool,
+		agentSvc:   agentSvc,
+		mentionSvc: service.NewMentionService(pool),
 	}
 }
 
@@ -386,15 +386,15 @@ func (h *Hub) handleMessageSend(client *Client, payload MessageSendPayload) {
 	}
 
 	// Insert message with mentioned_agent_ids and attachment_ids
-		// Determine sender type — agents table lookup for correct JOIN resolution.
-		var isAgent bool
-		_ = h.pool.QueryRow(context.Background(),
-			`SELECT EXISTS(SELECT 1 FROM agents WHERE id = $1)`, client.userID,
-		).Scan(&isAgent)
-		senderType := "user"
-		if isAgent {
-			senderType = "agent"
-		}
+	// Determine sender type — agents table lookup for correct JOIN resolution.
+	var isAgent bool
+	_ = h.pool.QueryRow(context.Background(),
+		`SELECT EXISTS(SELECT 1 FROM agents WHERE id = $1)`, client.userID,
+	).Scan(&isAgent)
+	senderType := "user"
+	if isAgent {
+		senderType = "agent"
+	}
 
 	now := time.Now()
 	messageID := uuid.New().String()
@@ -410,17 +410,23 @@ func (h *Hub) handleMessageSend(client *Client, payload MessageSendPayload) {
 		return
 	}
 
-	// Get user's display name for the broadcast
-	var displayName string
+	// Get user's display identity for the broadcast
+	var displayName, senderAvatar string
 	err = h.pool.QueryRow(context.Background(),
 		`SELECT COALESCE(
-		(SELECT display_name FROM users WHERE id = $1),
-		(SELECT name FROM agents WHERE id = $1),
-		'Unknown'
-	)`, client.userID,
-	).Scan(&displayName)
+			(SELECT display_name FROM users WHERE id = $1),
+			(SELECT name FROM agents WHERE id = $1),
+			'Unknown'
+		),
+		COALESCE(
+			(SELECT avatar_url FROM users WHERE id = $1),
+			(SELECT avatar_url FROM agents WHERE id = $1),
+			''
+		)`, client.userID,
+	).Scan(&displayName, &senderAvatar)
 	if err != nil {
 		displayName = "Unknown"
+		senderAvatar = ""
 	}
 
 	// Broadcast to channel
@@ -430,6 +436,7 @@ func (h *Hub) handleMessageSend(client *Client, payload MessageSendPayload) {
 		SenderType:    "user",
 		SenderID:      client.userID,
 		SenderName:    displayName,
+		SenderAvatar:  senderAvatar,
 		Content:       payload.Content,
 		ContentType:   "text",
 		AttachmentIDs: attachmentIDs,
@@ -449,20 +456,20 @@ func (h *Hub) handleMessageSend(client *Client, payload MessageSendPayload) {
 	// Also broadcast dm.message.new if the channel is a DM (SOLO-57-B)
 	go h.broadcastDMMessageIfNeeded(payload.ChannelID, msgNewPayload)
 
-		// Resolve user @mentions and broadcast inbox.updated to mentioned users (v1.5).
-		if h.mentionSvc != nil {
-			go func() {
-				mentionedUsers, err := h.mentionSvc.ResolveUserMentions(context.Background(), payload.Content, messageID)
-				if err != nil {
-					slog.Warn("failed to resolve user mentions in WS", "error", err)
-					return
-				}
-				for _, uid := range mentionedUsers {
-					env := Envelope(EventInboxUpdated, struct{}{})
-					h.SendToUser(uid, env)
-				}
-			}()
-		}
+	// Resolve user @mentions and broadcast inbox.updated to mentioned users (v1.5).
+	if h.mentionSvc != nil {
+		go func() {
+			mentionedUsers, err := h.mentionSvc.ResolveUserMentions(context.Background(), payload.Content, messageID)
+			if err != nil {
+				slog.Warn("failed to resolve user mentions in WS", "error", err)
+				return
+			}
+			for _, uid := range mentionedUsers {
+				env := Envelope(EventInboxUpdated, struct{}{})
+				h.SendToUser(uid, env)
+			}
+		}()
+	}
 
 	// Trigger agent auto-response with @mention support
 	if h.agentSvc != nil {
@@ -474,7 +481,7 @@ func (h *Hub) handleMessageSend(client *Client, payload MessageSendPayload) {
 			client.userID,
 			mentionedAgentIDs,
 			hasMentions,
-				nil,
+			nil,
 		)
 	}
 }
@@ -614,15 +621,15 @@ func (h *Hub) handleThreadReply(client *Client, payload ThreadReplyPayload) {
 	}
 
 	// Insert reply message with mentioned_agent_ids and attachment_ids
-		// Determine sender type — agents table lookup for correct JOIN resolution.
-		var isAgentReply bool
-		_ = h.pool.QueryRow(context.Background(),
-			`SELECT EXISTS(SELECT 1 FROM agents WHERE id = $1)`, client.userID,
-		).Scan(&isAgentReply)
-		senderType := "user"
-		if isAgentReply {
-			senderType = "agent"
-		}
+	// Determine sender type — agents table lookup for correct JOIN resolution.
+	var isAgentReply bool
+	_ = h.pool.QueryRow(context.Background(),
+		`SELECT EXISTS(SELECT 1 FROM agents WHERE id = $1)`, client.userID,
+	).Scan(&isAgentReply)
+	senderType := "user"
+	if isAgentReply {
+		senderType = "agent"
+	}
 
 	now := time.Now()
 	messageID := uuid.New().String()
@@ -723,20 +730,20 @@ func (h *Hub) handleThreadReply(client *Client, payload ThreadReplyPayload) {
 	// Broadcast inbox.updated to all user participants of this thread (v1.5).
 	go h.notifyInboxForThread(context.Background(), payload.ThreadID, payload.ChannelID, client.userID)
 
-		// Resolve user @mentions and broadcast inbox.updated to mentioned users (v1.5).
-		if h.mentionSvc != nil {
-			go func() {
-				mentionedUsers, err := h.mentionSvc.ResolveUserMentions(context.Background(), payload.Content, messageID)
-				if err != nil {
-					slog.Warn("failed to resolve user mentions in thread reply", "error", err)
-					return
-				}
-				for _, uid := range mentionedUsers {
-					env := Envelope(EventInboxUpdated, struct{}{})
-					h.SendToUser(uid, env)
-				}
-			}()
-		}
+	// Resolve user @mentions and broadcast inbox.updated to mentioned users (v1.5).
+	if h.mentionSvc != nil {
+		go func() {
+			mentionedUsers, err := h.mentionSvc.ResolveUserMentions(context.Background(), payload.Content, messageID)
+			if err != nil {
+				slog.Warn("failed to resolve user mentions in thread reply", "error", err)
+				return
+			}
+			for _, uid := range mentionedUsers {
+				env := Envelope(EventInboxUpdated, struct{}{})
+				h.SendToUser(uid, env)
+			}
+		}()
+	}
 
 	// Trigger agent auto-response in thread with @mention support
 	if h.agentSvc != nil {

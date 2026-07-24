@@ -12,6 +12,7 @@
 import { t } from '@/lib/i18n';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
+import { useAuth } from '@/lib/auth-context';
 import { useWebSocket } from '@/lib/ws-context';
 import type { Attachment, DMChannel, Message, CreateDMInput } from '@/lib/types';
 
@@ -28,6 +29,7 @@ interface DMChannelResponse {
   other_member_type: string;
   other_member_id: string;
   other_member_name: string;
+  other_member_avatar?: string;
   other_member_active?: boolean;
   last_message?: string;
   last_message_at?: string;
@@ -40,6 +42,7 @@ interface DMMessageResponse {
   sender_type: string;
   sender_id: string;
   sender_name: string;
+  sender_avatar?: string | null;
   sender_active?: boolean;
   content: string;
   content_type: string;
@@ -73,11 +76,13 @@ function mapDMChannel(resp: DMChannelResponse): DMChannel {
     channel.other_user = {
       id: resp.other_member_id,
       display_name: resp.other_member_name,
+      avatar_url: resp.other_member_avatar,
     };
   } else if (resp.other_member_type === 'agent') {
     channel.other_agent = {
       id: resp.other_member_id,
       name: resp.other_member_name,
+      avatar_url: resp.other_member_avatar,
       is_active: resp.other_member_active,
     };
   }
@@ -94,6 +99,7 @@ function mapDMMessageResponse(resp: DMMessageResponse): Message {
     created_at: resp.created_at,
     status: 'sent',
     sender_type: resp.sender_type as 'user' | 'agent' | 'system' | undefined,
+    avatar_url: resp.sender_avatar,
     sender_active: resp.sender_active,
     task_number: resp.task_number,
     task_title: resp.task_title,
@@ -112,6 +118,7 @@ function flatDMToMessage(event: {
   sender_type: string;
   sender_id: string;
   sender_name?: string;
+  sender_avatar?: string | null;
   content: string;
   created_at: string;
   task_number?: number;
@@ -130,6 +137,7 @@ function flatDMToMessage(event: {
     created_at: event.created_at,
     status: 'sent',
     sender_type: event.sender_type as 'user' | 'agent' | 'system' | undefined,
+    avatar_url: event.sender_avatar,
     task_number: event.task_number,
     task_title: event.task_title,
     task_status: event.task_status,
@@ -146,6 +154,7 @@ function flatToMessage(event: {
   sender_type: string;
   sender_id: string;
   sender_name?: string;
+  sender_avatar?: string | null;
   content: string;
   thread_id?: string;
   created_at: string;
@@ -167,6 +176,7 @@ function flatToMessage(event: {
     thread_id: event.thread_id,
     reply_count: 0,
     sender_type: event.sender_type as 'user' | 'agent' | 'system' | undefined,
+    avatar_url: event.sender_avatar,
     task_number: event.task_number,
     task_title: event.task_title,
     task_status: event.task_status,
@@ -179,6 +189,7 @@ function flatToMessage(event: {
 // ---- Hook ----
 
 export function useDM(dmId: string | null = null) {
+  const { user } = useAuth();
   const { subscribeDM, unsubscribeDM, onEvent, isConnected } = useWebSocket();
   const [dmChannels, setDMChannels] = useState<DMChannel[]>([]);
   const [isLoadingDMs, setIsLoadingDMs] = useState(true);
@@ -617,8 +628,9 @@ export function useDM(dmId: string | null = null) {
       const optimisticMessage: Message = {
         id: tempId,
         channel_id: id,
-        user_id: 'user-1',
-        display_name: 'You',
+        user_id: user?.id ?? '',
+        display_name: user?.display_name ?? 'You',
+        avatar_url: user?.avatar_url,
         content: trimmedContent,
         created_at: new Date().toISOString(),
         status: 'sending',
@@ -710,7 +722,7 @@ export function useDM(dmId: string | null = null) {
         return null;
       }
     },
-    [],
+    [user],
   );
 
   // ---- Retry failed message ----

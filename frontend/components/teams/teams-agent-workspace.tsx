@@ -1,5 +1,5 @@
 // ============================================================================
-// TeamsAgentWorkspace — Workspace tab content for an agent on /teams.
+// TeamsAgentWorkspace — Workspace tab content for an agent detail drawer.
 // Top bar: agent's workspace path + refresh/fullscreen actions.
 // Body:   narrow file tree + read-only editor preview.
 // Read-only — no edit, no upload, no delete.

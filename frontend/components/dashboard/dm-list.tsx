@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, X, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
+import { UserAvatar } from '@/components/ui/user-avatar';
 import { selectableRowClass } from '@/components/ui/selectable-row';
 import { iconActionClass } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -122,10 +123,20 @@ function DMItem({
       className={selectableRowClass(isSelected)}
       aria-current={isSelected ? 'true' : undefined}
     >
-      <PixelAvatar
-        agentId={dm.other_user?.id || dm.other_agent?.id || dm.id}
-        size="sm"
-      />
+      {dm.other_agent ? (
+        <PixelAvatar
+          agentId={dm.other_agent.id}
+          avatarUrl={dm.other_agent.avatar_url}
+          size="sm"
+        />
+      ) : (
+        <UserAvatar
+          userId={dm.other_user?.id ?? dm.id}
+          name={dm.other_user?.display_name ?? name}
+          avatarUrl={dm.other_user?.avatar_url}
+          size="sm"
+        />
+      )}
 
       {/* Name + preview */}
       <div className="min-w-0 flex-1">

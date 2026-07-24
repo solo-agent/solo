@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/solo-ai/solo/internal/server/handler"
 	"github.com/solo-ai/solo/internal/server/middleware"
-	"github.com/solo-ai/solo/internal/server/onboarding"
 	"github.com/solo-ai/solo/internal/server/service"
 	"github.com/solo-ai/solo/internal/server/ws"
 	"github.com/solo-ai/solo/pkg/metrics"
@@ -49,19 +47,12 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 
 	// Initialize services
 	workspaceRoot := defaultAgentWorkspaceRoot()
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := onboarding.UpgradeExistingLucyKnowledge(ctx, pool, workspaceRoot); err != nil {
-			slog.Warn("onboarding: existing Lucy knowledge upgrade failed", "error", err)
-		}
-	}()
 	relationshipMD := service.NewRelationshipsMDGenerator(pool, workspaceRoot)
 	taskSvc := service.NewTaskService(pool)
 	taskSvc.SetAgentNotifier(service.NewAgentNotifier(pool, hub, agentSvc))
 	relationshipSvc := service.NewAgentRelationshipService(pool, relationshipMD)
 	templateSvc := service.NewTemplateService(pool, relationshipMD)
-	teamFormationSvc := service.NewTeamFormationService(pool, relationshipMD, hub)
+	teamFormationSvc := service.NewTeamFormationService(pool, relationshipMD, hub, templateSvc)
 	computerSvc := service.NewComputerService(pool)
 	inboxSvc := service.NewInboxService(pool)
 	artifactRoot := os.Getenv("ARTIFACTS_DIR")
@@ -89,10 +80,10 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(pool, agentSvc)
-	channelHandler := handler.NewChannelHandler(pool, dm)
-	memberHandler := handler.NewMemberHandler(pool, agentSvc)
+	channelHandler := handler.NewChannelHandler(pool, dm, templateSvc)
+	memberHandler := handler.NewMemberHandler(pool, agentSvc, dm)
 	messageHandler := handler.NewMessageHandler(pool, hub, agentSvc, taskSvc)
-	agentHandler := handler.NewAgentHandler(pool, dm, hub)
+	agentHandler := handler.NewAgentHandler(pool, dm, hub, agentSvc)
 	agentRunHandler := handler.NewAgentRunHandler(pool)
 	dashboardHandler := handler.NewDashboardHandler(pool)
 	threadHandler := handler.NewThreadHandler(pool, hub, agentSvc)
@@ -159,16 +150,8 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Post("/api/v1/auth/logout", authHandler.Logout)
 
 		// User routes
-		r.Get("/api/v1/users/me", func(w http.ResponseWriter, r *http.Request) {
-			uid := r.Header.Get("X-User-ID")
-			email := r.Header.Get("X-User-Email")
-			name := r.Header.Get("X-User-Name")
-			writeJSON(w, http.StatusOK, map[string]string{
-				"id":           uid,
-				"email":        email,
-				"display_name": name,
-			})
-		})
+		r.Get("/api/v1/users/me", authHandler.CurrentUser)
+		r.Patch("/api/v1/users/me", authHandler.UpdateCurrentUser)
 		// Channel routes
 		r.Get("/api/v1/server/info", channelHandler.ServerInfo)
 
@@ -178,11 +161,19 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		r.Route("/api/v1/channels", func(r chi.Router) {
 			r.Get("/", channelHandler.List)
 			r.Post("/", channelHandler.Create)
+			r.Get("/lucy", channelHandler.GetLucy)
 
 			r.Route("/{channelID}", func(r chi.Router) {
 				r.Get("/", channelHandler.Get)
 				r.Patch("/", channelHandler.Update)
 				r.Delete("/", channelHandler.Delete)
+				r.Post("/template", channelHandler.ApplyTemplate)
+
+				// Ordinary Agents are created and listed only inside their home Channel.
+				r.Route("/agents", func(r chi.Router) {
+					r.Get("/", agentHandler.List)
+					r.Post("/", agentHandler.Create)
+				})
 
 				// Channel member management routes
 				r.Route("/members", func(r chi.Router) {
@@ -247,9 +238,6 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 
 		// Agent routes
 		r.Route("/api/v1/agents", func(r chi.Router) {
-			r.Get("/", agentHandler.List)
-			r.Post("/", agentHandler.Create)
-
 			r.Route("/{agentID}", func(r chi.Router) {
 				r.Get("/", agentHandler.Get)
 				r.Patch("/", agentHandler.Update)
@@ -280,7 +268,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 
 		r.Route("/api/v1/templates", func(r chi.Router) {
 			r.Get("/", templateHandler.List)
-			r.Post("/{templateID}/apply", templateHandler.Apply)
+			r.Get("/{templateID}", templateHandler.Get)
 		})
 
 		// Lucy-only declarative auto-team provisioning.

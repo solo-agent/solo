@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/solo-ai/solo/internal/realtime"
+	"github.com/solo-ai/solo/internal/server/service"
 	"github.com/solo-ai/solo/internal/server/workspace"
 	"github.com/solo-ai/solo/pkg/agent"
 )
@@ -34,10 +36,11 @@ type AgentHandler struct {
 	proxy         workspace.Proxy // optional proxy for workspace requests (nil = local FS only)
 	httpClient    *http.Client    // for daemon cleanup callbacks
 	hub           realtime.Broadcaster
+	agentSvc      *service.AgentService
 }
 
 // NewAgentHandler creates a new AgentHandler.
-func NewAgentHandler(pool *pgxpool.Pool, proxy workspace.Proxy, hub realtime.Broadcaster) *AgentHandler {
+func NewAgentHandler(pool *pgxpool.Pool, proxy workspace.Proxy, hub realtime.Broadcaster, agentSvc *service.AgentService) *AgentHandler {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
@@ -52,6 +55,7 @@ func NewAgentHandler(pool *pgxpool.Pool, proxy workspace.Proxy, hub realtime.Bro
 		proxy:         proxy,
 		httpClient:    &http.Client{Timeout: 10 * time.Second},
 		hub:           hub,
+		agentSvc:      agentSvc,
 	}
 }
 
@@ -82,6 +86,8 @@ type AgentResponse struct {
 	Name          string            `json:"name"`
 	Description   string            `json:"description,omitempty"`
 	OwnerID       string            `json:"owner_id"`
+	HomeChannelID string            `json:"home_channel_id"`
+	Kind          string            `json:"kind"`
 	ModelProvider string            `json:"model_provider"`
 	ModelName     string            `json:"model_name"`
 	SystemPrompt  string            `json:"system_prompt"`
@@ -93,11 +99,16 @@ type AgentResponse struct {
 	UpdatedAt     string            `json:"updated_at"`
 }
 
-// Create handles POST /api/v1/agents
+// Create handles POST /api/v1/channels/{channelID}/agents.
 func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	channelID := chi.URLParam(r, "channelID")
+	if channelID == "" {
+		writeError(w, http.StatusBadRequest, "channel ID is required")
 		return
 	}
 
@@ -122,7 +133,11 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		systemPrompt = "You are a helpful AI assistant."
 	}
 
-	modelProvider := req.ModelProvider
+	modelProvider := strings.TrimSpace(req.ModelProvider)
+	if modelProvider == "" {
+		writeError(w, http.StatusBadRequest, "model provider is required")
+		return
+	}
 
 	modelName := req.ModelName
 
@@ -146,26 +161,66 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create agent")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	var canCreate bool
+	err = tx.QueryRow(r.Context(), `
+		SELECT EXISTS(
+			SELECT 1
+			  FROM channels c
+			  JOIN channel_members cm ON cm.channel_id = c.id
+			 WHERE c.id = $1
+			   AND c.type = 'channel'
+			   AND c.is_archived = false
+			   AND cm.member_type = 'user'
+			   AND cm.member_id = $2
+			   AND cm.role IN ('owner', 'admin')
+		)
+	`, channelID, userID).Scan(&canCreate)
+	if err != nil || !canCreate {
+		writeError(w, http.StatusNotFound, "channel not found")
+		return
+	}
+
 	// Auto-bind to the first online computer if available.
 	var computerID *string
 	var cid string
-	compErr := h.pool.QueryRow(r.Context(),
-		`SELECT id FROM computers WHERE status = 'online' ORDER BY created_at ASC LIMIT 1`,
+	compErr := tx.QueryRow(r.Context(),
+		`SELECT c.id
+		   FROM computers c
+		  WHERE c.status = 'online'
+		    AND (c.owner_id = $1 OR EXISTS (
+		        SELECT 1 FROM computer_members cm
+		         WHERE cm.computer_id = c.id AND cm.user_id = $1
+		    ))
+		  ORDER BY c.created_at ASC
+		  LIMIT 1`,
+		userID,
 	).Scan(&cid)
 	if compErr == nil && cid != "" {
 		computerID = &cid
 	}
 
-	var agentID string
+	agentID := uuid.NewString()
+	avatarURL := "dicebear:pixel-art:agent-" + agentID
 	var createdAt, updatedAt time.Time
-	err = h.pool.QueryRow(r.Context(),
-		`INSERT INTO agents (name, description, owner_id, model_provider, model_name, system_prompt, runtime_id, custom_env, custom_args)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		 RETURNING id, created_at, updated_at`,
-		name, req.Description, userID, modelProvider, modelName, systemPrompt,
+	err = tx.QueryRow(r.Context(),
+		`INSERT INTO agents (
+			id, name, description, owner_id, model_provider, model_name,
+			system_prompt, runtime_id, custom_env, custom_args,
+			avatar_url, home_channel_id, kind
+		 )
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'agent')
+		 RETURNING created_at, updated_at`,
+		agentID, name, req.Description, userID, modelProvider, modelName, systemPrompt,
 		computerID,
-		customEnvBytes, customArgsBytes,
-	).Scan(&agentID, &createdAt, &updatedAt)
+		customEnvBytes, customArgsBytes, avatarURL, channelID,
+	).Scan(&createdAt, &updatedAt)
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "agent name conflict")
@@ -176,25 +231,23 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("agent created", "agent_id", agentID, "name", name, "owner_id", userID)
+	if _, err := tx.Exec(r.Context(), `
+		INSERT INTO channel_members (channel_id, member_type, member_id, role)
+		VALUES ($1, 'agent', $2, 'member')
+	`, channelID, agentID); err != nil {
+		slog.Error("failed to add new agent to home channel", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create agent")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create agent")
+		return
+	}
 
-	// Auto-join the user's #all-{name} channel so @mentions work immediately.
-	var allID string
-	_ = h.pool.QueryRow(r.Context(),
-		`SELECT c.id FROM channels c
-		 JOIN channel_members cm ON cm.channel_id = c.id
-		 WHERE cm.member_type = 'user' AND cm.member_id = $1
-		 AND c.name LIKE 'all-%%' AND c.is_archived = false
-		 LIMIT 1`,
-		userID,
-	).Scan(&allID)
-	if allID != "" {
-		_, _ = h.pool.Exec(r.Context(),
-			`INSERT INTO channel_members (channel_id, member_type, member_id, role)
-			 VALUES ($1, 'agent', $2, 'member')
-			 ON CONFLICT DO NOTHING`,
-			allID, agentID,
-		)
+	slog.Info("agent created", "agent_id", agentID, "name", name, "owner_id", userID, "home_channel_id", channelID)
+	if h.agentSvc != nil {
+		h.agentSvc.BroadcastMemberEvent(channelID, "member.added", "agent", agentID, name)
+		go h.agentSvc.TriggerAgentGreeting(context.Background(), channelID, agentID, "")
 	}
 
 	writeJSON(w, http.StatusCreated, AgentResponse{
@@ -202,10 +255,13 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Name:          name,
 		Description:   req.Description,
 		OwnerID:       userID,
+		HomeChannelID: channelID,
+		Kind:          "agent",
 		ModelProvider: modelProvider,
 		ModelName:     modelName,
 		SystemPrompt:  systemPrompt,
 		IsActive:      true,
+		AvatarURL:     avatarURL,
 		CustomEnv:     customEnv,
 		CustomArgs:    customArgs,
 		CreatedAt:     createdAt.Format(time.RFC3339),
@@ -213,23 +269,35 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// List handles GET /api/v1/agents
+// List handles GET /api/v1/channels/{channelID}/agents.
 func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
+	channelID := chi.URLParam(r, "channelID")
+	if channelID == "" {
+		writeError(w, http.StatusBadRequest, "channel ID is required")
+		return
+	}
 
 	rows, err := h.pool.Query(r.Context(),
-		`SELECT id, name, COALESCE(description, ''), owner_id, model_provider, model_name,
+		`SELECT a.id, a.name, COALESCE(a.description, ''), a.owner_id,
+		        a.home_channel_id, a.kind, a.model_provider, a.model_name,
 		        system_prompt, is_active, COALESCE(avatar_url, ''),
 		        custom_env, custom_args,
-		        created_at, updated_at
-		 FROM agents
-		 WHERE owner_id = $1 AND is_active = true
-		 ORDER BY created_at DESC`,
-		userID,
+		        a.created_at, a.updated_at
+		 FROM agents a
+		 JOIN channel_members ucm
+		   ON ucm.channel_id = a.home_channel_id
+		  AND ucm.member_type = 'user'
+		  AND ucm.member_id = $2
+		 WHERE a.home_channel_id = $1
+		   AND a.is_active = true
+		   AND a.kind = 'agent'
+		 ORDER BY a.created_at ASC`,
+		channelID, userID,
 	)
 	if err != nil {
 		slog.Error("failed to query agents", "error", err)
@@ -244,6 +312,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		var createdAt, updatedAt time.Time
 		var customEnvBytes, customArgsBytes []byte
 		err := rows.Scan(&a.ID, &a.Name, &a.Description, &a.OwnerID,
+			&a.HomeChannelID, &a.Kind,
 			&a.ModelProvider, &a.ModelName, &a.SystemPrompt,
 			&a.IsActive, &a.AvatarURL,
 			&customEnvBytes, &customArgsBytes,
@@ -280,7 +349,8 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var createdAt, updatedAt time.Time
 	var customEnvBytes, customArgsBytes []byte
 	err := h.pool.QueryRow(r.Context(),
-		`SELECT id, name, COALESCE(description, ''), owner_id, model_provider, model_name,
+		`SELECT id, name, COALESCE(description, ''), owner_id,
+		        home_channel_id, kind, model_provider, model_name,
 		        system_prompt, is_active, COALESCE(avatar_url, ''),
 		        custom_env, custom_args,
 		        created_at, updated_at
@@ -288,6 +358,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		 WHERE id = $1 AND owner_id = $2 AND is_active = true`,
 		agentID, userID,
 	).Scan(&a.ID, &a.Name, &a.Description, &a.OwnerID,
+		&a.HomeChannelID, &a.Kind,
 		&a.ModelProvider, &a.ModelName, &a.SystemPrompt,
 		&a.IsActive, &a.AvatarURL,
 		&customEnvBytes, &customArgsBytes,
@@ -379,7 +450,8 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 			custom_args = COALESCE($7, custom_args),
 			updated_at = now()
 		 WHERE id = $8 AND owner_id = $9 AND is_active = true
-		 RETURNING id, name, COALESCE(description, ''), owner_id, model_provider, model_name,
+		 RETURNING id, name, COALESCE(description, ''), owner_id,
+		           home_channel_id, kind, model_provider, model_name,
 		           system_prompt, is_active, COALESCE(avatar_url, ''),
 		           custom_env, custom_args,
 		           created_at, updated_at`,
@@ -388,6 +460,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		customEnvBytes, customArgsBytes,
 		agentID, userID,
 	).Scan(&a.ID, &a.Name, &a.Description, &a.OwnerID,
+		&a.HomeChannelID, &a.Kind,
 		&a.ModelProvider, &a.ModelName, &a.SystemPrompt,
 		&a.IsActive, &a.AvatarURL,
 		&retCustomEnvBytes, &retCustomArgsBytes,
@@ -411,7 +484,8 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 // Delete handles DELETE /api/v1/agents/{id} (soft delete: sets is_active=false).
-// Side-effects (cascaded, not atomic with the soft-delete tx):
+// Side-effects:
+//   - Release unfinished work, cancel active runs, and close active sessions.
 //   - Remove agent from any computer's connected agent_ids array.
 //   - Ask the daemon to kill the agent's session, drop its workspace, and
 //     delete its memory file (best-effort, async; daemon may be offline).
@@ -438,7 +512,7 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	result, err := tx.Exec(r.Context(),
 		`UPDATE agents SET is_active = false, updated_at = now()
-		 WHERE id = $1 AND owner_id = $2 AND is_active = true`,
+		 WHERE id = $1 AND owner_id = $2 AND is_active = true AND kind = 'agent'`,
 		agentID, userID,
 	)
 	if err != nil {
@@ -468,11 +542,43 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, err = tx.Exec(r.Context(), `
+		UPDATE tasks
+		   SET status = 'todo', claimer_id = NULL, updated_at = now()
+		 WHERE claimer_id = $1
+		   AND status IN ('in_progress', 'in_review')
+	`, agentID); err != nil {
+		slog.Error("failed to release agent tasks", "agent_id", agentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete agent")
+		return
+	}
+	if _, err = tx.Exec(r.Context(), `
+		UPDATE agent_runs
+		   SET status = 'cancelled',
+		       activity_text = 'Cancelled because the Agent was deleted',
+		       updated_at = now(),
+		       finished_at = COALESCE(finished_at, now())
+		 WHERE agent_id = $1
+		   AND status IN (
+		       'queued', 'thinking', 'running', 'streaming',
+		       'waiting_input', 'waiting_approval'
+		   )
+	`, agentID); err != nil {
+		slog.Error("failed to cancel agent runs", "agent_id", agentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete agent")
+		return
+	}
+	if _, err = tx.Exec(r.Context(), `
+		UPDATE agent_sessions
+		   SET status = 'closed', last_active_at = now()
+		 WHERE agent_id = $1 AND status = 'active'
+	`, agentID); err != nil {
+		slog.Error("failed to close agent sessions", "agent_id", agentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete agent")
+		return
+	}
+
 	// Disconnect from any computer that had this agent in its connected list.
-	// Tasks.claimer_id is intentionally NOT cleared — soft-deleted agents stay
-	// as the claimer (displayed with a "Deleted" marker) so historical
-	// ownership of in-flight tasks is preserved.
-	//
 	// Capture the daemon URL before array_remove strips this agent from
 	// agent_ids — once we leave the transaction, no computer row references
 	// this agent, and we need the URL to tell the daemon to drop the session,

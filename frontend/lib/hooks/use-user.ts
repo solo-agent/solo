@@ -32,7 +32,7 @@ interface UseUserResult {
 }
 
 export function useUser(): UseUserResult {
-  const { user: authUser } = useAuth();
+  const { user: authUser, updateProfile } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -62,7 +62,7 @@ export function useUser(): UseUserResult {
       setError(null);
       setSuccessMessage(null);
       try {
-        const updated = await apiClient.patch<User>('/api/v1/users/me', {
+        const updated = await updateProfile({
           display_name: displayName,
         });
         setLocalUser(updated);
@@ -78,7 +78,7 @@ export function useUser(): UseUserResult {
         setIsUpdating(false);
       }
     },
-    [],
+    [updateProfile],
   );
 
   const clearSuccess = useCallback(() => setSuccessMessage(null), []);

@@ -27,6 +27,7 @@ export interface AgentNodeTask {
 export interface AgentNodeData {
   agentId: string;
   agentName: string;
+  avatarUrl?: string | null;
   isActive?: boolean;
   liveActivity?: LiveAgentState;
   task?: AgentNodeTask;
@@ -154,27 +155,27 @@ function RelationshipNodeComponent({ data, selected }: NodeProps) {
   return (
     <div className="relative flex flex-col items-center">
       {hasTask && (
-        <Handle id="bottom" type="source" position={Position.Bottom} className="!z-30 !w-3 !h-3 !border-2 !border-black !bg-white" />
+        <Handle id="bottom" type="source" position={Position.Bottom} className="!z-30 !h-2 !w-2 !border !border-white !bg-[var(--skin-ink)]" />
       )}
       <div
         className={[
-          'relationship-agent-node relative overflow-visible px-4 py-3 border-4 min-w-[140px] cursor-pointer hover:-translate-y-0.5 hover:shadow-brutal-lg active:translate-x-0.5 active:translate-y-0.5 transition-transform duration-100',
+          'relationship-agent-node relative min-h-[76px] w-[204px] cursor-pointer overflow-visible border-2 px-3 py-2.5 transition-transform duration-100 hover:-translate-y-0.5 hover:shadow-brutal-lg active:translate-x-0.5 active:translate-y-0.5',
           showHalo ? 'team-agent-active-halo' : '',
-          selected ? 'bg-brutal-primary shadow-brutal-lg' : 'bg-white shadow-brutal',
+          selected ? 'relationship-agent-node-selected bg-brutal-primary shadow-brutal-lg' : 'bg-white shadow-brutal',
         ].join(' ')}
         style={{ borderColor, '--team-agent-status-color': borderColor } as CSSProperties}
       >
-        <Handle id="top" type="target" position={Position.Top} className="!w-3 !h-3 !border-2 !border-black !bg-white" />
+        <Handle id="top" type="target" position={Position.Top} className="!h-2 !w-2 !border !border-white !bg-[var(--skin-ink)]" />
         {!hasTask && (
-          <Handle id="bottom" type="source" position={Position.Bottom} className="!w-3 !h-3 !border-2 !border-black !bg-white" />
+          <Handle id="bottom" type="source" position={Position.Bottom} className="!h-2 !w-2 !border !border-white !bg-[var(--skin-ink)]" />
         )}
-        <Handle id="left" type="target" position={Position.Left} className="!w-3 !h-3 !border-2 !border-black !bg-white" />
-        <Handle id="right" type="source" position={Position.Right} className="!w-3 !h-3 !border-2 !border-black !bg-white" />
+        <Handle id="left" type="target" position={Position.Left} className="!h-2 !w-2 !border !border-white !bg-[var(--skin-ink)]" />
+        <Handle id="right" type="source" position={Position.Right} className="!h-2 !w-2 !border !border-white !bg-[var(--skin-ink)]" />
         <RelationshipActivityCard activity={agentData.liveActivity} />
         {agentData.onOpenRun && (
           <button
             type="button"
-            className="nodrag nopan absolute -right-3 -top-3 z-20 flex h-8 w-8 items-center justify-center border-2 border-black bg-brutal-info-light text-black shadow-brutal-sm transition-transform hover:-translate-y-0.5 hover:bg-brutal-info active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brutal-info"
+            className="relationship-agent-run-button nodrag nopan absolute -right-3 -top-3 z-20 flex h-8 w-8 items-center justify-center border-2 border-black bg-brutal-info-light text-black shadow-brutal-sm transition-transform hover:-translate-y-0.5 hover:bg-brutal-info active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brutal-info"
             onClick={(event) => {
               event.stopPropagation();
               agentData.onOpenRun?.(agentData.agentId);
@@ -187,7 +188,12 @@ function RelationshipNodeComponent({ data, selected }: NodeProps) {
           </button>
         )}
         <div className="flex items-center gap-2.5">
-          <PixelAvatar agentId={agentData.agentId} size="sm" className="flex-shrink-0" />
+          <PixelAvatar
+            agentId={agentData.agentId}
+            avatarUrl={agentData.avatarUrl}
+            size="sm"
+            className="flex-shrink-0"
+          />
           <div className="min-w-0">
             <div className="font-heading text-sm font-bold text-black truncate">
               {agentData.agentName}

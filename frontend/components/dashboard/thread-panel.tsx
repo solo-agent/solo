@@ -29,6 +29,7 @@ import { highlightSpecials, buildValidNames } from '@/lib/utils/highlight';
 import { buildDashboardHref } from '@/lib/dashboard-url';
 import { displayAgentErrorReason } from '@/lib/agent-activity';
 import { Avatar } from '@/components/ui/avatar';
+import { UserAvatar } from '@/components/ui/user-avatar';
 import { panelToggleButtonClass } from '@/components/ui/button';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -81,6 +82,7 @@ function ParentMessageBlock({
       {isAgent ? (
         <PixelAvatar
           agentId={message.user_id || message.id}
+          avatarUrl={message.avatar_url}
           size="md"
           onClick={onAgentClick ? () => onAgentClick?.({
             id: message.user_id,
@@ -88,6 +90,14 @@ function ParentMessageBlock({
             is_active: message.sender_active,
           }) : undefined}
           ariaLabel={t('viewAgentDetail', { name: displayName })}
+        />
+      ) : message.sender_type === 'user' ? (
+        <UserAvatar
+          userId={message.user_id || message.id}
+          name={displayName}
+          avatarUrl={message.avatar_url}
+          size="md"
+          className="mt-0.5"
         />
       ) : (
         <Avatar
@@ -270,7 +280,7 @@ function ReplyItem({
   onOpenArtifactReference,
   onAgentClick,
 }: {
-  message: { id: string; display_name?: string; sender_id?: string; sender_active?: boolean; content: string; created_at: string; status?: string; sender_type?: string };
+  message: { id: string; display_name?: string; sender_id?: string; sender_avatar?: string | null; sender_active?: boolean; content: string; created_at: string; status?: string; sender_type?: string };
   validNames?: string[];
   isHighlighted?: boolean;
   onOpenArtifactReference?: (ref: string) => void;
@@ -295,6 +305,7 @@ function ReplyItem({
       {isAgent ? (
         <PixelAvatar
           agentId={message.sender_id || message.id}
+          avatarUrl={message.sender_avatar}
           size="sm"
           onClick={onAgentClick ? () => onAgentClick?.({
             id: message.sender_id || message.id,
@@ -302,6 +313,14 @@ function ReplyItem({
             is_active: message.sender_active,
           }) : undefined}
           ariaLabel={t('viewAgentDetail', { name: message.display_name || t('agent') })}
+        />
+      ) : message.sender_type === 'user' ? (
+        <UserAvatar
+          userId={message.sender_id || message.id}
+          name={message.display_name || '?'}
+          avatarUrl={message.sender_avatar}
+          size="sm"
+          className="mt-0.5"
         />
       ) : (
         <Avatar

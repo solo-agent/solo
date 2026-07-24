@@ -8,7 +8,7 @@ const assert = (condition, message) => {
   }
 };
 
-const teamsPage = read('app/teams/page.tsx');
+const nextConfig = read('next.config.ts');
 const relationshipWorkspace = read('components/relationships/relationship-workspace.tsx');
 const detailPanel = read('components/relationships/relationship-detail-panel.tsx');
 const teamsAgentProfile = read('components/teams/teams-agent-profile.tsx');
@@ -31,9 +31,8 @@ const inboxView = read('components/inbox/inbox-view.tsx');
 const tasksLeftColumn = read('components/tasks/tasks-left-column.tsx');
 const createTaskModal = read('components/tasks/create-task-modal.tsx');
 const createRelationshipModal = read('components/relationships/create-relationship-modal.tsx');
-const teamsAgentItem = read('components/teams/teams-agent-item.tsx');
-const teamsHumanItem = read('components/teams/teams-human-item.tsx');
 const navbar = read('components/ui/navbar.tsx');
+const computersPage = read('app/computers/page.tsx');
 const tabBar = read('components/ui/tab-bar.tsx');
 const brutalCss = read('app/globals.brutal.css');
 const splitDragHotPath = channelView.match(/const scheduleSplitResize[\s\S]*?\n  }, \[[^\]]*\]\);/)?.[0] ?? '';
@@ -47,16 +46,21 @@ assert(
   'standalone /workspace route should be removed',
 );
 assert(
+  !exists('app/teams/page.tsx') &&
+    !nextConfig.includes("source: '/teams'"),
+  'standalone /teams should be removed without a redirect',
+);
+assert(
+  !navbar.includes("href: '/teams'") && !computersPage.includes("router.push('/teams')"),
+  'retired /teams should not remain in navigation or computer agent links',
+);
+assert(
   relationshipWorkspace.includes('export function RelationshipWorkspace'),
-  'relationship workspace should live as a reusable Teams component',
+  'relationship workspace should remain available inside channels',
 );
 assert(
   !relationshipWorkspace.includes('MiniMap'),
   'embedded relationship workspace should not render the ReactFlow minimap',
-);
-assert(
-  teamsPage.includes('<RelationshipWorkspace') && !teamsPage.includes('TeamsLeftColumn'),
-  'teams page should render the relationship workspace directly instead of the old TeamsLeftColumn layout',
 );
 assert(
   detailPanel.includes('TeamsAgentProfile') && detailPanel.includes('TeamsAgentWorkspace'),
@@ -70,9 +74,9 @@ assert(
 );
 assert(
   relationshipWorkspace.includes('AgentForm') &&
-    relationshipWorkspace.includes('relationshipFromTemplate') &&
-    relationshipWorkspace.includes('relationshipCreateFromTemplate'),
-  'relationship workspace should preserve single-agent and template creation',
+    relationshipWorkspace.includes('useAgents(activeChannelFilterId)') &&
+    !relationshipWorkspace.includes('applyTemplate'),
+  'relationship workspace should create only fresh channel-scoped agents',
 );
 assert(
   relationshipWorkspace.includes("import { Button } from '@/components/ui/button'") &&
@@ -111,8 +115,8 @@ assert(
   'agent node detail should not add a standalone Runtime tab',
 );
 assert(
-  detailPanel.includes('redirectAfterDelete={false}') && teamsAgentProfile.includes('redirectAfterDelete = true'),
-  'embedded agent profile should delete in-place without redirecting away from the relationship graph',
+  !detailPanel.includes('redirectAfterDelete') && !teamsAgentProfile.includes('/teams'),
+  'embedded agent profile should delete in-place without referencing the retired teams route',
 );
 assert(
   relationshipWorkspace.includes('onAgentDeleted={handleAgentDeleted}'),
@@ -196,16 +200,14 @@ assert(
 );
 assert(
   !teamsAgentWorkspace.includes('href={`/workspace?agent=${agentId}`}') && !navbar.includes("href: '/workspace'"),
-  'workspace should not be exposed as a separate left-nav tab from Teams',
+  'workspace should not be exposed as a separate left-nav tab',
 );
 assert(
   selectableRow.includes('export function selectableRowClass') &&
     channelList.includes('selectableRowClass') &&
     dmList.includes('selectableRowClass') &&
-    tasksLeftColumn.includes('selectableRowClass') &&
-    teamsAgentItem.includes('selectableRowClass') &&
-    teamsHumanItem.includes('selectableRowClass'),
-  'Dashboard, Tasks, and Teams list selections should share the same selected-row primitive',
+    tasksLeftColumn.includes('selectableRowClass'),
+  'Dashboard and Tasks list selections should share the same selected-row primitive',
 );
 assert(
   selectableRow.includes('export function selectableRowIconClass') &&

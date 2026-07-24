@@ -377,6 +377,41 @@ func (dm *DaemonManager) CleanupThinkingSessions(ctx context.Context, nodeIDs []
 	return firstErr
 }
 
+// CleanupAgents force-closes every scoped runtime session for the supplied
+// Agents and removes their local runtime state. It is idempotent and fans out
+// because runtime affinity is not durable.
+func (dm *DaemonManager) CleanupAgents(ctx context.Context, agentIDs []string) error {
+	var firstErr error
+	for _, daemon := range dm.ListDaemons() {
+		if daemon.Status != DaemonStatusOnline {
+			continue
+		}
+		for _, agentID := range agentIDs {
+			url := fmt.Sprintf("http://%s:%d/internal/daemon/agents/%s/cleanup", daemon.Host, daemon.Port, agentID)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			resp, err := dm.httpClient.Do(req)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusNoContent && firstErr == nil {
+				firstErr = fmt.Errorf("daemon %s returned status %d while cleaning agent %s", daemon.ID, resp.StatusCode, agentID)
+			}
+		}
+	}
+	return firstErr
+}
+
 // --- SSE Streaming task support ---
 
 // SSEDaemonEvent represents a single event from the daemon's SSE stream.

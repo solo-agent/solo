@@ -17,6 +17,8 @@ export interface Channel {
   id: string;
   name: string;
   description: string;
+  type?: 'channel' | 'lucy';
+  source_template_id?: string;
   member_count: number;
   created_at: string;
   created_by: string;
@@ -27,8 +29,10 @@ export interface Message {
   channel_id: string;
   user_id: string;
   display_name: string;
+  avatar_url?: string | null;
   content: string;
   content_type?: string;
+  metadata?: Record<string, unknown>;
   created_at: string;
   status: 'sending' | 'sent' | 'failed' | 'streaming';
   thread_parent_id?: string;
@@ -96,6 +100,7 @@ export interface ThinkingSpace {
 export interface CreateChannelInput {
   name: string;
   description?: string;
+  template_id?: string;
 }
 
 // ---- Agent types ----
@@ -105,6 +110,8 @@ export interface Agent {
   name: string;
   description: string;
   owner_id: string;
+  home_channel_id: string;
+  kind: 'agent' | 'lucy';
   model_provider: AgentModelProvider;
   model_name: string;
   system_prompt: string;
@@ -151,7 +158,6 @@ export interface CreateAgentInput {
   model_provider: AgentModelProvider;
   model_name?: string;
   system_prompt?: string;
-  avatar_url?: string;
   custom_env?: Record<string, string>;
   custom_args?: string[];
 }
@@ -184,6 +190,7 @@ export interface ChannelMember {
   member_id: string;
   role: 'owner' | 'admin' | 'member';
   display_name: string;
+  avatar_url?: string | null;
   status: 'online' | 'offline' | 'thinking' | 'typing';
 }
 
@@ -452,6 +459,7 @@ export interface WorkspaceFileNode {
 export interface ComputerAgent {
   id: string;
   name: string;
+  avatar_url?: string;
   status: 'online' | 'thinking' | 'running' | 'offline';
   active_tasks: number;
 }

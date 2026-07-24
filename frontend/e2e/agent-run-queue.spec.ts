@@ -116,15 +116,11 @@ test('three real task triggers show one executing run and two queued runs', asyn
       name: `queue-e2e-${suffix}`,
       description: 'Real queued Agent Run lifecycle E2E',
     });
-    agent = await api<Entity>(request, auth.access_token, 'post', '/api/v1/agents', {
+    agent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
       name: agentName,
       model_provider: 'claude',
       model_name: 'sonnet',
       system_prompt: 'If asked to introduce yourself, do it immediately. For a message containing Queue lifecycle, first use Bash to run sleep 20. After it finishes, answer with exactly QUEUE_E2E_DONE and nothing else.',
-    });
-    await api(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/members`, {
-      member_type: 'agent',
-      member_id: agent.id,
     });
     await expect.poll(() => greetingFinished(agent!.id), {
       timeout: 90000,

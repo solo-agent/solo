@@ -118,15 +118,22 @@ func (h *OnboardingHandler) CreateLucy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	_, err := h.pool.Exec(r.Context(),
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create Lucy")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	_, err = tx.Exec(r.Context(),
 		`INSERT INTO agents (id, name, description, owner_id, model_provider, model_name,
-			system_prompt, runtime_id, custom_env, custom_args)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			system_prompt, runtime_id, custom_env, custom_args, avatar_url, home_channel_id, kind)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'dicebear:pixel-art:lucy', $11, 'lucy')`,
 		agentID, onboarding.LucyName, agentDesc, userID,
 		runtimeType, "", // model_provider = selected runtime, model_name = auto
 		onboarding.LucySystemPrompt,
 		nullIfEmpty(computerID),
-		`{}`, `[]`,
+		`{}`, `[]`, channelID,
 	)
 	if err != nil {
 		slog.Error("onboarding: failed to create Lucy agent", "error", err)
@@ -135,25 +142,24 @@ func (h *OnboardingHandler) CreateLucy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add Lucy to the onboarding channel.
-	_, err = h.pool.Exec(r.Context(),
+	_, err = tx.Exec(r.Context(),
 		`INSERT INTO channel_members (channel_id, member_type, member_id, role)
 		 VALUES ($1, 'agent', $2, 'member')`,
 		channelID, agentID,
 	)
 	if err != nil {
-		slog.Warn("onboarding: failed to add Lucy to channel",
+		slog.Error("onboarding: failed to add Lucy to channel",
 			"channel_id", channelID, "agent_id", agentID, "error", err)
-	} else if h.agentSvc != nil {
-		h.agentSvc.BroadcastMemberEvent(channelID, "member.added", "agent", agentID, onboarding.LucyName)
+		writeError(w, http.StatusInternalServerError, "failed to create Lucy")
+		return
 	}
-
-	// Also add Lucy to the shared #all channel.
-	h.ensureAgentInAllChannel(r.Context(), agentID)
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Error("onboarding: failed to commit Lucy", "agent_id", agentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create Lucy")
+		return
+	}
 	if h.agentSvc != nil {
-		allID := allChannelID(r.Context(), h.pool, agentID)
-		if allID != "" {
-			h.agentSvc.BroadcastMemberEvent(allID, "member.added", "agent", agentID, onboarding.LucyName)
-		}
+		h.agentSvc.BroadcastMemberEvent(channelID, "member.added", "agent", agentID, onboarding.LucyName)
 	}
 
 	// Seed knowledge files asynchronously.
@@ -199,8 +205,14 @@ func (h *OnboardingHandler) userOwnsChannel(ctx context.Context, channelID, user
 	var isMember bool
 	err := h.pool.QueryRow(ctx,
 		`SELECT EXISTS(
-			SELECT 1 FROM channel_members
-			WHERE channel_id = $1 AND member_type = 'user' AND member_id = $2
+			SELECT 1
+			  FROM channels c
+			  JOIN channel_members cm ON cm.channel_id = c.id
+			 WHERE c.id = $1
+			   AND c.type = 'lucy'
+			   AND c.is_archived = false
+			   AND cm.member_type = 'user'
+			   AND cm.member_id = $2
 		)`, channelID, userID,
 	).Scan(&isMember)
 	return err == nil && isMember
@@ -216,35 +228,6 @@ func channelName(ctx context.Context, pool *pgxpool.Pool, channelID string) stri
 		name = channelID
 	}
 	return name
-}
-
-// ensureAgentInAllChannel adds the agent to the shared #all channel.
-func (h *OnboardingHandler) ensureAgentInAllChannel(ctx context.Context, agentID string) {
-	allID := allChannelID(ctx, h.pool, agentID)
-	if allID == "" {
-		return
-	}
-	_, _ = h.pool.Exec(ctx,
-		`INSERT INTO channel_members (channel_id, member_type, member_id, role)
-		 VALUES ($1, 'agent', $2, 'member')
-		 ON CONFLICT DO NOTHING`,
-		allID, agentID,
-	)
-}
-
-// allChannelID resolves the per-user #all-{name} channel ID for the given agent's owner.
-func allChannelID(ctx context.Context, pool *pgxpool.Pool, agentID string) string {
-	var id string
-	_ = pool.QueryRow(ctx,
-		`SELECT c.id FROM channels c
-		 JOIN channel_members cm ON cm.channel_id = c.id
-		 JOIN agents a ON a.owner_id = cm.member_id
-		 WHERE a.id = $1 AND cm.member_type = 'user'
-		 AND c.name LIKE 'all-%%' AND c.is_archived = false
-		 LIMIT 1`,
-		agentID,
-	).Scan(&id)
-	return id
 }
 
 // nullIfEmpty returns a *string that is nil when s is empty.

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -15,13 +16,18 @@ import (
 
 // ChannelHandler handles channel-related HTTP requests.
 type ChannelHandler struct {
-	pool *pgxpool.Pool
-	dm   *service.DaemonManager
+	pool      *pgxpool.Pool
+	dm        *service.DaemonManager
+	templates *service.TemplateService
 }
 
 // NewChannelHandler creates a new ChannelHandler.
-func NewChannelHandler(pool *pgxpool.Pool, dm *service.DaemonManager) *ChannelHandler {
-	return &ChannelHandler{pool: pool, dm: dm}
+func NewChannelHandler(pool *pgxpool.Pool, dm *service.DaemonManager, templates ...*service.TemplateService) *ChannelHandler {
+	templateSvc := service.NewTemplateService(pool)
+	if len(templates) > 0 && templates[0] != nil {
+		templateSvc = templates[0]
+	}
+	return &ChannelHandler{pool: pool, dm: dm, templates: templateSvc}
 }
 
 // --- Request/Response types ---
@@ -29,6 +35,13 @@ func NewChannelHandler(pool *pgxpool.Pool, dm *service.DaemonManager) *ChannelHa
 type CreateChannelRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	TemplateID  string `json:"template_id,omitempty"`
+	Locale      string `json:"locale,omitempty"`
+}
+
+type ApplyChannelTemplateRequest struct {
+	TemplateID string `json:"template_id"`
+	Locale     string `json:"locale,omitempty"`
 }
 
 type UpdateChannelRequest struct {
@@ -37,14 +50,15 @@ type UpdateChannelRequest struct {
 }
 
 type ChannelResponse struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Type        string `json:"type"`
-	CreatedBy   string `json:"created_by"`
-	IsArchived  bool   `json:"is_archived"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Description      string `json:"description,omitempty"`
+	Type             string `json:"type"`
+	CreatedBy        string `json:"created_by"`
+	IsArchived       bool   `json:"is_archived"`
+	SourceTemplateID string `json:"source_template_id,omitempty"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
 }
 
 // Create handles POST /api/v1/channels
@@ -92,7 +106,6 @@ func (h *ChannelHandler) ServerInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
-	_ = userID
 	// List public channels the user can see
 	channels := []map[string]interface{}{}
 	rows, err := h.pool.Query(r.Context(),
@@ -113,7 +126,12 @@ func (h *ChannelHandler) ServerInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	// List active agents
 	agents := []map[string]interface{}{}
-	rows2, err := h.pool.Query(r.Context(), `SELECT id, name, COALESCE(system_prompt,'') FROM agents WHERE is_active=true`)
+	rows2, err := h.pool.Query(r.Context(), `
+		SELECT id, name, COALESCE(system_prompt, '')
+		  FROM agents
+		 WHERE is_active = true
+		   AND owner_id = $1
+	`, userID)
 	if err == nil {
 		defer rows2.Close()
 		for rows2.Next() {
@@ -148,6 +166,41 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(name) > 100 {
 		writeError(w, http.StatusBadRequest, "channel name must be 100 characters or less")
+		return
+	}
+	templateID := strings.TrimSpace(req.TemplateID)
+	if templateID != "" {
+		result, err := h.templates.CreateChannel(r.Context(), service.TemplateProvisionRequest{
+			OwnerID:     userID,
+			TemplateID:  templateID,
+			ChannelName: name,
+			Description: req.Description,
+			Locale:      req.Locale,
+		})
+		if err != nil {
+			switch {
+			case isUniqueViolation(err):
+				writeError(w, http.StatusConflict, "a channel with this name already exists")
+			case isNotFound(err):
+				writeError(w, http.StatusNotFound, "template not found")
+			case errors.Is(err, service.ErrTemplateRuntimeUnavailable):
+				writeError(w, http.StatusUnprocessableEntity, err.Error())
+			default:
+				slog.Error("failed to create channel from template", "template_id", templateID, "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to create channel from template")
+			}
+			return
+		}
+		writeJSON(w, http.StatusCreated, ChannelResponse{
+			ID:               result.ChannelID,
+			Name:             result.ChannelName,
+			Description:      req.Description,
+			Type:             "channel",
+			CreatedBy:        userID,
+			SourceTemplateID: result.TemplateID,
+			CreatedAt:        result.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:        result.CreatedAt.Format(time.RFC3339),
+		})
 		return
 	}
 
@@ -228,6 +281,56 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ApplyTemplate handles POST /api/v1/channels/{channelID}/template.
+func (h *ChannelHandler) ApplyTemplate(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	channelID := strings.TrimSpace(chi.URLParam(r, "channelID"))
+	if channelID == "" {
+		writeError(w, http.StatusBadRequest, "channel ID is required")
+		return
+	}
+
+	var req ApplyChannelTemplateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.TemplateID = strings.TrimSpace(req.TemplateID)
+	if req.TemplateID == "" {
+		writeError(w, http.StatusBadRequest, "template_id is required")
+		return
+	}
+
+	result, err := h.templates.ApplyToChannel(r.Context(), service.TemplateProvisionRequest{
+		OwnerID:         userID,
+		TemplateID:      req.TemplateID,
+		TargetChannelID: channelID,
+		Locale:          req.Locale,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrTemplateTargetUnavailable):
+			writeError(w, http.StatusNotFound, "channel not found")
+		case errors.Is(err, service.ErrChannelTeamNotEmpty):
+			writeError(w, http.StatusConflict, err.Error())
+		case isNotFound(err):
+			writeError(w, http.StatusNotFound, "template not found")
+		case errors.Is(err, service.ErrTemplateRuntimeUnavailable):
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+		default:
+			slog.Error("failed to apply template to channel", "channel_id", channelID, "template_id", req.TemplateID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to apply template to channel")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
+}
+
 // List handles GET /api/v1/channels
 func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
@@ -237,7 +340,8 @@ func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.pool.Query(r.Context(),
-		`SELECT c.id, c.name, COALESCE(c.description, ''), c.type, c.created_by, c.is_archived, c.created_at, c.updated_at
+		`SELECT c.id, c.name, COALESCE(c.description, ''), c.type, c.created_by,
+		        c.is_archived, COALESCE(c.source_template_id, ''), c.created_at, c.updated_at
 		 FROM channels c
 		 JOIN channel_members cm ON cm.channel_id = c.id
 		 WHERE cm.member_type = 'user' AND cm.member_id = $1 AND c.is_archived = false AND c.type = 'channel'
@@ -255,7 +359,8 @@ func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var ch ChannelResponse
 		var createdAt, updatedAt time.Time
-		err := rows.Scan(&ch.ID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy, &ch.IsArchived, &createdAt, &updatedAt)
+		err := rows.Scan(&ch.ID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
+			&ch.IsArchived, &ch.SourceTemplateID, &createdAt, &updatedAt)
 		if err != nil {
 			slog.Error("failed to scan channel row", "error", err)
 			continue
@@ -266,6 +371,54 @@ func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, channels)
+}
+
+// GetLucy returns the authenticated user's pinned Lucy Channel. It is not
+// included in the ordinary Channel list because the sidebar renders it first.
+func (h *ChannelHandler) GetLucy(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	var ch ChannelResponse
+	var createdAt, updatedAt time.Time
+	err := h.pool.QueryRow(r.Context(), `
+		SELECT c.id, c.name, COALESCE(c.description, ''), c.type, c.created_by,
+		       c.is_archived, COALESCE(c.source_template_id, ''), c.created_at, c.updated_at
+		  FROM channels c
+		  JOIN channel_members cm
+		    ON cm.channel_id = c.id
+		   AND cm.member_type = 'user'
+		   AND cm.member_id = $1
+	 WHERE c.type = 'lucy'
+	   AND c.is_archived = false
+	 ORDER BY EXISTS (
+	              SELECT 1
+	                FROM agents lucy
+	               WHERE lucy.owner_id = $1
+	                 AND lucy.kind = 'lucy'
+	                 AND lucy.is_active = true
+	                 AND lucy.home_channel_id = c.id
+	          ) DESC,
+	          c.created_at ASC
+	 LIMIT 1
+	`, userID).Scan(
+		&ch.ID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
+		&ch.IsArchived, &ch.SourceTemplateID, &createdAt, &updatedAt,
+	)
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "Lucy channel not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load Lucy channel")
+		return
+	}
+	ch.CreatedAt = createdAt.Format(time.RFC3339)
+	ch.UpdatedAt = updatedAt.Format(time.RFC3339)
+	writeJSON(w, http.StatusOK, ch)
 }
 
 // Get handles GET /api/v1/channels/{id}
@@ -303,10 +456,12 @@ func (h *ChannelHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var ch ChannelResponse
 	var createdAt, updatedAt time.Time
 	err = h.pool.QueryRow(r.Context(),
-		`SELECT id, name, COALESCE(description, ''), type, created_by, is_archived, created_at, updated_at
+		`SELECT id, name, COALESCE(description, ''), type, created_by,
+		        is_archived, COALESCE(source_template_id, ''), created_at, updated_at
 		 FROM channels WHERE id = $1 AND is_archived = false`,
 		channelID,
-	).Scan(&ch.ID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy, &ch.IsArchived, &createdAt, &updatedAt)
+	).Scan(&ch.ID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
+		&ch.IsArchived, &ch.SourceTemplateID, &createdAt, &updatedAt)
 	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "channel not found")
@@ -401,9 +556,11 @@ func (h *ChannelHandler) Update(w http.ResponseWriter, r *http.Request) {
 			description = COALESCE($2, description),
 			updated_at = now()
 		 WHERE id = $3 AND is_archived = false
-		 RETURNING id, name, COALESCE(description, ''), type, created_by, is_archived, created_at, updated_at`,
+		 RETURNING id, name, COALESCE(description, ''), type, created_by,
+		           is_archived, COALESCE(source_template_id, ''), created_at, updated_at`,
 		req.Name, req.Description, channelID,
-	).Scan(&ch.ID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy, &ch.IsArchived, &createdAt, &updatedAt)
+	).Scan(&ch.ID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
+		&ch.IsArchived, &ch.SourceTemplateID, &createdAt, &updatedAt)
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "a channel with this name already exists")
@@ -438,72 +595,133 @@ func (h *ChannelHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check user is a member
-	var isMember bool
-	err := h.pool.QueryRow(r.Context(),
-		`SELECT EXISTS(
-			SELECT 1 FROM channel_members
-			WHERE channel_id = $1 AND member_type = 'user' AND member_id = $2
-		)`, channelID, userID,
-	).Scan(&isMember)
+	tx, err := h.pool.Begin(r.Context())
 	if err != nil {
-		slog.Error("failed to check membership", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	if !isMember {
-		writeError(w, http.StatusNotFound, "channel not found")
-		return
-	}
-
-	result, err := h.pool.Exec(r.Context(),
-		`UPDATE channels SET is_archived = true, updated_at = now()
-		 WHERE id = $1 AND is_archived = false`,
-		channelID,
-	)
-	if err != nil {
-		slog.Error("failed to archive channel", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to delete channel")
 		return
 	}
+	defer tx.Rollback(r.Context())
 
-	if result.RowsAffected() == 0 {
+	var canDelete bool
+	err = tx.QueryRow(r.Context(), `
+		SELECT EXISTS(
+			SELECT 1
+			  FROM channels c
+			  JOIN channel_members cm ON cm.channel_id = c.id
+			 WHERE c.id = $1
+			   AND c.type = 'channel'
+			   AND c.is_archived = false
+			   AND cm.member_type = 'user'
+			   AND cm.member_id = $2
+			   AND cm.role IN ('owner', 'admin')
+		)
+	`, channelID, userID).Scan(&canDelete)
+	if err != nil || !canDelete {
 		writeError(w, http.StatusNotFound, "channel not found")
+		return
+	}
+
+	agentRows, err := tx.Query(r.Context(), `
+		SELECT id::text
+		  FROM agents
+		 WHERE home_channel_id = $1
+		   AND kind = 'agent'
+		   AND is_active = true
+		 FOR UPDATE
+	`, channelID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete channel")
+		return
+	}
+	agentIDs := make([]string, 0)
+	for agentRows.Next() {
+		var agentID string
+		if err := agentRows.Scan(&agentID); err != nil {
+			agentRows.Close()
+			writeError(w, http.StatusInternalServerError, "failed to delete channel")
+			return
+		}
+		agentIDs = append(agentIDs, agentID)
+	}
+	agentRows.Close()
+
+	if _, err := tx.Exec(r.Context(), `
+		UPDATE channels
+		   SET is_archived = true, updated_at = now()
+		 WHERE id = $1
+	`, channelID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete channel")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `
+		UPDATE agents
+		   SET is_active = false, updated_at = now()
+		 WHERE home_channel_id = $1 AND kind = 'agent' AND is_active = true
+	`, channelID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete channel")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `
+		UPDATE tasks
+		   SET status = 'todo', claimer_id = NULL, updated_at = now()
+		 WHERE channel_id = $1
+		   AND status IN ('in_progress', 'in_review')
+	`, channelID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete channel")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `
+		UPDATE agent_runs
+		   SET status = 'cancelled',
+		       activity_text = 'Cancelled because the Channel was closed',
+		       updated_at = now(),
+		       finished_at = COALESCE(finished_at, now())
+		 WHERE channel_id = $1
+		   AND status IN (
+		       'queued', 'thinking', 'running', 'streaming',
+		       'waiting_input', 'waiting_approval'
+		   )
+	`, channelID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete channel")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `
+		UPDATE agent_sessions
+		   SET status = 'closed', last_active_at = now()
+		 WHERE agent_id IN (
+		       SELECT id FROM agents WHERE home_channel_id = $1
+		   )
+		   AND status = 'active'
+	`, channelID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete channel")
+		return
+	}
+	for _, agentID := range agentIDs {
+		if _, err := tx.Exec(r.Context(), `
+			UPDATE computers
+			   SET agent_ids = array_remove(agent_ids, $1::uuid), updated_at = now()
+			 WHERE $1::uuid = ANY(agent_ids)
+		`, agentID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to delete channel")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete channel")
 		return
 	}
 
 	slog.Info("channel archived", "channel_id", channelID, "user_id", userID)
 
-	rows, queryErr := h.pool.Query(r.Context(), `
-		SELECT node.id::text
-		FROM thinking_spaces space
-		JOIN thinking_nodes node ON node.space_id = space.id
-		WHERE space.channel_id = $1`, channelID)
-	if queryErr != nil {
-		slog.Warn("failed to list Thinking nodes for archived channel cleanup", "channel_id", channelID, "error", queryErr)
-	} else {
-		nodeIDs := make([]string, 0)
-		for rows.Next() {
-			var nodeID string
-			if err := rows.Scan(&nodeID); err != nil {
-				slog.Warn("failed to scan Thinking node for archived channel cleanup", "channel_id", channelID, "error", err)
-				continue
+	if h.dm != nil && len(agentIDs) > 0 {
+		go func(ids []string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := h.dm.CleanupAgents(ctx, ids); err != nil {
+				slog.Warn("failed to clean Agent sessions for archived channel", "channel_id", channelID, "error", err)
 			}
-			nodeIDs = append(nodeIDs, nodeID)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			slog.Warn("failed while listing Thinking nodes for archived channel cleanup", "channel_id", channelID, "error", err)
-		}
-		if h.dm != nil && len(nodeIDs) > 0 {
-			go func(ids []string) {
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				if err := h.dm.CleanupThinkingSessions(ctx, ids); err != nil {
-					slog.Warn("failed to clean Thinking sessions for archived channel", "channel_id", channelID, "error", err)
-				}
-			}(append([]string(nil), nodeIDs...))
-		}
+		}(append([]string(nil), agentIDs...))
 	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"message": "channel deleted"})
 }

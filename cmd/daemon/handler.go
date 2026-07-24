@@ -332,7 +332,11 @@ func (h *daemonHandler) holdAndRevise(ctx context.Context, req runTaskRequest, d
 		slog.Warn("task: holdAndRevise: no session manager", "provider", req.ModelConfig.Provider)
 		return draftContent, false
 	}
-	ps, err := sm.DeliverMessage(ctx, req.AgentID, pendingMsgs)
+	ps, err := sm.DeliverScopedMessage(
+		ctx,
+		agent.ChannelSessionKey(req.AgentID, req.ChannelID),
+		pendingMsgs,
+	)
 	if err != nil {
 		slog.Warn("task: holdAndRevise failed to deliver", "agent_id", req.AgentID, "error", err)
 		return draftContent, false
@@ -1053,7 +1057,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	var transcriptPath string
 	if _, isPersistent := backend.(agent.PersistentBackend); isPersistent && h.getSessionManager(req.ModelConfig.Provider) != nil {
 		sm := h.getSessionManager(req.ModelConfig.Provider)
-		sessionKey := agent.AgentSessionKey(req.AgentID)
+		sessionKey := agent.ChannelSessionKey(req.AgentID, req.ChannelID)
 		if req.NodeID != "" {
 			sessionKey = agent.ThinkingSessionKey(req.NodeID)
 		}

@@ -18,6 +18,7 @@ import {
   memo,
   useCallback,
 } from 'react';
+import Link from 'next/link';
 import {
   AlertCircle,
   RefreshCw,
@@ -27,10 +28,13 @@ import {
   Pencil,
   Trash2,
   SquareCheckBig,
+  ArrowUpRight,
+  CheckCircle2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { buildValidNames } from '@/lib/utils/highlight';
 import { Avatar } from '@/components/ui/avatar';
+import { UserAvatar } from '@/components/ui/user-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { motionScrollBehavior } from '@/lib/motion';
@@ -238,6 +242,48 @@ const MessageItem = memo(function MessageItem({
     [handleSaveEdit, handleCancelEdit],
   );
 
+  if (message.content_type === 'channel_created') {
+    const channelId = typeof message.metadata?.channel_id === 'string' ? message.metadata.channel_id : '';
+    const channelName = typeof message.metadata?.channel_name === 'string' ? message.metadata.channel_name : t('lucyNewChannel');
+    const templateId = typeof message.metadata?.template_id === 'string' ? message.metadata.template_id : '';
+    const memberCount = typeof message.metadata?.member_count === 'number' ? message.metadata.member_count : 0;
+    return (
+      <div data-message-id={message.id} className="px-5 py-3" role="listitem">
+        <div className="border-4 border-black bg-brutal-cream p-4 shadow-brutal">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-success-light shadow-brutal-sm">
+              <CheckCircle2 className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="font-mono text-[10px] font-bold uppercase tracking-widest text-black/55">{t('lucyChannelReady')}</div>
+              <h3 className="truncate font-heading text-lg font-black"># {channelName}</h3>
+              <p className="mt-1 font-body text-sm text-black/65">{message.content}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {templateId && (
+                  <span className="border-2 border-black bg-white px-2 py-1 font-mono text-[10px] font-bold uppercase">
+                    {templateId}
+                  </span>
+                )}
+                <span className="border-2 border-black bg-white px-2 py-1 font-mono text-[10px] font-bold uppercase">
+                  {t('lucyAgentCount', { n: memberCount })}
+                </span>
+              </div>
+            </div>
+          </div>
+          {channelId && (
+            <Link
+              href={`/dashboard?channel=${encodeURIComponent(channelId)}`}
+              className="mt-4 flex w-full items-center justify-between border-2 border-black bg-brutal-success px-3 py-2 font-heading text-sm font-black shadow-brutal-sm hover:-translate-y-px"
+            >
+              {t('lucyOpenChannel')}
+              <ArrowUpRight className="h-4 w-4" />
+            </Link>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       data-message-id={message.id}
@@ -276,10 +322,20 @@ const MessageItem = memo(function MessageItem({
         </button>
       )}
 
-      <Avatar
-        name={message.display_name}
-        className="mt-0.5 h-8 w-8 flex-shrink-0"
-      />
+      {message.sender_type === 'user' ? (
+        <UserAvatar
+          userId={message.user_id}
+          name={message.display_name}
+          avatarUrl={message.avatar_url}
+          size="md"
+          className="mt-0.5"
+        />
+      ) : (
+        <Avatar
+          name={message.display_name}
+          className="mt-0.5 h-8 w-8 flex-shrink-0"
+        />
+      )}
 
       <div className="min-w-0 flex-1">
         {/* SOLO-225-F: Task header row — above sender name + timestamp */}

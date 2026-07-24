@@ -112,9 +112,11 @@ type MessageResponse struct {
 	SenderType         string           `json:"sender_type"`
 	SenderID           string           `json:"sender_id"`
 	SenderName         string           `json:"sender_name,omitempty"`
+	SenderAvatar       string           `json:"sender_avatar,omitempty"`
 	SenderActive       bool             `json:"sender_active"`
 	Content            string           `json:"content"`
 	ContentType        string           `json:"content_type"`
+	Metadata           map[string]any   `json:"metadata,omitempty"`
 	MentionedAgentIDs  []string         `json:"mentioned_agent_ids,omitempty"`
 	AttachmentIDs      []string         `json:"attachment_ids,omitempty"`
 	Attachments        []AttachmentMeta `json:"attachments,omitempty"`
@@ -447,17 +449,23 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		).Scan(&threadRootMsgID, &threadReplyCount)
 	}
 
-	// Get sender name
-	var displayName string
+	// Get sender identity
+	var displayName, senderAvatar string
 	err = h.pool.QueryRow(r.Context(),
 		`SELECT COALESCE(
 				(SELECT display_name FROM users WHERE id = $1),
 				(SELECT name FROM agents WHERE id = $1),
 				'Unknown'
+			),
+			COALESCE(
+				(SELECT avatar_url FROM users WHERE id = $1),
+				(SELECT avatar_url FROM agents WHERE id = $1),
+				''
 			)`, userID,
-	).Scan(&displayName)
+	).Scan(&displayName, &senderAvatar)
 	if err != nil {
 		displayName = "Unknown"
+		senderAvatar = ""
 	}
 
 	// Fetch attachment metadata for the response and realtime payloads.
@@ -483,6 +491,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 				SenderType:    senderType,
 				SenderID:      userID,
 				SenderName:    displayName,
+				SenderAvatar:  senderAvatar,
 				Content:       content,
 				ContentType:   "text",
 				AttachmentIDs: attachmentIDs,
@@ -554,6 +563,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 			SenderType:        senderType,
 			SenderID:          userID,
 			SenderName:        displayName,
+			SenderAvatar:      senderAvatar,
 			Content:           content,
 			ContentType:       "text",
 			ThreadID:          threadID,
@@ -613,6 +623,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		SenderType:        "user",
 		SenderID:          userID,
 		SenderName:        displayName,
+		SenderAvatar:      senderAvatar,
 		Content:           content,
 		ContentType:       "text",
 		MentionedAgentIDs: mentionedAgentIDs,
@@ -735,9 +746,11 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		                   WHEN m.sender_type = 'system' THEN 'Solo'
 		                   ELSE COALESCE(u.display_name, a.name, m.sender_id::text)
 		                 END as sender_name,
+		                 COALESCE(u.avatar_url, a.avatar_url, '') AS sender_avatar,
 		                 COALESCE(a.is_active, false) AS sender_active,
 		                 COALESCE(m.thinking_node_id::text, '') AS thinking_node_id,
-	                 m.content, m.content_type, COALESCE(m.attachment_ids, '{}') as attachment_ids, m.created_at,
+	                 m.content, m.content_type, m.metadata,
+	                 COALESCE(m.attachment_ids, '{}') as attachment_ids, m.created_at,
 		                 COALESCE(t.reply_count, 0) AS reply_count,
 		                 COALESCE(tasks.task_number, 0) AS task_number,
 		                 COALESCE(tasks.status, '') AS task_status,
@@ -782,12 +795,17 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var msg MessageResponse
 		var createdAt time.Time
+		var metadataBytes []byte
 		err := rows.Scan(&msg.ID, &msg.ChannelID, &msg.SenderType, &msg.SenderID,
-			&msg.SenderName, &msg.SenderActive, &msg.ThinkingNodeID, &msg.Content, &msg.ContentType, &msg.AttachmentIDs, &createdAt,
+			&msg.SenderName, &msg.SenderAvatar, &msg.SenderActive, &msg.ThinkingNodeID,
+			&msg.Content, &msg.ContentType, &metadataBytes, &msg.AttachmentIDs, &createdAt,
 			&msg.ReplyCount, &msg.TaskNumber, &msg.TaskStatus, &msg.TaskClaimerName, &msg.TaskClaimerDeleted, &msg.HasUnreadThread)
 		if err != nil {
 			slog.Error("failed to scan message row", "error", err)
 			continue
+		}
+		if len(metadataBytes) > 0 {
+			_ = json.Unmarshal(metadataBytes, &msg.Metadata)
 		}
 		msg.CreatedAt = createdAt.Format(time.RFC3339)
 		messages = append(messages, msg)

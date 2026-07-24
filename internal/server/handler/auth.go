@@ -55,11 +55,12 @@ type AuthResponse struct {
 }
 
 type UserResponse struct {
-	ID          string `json:"id"`
-	Email       string `json:"email"`
-	DisplayName string `json:"display_name"`
-	Role        string `json:"role"`
-	CreatedAt   string `json:"created_at"`
+	ID          string  `json:"id"`
+	Email       string  `json:"email"`
+	DisplayName string  `json:"display_name"`
+	AvatarURL   *string `json:"avatar_url"`
+	Role        string  `json:"role"`
+	CreatedAt   string  `json:"created_at"`
 }
 
 // Register handles POST /api/v1/auth/register
@@ -148,8 +149,8 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("user registered", "user_id", userID, "email", email)
 
-	// Bootstrap onboarding: creates onboarding channel, Lucy agent,
-	// seeds knowledge files, and triggers the first welcome message.
+	// Bootstrap onboarding: creates the pinned Lucy Channel and initial system
+	// message. Lucy herself is configured later by the runtime wizard.
 	// Best-effort — failures are logged but never block registration.
 	onboardingChannelID := h.bootstrapOnboarding(r.Context(), userID, displayName, email)
 
@@ -186,12 +187,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Query user
 	var userID, displayName, passwordHash, role string
+	var avatarURL *string
 	var createdAt time.Time
 	err := h.pool.QueryRow(r.Context(),
-		`SELECT id, display_name, password_hash, role, created_at
+		`SELECT id, display_name, password_hash, role, created_at, avatar_url
 		 FROM users WHERE email = $1 AND is_active = true`,
 		email,
-	).Scan(&userID, &displayName, &passwordHash, &role, &createdAt)
+	).Scan(&userID, &displayName, &passwordHash, &role, &createdAt, &avatarURL)
 
 	if err != nil {
 		if isNotFound(err) {
@@ -244,6 +246,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			ID:          userID,
 			Email:       email,
 			DisplayName: displayName,
+			AvatarURL:   avatarURL,
 			Role:        role,
 			CreatedAt:   createdAt.Format(time.RFC3339),
 		},
@@ -362,21 +365,21 @@ func onboardingUniqueName(base, userID string) string {
 	return name + "-" + suffix
 }
 
-// bootstrapOnboarding creates the onboarding channel for a newly registered user
+// bootstrapOnboarding creates the pinned Lucy Channel for a newly registered user
 // and inserts a wizard welcome message. Lucy agent creation is deferred to the
 // onboarding wizard (POST /api/v1/onboarding/create-lucy) so the user can select
 // a runtime first.
-// Returns the channel ID so the frontend can auto-select it.
+// Returns the Channel ID for clients that need to initialize Lucy.
 // All failures are logged but not returned — registration succeeds regardless.
 func (h *AuthHandler) bootstrapOnboarding(ctx context.Context, userID, displayName, email string) string {
 	channelName := onboarding.OnboardingChannelName(displayName)
-	channelDesc := "Your personal onboarding space. Set up your first agent here."
+	channelDesc := "Your pinned Channel with Lucy, Solo's steward."
 
-	// Step 1: Create the onboarding channel.
-	channelID, err := h.svc.CreateChannel(ctx, channelName, channelDesc, "channel", userID)
+	// Step 1: Create the pinned Lucy Channel.
+	channelID, err := h.svc.CreateChannel(ctx, channelName, channelDesc, "lucy", userID)
 	if errors.Is(err, service.ErrChannelNameExists) {
 		channelName = onboardingUniqueName(channelName, userID)
-		channelID, err = h.svc.CreateChannel(ctx, channelName, channelDesc, "channel", userID)
+		channelID, err = h.svc.CreateChannel(ctx, channelName, channelDesc, "lucy", userID)
 	}
 	if err != nil {
 		slog.Warn("onboarding: failed to create channel",
@@ -384,7 +387,7 @@ func (h *AuthHandler) bootstrapOnboarding(ctx context.Context, userID, displayNa
 		return ""
 	}
 
-	// Step 1b: Create the per-user #all channel where all agents auto-join.
+	// Step 1b: Preserve the per-user #all Channel. New Agents are not auto-added.
 	h.ensureAllChannel(ctx, userID, displayName)
 
 	// Step 2: Insert a wizard welcome message.
@@ -408,8 +411,8 @@ func (h *AuthHandler) bootstrapOnboarding(ctx context.Context, userID, displayNa
 	return channelID
 }
 
-// ensureAllChannel creates a per-user #all-{name} channel where the user's
-// agents automatically join so @mentions work across the workspace.
+// ensureAllChannel preserves the current per-user #all-{name} Channel.
+// New Channel-scoped Agents and Lucy are intentionally not auto-added.
 func (h *AuthHandler) ensureAllChannel(ctx context.Context, userID, displayName string) {
 	channelName := "all-" + onboarding.SanitizeDisplayName(displayName)
 	_, err := h.svc.CreateChannel(ctx, channelName, "All your agents and members", "channel", userID)

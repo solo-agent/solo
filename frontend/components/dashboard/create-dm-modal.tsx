@@ -20,8 +20,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
-import { Avatar } from '@/components/ui/avatar';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
+import { UserAvatar } from '@/components/ui/user-avatar';
 import { t } from '@/lib/i18n';
 import type { CreateDMInput, DMChannel } from '@/lib/types';
 
@@ -31,6 +31,7 @@ interface DMCreateParticipant {
   id: string;
   type: 'user' | 'agent';
   display_name: string;
+  avatar_url?: string;
   online: boolean;
 }
 
@@ -59,12 +60,13 @@ export function CreateDMModal({
     if (!open) return;
     setParticipantsLoading(true);
     setParticipantsError(null);
-    apiClient.get<Array<{ id: string; name: string; is_active: boolean }>>('/api/v1/agents')
+    apiClient.get<Array<{ id: string; name: string; avatar_url?: string; is_active: boolean }>>('/api/v1/agents')
       .then((agents) => {
         const list: DMCreateParticipant[] = agents.map((a) => ({
           id: a.id,
           type: 'agent' as const,
           display_name: a.name,
+          avatar_url: a.avatar_url,
           online: a.is_active,
         }));
         setParticipants(list);
@@ -181,11 +183,13 @@ export function CreateDMModal({
                   {/* Avatar */}
                   <div className="relative flex-shrink-0">
                     {isAgent ? (
-                      <PixelAvatar agentId={participant.id} size="md" />
+                      <PixelAvatar agentId={participant.id} avatarUrl={participant.avatar_url} size="md" />
                     ) : (
-                      <Avatar
+                      <UserAvatar
+                        userId={participant.id}
                         name={participant.display_name}
-                        className="h-8 w-8 text-xs"
+                        avatarUrl={participant.avatar_url}
+                        size="md"
                       />
                     )}
                   </div>

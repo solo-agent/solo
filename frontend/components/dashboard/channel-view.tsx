@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Users, Loader2, SquareCheckBig, Plus, Network, Maximize2, Minimize2, BrainCircuit } from 'lucide-react';
+import { Users, Loader2, SquareCheckBig, Plus, Network, Maximize2, Minimize2, BrainCircuit, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
 import { useThinkingSpace } from '@/lib/hooks/use-thinking-space';
@@ -135,7 +135,6 @@ export function ChannelView({
     users,
     agents,
     isLoading: membersLoading,
-    addAgentToChannel,
     removeMember,
     updateMemberStatus,
     refetch: refetchMembers,
@@ -147,6 +146,8 @@ export function ChannelView({
 
   const [threadMessage, setThreadMessage] = useState<Message | null>(null);
   const [isAddAgentModalOpen, setIsAddAgentModalOpen] = useState(false);
+  const [teamRefreshKey, setTeamRefreshKey] = useState(0);
+  const [messageSuggestion, setMessageSuggestion] = useState<string | null>(null);
   const [workspaceDetail, setWorkspaceDetail] = useState<WorkspaceDetail | null>(null);
   const [threadTask, setThreadTask] = useState<Task | null>(null);
   const [artifactPreview, setArtifactPreview] = useState<ArtifactPreview | null>(null);
@@ -710,8 +711,7 @@ export function ChannelView({
     });
   }, [pushDashboardState, threadMessage]);
 
-  const existingAgentIds = agents.map((a) => a.member_id);
-  const canAddAgents = !channel.name.startsWith('all-');
+  const canAddAgents = channel.type !== 'lucy' && !channel.name.startsWith('all-');
 
   // ---- Task quick-create handler (SOLO-128-F) ----
 
@@ -944,7 +944,10 @@ export function ChannelView({
             relationship={workspaceDetail.relationship}
             agent={workspaceDetail.agent}
             onClose={handleAgentDetailClose}
-            onUpdate={() => { void loadRelationships(); }}
+            onUpdate={() => {
+              void Promise.all([refetchMembers(), loadRelationships()])
+                .then(() => setTeamRefreshKey((key) => key + 1));
+            }}
             onDelete={() => {
               handleAgentDetailClose();
               void loadRelationships();
@@ -1005,6 +1008,30 @@ export function ChannelView({
               onOpenArtifactReference={handleOpenArtifactReference}
               onAgentClick={openAgentDetail}
             />
+            {channel.type === 'lucy' && !isThinking && (
+              <div className="border-t-2 border-black bg-brutal-cream px-4 py-2">
+                <div className="mb-1.5 flex items-center gap-1.5 font-mono text-[9px] font-bold uppercase tracking-widest text-black/50">
+                  <Sparkles className="h-3 w-3 text-brutal-accent" />
+                  {t('lucyQuickStart')}
+                </div>
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {[
+                    t('lucyPromptBlankChannel'),
+                    t('lucyPromptChooseTemplate'),
+                    t('lucyPromptExploreTemplates'),
+                  ].map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      onClick={() => setMessageSuggestion(prompt)}
+                      className="whitespace-nowrap border-2 border-black bg-white px-2.5 py-1.5 font-body text-xs shadow-brutal-sm hover:-translate-y-px hover:bg-brutal-primary-light"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <MessageInput
               onSend={async (content, _mentionedAgentIds, asTask, taskTitle, attachmentIds) => {
                 if (asTask) {
@@ -1032,6 +1059,8 @@ export function ChannelView({
               thinkingMode={isThinking}
               onThinkingModeChange={handleThinkingModeChange}
               disabled={Boolean(selectedThinkingNode?.fork_handoff_pending || selectedThinkingNode?.returning_at || selectedThinkingNode?.returned_at)}
+              suggestedContent={messageSuggestion}
+              onSuggestedContentApplied={() => setMessageSuggestion(null)}
             />
           </div>
           </div>
@@ -1164,9 +1193,13 @@ export function ChannelView({
         {workspaceView === 'team' && (
           <RelationshipWorkspace
             embedded
+            isFullscreen={isWorkspaceFullscreen}
             title={t('navTeams')}
             channelFilterId={channel.id}
             channelTeam={channelTeam}
+            refreshKey={teamRefreshKey}
+            onAddAgent={canAddAgents ? () => setIsAddAgentModalOpen(true) : undefined}
+            onChooseTemplate={canAddAgents ? () => router.push(`/templates?channel=${encodeURIComponent(channel.id)}`) : undefined}
             agentTasks={latestTaskByAgent}
             onOpenTask={handleTeamTaskOpen}
             onOpenTaskArtifact={handleTeamTaskArtifactOpen}
@@ -1178,7 +1211,7 @@ export function ChannelView({
             onDetailClose={handleAgentDetailClose}
             embeddedActions={
               <>
-                {canAddAgents && (
+                {canAddAgents && agents.length > 0 && (
                   <Button
                     type="button"
                     onClick={() => setIsAddAgentModalOpen(true)}
@@ -1288,11 +1321,10 @@ export function ChannelView({
       <AddAgentModal
         open={isAddAgentModalOpen}
         onOpenChange={setIsAddAgentModalOpen}
-        existingAgentIds={existingAgentIds}
-        onAdd={addAgentToChannel}
-        onChanged={() => {
-          void refetchMembers();
-          void loadRelationships();
+        channelId={channel.id}
+        onChanged={async () => {
+          await Promise.all([refetchMembers(), loadRelationships()]);
+          setTeamRefreshKey((key) => key + 1);
         }}
       />
 
@@ -1310,21 +1342,6 @@ export function ChannelView({
             </div>
           </DialogTitle>
           <div className="flex items-center gap-1">
-            {canAddAgents && (
-              <Button
-                type="button"
-                onClick={() => {
-                  setIsMemberPopoverOpen(false);
-                  setIsAddAgentModalOpen(true);
-                }}
-                variant="success"
-                size="icon"
-                className="h-7 w-7"
-                aria-label={t('addAgentToChannel')}
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </Button>
-            )}
             <DialogCloseButton onClick={() => setIsMemberPopoverOpen(false)} />
           </div>
         </DialogHeader>
@@ -1333,14 +1350,10 @@ export function ChannelView({
             users={users}
             agents={agents}
             isLoading={membersLoading}
-            onAddAgent={() => {
-              setIsMemberPopoverOpen(false);
-              setIsAddAgentModalOpen(true);
-            }}
             onRemoveAgent={(memberId) => removeMember('agent', memberId)}
             onAgentClick={openAgentDetail}
             showHeader={false}
-            canAddAgent={canAddAgents}
+            canAddAgent={false}
           />
         </div>
       </Dialog>

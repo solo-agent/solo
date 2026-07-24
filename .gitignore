@@ -63,7 +63,10 @@ frontend/.audit-shots/
 !assets/**/*.png
 
 # Docs — design/research/version docs are working documents, not production artifacts
-docs/
+docs/*
+!docs/releases/
+docs/releases/*
+!docs/releases/agent-channel-scope.md
 *.bak
 *.bak2
 .playwright-cli/

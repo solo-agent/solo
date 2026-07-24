@@ -11,6 +11,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
+import { useAuth } from '@/lib/auth-context';
 import { t } from '@/lib/i18n';
 import type { Attachment } from '@/lib/types';
 import type { WSMessage, WSMessageSource } from '@/lib/ws-types';
@@ -24,6 +25,7 @@ interface ThreadReplyResponse {
   sender_type: string;
   sender_id: string;
   sender_name?: string;
+  sender_avatar?: string | null;
   sender_active?: boolean;
   content: string;
   content_type: string;
@@ -46,6 +48,7 @@ function toWSMessage(r: ThreadReplyResponse): WSMessage {
     sender_type: r.sender_type as WSMessageSource,
     sender_id: r.sender_id,
     sender_name: r.sender_name || (r.sender_type === 'system' ? 'Solo' : undefined),
+    sender_avatar: r.sender_avatar,
     sender_active: r.sender_active,
     display_name: r.sender_name || (r.sender_type === 'system' ? 'Solo' : undefined),
     content: r.content,
@@ -78,6 +81,7 @@ export interface UseThreadReturn {
 }
 
 export function useThread(): UseThreadReturn {
+  const { user } = useAuth();
   const { subscribeThread, unsubscribeThread, onEvent } = useWebSocket();
   const [messages, setMessages] = useState<WSMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -194,6 +198,7 @@ export function useThread(): UseThreadReturn {
             sender_type: event.message.sender_type as WSMessageSource,
             sender_id: event.message.sender_id,
             sender_name: event.message.sender_name,
+            sender_avatar: event.message.sender_avatar,
             display_name: event.message.sender_name,
             content: event.message.content,
             content_type: event.message.content_type,
@@ -227,9 +232,10 @@ export function useThread(): UseThreadReturn {
         id: tempId,
         channel_id: cid,
         sender_type: 'user',
-        sender_id: 'local',
-        sender_name: 'You',
-        display_name: 'You',
+        sender_id: user?.id || 'local-user',
+        sender_name: user?.display_name || 'You',
+        sender_avatar: user?.avatar_url,
+        display_name: user?.display_name || 'You',
         content: content.trim(),
         created_at: new Date().toISOString(),
         status: 'sending',
@@ -260,7 +266,7 @@ export function useThread(): UseThreadReturn {
         );
       }
     },
-    [],
+    [user],
   );
 
   // ---- 标记线程已读 (P25-08-F) ----

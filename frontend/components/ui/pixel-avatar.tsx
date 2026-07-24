@@ -1,52 +1,29 @@
 'use client';
 
+import { createAvatar } from '@dicebear/core';
+import * as pixelArt from '@dicebear/pixel-art';
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
 
-// 8 preset pixel art patterns (7×7 grid, 0=empty 1=color1 2=color2)
-// Each is a retro game character silhouette
-const PATTERNS: number[][] = [
-  // 0: Knight — helmet shape
-  [0,0,1,1,1,0,0, 0,1,1,1,1,1,0, 1,1,0,1,0,1,1, 1,1,1,1,1,1,1, 1,1,0,1,0,1,1, 0,1,1,1,1,1,0, 0,0,1,1,1,0,0],
-  // 1: Mage — pointed hat
-  [0,0,0,2,0,0,0, 0,0,2,2,2,0,0, 0,1,1,1,1,1,0, 1,1,0,1,0,1,1, 1,1,1,1,1,1,1, 1,0,1,1,1,0,1, 0,1,0,1,0,1,0],
-  // 2: Ranger — hood
-  [0,0,1,1,1,0,0, 0,1,1,1,1,1,0, 1,1,1,1,1,1,1, 1,1,0,1,0,1,1, 1,1,1,1,1,1,1, 0,1,1,1,1,1,0, 0,1,0,1,0,1,0],
-  // 3: Cleric — cross helmet
-  [0,0,1,1,1,0,0, 0,1,1,2,1,1,0, 1,1,2,1,2,1,1, 1,1,1,1,1,1,1, 1,1,0,1,0,1,1, 0,1,1,1,1,1,0, 0,0,1,1,1,0,0],
-  // 4: Rogue — mask
-  [0,0,1,1,1,0,0, 0,1,1,1,1,1,0, 1,1,2,1,2,1,1, 1,1,1,2,1,1,1, 1,1,2,1,2,1,1, 0,1,1,1,1,1,0, 0,0,1,1,1,0,0],
-  // 5: Monk — bald head
-  [0,0,1,1,1,0,0, 0,1,1,1,1,1,0, 1,1,1,1,1,1,1, 1,1,0,1,0,1,1, 1,1,1,1,1,1,1, 0,1,1,1,1,1,0, 0,0,1,1,1,0,0],
-  // 6: Mech — square head
-  [0,1,1,1,1,1,0, 1,1,1,1,1,1,1, 1,1,2,1,2,1,1, 1,1,1,2,1,1,1, 1,1,2,1,2,1,1, 1,1,1,1,1,1,1, 0,1,1,1,1,1,0],
-  // 7: Slime — round blob
-  [0,0,1,1,1,0,0, 0,1,1,1,1,1,0, 1,1,1,1,1,1,1, 1,1,1,1,1,1,1, 1,1,1,1,1,1,1, 0,1,1,1,1,1,0, 0,0,1,1,1,0,0],
-];
+export const PIXEL_ART_AVATAR_PREFIX = 'dicebear:pixel-art:';
 
-const COLOR_PAIRS: [string, string][] = [
-  ['#4a6fa5', '#2d4a7a'], // Knight: steel blue
-  ['#8b5cf6', '#FFD23F'], // Mage: purple + gold
-  ['#5d8a4c', '#8b6914'], // Ranger: green + brown
-  ['#f8f8f8', '#FF6B6B'], // Cleric: white + coral pink
-  ['#1a1a1a', '#f97264'], // Rogue: black + red
-  ['#f8a16f', '#FFD23F'], // Monk: orange + yellow
-  ['#808080', '#74B9FF'], // Mech: gray + sky blue
-  ['#88D498', '#74B9FF'], // Slime: soft green + sky blue
-];
+// ponytail: cache the small local roster; add an LRU only if workspaces reach thousands of identities.
+const sourceCache = new Map<string, string>();
 
-export function getPixelAvatarIndex(agentId: string, existingUrl?: string | null): number {
-  if (existingUrl?.startsWith('pixel:')) {
-    const idx = parseInt(existingUrl.replace('pixel:', ''), 10);
-    if (idx >= 0 && idx < 8) return idx;
+export function pixelAvatarSource(seed: string): string {
+  const cached = sourceCache.get(seed);
+  if (cached) return cached;
+  const source = createAvatar(pixelArt, { seed }).toDataUri();
+  sourceCache.set(seed, source);
+  return source;
+}
+
+export function agentAvatarSeed(agentId: string, avatarUrl?: string | null): string {
+  if (avatarUrl?.startsWith(PIXEL_ART_AVATAR_PREFIX)) {
+    const seed = avatarUrl.slice(PIXEL_ART_AVATAR_PREFIX.length).trim();
+    if (seed) return seed;
   }
-  // Hash the ID to 0-7
-  let hash = 0;
-  for (let i = 0; i < agentId.length; i++) {
-    hash = ((hash << 5) - hash) + agentId.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash) % 8;
+  return `solo-agent-${agentId}`;
 }
 
 interface PixelAvatarProps {
@@ -58,74 +35,49 @@ interface PixelAvatarProps {
   ariaLabel?: string;
 }
 
-export function PixelAvatar({ agentId, avatarUrl, size = 'sm', className, onClick, ariaLabel }: PixelAvatarProps) {
-  const index = useMemo(
-    () => getPixelAvatarIndex(agentId, avatarUrl),
+export function PixelAvatar({
+  agentId,
+  avatarUrl,
+  size = 'sm',
+  className,
+  onClick,
+  ariaLabel,
+}: PixelAvatarProps) {
+  const source = useMemo(
+    () => pixelAvatarSource(agentAvatarSeed(agentId, avatarUrl)),
     [agentId, avatarUrl],
   );
-  const pattern = PATTERNS[index];
-  const [color1, color2] = COLOR_PAIRS[index];
-  const sizeClass = size === 'sm' ? 'pixel-avatar-sm' : 'pixel-avatar-md';
   const classes = cn(
-    'flex items-center justify-center border-2 border-black shadow-brutal-sm bg-white p-0',
+    'flex flex-shrink-0 items-center justify-center overflow-hidden border-2 border-black bg-white p-0 shadow-brutal-sm',
     onClick && 'cursor-pointer hover:bg-brutal-primary-light',
-    sizeClass,
+    size === 'sm' ? 'pixel-avatar-sm' : 'pixel-avatar-md',
     className,
   );
-  const label = ariaLabel ?? `Pixel avatar ${index}`;
-  const grid = (
-    <div className="pixel-avatar-grid">
-      {pattern.map((cell, i) => (
-        <div
-          key={i}
-          className="pixel-avatar-cell"
-          style={{
-            backgroundColor: cell === 1 ? color1 : cell === 2 ? color2 : 'transparent',
-          }}
-        />
-      ))}
-    </div>
+  const image = (
+    // DiceBear renders locally as a data URI.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={source} alt="" className="h-full w-full object-cover [image-rendering:pixelated]" />
   );
 
   if (onClick) {
     return (
       <button
         type="button"
-        onClick={(e) => {
-          e.stopPropagation();
+        onClick={(event) => {
+          event.stopPropagation();
           onClick();
         }}
         className={classes}
-        aria-label={label}
+        aria-label={ariaLabel ?? 'Open Agent'}
       >
-        {grid}
+        {image}
       </button>
     );
   }
 
   return (
-    <div
-      className={classes}
-      aria-label={label}
-    >
-      {grid}
-    </div>
+    <span className={classes} aria-label={ariaLabel}>
+      {image}
+    </span>
   );
 }
-
-/** Find the next unused pixel avatar index (round-robin). Returns 0 if all used. */
-export function getNextPixelAvatarIndex(existingUrls: (string | null | undefined)[]): number {
-  const usedIndices = new Set<number>();
-  for (const url of existingUrls) {
-    if (url?.startsWith('pixel:')) {
-      const idx = parseInt(url.replace('pixel:', ''), 10);
-      if (idx >= 0 && idx < PIXEL_AVATAR_COUNT) usedIndices.add(idx);
-    }
-  }
-  for (let i = 0; i < PIXEL_AVATAR_COUNT; i++) {
-    if (!usedIndices.has(i)) return i;
-  }
-  return 0;
-}
-
-export const PIXEL_AVATAR_COUNT = 8;

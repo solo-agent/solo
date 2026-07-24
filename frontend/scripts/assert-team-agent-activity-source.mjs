@@ -31,7 +31,7 @@ assert(node.includes('ACTIVE_DOT_STATUSES') && node.includes("'thinking', 'runni
 assert(node.includes('RunningDots') && node.includes('animationDelay'), 'relationship node should show staggered running dots for active work');
 assert(node.includes('--team-agent-status-color') && node.includes('team-agent-active-halo'), 'relationship node should use the current status color for its active halo');
 assert(node.includes('Activity') && node.includes('absolute -right-3 -top-3'), 'relationship node should expose Live as an explicit icon button');
-assert(node.includes('<PixelAvatar agentId={agentData.agentId} size="sm" className="flex-shrink-0" />'), 'relationship node avatar should not hide the Live navigation action');
+assert(node.includes('avatarUrl={agentData.avatarUrl}') && node.includes('className="flex-shrink-0"'), 'relationship node should use the persisted avatar without hiding the Live navigation action');
 assert(hook.includes("event.type === 'message.new'"), 'team activity hook should cache message.new events');
 assert(hook.includes("event.event_type === 'user_message_received'"), 'human message should be driven by user_message_received run events');
 assert(hook.includes("payloadText(event.payload, 'message_id')"), 'human message should be linked by message_id, not mention text');

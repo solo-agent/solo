@@ -303,6 +303,17 @@ func waitForScopedTurnRelease(t *testing.T, mgr *AgentSessionManager, sessionKey
 	t.Fatalf("turn for %s did not release", sessionKey)
 }
 
+func TestChannelSessionKeyIsolatesChannels(t *testing.T) {
+	first := ChannelSessionKey("agent-1", "channel-a")
+	second := ChannelSessionKey("agent-1", "channel-b")
+	if first == second {
+		t.Fatalf("channel-scoped session keys collided: %q", first)
+	}
+	if first != ChannelSessionKey("agent-1", "channel-a") {
+		t.Fatal("channel-scoped session key is not stable")
+	}
+}
+
 func TestSessionManagerHoldsTurnUntilEarlyStartResultCloses(t *testing.T) {
 	backend := newEarlyReturnBackend()
 	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())

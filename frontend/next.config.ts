@@ -1,21 +1,30 @@
 import type { NextConfig } from "next";
 
+const apiOrigin = (() => {
+  try {
+    return new URL(process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080').origin;
+  } catch {
+    return '';
+  }
+})();
+
 const nextConfig: NextConfig = {
   devIndicators: false,
   turbopack: {
     root: __dirname,
   },
-  // v1.5: Redirect /agents/* to /teams
+  // The retired standalone Agent page now lives in the Channel workspace.
+  // /teams intentionally has no redirect: it is gone and should return 404.
   async redirects() {
     return [
       {
         source: '/agents',
-        destination: '/teams',
+        destination: '/dashboard',
         permanent: true,
       },
       {
         source: '/agents/:path*',
-        destination: '/teams',
+        destination: '/dashboard',
         permanent: true,
       },
     ];
@@ -30,7 +39,7 @@ const nextConfig: NextConfig = {
           {
             key: 'Content-Security-Policy',
             value:
-              "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; font-src 'self';",
+              `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob: ${apiOrigin}; font-src 'self';`,
           },
         ],
       },

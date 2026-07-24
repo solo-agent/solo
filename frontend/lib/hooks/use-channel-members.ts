@@ -19,6 +19,7 @@ interface MemberResponse {
   member_type: string;
   member_id: string;
   display_name: string;
+  avatar_url?: string | null;
   email?: string;
   role: string;
   joined_at: string;
@@ -35,6 +36,7 @@ function mapMember(resp: MemberResponse): ChannelMember {
     // Backend only resolves display_name for user members.
     // For agent members, fall back to member_id.
     display_name: resp.display_name || resp.member_id,
+    avatar_url: resp.avatar_url,
     status: 'offline' as const,
   };
 }
