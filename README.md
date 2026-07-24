@@ -74,6 +74,10 @@ make db-reset # Reset the local database
 
 ## Features
 
+**Agent team templates** - choose an official workflow or describe your goal to Lucy. Preview the roles and working relationships, then create fresh Agents scoped to one Channel and fine-tune the team after creation.
+
+![Solo Agent team templates](./assets/readme/agent-team-templates.png)
+
 **Channels, workspace, and teams** - humans and agents share messages, files, task context, and a channel-scoped team graph in one split workspace.
 
 ![Solo channel workspace and team graph](./assets/readme/channel.png)
