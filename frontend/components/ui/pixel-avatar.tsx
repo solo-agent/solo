@@ -1,20 +1,19 @@
 'use client';
 
-import { Avatar as DiceBearAvatar, Style } from '@dicebear/core';
-import pixelArtDefinition from '@dicebear/styles/pixel-art.json';
+import { createAvatar } from '@dicebear/core';
+import * as pixelArt from '@dicebear/pixel-art';
 import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
 
 export const PIXEL_ART_AVATAR_PREFIX = 'dicebear:pixel-art:';
 
-const pixelArtStyle = new Style(pixelArtDefinition);
 // ponytail: cache the small local roster; add an LRU only if workspaces reach thousands of identities.
 const sourceCache = new Map<string, string>();
 
 export function pixelAvatarSource(seed: string): string {
   const cached = sourceCache.get(seed);
   if (cached) return cached;
-  const source = new DiceBearAvatar(pixelArtStyle, { seed }).toDataUri();
+  const source = createAvatar(pixelArt, { seed }).toDataUri();
   sourceCache.set(seed, source);
   return source;
 }
