@@ -2,27 +2,146 @@
 // AgentRuntimeTab — display Agent runtime configuration (v1.5)
 // - Shows: Runtime type, model name
 // - Environment variables key-value list
-// - Read-only display (editing is handled via Profile tab or future enhancements)
+// - Model is inline-editable (v1.5): dropdown for known runtimes, free text
+//   otherwise. Runtime type + env vars remain read-only.
 // ============================================================================
 
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { AlertCircle, RefreshCw, Terminal, Layers, Cpu } from 'lucide-react';
+import { AlertCircle, RefreshCw, Terminal, Layers, Cpu, Pencil, Check, X } from 'lucide-react';
 import { apiClient, ApiError } from '@/lib/api-client';
+import { useToast } from '@/components/ui/toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import { Select } from '@/components/ui/select';
 import { t } from '@/lib/i18n';
+import { MODEL_PRESETS } from '@/lib/agent-models';
 import type { Agent } from '@/lib/types';
 
 interface AgentRuntimeTabProps {
   agentId: string;
 }
 
+// ---- Inline editable model field ----
+
+function EditableModelField({
+  provider,
+  value,
+  onSave,
+}: {
+  provider: string;
+  value: string;
+  onSave: (val: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+
+  const presets = MODEL_PRESETS[provider];
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave(draft.trim());
+      setEditing(false);
+    } catch {
+      // Error surfaced by parent via toast
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setDraft(value);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-2">
+        {presets ? (
+          <Select
+            value={draft}
+            onChange={setDraft}
+            options={[
+              { value: '', label: t('agentRuntimeDefault') },
+              ...presets,
+            ]}
+            size="sm"
+            className="min-w-[140px]"
+            disabled={saving}
+          />
+        ) : (
+          <input
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={t('agentFormModelPlaceholder')}
+            className="input-brutal h-8 w-full max-w-[220px] font-mono text-xs"
+            disabled={saving}
+          />
+        )}
+        <Button
+          type="button"
+          onClick={handleSave}
+          disabled={saving || draft.trim() === value}
+          variant="success"
+          size="sm"
+          className="gap-1 text-[10px] uppercase tracking-wider"
+        >
+          {saving ? t('saving') : <><Check className="h-3 w-3" />{t('save')}</>}
+        </Button>
+        <Button
+          type="button"
+          onClick={handleCancel}
+          disabled={saving}
+          variant="outline"
+          size="sm"
+          className="gap-1 text-[10px] uppercase tracking-wider"
+        >
+          <X className="h-3 w-3" />
+          {t('cancel')}
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 group">
+      <span className="font-mono text-xs text-foreground">
+        {value || t('agentRuntimeDefault')}
+      </span>
+      <button
+        type="button"
+        onClick={() => {
+          setDraft(value);
+          setEditing(true);
+        }}
+        className="inline-flex items-center gap-1 font-heading text-[10px] font-bold uppercase tracking-wider text-muted-foreground hover:text-brutal-primary transition-colors"
+        aria-label={t('edit')}
+      >
+        <Pencil className="h-3 w-3" />
+        {t('edit')}
+      </button>
+    </div>
+  );
+}
+
 export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { showToast } = useToast();
+
+  const handleModelSave = useCallback(
+    async (model: string) => {
+      await apiClient.patch(`/api/v1/agents/${agentId}`, { model_name: model });
+      setAgent((prev) => (prev ? { ...prev, model_name: model } : prev));
+      showToast(t('agentProfileUpdateSuccess'), 'success');
+    },
+    [agentId, showToast],
+  );
 
   const loadAgent = useCallback(async () => {
     setIsLoading(true);
@@ -116,9 +235,11 @@ export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
             <Layers className="inline h-3 w-3 mr-1 -mt-0.5" />
             Model
           </span>
-          <span className="font-mono text-xs text-foreground">
-            {agent.model_name || t('agentRuntimeDefault')}
-          </span>
+          <EditableModelField
+            provider={agent.model_provider}
+            value={agent.model_name}
+            onSave={handleModelSave}
+          />
         </div>
 
         {/* Environment variables — v3.3: label sits on its own row, and
