@@ -42,12 +42,13 @@ func NewTaskHandler(pool *pgxpool.Pool, hub realtime.Broadcaster, agentSvc *serv
 // --- Request/Response types ---
 
 type CreateTaskRequest struct {
-	Title        string     `json:"title"`
-	Description  string     `json:"description,omitempty"`
-	Priority     string     `json:"priority,omitempty"`
-	DueDate      *time.Time `json:"due_date,omitempty"`
-	ChannelID    string     `json:"channel_id,omitempty"`
-	ParentTaskID string     `json:"parent_task_id,omitempty"`
+	Title                   string     `json:"title"`
+	Description             string     `json:"description,omitempty"`
+	Priority                string     `json:"priority,omitempty"`
+	DueDate                 *time.Time `json:"due_date,omitempty"`
+	ChannelID               string     `json:"channel_id,omitempty"`
+	ParentTaskID            string     `json:"parent_task_id,omitempty"`
+	ExpectedDurationMinutes int        `json:"expected_duration_minutes,omitempty"`
 }
 
 type UpdateTaskRequest struct {
@@ -178,11 +179,12 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	svcReq := service.TaskCreateRequest{
-		Title:        req.Title,
-		Description:  req.Description,
-		Priority:     req.Priority,
-		DueDate:      req.DueDate,
-		ParentTaskID: req.ParentTaskID,
+		Title:                   req.Title,
+		Description:             req.Description,
+		Priority:                req.Priority,
+		DueDate:                 req.DueDate,
+		ParentTaskID:            req.ParentTaskID,
+		ExpectedDurationMinutes: req.ExpectedDurationMinutes,
 	}
 
 	task, err := h.svc.CreateTask(r.Context(), channelID, userID, svcReq)

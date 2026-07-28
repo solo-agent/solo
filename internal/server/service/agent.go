@@ -46,6 +46,15 @@ const (
 	agentErrorNoAvailableDaemon = "agent.error.no_available_daemon"
 )
 
+// AgentLifecycleMode defines the intended session lifecycle pattern for an agent.
+type AgentLifecycleMode string
+
+const (
+	AgentLifecycleShort     AgentLifecycleMode = "short"     // 6 min default
+	AgentLifecycleExtended  AgentLifecycleMode = "extended"  // 60 min
+	AgentLifecycleUnlimited AgentLifecycleMode = "unlimited" // 120 min cap
+)
+
 // maxAgentChainDepth limits the depth of agent-to-agent trigger chains
 // to prevent infinite loops. A chain of [A, B, C] means A triggered B,
 // B triggered C; C cannot trigger another agent because depth == 3.
@@ -617,7 +626,7 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 	}
 
 	// Track this task for daemon offline cleanup (cleanup on return)
-	s.dm.TrackTask(taskReq.TaskID, daemon.ID, ag.ID)
+	s.dm.TrackTask(taskReq.TaskID, daemon.ID, ag.ID, taskReq.ExpectedDurationMinutes)
 	defer s.dm.RemoveTask(taskReq.TaskID)
 
 	// Queue and backend execution are timed independently by DaemonManager.
@@ -2452,8 +2461,10 @@ type daemonTaskRequest struct {
 	TaskContext           string            `json:"task_context,omitempty"`     // SOLO-221-B: summary of pending tasks in channel
 	AgentChain            []string          `json:"agent_chain,omitempty"`      // SOLO-228-B: agent trigger chain for loop prevention
 	MentionedNames        []string          `json:"mentioned_names,omitempty"`  // v1.3: names of @mentioned agents for context awareness
-	InitialGreeting       string            `json:"initial_greeting,omitempty"` // greeting message to prepend as system context
-	ReturnHandoff         bool              `json:"return_handoff,omitempty"`
+	InitialGreeting          string            `json:"initial_greeting,omitempty"`          // greeting message to prepend as system context
+	ReturnHandoff            bool              `json:"return_handoff,omitempty"`
+	ExpectedDurationMinutes  int               `json:"expected_duration_minutes,omitempty"`  // per-task custom timeout
+	LifecycleMode            string            `json:"lifecycle_mode,omitempty"`             // agent lifecycle mode
 }
 
 // containsStr returns true if the slice s contains value v.

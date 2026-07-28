@@ -635,6 +635,7 @@ func handleTaskUpdate(args []string, baseURL, token string) {
 func handleTaskCreate(args []string, baseURL, token string) {
 	var channel, title, description, priority string
 	var parent int
+	var expectedDuration int
 	fs := flag.NewFlagSet("task create", flag.ExitOnError)
 	fs.StringVar(&channel, "c", "", "Channel ID or #name (required)")
 	fs.StringVar(&channel, "channel", "", "Channel ID or #name (required)")
@@ -642,6 +643,8 @@ func handleTaskCreate(args []string, baseURL, token string) {
 	fs.StringVar(&description, "description", "", "Task description")
 	fs.StringVar(&priority, "priority", "", "Task priority: p0|p1|p2|p3")
 	fs.IntVar(&parent, "parent", 0, "Parent task number")
+	fs.IntVar(&expectedDuration, "expected-duration", 0, "Custom execution timeout in minutes (max 120)")
+	fs.IntVar(&expectedDuration, "d", 0, "Custom execution timeout in minutes (max 120)")
 	fs.Parse(args)
 
 	if channel == "" {
@@ -660,6 +663,10 @@ func handleTaskCreate(args []string, baseURL, token string) {
 			doExit(exitUsage)
 		}
 	}
+	if expectedDuration < 0 || expectedDuration > 120 {
+		fmt.Fprintln(os.Stderr, "solo: error: --expected-duration must be 0-120")
+		doExit(exitUsage)
+	}
 
 	channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
 	if resolveErr != nil {
@@ -667,10 +674,13 @@ func handleTaskCreate(args []string, baseURL, token string) {
 		doExit(exitBusiness)
 	}
 
-	bodyMap := map[string]string{
+	bodyMap := map[string]interface{}{
 		"title":       title,
 		"description": description,
 		"priority":    priority,
+	}
+	if expectedDuration > 0 {
+		bodyMap["expected_duration_minutes"] = expectedDuration
 	}
 
 	// Resolve --parent: look up the parent task by number in the channel to get its UUID.

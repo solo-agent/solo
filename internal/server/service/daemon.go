@@ -36,8 +36,9 @@ type PendingTaskInfo struct {
 	RunID            string     `json:"run_id,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	BackendStartedAt *time.Time `json:"backend_started_at,omitempty"`
-	LastProgressAt   time.Time  `json:"last_progress_at,omitempty"`
-	TimeoutPhase     string     `json:"-"`
+	LastProgressAt          time.Time `json:"last_progress_at,omitempty"`
+	ExpectedDurationMinutes int       `json:"expected_duration_minutes"`
+	TimeoutPhase            string    `json:"-"`
 }
 
 // DaemonInfo holds runtime state for a registered daemon instance.
@@ -77,22 +78,26 @@ type DaemonManager struct {
 	queueTimeout     time.Duration
 	executionTimeout time.Duration
 
+	// maxExecutionTimeout is the hard cap for custom per-task execution timeouts.
+	maxExecutionTimeout time.Duration
+
 	stopCh chan struct{}
 }
 
 // NewDaemonManager creates a new DaemonManager.
 func NewDaemonManager(pool *pgxpool.Pool, hub realtime.Broadcaster) *DaemonManager {
 	return &DaemonManager{
-		daemons:           make(map[string]*DaemonInfo),
-		pendingTasks:      make(map[string]PendingTaskInfo),
-		pool:              pool,
-		hub:               hub,
-		httpClient:        &http.Client{Timeout: 10 * time.Second},
-		heartbeatInterval: 30 * time.Second,
-		maxMissedHB:       3,
-		queueTimeout:      agentRunQueueTimeout,
-		executionTimeout:  agentRunExecutionTimeout,
-		stopCh:            make(chan struct{}),
+		daemons:            make(map[string]*DaemonInfo),
+		pendingTasks:       make(map[string]PendingTaskInfo),
+		pool:               pool,
+		hub:                hub,
+		httpClient:         &http.Client{Timeout: 10 * time.Second},
+		heartbeatInterval:  30 * time.Second,
+		maxMissedHB:        3,
+		queueTimeout:       agentRunQueueTimeout,
+		executionTimeout:   agentRunExecutionTimeout,
+		maxExecutionTimeout: 120 * time.Minute,
+		stopCh:             make(chan struct{}),
 	}
 }
 
@@ -208,14 +213,15 @@ func (dm *DaemonManager) ListDaemons() []*DaemonInfo {
 
 // TrackTask records a pending task dispatched to a daemon.
 // Used for cleanup when a daemon goes offline.
-func (dm *DaemonManager) TrackTask(taskID, daemonID, agentID string) {
+func (dm *DaemonManager) TrackTask(taskID, daemonID, agentID string, expectedDurationMinutes int) {
 	dm.mu.Lock()
 	defer dm.mu.Unlock()
 	dm.pendingTasks[taskID] = PendingTaskInfo{
-		TaskID:    taskID,
-		AgentID:   agentID,
-		DaemonID:  daemonID,
-		CreatedAt: time.Now(),
+		TaskID:                  taskID,
+		AgentID:                 agentID,
+		DaemonID:                daemonID,
+		CreatedAt:               time.Now(),
+		ExpectedDurationMinutes: expectedDurationMinutes,
 	}
 }
 
@@ -724,6 +730,23 @@ func (dm *DaemonManager) checkHealth() {
 	}
 }
 
+// resolveExecutionTimeout computes the effective execution timeout by applying
+// the task's expected duration (in minutes) as an override, clamped between the
+// default timeout and the system max (120 min).
+func resolveExecutionTimeout(minutes int, defaultTimeout, maxTimeout time.Duration) time.Duration {
+	if minutes <= 0 {
+		return defaultTimeout
+	}
+	d := time.Duration(minutes) * time.Minute
+	if d < defaultTimeout {
+		return defaultTimeout
+	}
+	if d > maxTimeout {
+		return maxTimeout
+	}
+	return d
+}
+
 // removeStaleTasks removes pending tasks that have exceeded the timeout for
 // their current phase.
 func (dm *DaemonManager) removeStaleTasks(now time.Time) []PendingTaskInfo {
@@ -740,6 +763,10 @@ func (dm *DaemonManager) removeStaleTasks(now time.Time) []PendingTaskInfo {
 			}
 			timeout = dm.executionTimeout
 			phase = "execution"
+			// Apply per-task custom timeout override.
+			if task.ExpectedDurationMinutes > 0 {
+				timeout = resolveExecutionTimeout(task.ExpectedDurationMinutes, dm.executionTimeout, dm.maxExecutionTimeout)
+			}
 		}
 		if now.Sub(deadlineBase) > timeout {
 			task.TimeoutPhase = phase

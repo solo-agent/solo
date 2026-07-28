@@ -81,7 +81,7 @@ func TestSlidingProgressTimeoutResetsExecutionDeadline(t *testing.T) {
 
 func TestMarkTaskProgressUpdatesPendingTask(t *testing.T) {
 	dm := NewDaemonManager(nil, nil)
-	dm.TrackTask("prog-task", "d1", "a1")
+	dm.TrackTask("prog-task", "d1", "a1", 0)
 	now := time.Now()
 	dm.MarkTaskBackendStarted("prog-task", &now)
 
@@ -97,6 +97,69 @@ func TestMarkTaskProgressUpdatesPendingTask(t *testing.T) {
 	}
 }
 
+func TestCustomExecutionTimeout(t *testing.T) {
+	now := time.Now().UTC()
+	dm := NewDaemonManager(nil, nil)
+	dm.queueTimeout = 10 * time.Minute
+	dm.executionTimeout = 6 * time.Minute
+	dm.maxExecutionTimeout = 120 * time.Minute
+
+	// Task with 60 min custom timeout and recent progress — NOT stale at 30 min.
+	backend30min := now.Add(-30 * time.Minute)
+	dm.pendingTasks = map[string]PendingTaskInfo{
+		"custom-60-active": {
+			TaskID:                  "custom-60-active",
+			CreatedAt:               now.Add(-35 * time.Minute),
+			BackendStartedAt:        &backend30min,
+			LastProgressAt:          now.Add(-3 * time.Minute),
+			ExpectedDurationMinutes: 60,
+		},
+		// Task with 60 min custom timeout but no progress for 70 min — IS stale.
+		"custom-60-stale": {
+			TaskID:                  "custom-60-stale",
+			CreatedAt:               now.Add(-80 * time.Minute),
+			BackendStartedAt:        &backend30min,
+			LastProgressAt:          now.Add(-70 * time.Minute),
+			ExpectedDurationMinutes: 60,
+		},
+		// Task with 0 expected duration — uses default 6 min.
+		"default-timeout-stale": {
+			TaskID:                  "default-timeout-stale",
+			CreatedAt:               now.Add(-30 * time.Minute),
+			BackendStartedAt:        &backend30min,
+			LastProgressAt:          now.Add(-10 * time.Minute),
+			ExpectedDurationMinutes: 0,
+		},
+		// Task with 200 min expected — capped at 120 min max.
+		"capped-max": {
+			TaskID:                  "capped-max",
+			CreatedAt:               now.Add(-130 * time.Minute),
+			BackendStartedAt:        &backend30min,
+			LastProgressAt:          now.Add(-30 * time.Minute),
+			ExpectedDurationMinutes: 200,
+		},
+	}
+
+	stale := dm.removeStaleTasks(now)
+	staleIDs := make(map[string]bool)
+	for _, s := range stale {
+		staleIDs[s.TaskID] = true
+	}
+
+	if staleIDs["custom-60-active"] {
+		t.Fatal("custom-60-active should NOT be stale with recent progress")
+	}
+	if !staleIDs["custom-60-stale"] {
+		t.Fatal("custom-60-stale should be stale after 70 min without progress")
+	}
+	if !staleIDs["default-timeout-stale"] {
+		t.Fatal("default-timeout-stale should be stale after 10 min without progress")
+	}
+	if staleIDs["capped-max"] {
+		t.Fatal("capped-max should NOT be stale at 30 min (200 capped to 120)")
+	}
+}
+
 func TestMarkTaskProgressNoOp(t *testing.T) {
 	dm := NewDaemonManager(nil, nil)
 
@@ -104,7 +167,7 @@ func TestMarkTaskProgressNoOp(t *testing.T) {
 	dm.MarkTaskProgress("nonexistent")
 
 	// Task without BackendStartedAt should not update LastProgressAt
-	dm.TrackTask("queued-only", "d1", "a1")
+	dm.TrackTask("queued-only", "d1", "a1", 0)
 	dm.MarkTaskProgress("queued-only")
 
 	dm.mu.RLock()

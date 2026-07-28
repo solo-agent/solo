@@ -308,7 +308,7 @@ func TestDaemonOfflineTimesOutTrackedAgentRun(t *testing.T) {
 	daemonID := "daemon-" + agentID[:8]
 	dm.Register(&DaemonInfo{ID: daemonID, Host: "127.0.0.1", Port: 1, Capabilities: []string{"agent"}})
 	taskID := uuid.NewString()
-	dm.TrackTask(taskID, daemonID, agentID)
+	dm.TrackTask(taskID, daemonID, agentID, 0)
 	dm.AttachTaskRun(taskID, run.ID)
 
 	dm.mu.Lock()
@@ -364,7 +364,7 @@ func TestDaemonUnregisterTimesOutTrackedAgentRun(t *testing.T) {
 	daemonID := "daemon-" + agentID[:8]
 	dm.Register(&DaemonInfo{ID: daemonID, Host: "127.0.0.1", Port: 1, Capabilities: []string{"agent"}})
 	taskID := uuid.NewString()
-	dm.TrackTask(taskID, daemonID, agentID)
+	dm.TrackTask(taskID, daemonID, agentID, 0)
 	dm.AttachTaskRun(taskID, run.ID)
 
 	dm.Unregister(daemonID)
