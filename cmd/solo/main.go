@@ -38,6 +38,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"strconv"
 
 	"strings"
@@ -456,6 +457,8 @@ func handleTask(args []string, baseURL, token string) {
 		handleTaskUnclaim(args[1:], baseURL, token)
 	case "fan":
 		handleTaskFan(args[1:], baseURL, token)
+	case "pr":
+		handleTaskPR(args[1:], baseURL, token)
 	case "submit", "accept", "reject", "close", "reopen":
 		handleTaskLifecycle(args[1:], baseURL, token, args[0])
 	default:
@@ -882,6 +885,78 @@ func parseAgentFanList(s string) []string {
 		}
 	}
 	return result
+}
+
+// --- task pr ---
+
+func handleTaskPR(args []string, baseURL, token string) {
+	var channel string
+	var number int
+	var base string
+	fs := flag.NewFlagSet("task pr", flag.ExitOnError)
+	fs.StringVar(&channel, "c", "", "Channel ID or #name (required)")
+	fs.StringVar(&channel, "channel", "", "Channel ID or #name (required)")
+	fs.IntVar(&number, "n", 0, "Task number (required)")
+	fs.IntVar(&number, "number", 0, "Task number (required)")
+	fs.StringVar(&base, "base", "main", "Base branch for PR (default: main)")
+	fs.Parse(args)
+
+	if channel == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: -c <channel_id> is required")
+		doExit(exitUsage)
+	}
+	if number <= 0 {
+		fmt.Fprintln(os.Stderr, "solo: error: -n <number> must be a positive integer")
+		doExit(exitUsage)
+	}
+
+	channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+
+	// 1. Get task details
+	apiURL := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d", baseURL, channelID, number)
+	statusCode, body, err := doHTTP(http.MethodGet, apiURL, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+
+	var task struct {
+		ID         string `json:"id"`
+		TaskNumber int    `json:"task_number"`
+		Title      string `json:"title"`
+		Status     string `json:"status"`
+	}
+	if err := json.Unmarshal(body, &task); err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: failed to parse task: %v\n", err)
+		doExit(exitBusiness)
+	}
+
+	// 2. Try gh CLI first
+	branch := fmt.Sprintf("solo/task-%d", task.TaskNumber)
+	prTitle := fmt.Sprintf("Solo Task #%d: %s", task.TaskNumber, task.Title)
+	prBody := fmt.Sprintf("Closes solo task #%d\n\nStatus: %s", task.TaskNumber, task.Status)
+
+	ghArgs := []string{"pr", "create", "--base", base, "--head", branch, "--title", prTitle, "--body", prBody}
+	cmd := exec.Command("gh", ghArgs...)
+	output, ghErr := cmd.CombinedOutput()
+	if ghErr == nil {
+		fmt.Printf("PR created: %s\n", strings.TrimSpace(string(output)))
+		doExit(exitOK)
+	}
+
+	// 3. Fallback: instruct user to push and open manually
+	fmt.Fprintf(os.Stderr, "solo: gh CLI not available or failed: %v\n", ghErr)
+	fmt.Fprintf(os.Stderr, "solo: to create a PR manually:\n")
+	fmt.Fprintf(os.Stderr, "  git push origin %s\n", branch)
+	fmt.Fprintf(os.Stderr, "  Then open a PR with title: %s\n", prTitle)
+	doExit(exitBusiness)
 }
 
 func handleMessage(args []string, baseURL, token string) {

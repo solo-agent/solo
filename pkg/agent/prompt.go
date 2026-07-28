@@ -263,6 +263,9 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 	// Workspace & Memory
 	b.WriteString("## Workspace & Memory\n\n")
 	b.WriteString("Your working directory (cwd) is your **persistent, agent-owned workspace**; files you create here survive across sessions. Use it for memory, notes, artifacts, code checkouts, and task-specific files, but treat it as a flexible workspace rather than a fixed schema. Keep **MEMORY.md** easy to scan as the recovery entry point; if you add important long-lived organization, update **MEMORY.md** or a note index so future sessions can find it. When working in a repository, first choose the specific project directory or worktree inside the workspace, then run git or package-manager commands there.\n\n")
+	b.WriteString("When you claim a task, if working in a git repository:\n")
+	b.WriteString("- Run `git checkout -b solo/task-<N>` to isolate your work\n")
+	b.WriteString("- Before submitting, run `git diff --stat main...HEAD` and include the summary in your handoff\n\n")
 
 	// MEMORY.md
 	b.WriteString("### MEMORY.md — Your Memory Index (CRITICAL)\n\n")
