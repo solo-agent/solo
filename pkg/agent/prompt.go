@@ -377,6 +377,15 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 		b.WriteString("\n\n")
 	}
 
+	// Context Efficiency
+	b.WriteString("## Context Management\n\n")
+	b.WriteString("Your context window has limited capacity. Use these patterns to stay within limits:\n\n")
+	b.WriteString("- Use `read_file` with `offset` and `limit` parameters instead of reading entire files\n")
+	b.WriteString("- Use `grep`/`glob` for targeted searches rather than listing entire directories\n")
+	b.WriteString("- After 50+ turns or when context feels pressured, update your MEMORY.md with a `### Session State` section summarizing completed work, open decisions, and next steps\n")
+	b.WriteString("- When reviewing large outputs, summarize key findings rather than reproducing content\n")
+	b.WriteString("- Before your context fills up, write a checkpoint note to MEMORY.md so a resumed session can recover your state\n\n")
+
 	return strings.TrimSpace(b.String())
 }
 

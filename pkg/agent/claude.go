@@ -21,6 +21,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// ── Context pressure thresholds ──
+
+const (
+	contextWarningThreshold  int64 = 100_000 // emit warning event
+	contextCriticalThreshold int64 = 160_000 // trigger compaction
+	contextHardLimit         int64 = 200_000 // Claude's context window
+)
+
 // ── External interface ──
 
 // ClaudeBackend implements Backend by spawning the Claude Code CLI

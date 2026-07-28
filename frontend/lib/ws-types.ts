@@ -91,7 +91,9 @@ export type WSServerEvent =
   // ---- Inbox events (v1.5) ----
   | { type: 'inbox.updated'; }
   // ---- Lucy automatic team formation ----
-  | { type: 'team.formed'; formation_id: string; source_channel_id: string; source_message_id: string; channel_id: string; channel_name: string; member_count: number; relationship_count: number; template_id: string; relationship_docs_ready: boolean; warnings?: string[]; dashboard_url: string; created_at: string };
+  | { type: 'team.formed'; formation_id: string; source_channel_id: string; source_message_id: string; channel_id: string; channel_name: string; member_count: number; relationship_count: number; template_id: string; relationship_docs_ready: boolean; warnings?: string[]; dashboard_url: string; created_at: string }
+  // ---- Context pressure ----
+  | { type: 'agent.compacting'; agent_id: string; channel_id: string; tokens_used: number; context_limit: number; status: 'warning' | 'compacting' };
 
 /** 客户端发送的 WebSocket 命令 */
 export type WSClientCommand =
