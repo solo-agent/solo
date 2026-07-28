@@ -81,6 +81,45 @@ func TestBuildClaudeArgs(t *testing.T) {
 	})
 }
 
+func TestBuildClaudeArgsWithResumeSession(t *testing.T) {
+	t.Run("with resume session id", func(t *testing.T) {
+		opts := &ExecuteOptions{ResumeSessionID: "abc123-session"}
+		args := buildClaudeArgs(&ExecuteRequest{}, opts)
+
+		found := false
+		for i, a := range args {
+			if a == "--resume" && i+1 < len(args) && args[i+1] == "abc123-session" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("--resume flag not found in args: %v", args)
+		}
+	})
+
+	t.Run("without resume session id", func(t *testing.T) {
+		opts := &ExecuteOptions{}
+		args := buildClaudeArgs(&ExecuteRequest{}, opts)
+
+		for _, a := range args {
+			if a == "--resume" {
+				t.Fatal("--resume should not be present when ResumeSessionID is empty")
+			}
+		}
+	})
+
+	t.Run("empty resume session id", func(t *testing.T) {
+		opts := &ExecuteOptions{ResumeSessionID: ""}
+		args := buildClaudeArgs(&ExecuteRequest{}, opts)
+
+		for _, a := range args {
+			if a == "--resume" {
+				t.Fatal("--resume should not be present when ResumeSessionID is empty string")
+			}
+		}
+	})
+}
+
 func TestFilterCustomArgs(t *testing.T) {
 	blocked := map[string]blockedArgMode{
 		"--output-format":   blockedWithValue,

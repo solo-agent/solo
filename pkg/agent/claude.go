@@ -997,6 +997,9 @@ func buildClaudeArgs(req *ExecuteRequest, opts *ExecuteOptions) []string {
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", strconv.Itoa(opts.MaxTurns))
 	}
+	if opts.ResumeSessionID != "" {
+		args = append(args, "--resume", opts.ResumeSessionID)
+	}
 	if opts.SystemPrompt != "" {
 		// Write system prompt to .solo/system-prompt.md.
 		// The file IS the system prompt — single source of truth.
