@@ -36,6 +36,7 @@ type PendingTaskInfo struct {
 	RunID            string     `json:"run_id,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	BackendStartedAt *time.Time `json:"backend_started_at,omitempty"`
+	LastProgressAt   time.Time  `json:"last_progress_at,omitempty"`
 	TimeoutPhase     string     `json:"-"`
 }
 
@@ -250,6 +251,23 @@ func (dm *DaemonManager) MarkTaskBackendStarted(taskID string, startedAt *time.T
 		started = *startedAt
 	}
 	task.BackendStartedAt = &started
+	task.LastProgressAt = started
+	dm.pendingTasks[taskID] = task
+}
+
+// MarkTaskProgress resets the execution-phase heartbeat so a task that is
+// still producing events is not killed by the stale-task reaper.
+func (dm *DaemonManager) MarkTaskProgress(taskID string) {
+	if taskID == "" {
+		return
+	}
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+	task, ok := dm.pendingTasks[taskID]
+	if !ok || task.BackendStartedAt == nil {
+		return
+	}
+	task.LastProgressAt = time.Now()
 	dm.pendingTasks[taskID] = task
 }
 
@@ -716,7 +734,10 @@ func (dm *DaemonManager) removeStaleTasks(now time.Time) []PendingTaskInfo {
 		timeout := dm.queueTimeout
 		phase := "queue"
 		if task.BackendStartedAt != nil {
-			deadlineBase = *task.BackendStartedAt
+			deadlineBase = task.LastProgressAt
+			if deadlineBase.IsZero() {
+				deadlineBase = *task.BackendStartedAt
+			}
 			timeout = dm.executionTimeout
 			phase = "execution"
 		}

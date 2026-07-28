@@ -823,6 +823,13 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 	}()
 
 	for event := range eventCh {
+		// Heartbeat: any content-bearing event resets the execution deadline
+		// so actively-progressing tasks are not killed by the stale-task reaper.
+		switch event.Event {
+		case "thinking", "text", "tool_use", "tool_result", "agent.run.updated":
+			s.dm.MarkTaskProgress(taskReq.TaskID)
+		}
+
 		switch event.Event {
 		case "backend_started":
 			if markBackendStarted() {
