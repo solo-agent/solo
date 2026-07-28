@@ -1244,3 +1244,137 @@ func truncateForTitle(s string, maxLen int) string {
 	}
 	return string(runes[:maxLen]) + "..."
 }
+
+// FanOutTasks creates a parent task and N child tasks assigned to specific agents.
+// All operations happen within a single database transaction for atomicity.
+// Returns the parent task and list of child tasks.
+func (s *TaskService) FanOutTasks(ctx context.Context, channelID, creatorID, title, description string, agentNames []string, priority string) (*Task, []*Task, error) {
+	if len(agentNames) == 0 {
+		return nil, nil, fmt.Errorf("at least one agent name is required for fan-out")
+	}
+
+	// Resolve agent names to IDs.
+	agentRows, err := s.pool.Query(ctx,
+		`SELECT id, name FROM agents WHERE name = ANY($1) AND is_active = true`, agentNames,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve agent names: %w", err)
+	}
+	defer agentRows.Close()
+
+	type agentInfo struct {
+		ID   string
+		Name string
+	}
+	var agents []agentInfo
+	for agentRows.Next() {
+		var a agentInfo
+		if err := agentRows.Scan(&a.ID, &a.Name); err != nil {
+			return nil, nil, fmt.Errorf("scan agent: %w", err)
+		}
+		agents = append(agents, a)
+	}
+	if err := agentRows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate agents: %w", err)
+	}
+	if len(agents) == 0 {
+		return nil, nil, fmt.Errorf("no active agents found matching names: %v", agentNames)
+	}
+
+	// Build agent lookup map for ordering.
+	agentMap := make(map[string]string) // name -> id
+	for _, a := range agents {
+		agentMap[a.Name] = a.ID
+	}
+
+	// Create parent + children in a transaction.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	parentTask, err := s.createTaskTx(ctx, tx, channelID, creatorID, TaskCreateRequest{
+		Title:       title + " [fan-out]",
+		Description: description,
+		Priority:    priority,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("create parent task: %w", err)
+	}
+
+	var children []*Task
+	for i, name := range agentNames {
+		agentID, ok := agentMap[name]
+		if !ok {
+			continue // skip agents not found (shouldn't happen due to validation above)
+		}
+		childTitle := fmt.Sprintf("%s — %s (%d/%d)", title, name, i+1, len(agentNames))
+		child, err := s.createTaskTx(ctx, tx, channelID, creatorID, TaskCreateRequest{
+			Title:        childTitle,
+			Description:  description,
+			Priority:     priority,
+			ParentTaskID: parentTask.ID,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("create child task for %s: %w", name, err)
+		}
+		// Store agent name as claimer hint in a way the dispatch can pick up.
+		// We add the agent as a task "assignee" by setting claimer_id directly.
+		if _, err := tx.Exec(ctx,
+			`UPDATE tasks SET claimer_id = $1::uuid WHERE id = $2`,
+			agentID, child.ID,
+		); err != nil {
+			return nil, nil, fmt.Errorf("assign child task to agent: %w", err)
+		}
+		child.ClaimerID = agentID
+		child.ClaimerName = name
+		children = append(children, child)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, fmt.Errorf("commit fan-out: %w", err)
+	}
+
+	return parentTask, children, nil
+}
+
+// createTaskTx creates a single task within an existing transaction.
+func (s *TaskService) createTaskTx(ctx context.Context, tx pgx.Tx, channelID, creatorID string, req TaskCreateRequest) (*Task, error) {
+	id := uuid.NewString()
+	nextNumber, err := s.nextTaskNumber(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+
+	var msgID, parentTaskID interface{}
+	if req.MessageID != "" {
+		msgID = req.MessageID
+	}
+	if req.ParentTaskID != "" {
+		parentTaskID = req.ParentTaskID
+	}
+
+	now := time.Now()
+	_, err = tx.Exec(ctx,
+		`INSERT INTO tasks (id, task_number, channel_id, creator_id, title, description, status, priority, due_date, message_id, parent_task_id, expected_duration_minutes, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+		id, nextNumber, channelID, creatorID, req.Title, nullableStr(req.Description),
+		TaskStatusTodo, req.Priority, req.DueDate, msgID, parentTaskID, req.ExpectedDurationMinutes, now, now,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Task{
+		ID:         id,
+		TaskNumber: nextNumber,
+		ChannelID:  channelID,
+		CreatorID:  creatorID,
+		Title:      req.Title,
+		Status:     TaskStatusTodo,
+		Priority:   req.Priority,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}, nil
+}
