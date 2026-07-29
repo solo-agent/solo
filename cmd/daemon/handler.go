@@ -1222,12 +1222,8 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		case string(agent.MessageToolUse):
 			if chunk.Tool != nil {
 				// Detect solo message send for routing
-				if chunk.Tool.Name == "Bash" {
-					if input, ok := chunk.Tool.Input["command"].(string); ok {
-						if strings.Contains(input, "solo message send") {
-							messageSentViaCLI = true
-						}
-					}
+				if isSoloMessageSendToolCall(chunk.Tool) {
+					messageSentViaCLI = true
 				}
 				// Forward tool_use as SSE for agent view
 				inputJSON, _ := json.Marshal(chunk.Tool.Input)
@@ -1510,6 +1506,38 @@ func appendMaterializedAttachmentPaths(content string, attachments []agent.Attac
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func isSoloMessageSendToolCall(tool *agent.ToolInfo) bool {
+	if tool == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(tool.Name)) {
+	case "bash", "terminal":
+	default:
+		return false
+	}
+
+	command, ok := tool.Input["command"]
+	if !ok {
+		return false
+	}
+	switch value := command.(type) {
+	case string:
+		return strings.Contains(value, "solo message send")
+	case []string:
+		return strings.Contains(strings.Join(value, " "), "solo message send")
+	case []interface{}:
+		parts := make([]string, 0, len(value))
+		for _, part := range value {
+			if text, ok := part.(string); ok {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Contains(strings.Join(parts, " "), "solo message send")
+	default:
+		return false
+	}
 }
 
 func backendFinalStatus(result *agent.Result) string {

@@ -44,6 +44,63 @@ func TestBackendFinalStatusMapping(t *testing.T) {
 	}
 }
 
+func TestIsSoloMessageSendToolCallSupportsTraeTerminal(t *testing.T) {
+	tests := []struct {
+		name string
+		tool *agent.ToolInfo
+		want bool
+	}{
+		{
+			name: "claude bash",
+			tool: &agent.ToolInfo{
+				Name:  "Bash",
+				Input: map[string]interface{}{"command": "solo message send --target '#general' -c hello"},
+			},
+			want: true,
+		},
+		{
+			name: "trae terminal command string",
+			tool: &agent.ToolInfo{
+				Name:  "terminal",
+				Input: map[string]interface{}{"command": "solo message send --target '#general' -c hello"},
+			},
+			want: true,
+		},
+		{
+			name: "trae terminal command argv",
+			tool: &agent.ToolInfo{
+				Name: "terminal",
+				Input: map[string]interface{}{
+					"command": []interface{}{"/bin/zsh", "-c", "solo message send --target '#general' -c hello"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "unrelated terminal command",
+			tool: &agent.ToolInfo{
+				Name:  "terminal",
+				Input: map[string]interface{}{"command": "solo message read --target '#general'"},
+			},
+		},
+		{
+			name: "non-shell tool",
+			tool: &agent.ToolInfo{
+				Name:  "read_file",
+				Input: map[string]interface{}{"command": "solo message send"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSoloMessageSendToolCall(tt.tool); got != tt.want {
+				t.Fatalf("isSoloMessageSendToolCall() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestProcessTaskWithProviderFailsWhenStreamClosesWithoutDone(t *testing.T) {
 	taskID := "task-missing-done"
 	tm := newTaskManager()
