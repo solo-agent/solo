@@ -25,6 +25,10 @@ var hermesBlockedArgs = map[string]blockedArgMode{
 type HermesBackend struct {
 	executablePath string
 	logger         *slog.Logger
+	providerName   string
+	baseArgs       []string
+	blockedArgs    map[string]blockedArgMode
+	extraEnv       map[string]string
 }
 
 // NewHermesBackend creates a new HermesBackend.
@@ -37,11 +41,36 @@ func NewHermesBackend(executablePath string, logger *slog.Logger) *HermesBackend
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &HermesBackend{executablePath: executablePath, logger: logger}
+	return &HermesBackend{
+		executablePath: executablePath,
+		logger:         logger,
+		providerName:   "hermes",
+		baseArgs:       []string{"acp"},
+		blockedArgs:    hermesBlockedArgs,
+		extraEnv:       map[string]string{"HERMES_YOLO_MODE": "1"},
+	}
 }
 
 // Name returns "hermes".
-func (b *HermesBackend) Name() string { return "hermes" }
+func (b *HermesBackend) Name() string { return b.providerName }
+
+func (b *HermesBackend) commandArgs(opts *ExecuteOptions) []string {
+	args := append([]string(nil), b.baseArgs...)
+	args = append(args, filterCustomArgs(opts.ExtraArgs, b.blockedArgs)...)
+	args = append(args, filterCustomArgs(opts.CustomArgs, b.blockedArgs)...)
+	return args
+}
+
+func (b *HermesBackend) processEnv(opts *ExecuteOptions) map[string]string {
+	env := make(map[string]string, len(opts.Env)+len(b.extraEnv))
+	for k, v := range opts.Env {
+		env[k] = v
+	}
+	for k, v := range b.extraEnv {
+		env[k] = v
+	}
+	return env
+}
 
 // Execute launches the hermes CLI subprocess, sends the prompt via ACP,
 // streams output events through Session.Messages, and delivers the final
@@ -49,7 +78,7 @@ func (b *HermesBackend) Name() string { return "hermes" }
 func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *ExecuteOptions) (*Session, error) {
 	execPath := b.executablePath
 	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("hermes executable not found at %q: %w", execPath, err)
+		return nil, fmt.Errorf("%s executable not found at %q: %w", b.Name(), execPath, err)
 	}
 
 	timeout := 20 * time.Minute
@@ -61,47 +90,46 @@ func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
 	prompt := buildPrompt(req, opts)
-	hermesArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, hermesBlockedArgs)...)
+	commandArgs := b.commandArgs(opts)
 
-	cmd := exec.CommandContext(runCtx, execPath, hermesArgs...)
+	cmd := exec.CommandContext(runCtx, execPath, commandArgs...)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.WorkspaceDir != "" {
 		cmd.Dir = opts.WorkspaceDir
 	}
-	cmd.Env = buildEnvAt(opts.WorkspaceDir, opts.Env)
-	cmd.Env = append(cmd.Env, "HERMES_YOLO_MODE=1")
+	cmd.Env = buildEnvAt(opts.WorkspaceDir, b.processEnv(opts))
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("hermes: stdout pipe: %w", err)
+		return nil, fmt.Errorf("%s: stdout pipe: %w", b.Name(), err)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("hermes: stdin pipe: %w", err)
+		return nil, fmt.Errorf("%s: stdin pipe: %w", b.Name(), err)
 	}
 
-	providerErr := newACPProviderErrorSniffer("hermes")
+	providerErr := newACPProviderErrorSniffer(b.Name())
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("hermes: stderr pipe: %w", err)
+		return nil, fmt.Errorf("%s: stderr pipe: %w", b.Name(), err)
 	}
 
 	if err := cmd.Start(); err != nil {
 		cancel()
-		return nil, fmt.Errorf("hermes: start: %w", err)
+		return nil, fmt.Errorf("%s: start: %w", b.Name(), err)
 	}
 
-	stderrSink := io.MultiWriter(newLogWriter(b.logger, "[hermes:stderr] "), providerErr)
+	stderrSink := io.MultiWriter(newLogWriter(b.logger, "["+b.Name()+":stderr] "), providerErr)
 	stderrDone := make(chan struct{})
 	go func() {
 		defer close(stderrDone)
 		_, _ = io.Copy(stderrSink, stderr)
 	}()
 
-	b.logger.Info("hermes: started", "pid", cmd.Process.Pid, "cwd", cmd.Dir)
+	b.logger.Info(b.Name()+": started", "pid", cmd.Process.Pid, "cwd", cmd.Dir)
 
 	msgCh := make(chan OutputChunk, 256)
 	resCh := make(chan *Result, 1)
@@ -149,7 +177,7 @@ func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 			}
 			cl.handleLine(line)
 		}
-		cl.closeAllPending(fmt.Errorf("hermes process exited"))
+		cl.closeAllPending(fmt.Errorf("%s process exited", b.Name()))
 	}()
 
 	var stopOnce sync.Once
@@ -188,7 +216,7 @@ func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 		})
 		if err != nil {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("hermes initialize failed: %v", err)
+			finalError = fmt.Sprintf("%s initialize failed: %v", b.Name(), err)
 			resCh <- &Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
@@ -210,21 +238,21 @@ func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 			result, err := cl.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model))
 			if err != nil {
 				finalStatus = "failed"
-				finalError = fmt.Sprintf("hermes session/new failed: %v", err)
+				finalError = fmt.Sprintf("%s session/new failed: %v", b.Name(), err)
 				resCh <- &Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
 			sessionID = extractACPSessionID(result)
 			if sessionID == "" {
 				finalStatus = "failed"
-				finalError = "hermes session/new returned no session ID"
+				finalError = b.Name() + " session/new returned no session ID"
 				resCh <- &Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
 		}
 
 		cl.sessionID = sessionID
-		b.logger.Info("hermes: session created", "session_id", sessionID)
+		b.logger.Info(b.Name()+": session created", "session_id", sessionID)
 		trySend(msgCh, OutputChunk{Type: string(MessageStatus), Content: "running", SessionID: sessionID})
 
 		// 3. Set model if specified.
@@ -233,9 +261,9 @@ func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 				"sessionId": sessionID,
 				"modelId":   opts.Model,
 			}); err != nil {
-				b.logger.Warn("hermes: set_session_model failed", "error", err, "requested_model", opts.Model)
+				b.logger.Warn(b.Name()+": set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
-				finalError = fmt.Sprintf("hermes could not switch to model %q: %v", opts.Model, err)
+				finalError = fmt.Sprintf("%s could not switch to model %q: %v", b.Name(), opts.Model, err)
 				resCh <- &Result{
 					Status:     finalStatus,
 					Error:      finalError,
@@ -243,7 +271,7 @@ func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 				}
 				return
 			}
-			b.logger.Info("hermes: session model set", "model", opts.Model)
+			b.logger.Info(b.Name()+": session model set", "model", opts.Model)
 		}
 
 		// 4. Build prompt blocks with role-based format so the agent
@@ -266,20 +294,20 @@ func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 		if err != nil {
 			if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 				finalStatus = "timeout"
-				finalError = fmt.Sprintf("hermes timed out after %s", timeout)
+				finalError = fmt.Sprintf("%s timed out after %s", b.Name(), timeout)
 			} else if errors.Is(runCtx.Err(), context.Canceled) {
 				finalStatus = "cancelled"
 				finalError = "execution cancelled"
 			} else {
 				finalStatus = "failed"
-				finalError = fmt.Sprintf("hermes session/prompt failed: %v", err)
+				finalError = fmt.Sprintf("%s session/prompt failed: %v", b.Name(), err)
 			}
 		} else {
 			select {
 			case pr := <-promptDone:
 				if pr.stopReason == "cancelled" {
 					finalStatus = "cancelled"
-					finalError = "hermes cancelled the prompt"
+					finalError = b.Name() + " cancelled the prompt"
 				}
 				cl.usageMu.Lock()
 				cl.usage.InputTokens += pr.usage.InputTokens
@@ -290,7 +318,7 @@ func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 		}
 
 		duration := time.Since(startTime)
-		b.logger.Info("hermes: finished",
+		b.logger.Info(b.Name()+": finished",
 			"status", finalStatus,
 			"session_id", sessionID,
 			"duration", duration.Round(time.Millisecond).String(),
@@ -369,19 +397,10 @@ func (s *hermesPersistentState) Notify(msg string) error { return s.runner.write
 func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *ExecuteOptions) (*PersistentSession, error) {
 	execPath := b.executablePath
 	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("hermes executable not found at %q: %w", execPath, err)
+		return nil, fmt.Errorf("%s executable not found at %q: %w", b.Name(), execPath, err)
 	}
 
-	hermesArgs := append([]string{"acp"}, filterCustomArgs(opts.ExtraArgs, hermesBlockedArgs)...)
-	hermesArgs = append(hermesArgs, filterCustomArgs(opts.CustomArgs, hermesBlockedArgs)...)
-
-	extraEnv := make(map[string]string, len(opts.Env)+1)
-	for k, v := range opts.Env {
-		extraEnv[k] = v
-	}
-	extraEnv["HERMES_YOLO_MODE"] = "1"
-
-	runner, err := startPersistent(ctx, execPath, hermesArgs, opts.WorkspaceDir, extraEnv, b.logger)
+	runner, err := startPersistent(ctx, execPath, b.commandArgs(opts), opts.WorkspaceDir, b.processEnv(opts), b.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -391,7 +410,7 @@ func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 	turn, turnErr := state.turns.begin(opts.Model)
 	if turnErr != nil {
 		_ = runner.close()
-		return nil, fmt.Errorf("hermes: begin initial turn: %w", turnErr)
+		return nil, fmt.Errorf("%s: begin initial turn: %w", b.Name(), turnErr)
 	}
 
 	cl := &acpClient{
@@ -414,8 +433,8 @@ func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 			}
 			cl.handleLine(line)
 		}
-		cl.closeAllPending(fmt.Errorf("hermes process exited"))
-		state.turns.failActive("hermes process exited unexpectedly")
+		cl.closeAllPending(fmt.Errorf("%s process exited", b.Name()))
+		state.turns.failActive(b.Name() + " process exited unexpectedly")
 	}()
 
 	handleError := func(errMsg string) {
@@ -432,7 +451,7 @@ func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 		"clientCapabilities": map[string]any{},
 	})
 	if err != nil {
-		handleError(fmt.Sprintf("hermes initialize failed: %v", err))
+		handleError(fmt.Sprintf("%s initialize failed: %v", b.Name(), err))
 		_ = runner.close()
 		return &PersistentSession{Messages: turn.msgCh, Result: turn.resCh, state: state}, nil
 	}
@@ -454,20 +473,20 @@ func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 	if sessionID == "" {
 		result, err := cl.request(ctx, "session/new", buildHermesSessionParams(cwd, opts.Model))
 		if err != nil {
-			handleError(fmt.Sprintf("hermes session/new failed: %v", err))
+			handleError(fmt.Sprintf("%s session/new failed: %v", b.Name(), err))
 			_ = runner.close()
 			return &PersistentSession{Messages: turn.msgCh, Result: turn.resCh, state: state}, nil
 		}
 		sessionID = extractACPSessionID(result)
 		if sessionID == "" {
-			handleError("hermes session/new returned no session ID")
+			handleError(b.Name() + " session/new returned no session ID")
 			_ = runner.close()
 			return &PersistentSession{Messages: turn.msgCh, Result: turn.resCh, state: state}, nil
 		}
 	}
 	cl.sessionID = sessionID
 	state.sessionID = sessionID
-	b.logger.Info("hermes: persistent session created", "session_id", sessionID)
+	b.logger.Info(b.Name()+": persistent session created", "session_id", sessionID)
 
 	// 3. Set model if specified (session/new already passes model, but
 	// explicit set_model provides a clearer error path).
@@ -476,7 +495,7 @@ func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 			"sessionId": sessionID,
 			"modelId":   opts.Model,
 		}); err != nil {
-			b.logger.Warn("hermes: set_session_model failed", "error", err)
+			b.logger.Warn(b.Name()+": set_session_model failed", "error", err)
 		}
 	}
 
@@ -495,7 +514,7 @@ func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 
 	startACPInitialPromptTurn(acpInitialPromptTurn{
 		ctx:          ctx,
-		provider:     "hermes",
+		provider:     b.Name(),
 		sessionID:    sessionID,
 		promptBlocks: promptBlocks,
 		client:       cl,
@@ -519,16 +538,16 @@ func (b *HermesBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 func (b *HermesBackend) Send(ctx context.Context, ps *PersistentSession, messages []Message) (*PersistentSession, error) {
 	state, ok := ps.state.(*hermesPersistentState)
 	if !ok || state == nil {
-		return nil, fmt.Errorf("hermes: invalid session state")
+		return nil, fmt.Errorf("%s: invalid session state", b.Name())
 	}
 	if !state.runner.isAlive() {
-		return nil, fmt.Errorf("hermes: session process has exited")
+		return nil, fmt.Errorf("%s: session process has exited", b.Name())
 	}
 
 	prompt := buildPromptFromMessages(messages)
 	turn, err := state.turns.begin("")
 	if err != nil {
-		return nil, fmt.Errorf("hermes: %w", err)
+		return nil, fmt.Errorf("%s: %w", b.Name(), err)
 	}
 
 	_, err = state.client.request(ctx, "session/prompt", map[string]any{
@@ -539,12 +558,12 @@ func (b *HermesBackend) Send(ctx context.Context, ps *PersistentSession, message
 	})
 	if err != nil {
 		state.turns.finish(turn, acpPromptErrorStatus(ctx), err.Error())
-		return nil, fmt.Errorf("hermes persistent session/prompt: %w", err)
+		return nil, fmt.Errorf("%s persistent session/prompt: %w", b.Name(), err)
 	}
 
 	state.turns.finish(turn, "completed", "")
 
-	b.logger.Info("hermes: persistent turn completed via Send",
+	b.logger.Info(b.Name()+": persistent turn completed via Send",
 		"session_id", state.sessionID,
 		"duration", time.Since(turn.startedAt).Round(time.Millisecond).String(),
 	)
@@ -565,7 +584,7 @@ func (b *HermesBackend) Send(ctx context.Context, ps *PersistentSession, message
 func (b *HermesBackend) Close(ps *PersistentSession) error {
 	state, ok := ps.state.(*hermesPersistentState)
 	if !ok || state == nil {
-		return fmt.Errorf("hermes: invalid session state")
+		return fmt.Errorf("%s: invalid session state", b.Name())
 	}
 	return state.runner.close()
 }
@@ -574,7 +593,7 @@ func (b *HermesBackend) Close(ps *PersistentSession) error {
 func (b *HermesBackend) ForceClose(ps *PersistentSession) error {
 	state, ok := ps.state.(*hermesPersistentState)
 	if !ok || state == nil {
-		return fmt.Errorf("hermes: invalid session state")
+		return fmt.Errorf("%s: invalid session state", b.Name())
 	}
 	return state.runner.forceClose()
 }

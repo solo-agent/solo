@@ -488,6 +488,11 @@ func agentGlobalRoots(provider, home string) []skillloader.SkillRoot {
 		return []skillloader.SkillRoot{
 			{Path: filepath.Join(home, ".hermes", "skills"), Kind: "hermes", Priority: 35},
 		}
+	case "trae":
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(home, ".trae", "skills"), Kind: "trae", Priority: 35},
+			{Path: filepath.Join(home, ".agents", "skills"), Kind: "agents", Priority: 25},
+		}
 	case "pi":
 		return []skillloader.SkillRoot{
 			{Path: filepath.Join(home, ".pi", "agent", "skills"), Kind: "pi", Priority: 35},
@@ -536,6 +541,11 @@ func agentWorkspaceRoots(provider, wsDir string) []skillloader.SkillRoot {
 	case "hermes":
 		return []skillloader.SkillRoot{
 			{Path: filepath.Join(wsDir, ".hermes", "skills"), Kind: "ws-hermes", Priority: 100},
+		}
+	case "trae":
+		return []skillloader.SkillRoot{
+			{Path: filepath.Join(wsDir, ".trae", "skills"), Kind: "ws-trae", Priority: 100},
+			{Path: filepath.Join(wsDir, ".agents", "skills"), Kind: "ws-trae", Priority: 80},
 		}
 	case "pi":
 		return []skillloader.SkillRoot{

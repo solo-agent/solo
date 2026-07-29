@@ -97,6 +97,15 @@ func init() {
 		Protocols:      []string{"acp"},
 	}, hermesFactory)
 
+	// ── trae — Trae CLI via ACP ─────────────────────────────────────
+	r.Register(AdapterMeta{
+		Type:           "trae",
+		DisplayName:    "Trae CLI",
+		RequiresBinary: "traex",
+		DetectCommand:  "--version",
+		Protocols:      []string{"acp"},
+	}, traeFactory)
+
 	// ── pi — Pi CLI via JSONL ───────────────────────────────────────
 	r.Register(AdapterMeta{
 		Type:           "pi",
@@ -193,6 +202,11 @@ func openclawFactory(cfg BackendConfig) (Backend, error) {
 func hermesFactory(cfg BackendConfig) (Backend, error) {
 	execPath := execPathOrDefault(cfg.ExecPath, "HERMES_BIN")
 	return NewHermesBackend(execPath, logOrDefault(cfg.Logger)), nil
+}
+
+func traeFactory(cfg BackendConfig) (Backend, error) {
+	execPath := execPathOrDefault(cfg.ExecPath, "TRAEX_BIN")
+	return NewTraeBackend(execPath, logOrDefault(cfg.Logger)), nil
 }
 
 func piFactory(cfg BackendConfig) (Backend, error) {

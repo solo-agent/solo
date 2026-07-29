@@ -118,8 +118,18 @@ Daemon 启动时会从 `PATH` 自动检测后端。
 | OpenCode CLI | `opencode` | ACP |
 | Hermes CLI | `hermes` | ACP |
 | OpenClaw Agent | `openclaw` | ACP |
+| Trae CLI | `traex` | ACP |
 
 每个智能体都可以覆盖 `system_prompt`、`model_name`、`custom_env` 和 `custom_args`。
+
+选择 Trae CLI 作为运行时前，请先安装并登录：
+
+```bash
+curl -fsSL https://code.byted.org/api/tos-proxy/download/traex_install.sh | sh
+traex login --sso
+```
+
+Solo 会从 `PATH` 检测 `traex`；如需指定其他二进制路径，可设置 `TRAEX_BIN`。
 
 ## 核心概念
 

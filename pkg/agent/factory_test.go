@@ -230,6 +230,22 @@ func TestNewBackend_Hermes(t *testing.T) {
 	}
 }
 
+func TestNewBackend_Trae(t *testing.T) {
+	b, err := NewBackend("trae", "")
+	if err != nil {
+		t.Fatalf("NewBackend(\"trae\") failed: %v", err)
+	}
+	if b == nil {
+		t.Fatal("expected non-nil backend")
+	}
+	if b.Name() != "trae" {
+		t.Errorf("expected name 'trae', got %q", b.Name())
+	}
+	if _, ok := b.(*TraeBackend); !ok {
+		t.Error("expected *TraeBackend type")
+	}
+}
+
 func TestNewBackend_Pi(t *testing.T) {
 	b, err := NewBackend("pi", "")
 	if err != nil {
@@ -390,6 +406,16 @@ func TestNewHermesBackend_Defaults(t *testing.T) {
 	}
 	if b.Name() != "hermes" {
 		t.Errorf("expected name 'hermes', got %q", b.Name())
+	}
+}
+
+func TestNewTraeBackend_Defaults(t *testing.T) {
+	b := NewTraeBackend("", nil)
+	if b.executablePath != "traex" {
+		t.Errorf("expected executablePath 'traex', got %q", b.executablePath)
+	}
+	if b.Name() != "trae" {
+		t.Errorf("expected name 'trae', got %q", b.Name())
 	}
 }
 
