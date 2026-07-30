@@ -263,6 +263,9 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 	// Workspace & Memory
 	b.WriteString("## Workspace & Memory\n\n")
 	b.WriteString("Your working directory (cwd) is your **persistent, agent-owned workspace**; files you create here survive across sessions. Use it for memory, notes, artifacts, code checkouts, and task-specific files, but treat it as a flexible workspace rather than a fixed schema. Keep **MEMORY.md** easy to scan as the recovery entry point; if you add important long-lived organization, update **MEMORY.md** or a note index so future sessions can find it. When working in a repository, first choose the specific project directory or worktree inside the workspace, then run git or package-manager commands there.\n\n")
+	b.WriteString("When you claim a task, if working in a git repository:\n")
+	b.WriteString("- Run `git checkout -b solo/task-<N>` to isolate your work\n")
+	b.WriteString("- Before submitting, run `git diff --stat main...HEAD` and include the summary in your handoff\n\n")
 
 	// MEMORY.md
 	b.WriteString("### MEMORY.md — Your Memory Index (CRITICAL)\n\n")
@@ -376,6 +379,15 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 		b.WriteString(agent.ThinkingRuntimePrompt)
 		b.WriteString("\n\n")
 	}
+
+	// Context Efficiency
+	b.WriteString("## Context Management\n\n")
+	b.WriteString("Your context window has limited capacity. Use these patterns to stay within limits:\n\n")
+	b.WriteString("- Use `read_file` with `offset` and `limit` parameters instead of reading entire files\n")
+	b.WriteString("- Use `grep`/`glob` for targeted searches rather than listing entire directories\n")
+	b.WriteString("- After 50+ turns or when context feels pressured, update your MEMORY.md with a `### Session State` section summarizing completed work, open decisions, and next steps\n")
+	b.WriteString("- When reviewing large outputs, summarize key findings rather than reproducing content\n")
+	b.WriteString("- Before your context fills up, write a checkpoint note to MEMORY.md so a resumed session can recover your state\n\n")
 
 	return strings.TrimSpace(b.String())
 }

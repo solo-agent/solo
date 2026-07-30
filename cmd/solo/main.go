@@ -38,6 +38,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"strconv"
 
 	"strings"
@@ -454,6 +455,10 @@ func handleTask(args []string, baseURL, token string) {
 		handleTaskCreate(args[1:], baseURL, token)
 	case "unclaim":
 		handleTaskUnclaim(args[1:], baseURL, token)
+	case "fan":
+		handleTaskFan(args[1:], baseURL, token)
+	case "pr":
+		handleTaskPR(args[1:], baseURL, token)
 	case "submit", "accept", "reject", "close", "reopen":
 		handleTaskLifecycle(args[1:], baseURL, token, args[0])
 	default:
@@ -635,6 +640,7 @@ func handleTaskUpdate(args []string, baseURL, token string) {
 func handleTaskCreate(args []string, baseURL, token string) {
 	var channel, title, description, priority string
 	var parent int
+	var expectedDuration int
 	fs := flag.NewFlagSet("task create", flag.ExitOnError)
 	fs.StringVar(&channel, "c", "", "Channel ID or #name (required)")
 	fs.StringVar(&channel, "channel", "", "Channel ID or #name (required)")
@@ -642,6 +648,8 @@ func handleTaskCreate(args []string, baseURL, token string) {
 	fs.StringVar(&description, "description", "", "Task description")
 	fs.StringVar(&priority, "priority", "", "Task priority: p0|p1|p2|p3")
 	fs.IntVar(&parent, "parent", 0, "Parent task number")
+	fs.IntVar(&expectedDuration, "expected-duration", 0, "Custom execution timeout in minutes (max 120)")
+	fs.IntVar(&expectedDuration, "d", 0, "Custom execution timeout in minutes (max 120)")
 	fs.Parse(args)
 
 	if channel == "" {
@@ -660,6 +668,10 @@ func handleTaskCreate(args []string, baseURL, token string) {
 			doExit(exitUsage)
 		}
 	}
+	if expectedDuration < 0 || expectedDuration > 120 {
+		fmt.Fprintln(os.Stderr, "solo: error: --expected-duration must be 0-120")
+		doExit(exitUsage)
+	}
 
 	channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
 	if resolveErr != nil {
@@ -667,10 +679,13 @@ func handleTaskCreate(args []string, baseURL, token string) {
 		doExit(exitBusiness)
 	}
 
-	bodyMap := map[string]string{
+	bodyMap := map[string]interface{}{
 		"title":       title,
 		"description": description,
 		"priority":    priority,
+	}
+	if expectedDuration > 0 {
+		bodyMap["expected_duration_minutes"] = expectedDuration
 	}
 
 	// Resolve --parent: look up the parent task by number in the channel to get its UUID.
@@ -798,6 +813,151 @@ func handleTaskLifecycle(args []string, baseURL, token, action string) {
 // ---------------------------------------------------------------------------
 // message
 // ---------------------------------------------------------------------------
+
+// --- task fan ---
+
+func handleTaskFan(args []string, baseURL, token string) {
+	var channel, title, description, priority, agentsStr string
+	fs := flag.NewFlagSet("task fan", flag.ExitOnError)
+	fs.StringVar(&channel, "c", "", "Channel ID or #name (required)")
+	fs.StringVar(&channel, "channel", "", "Channel ID or #name (required)")
+	fs.StringVar(&title, "title", "", "Parent task title (required)")
+	fs.StringVar(&description, "description", "", "Task description")
+	fs.StringVar(&priority, "priority", "", "Task priority: p0|p1|p2|p3")
+	fs.StringVar(&agentsStr, "agents", "", "Comma-separated @agent names: @fe,@be,@qa")
+	fs.Parse(args)
+
+	if channel == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: -c <channel_id> is required")
+		doExit(exitUsage)
+	}
+	if title == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: --title is required")
+		doExit(exitUsage)
+	}
+	if agentsStr == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: --agents is required (e.g. --agents @fe,@be)")
+		doExit(exitUsage)
+	}
+
+	channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+
+	agentNames := parseAgentFanList(agentsStr)
+	if len(agentNames) == 0 {
+		fmt.Fprintln(os.Stderr, "solo: error: no valid agent names found in --agents")
+		doExit(exitUsage)
+	}
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"title":       title,
+		"description": description,
+		"priority":    priority,
+		"agents":      agentNames,
+	})
+	url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/fan", baseURL, channelID)
+	statusCode, respBody, err := doHTTP(http.MethodPost, url, token, body)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, respBody)
+	}
+
+	fmt.Println(string(respBody))
+	doExit(exitOK)
+}
+
+// parseAgentFanList splits "--agents @fe,@be,@qa" into ["fe","be","qa"].
+func parseAgentFanList(s string) []string {
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		p = strings.TrimPrefix(p, "@")
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+// --- task pr ---
+
+func handleTaskPR(args []string, baseURL, token string) {
+	var channel string
+	var number int
+	var base string
+	fs := flag.NewFlagSet("task pr", flag.ExitOnError)
+	fs.StringVar(&channel, "c", "", "Channel ID or #name (required)")
+	fs.StringVar(&channel, "channel", "", "Channel ID or #name (required)")
+	fs.IntVar(&number, "n", 0, "Task number (required)")
+	fs.IntVar(&number, "number", 0, "Task number (required)")
+	fs.StringVar(&base, "base", "main", "Base branch for PR (default: main)")
+	fs.Parse(args)
+
+	if channel == "" {
+		fmt.Fprintln(os.Stderr, "solo: error: -c <channel_id> is required")
+		doExit(exitUsage)
+	}
+	if number <= 0 {
+		fmt.Fprintln(os.Stderr, "solo: error: -n <number> must be a positive integer")
+		doExit(exitUsage)
+	}
+
+	channelID, resolveErr := resolveChannelParam(baseURL, token, channel)
+	if resolveErr != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: %v\n", resolveErr)
+		doExit(exitBusiness)
+	}
+
+	// 1. Get task details
+	apiURL := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d", baseURL, channelID, number)
+	statusCode, body, err := doHTTP(http.MethodGet, apiURL, token, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
+		doExit(exitUsage)
+	}
+	if statusCode >= 400 {
+		handleNonProxyHTTPError(statusCode, body)
+	}
+
+	var task struct {
+		ID         string `json:"id"`
+		TaskNumber int    `json:"task_number"`
+		Title      string `json:"title"`
+		Status     string `json:"status"`
+	}
+	if err := json.Unmarshal(body, &task); err != nil {
+		fmt.Fprintf(os.Stderr, "solo: error: failed to parse task: %v\n", err)
+		doExit(exitBusiness)
+	}
+
+	// 2. Try gh CLI first
+	branch := fmt.Sprintf("solo/task-%d", task.TaskNumber)
+	prTitle := fmt.Sprintf("Solo Task #%d: %s", task.TaskNumber, task.Title)
+	prBody := fmt.Sprintf("Closes solo task #%d\n\nStatus: %s", task.TaskNumber, task.Status)
+
+	ghArgs := []string{"pr", "create", "--base", base, "--head", branch, "--title", prTitle, "--body", prBody}
+	cmd := exec.Command("gh", ghArgs...)
+	output, ghErr := cmd.CombinedOutput()
+	if ghErr == nil {
+		fmt.Printf("PR created: %s\n", strings.TrimSpace(string(output)))
+		doExit(exitOK)
+	}
+
+	// 3. Fallback: instruct user to push and open manually
+	fmt.Fprintf(os.Stderr, "solo: gh CLI not available or failed: %v\n", ghErr)
+	fmt.Fprintf(os.Stderr, "solo: to create a PR manually:\n")
+	fmt.Fprintf(os.Stderr, "  git push origin %s\n", branch)
+	fmt.Fprintf(os.Stderr, "  Then open a PR with title: %s\n", prTitle)
+	doExit(exitBusiness)
+}
 
 func handleMessage(args []string, baseURL, token string) {
 	if len(args) < 1 {

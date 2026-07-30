@@ -42,12 +42,13 @@ func NewTaskHandler(pool *pgxpool.Pool, hub realtime.Broadcaster, agentSvc *serv
 // --- Request/Response types ---
 
 type CreateTaskRequest struct {
-	Title        string     `json:"title"`
-	Description  string     `json:"description,omitempty"`
-	Priority     string     `json:"priority,omitempty"`
-	DueDate      *time.Time `json:"due_date,omitempty"`
-	ChannelID    string     `json:"channel_id,omitempty"`
-	ParentTaskID string     `json:"parent_task_id,omitempty"`
+	Title                   string     `json:"title"`
+	Description             string     `json:"description,omitempty"`
+	Priority                string     `json:"priority,omitempty"`
+	DueDate                 *time.Time `json:"due_date,omitempty"`
+	ChannelID               string     `json:"channel_id,omitempty"`
+	ParentTaskID            string     `json:"parent_task_id,omitempty"`
+	ExpectedDurationMinutes int        `json:"expected_duration_minutes,omitempty"`
 }
 
 type UpdateTaskRequest struct {
@@ -178,11 +179,12 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	svcReq := service.TaskCreateRequest{
-		Title:        req.Title,
-		Description:  req.Description,
-		Priority:     req.Priority,
-		DueDate:      req.DueDate,
-		ParentTaskID: req.ParentTaskID,
+		Title:                   req.Title,
+		Description:             req.Description,
+		Priority:                req.Priority,
+		DueDate:                 req.DueDate,
+		ParentTaskID:            req.ParentTaskID,
+		ExpectedDurationMinutes: req.ExpectedDurationMinutes,
 	}
 
 	task, err := h.svc.CreateTask(r.Context(), channelID, userID, svcReq)
@@ -845,6 +847,52 @@ func (h *TaskHandler) writeTaskLifecycleError(w http.ResponseWriter, err error) 
 }
 
 // --- asTask — Convert message to task ---
+
+// FanOut handles POST /api/v1/channels/{channelID}/tasks/fan
+// Creates a parent task and N child tasks assigned to the specified agents.
+func (h *TaskHandler) FanOut(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	channelID := chi.URLParam(r, "channelID")
+	if channelID == "" {
+		writeError(w, http.StatusBadRequest, "channel ID is required")
+		return
+	}
+
+	var req struct {
+		Title       string   `json:"title"`
+		Description string   `json:"description,omitempty"`
+		Priority    string   `json:"priority,omitempty"`
+		Agents      []string `json:"agents"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Title == "" {
+		writeError(w, http.StatusBadRequest, "task title is required")
+		return
+	}
+	if len(req.Agents) == 0 {
+		writeError(w, http.StatusBadRequest, "at least one agent name is required")
+		return
+	}
+
+	parent, children, err := h.svc.FanOutTasks(r.Context(), channelID, userID, req.Title, req.Description, req.Agents, req.Priority)
+	if err != nil {
+		slog.Error("failed to fan-out tasks", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create fan-out tasks")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"parent_task": parent,
+		"child_tasks": children,
+	})
+}
 
 // ConvertToTask handles POST /api/v1/channels/{channelID}/messages/{messageID}/convert-to-task
 func (h *TaskHandler) ConvertToTask(w http.ResponseWriter, r *http.Request) {

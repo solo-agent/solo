@@ -40,6 +40,10 @@ type ExecuteOptions struct {
 	CustomArgs                []string          `json:"custom_args,omitempty"`
 	ExtraArgs                 []string          `json:"extra_args,omitempty"`                  // daemon-level global default args
 	SemanticInactivityTimeout time.Duration     `json:"semantic_inactivity_timeout,omitempty"` // 0 = disabled
+
+	// ContextPressureCallback is invoked after each turn with the current cumulative
+	// input token count. The daemon can use this to emit SSE events and trigger compaction.
+	ContextPressureCallback func(tokensUsed int64) `json:"-"`
 }
 
 // Session represents a running agent execution.

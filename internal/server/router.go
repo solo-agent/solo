@@ -186,6 +186,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 				r.Route("/tasks", func(r chi.Router) {
 					r.Get("/", taskHandler.List)
 					r.Post("/", taskHandler.Create)
+					r.Post("/fan", taskHandler.FanOut)
 
 					r.Route("/{taskID}", func(r chi.Router) {
 						r.Get("/", taskHandler.Get)

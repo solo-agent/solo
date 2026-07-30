@@ -21,6 +21,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// ── Context pressure thresholds ──
+
+const (
+	contextWarningThreshold  int64 = 100_000 // emit warning event
+	contextCriticalThreshold int64 = 160_000 // trigger compaction
+	contextHardLimit         int64 = 200_000 // Claude's context window
+)
+
 // ── External interface ──
 
 // ClaudeBackend implements Backend by spawning the Claude Code CLI
@@ -318,9 +326,9 @@ func (s *claudePersistentState) Notify(msg string) error {
 
 // ── Persistent Backend: Start ────────────────────────────────────────────────
 
-// Start creates a persistent Claude Code session. The subprocess stays alive
-// after the initial prompt, waiting for additional input on stdin. Callers
-// consume Messages for streaming events and wait on Result for the turn outcome.
+// Start creates a persistent Claude Code session.
+// The subprocess stays alive after the initial prompt, waiting for additional input on stdin.
+// Callers consume Messages for streaming events and wait on Result for the turn outcome.
 func (b *ClaudeBackend) Start(ctx context.Context, req *ExecuteRequest, opts *ExecuteOptions) (*PersistentSession, error) {
 	execPath := b.executablePath
 	if _, err := exec.LookPath(execPath); err != nil {
@@ -996,6 +1004,9 @@ func buildClaudeArgs(req *ExecuteRequest, opts *ExecuteOptions) []string {
 	}
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", strconv.Itoa(opts.MaxTurns))
+	}
+	if opts.ResumeSessionID != "" {
+		args = append(args, "--resume", opts.ResumeSessionID)
 	}
 	if opts.SystemPrompt != "" {
 		// Write system prompt to .solo/system-prompt.md.
