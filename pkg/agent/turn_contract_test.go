@@ -188,6 +188,7 @@ func TestStableACPPersistentProviderTurnContract(t *testing.T) {
 	}{
 		{name: "opencode", new: func(path string) PersistentBackend { return NewOpenCodeBackend(path, slog.Default()) }},
 		{name: "hermes", new: func(path string) PersistentBackend { return NewHermesBackend(path, slog.Default()) }},
+		{name: "trae", new: func(path string) PersistentBackend { return NewTraeBackend(path, slog.Default()) }},
 		{name: "openclaw", new: func(path string) PersistentBackend { return NewOpenClawBackend(path, slog.Default()) }},
 	}
 

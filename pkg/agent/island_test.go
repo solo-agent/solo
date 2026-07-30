@@ -434,7 +434,7 @@ func TestInferActivityTextForBackend_StreamJSON(t *testing.T) {
 }
 
 func TestInferActivityTextForBackend_ACP(t *testing.T) {
-	for _, provider := range []string{"kimi", "kiro", "hermes"} {
+	for _, provider := range []string{"kimi", "kiro", "hermes", "trae"} {
 		t.Run(provider+"/tool_use normalises snake_case", func(t *testing.T) {
 			chunk := OutputChunk{
 				Type: string(MessageToolUse),

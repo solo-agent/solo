@@ -3,7 +3,10 @@ package service
 import (
 	"context"
 	"regexp"
+	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -11,6 +14,11 @@ import (
 // Pattern for matching @mentions in message content.
 // Supports alphanumeric names with underscores, hyphens, dots, and Unicode characters.
 var mentionPattern = regexp.MustCompile(`@([\p{L}\p{N}_\-\.]+)`)
+
+type agentMentionCandidate struct {
+	ID   string
+	Name string
+}
 
 // MentionService handles @mention parsing and resolution.
 type MentionService struct {
@@ -33,68 +41,101 @@ func NewMentionService(pool *pgxpool.Pool) *MentionService {
 // Only resolves Agent mentions (not user mentions). Only returns IDs of
 // agents that are active members of the channel.
 func (s *MentionService) ResolveMentions(ctx context.Context, content, channelID string) (mentionedIDs []string, hasMentions bool, err error) {
-	// Parse @names from content
-	matches := mentionPattern.FindAllStringSubmatch(content, -1)
-	if len(matches) == 0 {
+	if !strings.Contains(content, "@") {
 		return nil, false, nil
 	}
 
 	hasMentions = true
 
-	// Deduplicate mention names
-	nameSet := make(map[string]bool, len(matches))
-	for _, m := range matches {
-		name := strings.TrimSpace(m[1])
-		if name != "" {
-			nameSet[name] = true
-		}
-	}
-
-	if len(nameSet) == 0 {
-		return []string{}, true, nil
-	}
-
-	// Build query arguments
-	names := make([]string, 0, len(nameSet))
-	for n := range nameSet {
-		names = append(names, n)
-	}
-
-	// Resolve @names to agent IDs by joining agents with channel_members
+	// Load eligible names first so display names containing whitespace can be
+	// matched exactly instead of being truncated by a token regex.
 	query := `SELECT a.id, a.name
 	           FROM agents a
 	           JOIN channel_members cm ON cm.member_id = a.id AND cm.member_type = 'agent'
 	           WHERE cm.channel_id = $1
-	             AND a.is_active = true
-	             AND a.name = ANY($2)`
+	             AND a.is_active = true`
 
-	rows, err := s.pool.Query(ctx, query, channelID, names)
+	rows, err := s.pool.Query(ctx, query, channelID)
 	if err != nil {
 		return nil, true, err
 	}
 	defer rows.Close()
 
-	var agentIDs []string
-	seen := make(map[string]bool)
+	var candidates []agentMentionCandidate
 	for rows.Next() {
 		var id, name string
 		if err := rows.Scan(&id, &name); err != nil {
 			return nil, true, err
 		}
-		if !seen[id] {
-			agentIDs = append(agentIDs, id)
-			seen[id] = true
-		}
+		candidates = append(candidates, agentMentionCandidate{ID: id, Name: name})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, true, err
 	}
 
-	if agentIDs == nil {
+	agentIDs := resolveAgentMentionCandidates(content, candidates)
+	if len(agentIDs) == 0 {
 		return []string{}, true, nil
 	}
 
 	return agentIDs, true, nil
+}
+
+func resolveAgentMentionCandidates(content string, candidates []agentMentionCandidate) []string {
+	ordered := append([]agentMentionCandidate(nil), candidates...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return utf8.RuneCountInString(ordered[i].Name) > utf8.RuneCountInString(ordered[j].Name)
+	})
+
+	var resolved []string
+	seen := make(map[string]bool, len(ordered))
+	for offset := 0; offset < len(content); {
+		relative := strings.IndexByte(content[offset:], '@')
+		if relative < 0 {
+			break
+		}
+		at := offset + relative
+		offset = at + 1
+		if !isMentionStartBoundary(content, at) {
+			continue
+		}
+
+		afterAt := content[at+1:]
+		var longestName string
+		for _, candidate := range ordered {
+			if candidate.Name == "" || !strings.HasPrefix(afterAt, candidate.Name) {
+				continue
+			}
+			if !isMentionEndBoundary(afterAt[len(candidate.Name):]) {
+				continue
+			}
+			if longestName == "" {
+				longestName = candidate.Name
+			}
+			if candidate.Name != longestName || seen[candidate.ID] {
+				continue
+			}
+			resolved = append(resolved, candidate.ID)
+			seen[candidate.ID] = true
+		}
+	}
+	return resolved
+}
+
+func isMentionStartBoundary(content string, at int) bool {
+	if at == 0 {
+		return true
+	}
+	r, _ := utf8.DecodeLastRuneInString(content[:at])
+	return unicode.IsSpace(r) || unicode.IsPunct(r)
+}
+
+func isMentionEndBoundary(remaining string) bool {
+	if remaining == "" {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(remaining)
+	return unicode.IsSpace(r) || unicode.IsPunct(r)
 }
 
 // ResolveUserMentions parses @mention patterns in content, resolves them to

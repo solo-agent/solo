@@ -364,17 +364,29 @@ func (c *acpClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var resp map[string]any
 	switch method {
 	case "session/request_permission":
+		optionID := selectACPPermissionOption(raw["params"])
+		if optionID == "" {
+			resp = map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(rawID),
+				"result": map[string]any{
+					"outcome": map[string]any{"outcome": "cancelled"},
+				},
+			}
+			c.logger.Warn("agent permission request contained no approvable option", "method", method)
+			break
+		}
 		resp = map[string]any{
 			"jsonrpc": "2.0",
 			"id":      json.RawMessage(rawID),
 			"result": map[string]any{
 				"outcome": map[string]any{
 					"outcome":  "selected",
-					"optionId": "approve_for_session",
+					"optionId": optionID,
 				},
 			},
 		}
-		c.logger.Debug("auto-approved agent permission request", "method", method)
+		c.logger.Debug("auto-approved agent permission request", "method", method, "option_id", optionID)
 	default:
 		resp = map[string]any{
 			"jsonrpc": "2.0",
@@ -396,6 +408,51 @@ func (c *acpClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	if err := c.writeLine(data); err != nil {
 		c.logger.Warn("write agent-request response", "method", method, "error", err)
 	}
+}
+
+func selectACPPermissionOption(rawParams json.RawMessage) string {
+	var params struct {
+		Options []struct {
+			OptionID string `json:"optionId"`
+			Kind     string `json:"kind"`
+			Name     string `json:"name"`
+		} `json:"options"`
+	}
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return ""
+	}
+
+	score := func(optionID, kind, name string) int {
+		value := strings.ToLower(optionID + " " + kind + " " + name)
+		switch {
+		case strings.Contains(value, "reject"), strings.Contains(value, "deny"):
+			return -1
+		case strings.Contains(value, "allow_always"),
+			strings.Contains(value, "approve_for_session"),
+			strings.Contains(value, "session"),
+			strings.Contains(value, "always"):
+			return 3
+		case strings.Contains(value, "allow_once"),
+			strings.Contains(value, "approve_once"),
+			strings.Contains(value, "once"),
+			strings.Contains(value, "allow"),
+			strings.Contains(value, "approve"):
+			return 2
+		default:
+			return 1
+		}
+	}
+
+	bestID, bestScore := "", -1
+	for _, option := range params.Options {
+		if option.OptionID == "" {
+			continue
+		}
+		if candidateScore := score(option.OptionID, option.Kind, option.Name); candidateScore > bestScore {
+			bestID, bestScore = option.OptionID, candidateScore
+		}
+	}
+	return bestID
 }
 
 func (c *acpClient) handleResponse(raw map[string]json.RawMessage) {

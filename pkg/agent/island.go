@@ -86,7 +86,7 @@ func InferActivityText(chunk OutputChunk) string {
 //
 // Solo currently ships 12 CLI backends grouped into 3 protocol families:
 // stream-json (Claude / OpenCode / Cursor / Gemini / OpenClaw), jsonl
-// (Copilot / Pi), and acp (Kimi / Kiro / Hermes). Codex is technically
+// (Copilot / Pi), and acp (Kimi / Kiro / Hermes / Trae). Codex is technically
 // JSON-RPC but its backend implementation already emits the canonical
 // OutputChunk types so it falls through to the generic path.
 //
@@ -107,7 +107,7 @@ func InferActivityText(chunk OutputChunk) string {
 const (
 	familyStreamJSON = "stream-json" // claude, local, opencode, cursor, gemini, openclaw
 	familyJSONL      = "jsonl"       // copilot, pi
-	familyACP        = "acp"         // kimi, kiro, hermes
+	familyACP        = "acp"         // kimi, kiro, hermes, trae
 	familyOther      = "other"       // codex (already emits canonical OutputChunk) + unknown
 )
 
@@ -117,7 +117,7 @@ func backendFamily(provider string) string {
 		return familyStreamJSON
 	case "copilot", "pi":
 		return familyJSONL
-	case "kimi", "kiro", "hermes":
+	case "kimi", "kiro", "hermes", "trae":
 		return familyACP
 	default:
 		return familyOther

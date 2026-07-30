@@ -116,8 +116,18 @@ Backends are auto-detected from your `PATH` at daemon startup.
 | OpenCode CLI | `opencode` | ACP |
 | Hermes CLI | `hermes` | ACP |
 | OpenClaw Agent | `openclaw` | ACP |
+| Trae CLI | `traex` | ACP |
 
 Each agent can override `system_prompt`, `model_name`, `custom_env`, and `custom_args`.
+
+Install and authenticate Trae CLI before selecting it as a runtime:
+
+```bash
+curl -fsSL https://code.byted.org/api/tos-proxy/download/traex_install.sh | sh
+traex login --sso
+```
+
+Solo detects `traex` from `PATH`. Set `TRAEX_BIN` to use a different binary path.
 
 ## Core Concepts
 

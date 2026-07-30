@@ -21,6 +21,7 @@ import (
 //   - "opencode" — OpenCode CLI via ACP protocol
 //   - "openclaw" — OpenClaw Agent CLI via ACP protocol
 //   - "hermes"   — Hermes CLI via ACP protocol
+//   - "trae"     — Trae CLI via ACP protocol
 //   - "pi"       — Pi CLI via JSON event stream
 //   - "openai"   — not yet implemented via Backend; use llm.NewProvider
 //   - "anthropic" — not yet implemented via Backend; use llm.NewProvider
@@ -46,7 +47,7 @@ func NewBackend(providerType, apiKey string) (Backend, error) {
 		// The registry error format is "unknown backend type: ...".
 		// Wrap to the original format for backward compatibility with
 		// callers that inspect the error string.
-		return nil, fmt.Errorf("unknown backend provider type: %q (supported: claude, local, codex, cursor, gemini, kimi, kiro, copilot, opencode, openclaw, hermes, pi, openai, anthropic)", providerType)
+		return nil, fmt.Errorf("unknown backend provider type: %q (supported: claude, local, codex, cursor, gemini, kimi, kiro, copilot, opencode, openclaw, hermes, trae, pi, openai, anthropic)", providerType)
 	}
 	return backend, nil
 }
@@ -70,7 +71,7 @@ func newClaudeBackendFromEnv() *ClaudeBackend {
 // It delegates to the global BackendRegistry and checks whether the created
 // Backend satisfies the PersistentBackend interface.
 //
-// Supported: claude, codex, opencode, hermes, kimi, kiro, openclaw.
+// Supported: claude, codex, opencode, hermes, trae, kimi, kiro, openclaw.
 func NewPersistentBackend(providerType string) (PersistentBackend, error) {
 	backend, err := GlobalRegistry().Create(providerType, BackendConfig{ProviderType: providerType})
 	if err != nil {
@@ -78,7 +79,7 @@ func NewPersistentBackend(providerType string) (PersistentBackend, error) {
 	}
 	pb, ok := backend.(PersistentBackend)
 	if !ok {
-		return nil, fmt.Errorf("persistent backend not supported for provider %q (supported: claude, local, codex, opencode, hermes, kimi, kiro, openclaw)", providerType)
+		return nil, fmt.Errorf("persistent backend not supported for provider %q (supported: claude, local, codex, opencode, hermes, trae, kimi, kiro, openclaw)", providerType)
 	}
 	return pb, nil
 }

@@ -24,6 +24,12 @@ interface TextPart {
   member?: ChannelMember;
 }
 
+interface ResolvedMention {
+  start: number;
+  end: number;
+  members: ChannelMember[];
+}
+
 interface UseMentionsResult {
   /**
    * Parsed text parts with mention highlighting.
@@ -67,7 +73,49 @@ interface UseMentionsResult {
 
 // ---- Constants ----
 
-const MENTION_REGEX = /@(\w*)$/;
+const MENTION_REGEX = /@([\p{L}\p{N}_.-]*)$/u;
+const MENTION_BOUNDARY_REGEX = /[\s\p{P}]/u;
+
+function isMentionBoundary(value: string | undefined): boolean {
+  return value === undefined || MENTION_BOUNDARY_REGEX.test(value);
+}
+
+export function resolveAgentMentions(
+  value: string,
+  members: ChannelMember[],
+): ResolvedMention[] {
+  const agents = members
+    .filter((member) => member.member_type === 'agent' && member.display_name)
+    .sort(
+      (left, right) =>
+        Array.from(right.display_name).length -
+        Array.from(left.display_name).length,
+    );
+  const matches: ResolvedMention[] = [];
+
+  for (let at = value.indexOf('@'); at >= 0; at = value.indexOf('@', at + 1)) {
+    if (!isMentionBoundary(at === 0 ? undefined : value.at(at - 1))) continue;
+
+    const afterAt = value.slice(at + 1);
+    const longest = agents.find(
+      (member) =>
+        afterAt.startsWith(member.display_name) &&
+        isMentionBoundary(afterAt.at(member.display_name.length)),
+    );
+    if (!longest) continue;
+
+    const sameNameMembers = agents.filter(
+      (member) => member.display_name === longest.display_name,
+    );
+    matches.push({
+      start: at,
+      end: at + 1 + longest.display_name.length,
+      members: sameNameMembers,
+    });
+  }
+
+  return matches;
+}
 
 // ---- Hook ----
 
@@ -171,29 +219,23 @@ export function useMentions(
   // Parse all @mentions in the full text for highlighted display
   const parsedParts = useMemo(() => {
     const parts: TextPart[] = [];
-    const globalRegex = /@(\S+)/g;
     let lastIndex = 0;
-    let matchResult: RegExpExecArray | null;
-
-    while ((matchResult = globalRegex.exec(value)) !== null) {
-      const m = matchResult;
+    for (const mention of resolveAgentMentions(value, members)) {
       // Text before this mention
-      if (m.index > lastIndex) {
-        parts.push({ text: value.slice(lastIndex, m.index), isMention: false });
+      if (mention.start > lastIndex) {
+        parts.push({
+          text: value.slice(lastIndex, mention.start),
+          isMention: false,
+        });
       }
 
-      // Find matching member
-      const matchedMember = members.find(
-        (member) => member.display_name === m[1] || member.member_id === m[1],
-      );
-
       parts.push({
-        text: m[0],
+        text: value.slice(mention.start, mention.end),
         isMention: true,
-        member: matchedMember,
+        member: mention.members[0],
       });
 
-      lastIndex = m.index + m[0].length;
+      lastIndex = mention.end;
     }
 
     // Remaining text after last mention
@@ -207,18 +249,11 @@ export function useMentions(
   // Extract mentioned agent IDs from the full text
   const mentionedAgentIds = useMemo(() => {
     const ids: string[] = [];
-    const globalRegex = /@(\S+)/g;
-    let matchResult: RegExpExecArray | null;
-
-    while ((matchResult = globalRegex.exec(value)) !== null) {
-      const m = matchResult;
-      const member = members.find((mem) => mem.display_name === m[1]);
-      if (
-        member &&
-        member.member_type === 'agent' &&
-        !ids.includes(member.member_id)
-      ) {
-        ids.push(member.member_id);
+    for (const mention of resolveAgentMentions(value, members)) {
+      for (const member of mention.members) {
+        if (!ids.includes(member.member_id)) {
+          ids.push(member.member_id);
+        }
       }
     }
 
