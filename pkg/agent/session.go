@@ -133,12 +133,14 @@ func (m *AgentSessionManager) ActiveThinkingNodeID(agentID string) (string, bool
 // GetOrCreateSession returns an existing session or creates one.
 // Asleep sessions are automatically woken via --resume.
 func (m *AgentSessionManager) GetOrCreateSession(ctx context.Context, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, initialMessages []Message, mentionedNames []string) (*PersistentSession, error) {
-	return m.GetOrCreateScopedSession(ctx, AgentSessionKey(agentID), agentID, agentCfg, channelCtx, initialMessages, "", mentionedNames)
+	return m.GetOrCreateScopedSession(ctx, AgentSessionKey(agentID), agentID, agentCfg, channelCtx, initialMessages, initialMessages, "", mentionedNames)
 }
 
 // GetOrCreateScopedSession returns or creates a persistent session whose pool
-// identity is independent from the Agent identity that owns the runtime.
-func (m *AgentSessionManager) GetOrCreateScopedSession(ctx context.Context, sessionKey, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, initialMessages []Message, resumeSessionID string, mentionedNames []string) (*PersistentSession, error) {
+// identity is independent from the Agent identity that owns the runtime. A
+// model change restarts the process after its current turn and uses
+// coldStartMessages so the new provider session keeps the visible context.
+func (m *AgentSessionManager) GetOrCreateScopedSession(ctx context.Context, sessionKey, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, messages, coldStartMessages []Message, resumeSessionID string, mentionedNames []string) (*PersistentSession, error) {
 	m.mu.RLock()
 	entry, exists := m.sessions[sessionKey]
 	m.mu.RUnlock()
@@ -153,7 +155,7 @@ func (m *AgentSessionManager) GetOrCreateScopedSession(ctx context.Context, sess
 			_, _, storedResumeID := entry.snapshot()
 			resumeID = firstNonEmpty(storedResumeID, resumeSessionID)
 		}
-		return m.createSession(ctx, sessionKey, agentID, agentCfg, channelCtx, initialMessages, resumeID, mentionedNames)
+		return m.createSession(ctx, sessionKey, agentID, agentCfg, channelCtx, messages, coldStartMessages, resumeID, mentionedNames)
 	}
 
 	// Check retry cooldown for agents with recent failed starts.
@@ -162,7 +164,7 @@ func (m *AgentSessionManager) GetOrCreateScopedSession(ctx context.Context, sess
 		return nil, fmt.Errorf("session start cooldown for %s", sessionKey)
 	}
 
-	return m.createSession(ctx, sessionKey, agentID, agentCfg, channelCtx, initialMessages, resumeSessionID, mentionedNames)
+	return m.createSession(ctx, sessionKey, agentID, agentCfg, channelCtx, messages, coldStartMessages, resumeSessionID, mentionedNames)
 }
 
 // DeliverMessage sends a message to an active session.
@@ -477,7 +479,7 @@ func (m *AgentSessionManager) deliverToSession(ctx context.Context, sessionKey s
 	return ps, nil
 }
 
-func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, messages []Message, prevSessionID string, mentionedNames []string) (*PersistentSession, error) {
+func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, messages, coldStartMessages []Message, prevSessionID string, mentionedNames []string) (*PersistentSession, error) {
 	release, err := m.acquireTurn(ctx, sessionKey, agentID)
 	if err != nil {
 		return nil, err
@@ -494,17 +496,43 @@ func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, age
 	m.mu.RUnlock()
 	if exists && m.isSessionAlive(entry) {
 		previous, _, _ := entry.snapshot()
-		ps, err := m.backend.Send(ctx, previous, messages)
-		if err != nil {
-			return nil, err
+		if entry.AgentConfig.Model == agentCfg.Model {
+			ps, err := m.backend.Send(ctx, previous, messages)
+			if err != nil {
+				return nil, err
+			}
+			if ps == nil {
+				return nil, fmt.Errorf("session backend returned a nil session for %s", sessionKey)
+			}
+			entry.updateSession(ps)
+			holdTurnUntilResult(ps, release)
+			releaseOnReturn = false
+			return ps, nil
 		}
-		if ps == nil {
-			return nil, fmt.Errorf("session backend returned a nil session for %s", sessionKey)
+
+		m.logger.Info("session: model changed, restarting", "agent_id", agentID, "session_key", sessionKey, "old_model", entry.AgentConfig.Model, "new_model", agentCfg.Model)
+		if err := m.backend.Close(previous); err != nil {
+			return nil, fmt.Errorf("close session for model change: %w", err)
 		}
-		entry.updateSession(ps)
-		holdTurnUntilResult(ps, release)
-		releaseOnReturn = false
-		return ps, nil
+		m.mu.Lock()
+		if current := m.sessions[sessionKey]; current == entry {
+			delete(m.sessions, sessionKey)
+		}
+		m.mu.Unlock()
+		exists = false
+		prevSessionID = ""
+	}
+
+	startMessages := coldStartMessages
+	if len(startMessages) == 0 {
+		startMessages = messages
+	}
+	if exists && entry.AgentConfig.Model != agentCfg.Model {
+		// Never resume a provider session created with another model. Codex
+		// thread/resume, for example, does not accept a new model override.
+		prevSessionID = ""
+	} else if prevSessionID != "" {
+		startMessages = messages
 	}
 
 	m.logger.Info("session: creating", "agent_id", agentID, "session_key", sessionKey, "resume", prevSessionID)
@@ -523,7 +551,7 @@ func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, age
 
 	executeReq := &ExecuteRequest{
 		AgentID:  agentID,
-		Messages: messages,
+		Messages: startMessages,
 	}
 	executeOpts := &ExecuteOptions{
 		SystemPrompt: systemPrompt,

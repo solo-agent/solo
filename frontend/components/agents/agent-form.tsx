@@ -35,6 +35,7 @@ import { EnvEditor } from '@/components/agents/env-editor';
 import { ArgsEditor } from '@/components/agents/args-editor';
 import { useCliDetection } from '@/lib/hooks/use-cli-detection';
 import { useBackendMeta } from '@/lib/hooks/use-backend-meta';
+import { MODEL_PRESETS } from '@/lib/agent-models';
 
 // ============================================================================
 // Role Templates (SOLO-210-F) — frontend-defined preset system prompts
@@ -138,6 +139,7 @@ export function AgentForm({
   });
 
   const currentSystemPrompt = watch('system_prompt') || '';
+  const selectedProvider = watch('model_provider') || '';
 
   // v1.4: dynamic CLI detection + backend metadata
   const { results: detection, isLoading: detectionLoading } = useCliDetection();
@@ -268,7 +270,14 @@ export function AgentForm({
               <Select
                 name={field.name}
                 value={field.value ?? ''}
-                onChange={field.onChange}
+                onChange={(value) => {
+                  // Reset model when switching runtime — a model alias valid
+                  // for one runtime (e.g. "opus") is meaningless for another.
+                  if (value !== field.value) {
+                    setValue('model_name', '');
+                  }
+                  field.onChange(value);
+                }}
                 onBlur={field.onBlur}
                 options={Object.values(detection).map((rt) => ({
                   value: rt.type,
@@ -305,6 +314,31 @@ export function AgentForm({
             ))}
 
       </div>
+
+      {/* Model Selection (v1.5) — known models are suggestions, not a closed
+          list. Empty value = let the CLI choose its default model. */}
+      {!detectionLoading && selectedProvider && (
+        <div className="space-y-2">
+          <Label htmlFor="model_name">{t('agentFormModel')}</Label>
+          <Input
+            id="model_name"
+            list={MODEL_PRESETS[selectedProvider] ? `model-presets-${selectedProvider}` : undefined}
+            placeholder={t('agentRuntimeDefault')}
+            maxLength={100}
+            {...register('model_name')}
+          />
+          {MODEL_PRESETS[selectedProvider] && (
+            <datalist id={`model-presets-${selectedProvider}`}>
+              {MODEL_PRESETS[selectedProvider].map((model) => (
+                <option key={model.value} value={model.value}>{model.label}</option>
+              ))}
+            </datalist>
+          )}
+          <p className="font-mono text-[11px] text-muted-foreground">
+            {t('agentFormModelHelp')}
+          </p>
+        </div>
+      )}
 
       {/* Role Template Selector (SOLO-210-F) */}
       <div className="space-y-3">
