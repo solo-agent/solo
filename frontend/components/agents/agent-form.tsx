@@ -315,36 +315,24 @@ export function AgentForm({
 
       </div>
 
-      {/* Model Selection (v1.5) — presets for known runtimes, free text else.
-          Empty value = let the CLI choose its default model. */}
+      {/* Model Selection (v1.5) — known models are suggestions, not a closed
+          list. Empty value = let the CLI choose its default model. */}
       {!detectionLoading && selectedProvider && (
         <div className="space-y-2">
           <Label htmlFor="model_name">{t('agentFormModel')}</Label>
-          {MODEL_PRESETS[selectedProvider] ? (
-            <Controller
-              name="model_name"
-              control={control}
-              render={({ field }) => (
-                <Select
-                  name={field.name}
-                  value={field.value ?? ''}
-                  onChange={field.onChange}
-                  onBlur={field.onBlur}
-                  options={[
-                    { value: '', label: t('agentRuntimeDefault') },
-                    ...MODEL_PRESETS[selectedProvider],
-                  ]}
-                  size="md"
-                  className="w-full font-body"
-                />
-              )}
-            />
-          ) : (
-            <Input
-              id="model_name"
-              placeholder={t('agentFormModelPlaceholder')}
-              {...register('model_name')}
-            />
+          <Input
+            id="model_name"
+            list={MODEL_PRESETS[selectedProvider] ? `model-presets-${selectedProvider}` : undefined}
+            placeholder={t('agentRuntimeDefault')}
+            maxLength={100}
+            {...register('model_name')}
+          />
+          {MODEL_PRESETS[selectedProvider] && (
+            <datalist id={`model-presets-${selectedProvider}`}>
+              {MODEL_PRESETS[selectedProvider].map((model) => (
+                <option key={model.value} value={model.value}>{model.label}</option>
+              ))}
+            </datalist>
           )}
           <p className="font-mono text-[11px] text-muted-foreground">
             {t('agentFormModelHelp')}

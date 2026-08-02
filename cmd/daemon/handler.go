@@ -1081,36 +1081,15 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		if req.NodeID != "" {
 			sessionKey = agent.ThinkingSessionKey(req.NodeID)
 		}
-		if sm.IsScopedActive(sessionKey) {
-			slog.Info("task: reusing persistent session", "agent_id", req.AgentID, "session_key", sessionKey)
-			ps, psErr := sm.DeliverScopedMessage(ctx, sessionKey, msgs)
-			if psErr == nil {
-				providerSessionID = ps.SessionID
-				transcriptPath = transcriptPathForProvider(req.ModelConfig.Provider, ws.WorkDir, providerSessionID)
-				session = &agent.Session{Messages: ps.Messages, Result: ps.Result, Stop: ps.Stop, SessionID: providerSessionID}
-			} else {
-				slog.Warn("task: session delivery failed", "agent_id", req.AgentID, "session_key", sessionKey, "error", psErr)
-			}
-		}
-		// The idle reaper may put a session to sleep between IsScopedActive
-		// and delivery. In either the cold-start or that race, wake/create the
-		// scoped session here so a Thinking turn never falls back to a stateless
-		// Execute call.
-		if session == nil {
-			_, _ = h.refreshToken(ctx, req.AgentID)
-			startMessages := coldStartMsgs
-			if req.ResumeSessionID != "" {
-				startMessages = msgs
-			}
-			slog.Info("task: creating persistent session", "agent_id", req.AgentID, "session_key", sessionKey, "resume", req.ResumeSessionID)
-			ps, psErr := sm.GetOrCreateScopedSession(ctx, sessionKey, req.AgentID, agentCfg, channelCtx, startMessages, req.ResumeSessionID, req.MentionedNames)
-			if psErr == nil {
-				providerSessionID = ps.SessionID
-				transcriptPath = transcriptPathForProvider(req.ModelConfig.Provider, ws.WorkDir, providerSessionID)
-				session = &agent.Session{Messages: ps.Messages, Result: ps.Result, Stop: ps.Stop, SessionID: providerSessionID}
-			} else {
-				slog.Warn("task: session creation failed, falling back to Execute", "agent_id", req.AgentID, "session_key", sessionKey, "error", psErr)
-			}
+		_, _ = h.refreshToken(ctx, req.AgentID)
+		slog.Info("task: getting persistent session", "agent_id", req.AgentID, "session_key", sessionKey, "resume", req.ResumeSessionID)
+		ps, psErr := sm.GetOrCreateScopedSession(ctx, sessionKey, req.AgentID, agentCfg, channelCtx, msgs, coldStartMsgs, req.ResumeSessionID, req.MentionedNames)
+		if psErr == nil {
+			providerSessionID = ps.SessionID
+			transcriptPath = transcriptPathForProvider(req.ModelConfig.Provider, ws.WorkDir, providerSessionID)
+			session = &agent.Session{Messages: ps.Messages, Result: ps.Result, Stop: ps.Stop, SessionID: providerSessionID}
+		} else {
+			slog.Warn("task: persistent session failed, falling back to Execute", "agent_id", req.AgentID, "session_key", sessionKey, "error", psErr)
 		}
 	}
 

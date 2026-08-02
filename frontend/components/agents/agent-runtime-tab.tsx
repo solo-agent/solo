@@ -2,8 +2,8 @@
 // AgentRuntimeTab — display Agent runtime configuration (v1.5)
 // - Shows: Runtime type, model name
 // - Environment variables key-value list
-// - Model is inline-editable (v1.5): dropdown for known runtimes, free text
-//   otherwise. Runtime type + env vars remain read-only.
+// - Model is inline-editable (v1.5), with known models offered as suggestions.
+//   Runtime type + env vars remain read-only.
 // ============================================================================
 
 'use client';
@@ -14,7 +14,7 @@ import { apiClient, ApiError } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import { Select } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 import { t } from '@/lib/i18n';
 import { MODEL_PRESETS } from '@/lib/agent-models';
 import type { Agent } from '@/lib/types';
@@ -60,27 +60,22 @@ function EditableModelField({
   if (editing) {
     return (
       <div className="flex items-center gap-2">
-        {presets ? (
-          <Select
-            value={draft}
-            onChange={setDraft}
-            options={[
-              { value: '', label: t('agentRuntimeDefault') },
-              ...presets,
-            ]}
-            size="sm"
-            className="min-w-[140px]"
-            disabled={saving}
-          />
-        ) : (
-          <input
-            type="text"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={t('agentFormModelPlaceholder')}
-            className="input-brutal h-8 w-full max-w-[220px] font-mono text-xs"
-            disabled={saving}
-          />
+        <Input
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          list={presets ? `runtime-model-presets-${provider}` : undefined}
+          placeholder={t('agentRuntimeDefault')}
+          aria-label={t('agentFormModel')}
+          maxLength={100}
+          className="h-8 w-full max-w-[220px] font-mono text-xs"
+          disabled={saving}
+        />
+        {presets && (
+          <datalist id={`runtime-model-presets-${provider}`}>
+            {presets.map((model) => (
+              <option key={model.value} value={model.value}>{model.label}</option>
+            ))}
+          </datalist>
         )}
         <Button
           type="button"
@@ -119,7 +114,7 @@ function EditableModelField({
           setEditing(true);
         }}
         className="inline-flex items-center gap-1 font-heading text-[10px] font-bold uppercase tracking-wider text-muted-foreground hover:text-brutal-primary transition-colors"
-        aria-label={t('edit')}
+        aria-label={t('agentProfileEdit', { label: t('agentFormModel') })}
       >
         <Pencil className="h-3 w-3" />
         {t('edit')}
@@ -136,9 +131,14 @@ export function AgentRuntimeTab({ agentId }: AgentRuntimeTabProps) {
 
   const handleModelSave = useCallback(
     async (model: string) => {
-      await apiClient.patch(`/api/v1/agents/${agentId}`, { model_name: model });
-      setAgent((prev) => (prev ? { ...prev, model_name: model } : prev));
-      showToast(t('agentProfileUpdateSuccess'), 'success');
+      try {
+        await apiClient.patch(`/api/v1/agents/${agentId}`, { model_name: model });
+        setAgent((prev) => (prev ? { ...prev, model_name: model } : prev));
+        showToast(t('agentProfileUpdateSuccess'), 'success');
+      } catch (err) {
+        showToast(err instanceof ApiError ? err.message : t('agentProfileUpdateError'), 'error');
+        throw err;
+      }
     },
     [agentId, showToast],
   );

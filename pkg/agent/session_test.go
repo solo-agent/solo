@@ -48,7 +48,7 @@ func TestSessionManagerScopesSessionsWithoutCloningAgent(t *testing.T) {
 	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
 	cfg := AgentConfig{AgentID: "agent-1", Name: "Agent", Provider: "claude"}
 
-	first, err := mgr.GetOrCreateScopedSession(context.Background(), ThinkingSessionKey("node-a"), "agent-1", cfg, ChannelContext{}, []Message{{Role: RoleUser, Content: "first"}}, "", nil)
+	first, err := mgr.GetOrCreateScopedSession(context.Background(), ThinkingSessionKey("node-a"), "agent-1", cfg, ChannelContext{}, []Message{{Role: RoleUser, Content: "first"}}, nil, "", nil)
 	if err != nil {
 		t.Fatalf("start first node: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestSessionManagerScopesSessionsWithoutCloningAgent(t *testing.T) {
 		t.Fatalf("first result = %#v", result)
 	}
 
-	secondTurn, err := mgr.GetOrCreateScopedSession(context.Background(), ThinkingSessionKey("node-a"), "agent-1", cfg, ChannelContext{}, []Message{{Role: RoleUser, Content: "second"}}, "", nil)
+	secondTurn, err := mgr.GetOrCreateScopedSession(context.Background(), ThinkingSessionKey("node-a"), "agent-1", cfg, ChannelContext{}, []Message{{Role: RoleUser, Content: "second"}}, nil, "", nil)
 	if err != nil {
 		t.Fatalf("reuse first node: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestSessionManagerScopesSessionsWithoutCloningAgent(t *testing.T) {
 		t.Fatalf("same node session changed: first=%q second=%q", first.SessionID, secondTurn.SessionID)
 	}
 
-	otherNode, err := mgr.GetOrCreateScopedSession(context.Background(), ThinkingSessionKey("node-b"), "agent-1", cfg, ChannelContext{}, []Message{{Role: RoleUser, Content: "other"}}, "", nil)
+	otherNode, err := mgr.GetOrCreateScopedSession(context.Background(), ThinkingSessionKey("node-b"), "agent-1", cfg, ChannelContext{}, []Message{{Role: RoleUser, Content: "other"}}, nil, "", nil)
 	if err != nil {
 		t.Fatalf("start second node: %v", err)
 	}
@@ -101,12 +101,59 @@ func TestSessionManagerScopesSessionsWithoutCloningAgent(t *testing.T) {
 	}
 }
 
+func TestSessionManagerRestartsScopedSessionWhenModelChanges(t *testing.T) {
+	backend := &scopedRecordingBackend{}
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	sessionKey := ChannelSessionKey("agent-1", "channel-1")
+	firstMessages := []Message{{Role: RoleUser, Content: "first"}}
+
+	first, err := mgr.GetOrCreateScopedSession(
+		context.Background(), sessionKey, "agent-1",
+		AgentConfig{AgentID: "agent-1", Name: "Agent", Provider: "claude", Model: "sonnet"},
+		ChannelContext{}, firstMessages, firstMessages, "", nil,
+	)
+	if err != nil {
+		t.Fatalf("start first model: %v", err)
+	}
+	<-first.Result
+
+	coldStart := []Message{
+		{Role: RoleUser, Content: "first"},
+		{Role: RoleAssistant, Content: "first reply"},
+		{Role: RoleUser, Content: "second"},
+	}
+	second, err := mgr.GetOrCreateScopedSession(
+		context.Background(), sessionKey, "agent-1",
+		AgentConfig{AgentID: "agent-1", Name: "Agent", Provider: "claude", Model: "haiku"},
+		ChannelContext{}, []Message{{Role: RoleUser, Content: "second"}}, coldStart, "", nil,
+	)
+	if err != nil {
+		t.Fatalf("restart with second model: %v", err)
+	}
+	<-second.Result
+
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if first.SessionID == second.SessionID {
+		t.Fatalf("model change reused session %q", first.SessionID)
+	}
+	if len(backend.startOptions) != 2 || backend.startOptions[0].Model != "sonnet" || backend.startOptions[1].Model != "haiku" {
+		t.Fatalf("start models = %#v", backend.startOptions)
+	}
+	if backend.sendCount != 0 || backend.closeCount != 1 {
+		t.Fatalf("send=%d close=%d, want 0/1", backend.sendCount, backend.closeCount)
+	}
+	if got := backend.startMessages[1]; len(got) != len(coldStart) || got[2].Content != "second" {
+		t.Fatalf("restart messages = %#v, want cold-start context", got)
+	}
+}
+
 func TestSessionManagerClosesReturnedThinkingSession(t *testing.T) {
 	backend := &scopedRecordingBackend{}
 	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
 	ps, err := mgr.GetOrCreateScopedSession(context.Background(), ThinkingSessionKey("returned-node"), "agent-1", AgentConfig{
 		AgentID: "agent-1", Name: "Agent", Provider: "claude",
-	}, ChannelContext{}, []Message{{Role: RoleUser, Content: "handoff"}}, "", nil)
+	}, ChannelContext{}, []Message{{Role: RoleUser, Content: "handoff"}}, nil, "", nil)
 	if err != nil {
 		t.Fatalf("start node: %v", err)
 	}
@@ -154,7 +201,7 @@ func TestSessionManagerSleepsOnlyIdleThinkingSessionsAndResumes(t *testing.T) {
 	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
 	cfg := AgentConfig{AgentID: "agent-1", Name: "Agent", Provider: "claude"}
 
-	thinking, err := mgr.GetOrCreateScopedSession(context.Background(), ThinkingSessionKey("idle-node"), "agent-1", cfg, ChannelContext{}, []Message{{Role: RoleUser, Content: "think"}}, "", nil)
+	thinking, err := mgr.GetOrCreateScopedSession(context.Background(), ThinkingSessionKey("idle-node"), "agent-1", cfg, ChannelContext{}, []Message{{Role: RoleUser, Content: "think"}}, nil, "", nil)
 	if err != nil {
 		t.Fatalf("start Thinking session: %v", err)
 	}
@@ -197,7 +244,7 @@ func TestSessionManagerSleepsOnlyIdleThinkingSessionsAndResumes(t *testing.T) {
 		t.Fatal("ordinary Agent session was incorrectly slept")
 	}
 
-	resumed, err := mgr.GetOrCreateScopedSession(context.Background(), ThinkingSessionKey("idle-node"), "agent-1", cfg, ChannelContext{}, []Message{{Role: RoleUser, Content: "continue"}}, "", nil)
+	resumed, err := mgr.GetOrCreateScopedSession(context.Background(), ThinkingSessionKey("idle-node"), "agent-1", cfg, ChannelContext{}, []Message{{Role: RoleUser, Content: "continue"}}, nil, "", nil)
 	if err != nil {
 		t.Fatalf("resume Thinking session: %v", err)
 	}
@@ -236,6 +283,7 @@ func TestSessionManagerUsesProtocolResumeWithoutInjectingCLIFlag(t *testing.T) {
 		cfg,
 		ChannelContext{},
 		[]Message{{Role: RoleUser, Content: "continue"}},
+		nil,
 		"provider-session-1",
 		nil,
 	)
@@ -290,7 +338,7 @@ func TestSessionManagerDoesNotSleepThinkingSessionWithActiveTurn(t *testing.T) {
 
 	_, err := mgr.GetOrCreateScopedSession(context.Background(), ThinkingSessionKey("busy-node"), "agent-1", AgentConfig{
 		AgentID: "agent-1", Name: "Agent", Provider: "claude",
-	}, ChannelContext{}, []Message{{Role: RoleUser, Content: "working"}}, "", nil)
+	}, ChannelContext{}, []Message{{Role: RoleUser, Content: "working"}}, nil, "", nil)
 	if err != nil {
 		t.Fatalf("start Thinking session: %v", err)
 	}
@@ -383,7 +431,7 @@ func TestSessionManagerExposesRuntimeOwnedThinkingScopeWhileTurnIsActive(t *test
 		AgentID:  "agent-1",
 		Name:     "Agent",
 		Provider: "claude",
-	}, ChannelContext{}, []Message{{Role: RoleUser, Content: "hello"}}, "", nil)
+	}, ChannelContext{}, []Message{{Role: RoleUser, Content: "hello"}}, nil, "", nil)
 	if err != nil {
 		t.Fatalf("GetOrCreateScopedSession: %v", err)
 	}
@@ -523,6 +571,7 @@ func (s earlyReturnState) Notify(string) error { return nil }
 type scopedRecordingBackend struct {
 	mu              sync.Mutex
 	startAgentIDs   []string
+	startMessages   [][]Message
 	sendCount       int
 	forceCloseCount int
 	closeCount      int
@@ -538,6 +587,7 @@ func (b *scopedRecordingBackend) Execute(context.Context, *ExecuteRequest, *Exec
 func (b *scopedRecordingBackend) Start(_ context.Context, req *ExecuteRequest, opts *ExecuteOptions) (*PersistentSession, error) {
 	b.mu.Lock()
 	b.startAgentIDs = append(b.startAgentIDs, req.AgentID)
+	b.startMessages = append(b.startMessages, append([]Message(nil), req.Messages...))
 	b.startOptions = append(b.startOptions, *opts)
 	id := opts.ResumeSessionID
 	if id == "" {

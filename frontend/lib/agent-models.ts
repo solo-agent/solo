@@ -1,8 +1,9 @@
 // ============================================================================
-// Agent model presets — per-runtime known model aliases.
+// Agent model suggestions — per-runtime known model aliases.
 // Shared by the create form (agent-form.tsx) and the runtime editor
-// (agent-runtime-tab.tsx). Runtimes not listed here fall back to a
-// free-text model input. Empty value = let the CLI pick its default model.
+// (agent-runtime-tab.tsx). These populate a native datalist rather than
+// validating the value, so existing and future model IDs remain editable.
+// Empty value = let the CLI pick its default model.
 // ============================================================================
 
 export interface ModelPreset {
@@ -20,7 +21,7 @@ export const MODEL_PRESETS: Record<string, ModelPreset[]> = {
   ],
   // Codex CLI — model identifiers passed through to the codex thread.
   codex: [
-    { value: 'gpt-5.6-solo', label: 'GPT 5.6 Solo' },
+    { value: 'gpt-5.6-sol', label: 'GPT 5.6 Sol' },
     { value: 'gpt-5.6-terra', label: 'GPT 5.6 Terra' },
     { value: 'gpt-5.6-luna', label: 'GPT 5.6 Luna' },
     { value: 'gpt-5.5', label: 'GPT 5.5' },

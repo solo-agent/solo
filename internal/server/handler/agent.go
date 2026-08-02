@@ -139,7 +139,11 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	modelName := req.ModelName
+	modelName := strings.TrimSpace(req.ModelName)
+	if len([]rune(modelName)) > 100 {
+		writeError(w, http.StatusBadRequest, "model name must be 100 characters or less")
+		return
+	}
 
 	customEnv := req.CustomEnv
 	if customEnv == nil {
@@ -412,6 +416,14 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "agent name must be 100 characters or less")
 			return
 		}
+	}
+	if req.ModelName != nil {
+		modelName := strings.TrimSpace(*req.ModelName)
+		if len([]rune(modelName)) > 100 {
+			writeError(w, http.StatusBadRequest, "model name must be 100 characters or less")
+			return
+		}
+		req.ModelName = &modelName
 	}
 
 	// Marshal custom_env if provided; nil bytes means "don't update".
