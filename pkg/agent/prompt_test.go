@@ -235,6 +235,8 @@ func TestBuildSystemPrompt_MessageFormat(t *testing.T) {
 	assertHas(t, p, "time=")
 	assertHas(t, p, "msg=")
 	assertHas(t, p, "type=")
+	assertHas(t, p, "is the **sender label**, never a recipient or @mention")
+	assertHas(t, p, "] @lili: hello")
 }
 
 func TestBuildSystemPrompt_MessageNotifications(t *testing.T) {

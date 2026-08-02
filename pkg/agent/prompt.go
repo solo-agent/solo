@@ -97,6 +97,7 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 	b.WriteString("[target=dm:@richard msg=c9d0e1f2 time=2026-03-15T01:00:02 type=human] @richard: hey, can you help?\n")
 	b.WriteString("[target=#general:a1b2c3d4 msg=f3a4b5c6 time=2026-03-15T01:00:03 type=human] @richard: thread reply\n")
 	b.WriteString("```\n\n")
+	b.WriteString("Parse this line structurally: the `@name:` immediately after `]` is the **sender label**, never a recipient or @mention. Only `@name` tokens inside the content after that sender label are @mentions. For example, `] @lili: hello` means lili sent `hello`; it does not address or @mention lili.\n\n")
 	b.WriteString("Header fields:\n")
 	b.WriteString("- `target=` — where the message came from. Reuse as the `--target` parameter when replying.\n")
 	b.WriteString("- `msg=` — message short ID (first 8 chars of UUID). Use as thread suffix to start/reply in a thread.\n")

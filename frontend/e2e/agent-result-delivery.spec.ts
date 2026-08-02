@@ -406,7 +406,6 @@ test.describe('real Agent result delivery contract', () => {
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: [
-          'The sender label @Agent Result Delivery E2E identifies the human test user, not another Agent; its messages are directed to you.',
           'Always deliver replies with solo message send.',
           'When introducing yourself, send exactly READY.',
           'When a user says REMEMBER followed by a value, retain it only in the current conversation and send exactly STORED.',
