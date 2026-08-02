@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -64,6 +65,9 @@ func (h *DaemonHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.dm.Register(info)
+	if h.agent != nil {
+		go h.agent.ReconcileDaemonRuns(context.Background(), info, req.Tasks)
+	}
 
 	// Persist computer record via ComputerService
 	if h.computerSvc != nil {

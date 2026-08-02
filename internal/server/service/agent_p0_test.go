@@ -197,13 +197,13 @@ func TestAgentRunProgressWatchdogWarnsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartRun: %v", err)
 	}
-	_, err = runSvc.AppendEvent(ctx, AppendRunEventInput{
-		RunID:   run.ID,
-		Type:    AgentRunEventAssistantMessage,
-		Message: "visible reply already happened",
-	})
+	_, err = pool.Exec(ctx, `
+		INSERT INTO messages (id, channel_id, sender_type, sender_id, content, metadata)
+		VALUES ($1, $2, 'agent', $3, 'visible reply already happened', jsonb_build_object('agent_run_id', $4::text))`,
+		uuid.NewString(), channelID, agentID, run.ID,
+	)
 	if err != nil {
-		t.Fatalf("AppendEvent assistant: %v", err)
+		t.Fatalf("insert visible message: %v", err)
 	}
 	old := time.Now().Add(-agentNoProgressAfter - time.Second)
 	_, err = pool.Exec(ctx, `UPDATE agent_runs SET backend_started_at = $2, updated_at = $2 WHERE id = $1`, run.ID, old)
@@ -278,7 +278,7 @@ func TestAgentRunWatchdogTimesOutStaleActiveRun(t *testing.T) {
 	}
 }
 
-func TestDaemonOfflineTimesOutTrackedAgentRun(t *testing.T) {
+func TestDaemonOfflineFailsTrackedAgentRunAsLost(t *testing.T) {
 	pool := agentRunTestPool(t)
 	ctx := context.Background()
 	ownerID := agentRunUser(t, pool)
@@ -323,18 +323,19 @@ func TestDaemonOfflineTimesOutTrackedAgentRun(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT status, finished_at FROM agent_runs WHERE id = $1`, run.ID).Scan(&status, &finishedAt); err != nil {
 		t.Fatalf("query run: %v", err)
 	}
-	if status != string(AgentRunStatusTimeout) {
-		t.Fatalf("status = %q, want timeout", status)
+	if status != string(AgentRunStatusFailed) {
+		t.Fatalf("status = %q, want failed", status)
 	}
 	if finishedAt == nil {
 		t.Fatal("finished_at is nil")
 	}
-	if !rec.hasBroadcastEvent("agent.run.finished", agentActivityTimeout) {
-		t.Fatalf("offline timeout finish not broadcast: %q", rec.broadcastMessages)
+	if !rec.hasBroadcastEvent("agent.run.finished", agentActivityDaemonLost) {
+		t.Fatalf("offline daemon-lost finish not broadcast: %q", rec.broadcastMessages)
 	}
+	assertRunFailure(t, pool, run.ID, agentFailureDaemonLost, true)
 }
 
-func TestDaemonUnregisterTimesOutTrackedAgentRun(t *testing.T) {
+func TestDaemonReconcileFailsTrackedRunMissingFromNewProcess(t *testing.T) {
 	pool := agentRunTestPool(t)
 	ctx := context.Background()
 	ownerID := agentRunUser(t, pool)
@@ -362,22 +363,42 @@ func TestDaemonUnregisterTimesOutTrackedAgentRun(t *testing.T) {
 	rec := newRecordingBroadcaster()
 	dm := NewDaemonManager(pool, rec)
 	daemonID := "daemon-" + agentID[:8]
-	dm.Register(&DaemonInfo{ID: daemonID, Host: "127.0.0.1", Port: 1, Capabilities: []string{"agent"}})
-	taskID := uuid.NewString()
-	dm.TrackTask(taskID, daemonID, agentID)
-	dm.AttachTaskRun(taskID, run.ID)
+	daemon := &DaemonInfo{ID: daemonID, Host: "127.0.0.1", Port: 1, Capabilities: []string{"agent"}}
+	dm.Register(daemon)
+	dm.TrackTask(run.ID, daemonID, agentID)
+	dm.AttachTaskRun(run.ID, run.ID)
 
-	dm.Unregister(daemonID)
+	svc := NewAgentService(pool, dm, rec, NewMentionService(pool))
+	svc.ReconcileDaemonRuns(ctx, daemon, nil)
 
 	var status string
 	if err := pool.QueryRow(ctx, `SELECT status FROM agent_runs WHERE id = $1`, run.ID).Scan(&status); err != nil {
 		t.Fatalf("query run: %v", err)
 	}
-	if status != string(AgentRunStatusTimeout) {
-		t.Fatalf("status = %q, want timeout", status)
+	if status != string(AgentRunStatusFailed) {
+		t.Fatalf("status = %q, want failed", status)
 	}
-	if !rec.hasBroadcastEvent("agent.run.finished", agentActivityTimeout) {
-		t.Fatalf("unregister timeout finish not broadcast: %q", rec.broadcastMessages)
+	if !rec.hasBroadcastEvent("agent.run.finished", agentActivityDaemonLost) {
+		t.Fatalf("reconcile daemon-lost finish not broadcast: %q", rec.broadcastMessages)
+	}
+	assertRunFailure(t, pool, run.ID, agentFailureDaemonLost, true)
+}
+
+func assertRunFailure(t *testing.T, pool *pgxpool.Pool, runID, wantCode string, wantRetryable bool) {
+	t.Helper()
+	var code string
+	var retryable bool
+	if err := pool.QueryRow(context.Background(), `
+		SELECT payload->>'failure_code', COALESCE((payload->>'retryable')::boolean, false)
+		  FROM agent_run_events
+		 WHERE run_id = $1 AND type = $2
+		 ORDER BY seq DESC
+		 LIMIT 1`, runID, AgentRunEventError,
+	).Scan(&code, &retryable); err != nil {
+		t.Fatalf("query run failure: %v", err)
+	}
+	if code != wantCode || retryable != wantRetryable {
+		t.Fatalf("failure = (%q, %t), want (%q, %t)", code, retryable, wantCode, wantRetryable)
 	}
 }
 

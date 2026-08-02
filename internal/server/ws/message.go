@@ -156,6 +156,7 @@ type MessageNewPayload struct {
 	SenderAvatar       string           `json:"sender_avatar,omitempty"`
 	Content            string           `json:"content"`
 	ContentType        string           `json:"content_type"`
+	Metadata           map[string]any   `json:"metadata,omitempty"`
 	ThreadID           string           `json:"thread_id,omitempty"`
 	ThinkingNodeID     string           `json:"thinking_node_id,omitempty"`
 	MentionedAgentIDs  []string         `json:"mentioned_agent_ids,omitempty"`
@@ -255,6 +256,7 @@ type ThreadMessageItem struct {
 	SenderAvatar  string           `json:"sender_avatar,omitempty"`
 	Content       string           `json:"content"`
 	ContentType   string           `json:"content_type"`
+	Metadata      map[string]any   `json:"metadata,omitempty"`
 	AttachmentIDs []string         `json:"attachment_ids,omitempty"`
 	Attachments   []AttachmentMeta `json:"attachments,omitempty"`
 	CreatedAt     string           `json:"created_at"`

@@ -92,6 +92,7 @@ type CreateMessageRequest struct {
 	AttachmentIDs  []string `json:"attachment_ids,omitempty"`
 	ThreadID       string   `json:"thread_id,omitempty"`
 	ThinkingNodeID string   `json:"thinking_node_id,omitempty"`
+	RunID          string   `json:"run_id,omitempty"`
 }
 
 // AttachmentMeta is the attachment metadata included in message responses.
@@ -168,6 +169,13 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "message content exceeds maximum length of 10000 characters")
 		return
 	}
+	runID := strings.TrimSpace(req.RunID)
+	if runID != "" {
+		if _, err := uuid.Parse(runID); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid run ID")
+			return
+		}
+	}
 	thinkingNodeID := strings.TrimSpace(req.ThinkingNodeID)
 	if thinkingNodeID != "" {
 		if req.ThreadID != "" || req.AsTask {
@@ -223,6 +231,10 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeThinkingScopeError(w, err)
 			return
 		}
+	}
+	if runID != "" && !isAgent {
+		writeError(w, http.StatusBadRequest, "run ID is only valid for agent messages")
+		return
 	}
 	if thinkingNodeID != "" && (req.ThreadID != "" || req.AsTask) {
 		writeError(w, http.StatusBadRequest, "thinking node messages cannot also be threads or tasks")
@@ -299,6 +311,17 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		if err != nil || ownedCount != len(attachmentIDs) {
 			writeError(w, http.StatusBadRequest, "one or more attachment IDs are invalid")
 			return
+		}
+	}
+	deliveryRunID := ""
+	if runID != "" {
+		scopeMatches, err := service.NewAgentRunService(h.pool).ValidateMessageDelivery(r.Context(), runID, userID, channelID, threadID, thinkingNodeID)
+		if err != nil {
+			writeError(w, http.StatusConflict, "invalid agent run")
+			return
+		}
+		if scopeMatches {
+			deliveryRunID = runID
 		}
 	}
 
@@ -405,15 +428,31 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if threadID != "" {
 		nullableThreadID = threadID
 	}
+	metadata := map[string]any{}
+	if deliveryRunID != "" {
+		metadata["agent_run_id"] = deliveryRunID
+		metadata["delivery"] = "visible"
+	}
+	metadataJSON, _ := json.Marshal(metadata)
 	_, err = h.pool.Exec(r.Context(),
-		`INSERT INTO messages (id, channel_id, thread_id, thinking_node_id, sender_type, sender_id, content, mentioned_agent_ids, attachment_ids, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uuid[], $9::uuid[], $10, $10)`,
-		messageID, channelID, nullableThreadID, nullableUUIDString(thinkingNodeID), senderType, userID, content, formatUUIDArray(mentionedAgentIDs), formatUUIDArray(attachmentIDs), now,
+		`INSERT INTO messages (id, channel_id, thread_id, thinking_node_id, sender_type, sender_id, content, mentioned_agent_ids, attachment_ids, metadata, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uuid[], $9::uuid[], $10::jsonb, $11, $11)`,
+		messageID, channelID, nullableThreadID, nullableUUIDString(thinkingNodeID), senderType, userID, content, formatUUIDArray(mentionedAgentIDs), formatUUIDArray(attachmentIDs), metadataJSON, now,
 	)
 	if err != nil {
 		slog.Error("failed to persist message", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to send message")
 		return
+	}
+	if deliveryRunID != "" {
+		if _, err := service.NewAgentRunService(h.pool).AppendEvent(r.Context(), service.AppendRunEventInput{
+			RunID:   deliveryRunID,
+			Type:    service.AgentRunEventVisibleMessageSent,
+			Message: "visible message persisted",
+			Payload: map[string]string{"message_id": messageID},
+		}); err != nil {
+			slog.Warn("failed to append visible message run event", "run_id", deliveryRunID, "message_id", messageID, "error", err)
+		}
 	}
 	if thinkingNodeID != "" {
 		thinkingSvc := service.NewThinkingService(h.pool)
@@ -494,6 +533,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 				SenderAvatar:  senderAvatar,
 				Content:       content,
 				ContentType:   "text",
+				Metadata:      metadata,
 				AttachmentIDs: attachmentIDs,
 				Attachments:   toWSAttachmentMeta(attachments),
 				CreatedAt:     now.UTC().Format(time.RFC3339),
@@ -566,6 +606,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 			SenderAvatar:      senderAvatar,
 			Content:           content,
 			ContentType:       "text",
+			Metadata:          metadata,
 			ThreadID:          threadID,
 			ThinkingNodeID:    thinkingNodeID,
 			MentionedAgentIDs: mentionedAgentIDs,
@@ -620,12 +661,13 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	resp := MessageResponse{
 		ID:                messageID,
 		ChannelID:         channelID,
-		SenderType:        "user",
+		SenderType:        senderType,
 		SenderID:          userID,
 		SenderName:        displayName,
 		SenderAvatar:      senderAvatar,
 		Content:           content,
 		ContentType:       "text",
+		Metadata:          metadata,
 		MentionedAgentIDs: mentionedAgentIDs,
 		AttachmentIDs:     attachmentIDs,
 		Attachments:       attachments,

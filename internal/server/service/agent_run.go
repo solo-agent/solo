@@ -55,7 +55,10 @@ const (
 	AgentRunEventToolStarted         = "tool_started"
 	AgentRunEventToolFinished        = "tool_finished"
 	AgentRunEventAssistantMessage    = "assistant_message"
+	AgentRunEventVisibleMessageSent  = "visible_message_sent"
 	AgentRunEventTaskLinked          = "task_linked"
+	AgentRunEventTaskReassigned      = "task_reassigned"
+	AgentRunEventTaskRetryExhausted  = "task_retry_exhausted"
 	AgentRunEventUsage               = "usage"
 	AgentRunEventDone                = "done"
 	AgentRunEventError               = "error"
@@ -688,6 +691,46 @@ func (s *AgentRunService) ListEvents(ctx context.Context, runID string) ([]Agent
 		events = append(events, *event)
 	}
 	return events, rows.Err()
+}
+
+func (s *AgentRunService) ValidateMessageDelivery(ctx context.Context, runID, agentID, channelID, threadID, thinkingNodeID string) (bool, error) {
+	var runChannelID, runThreadID, runThinkingNodeID string
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(channel_id::text, ''),
+		       COALESCE(thread_id::text, ''),
+		       COALESCE(thinking_node_id::text, '')
+		  FROM agent_runs
+		 WHERE id = $1
+		   AND agent_id = $2
+		   AND finished_at IS NULL`,
+		runID, agentID,
+	).Scan(&runChannelID, &runThreadID, &runThinkingNodeID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, fmt.Errorf("agent run is missing, finished, or owned by another agent")
+		}
+		return false, err
+	}
+	return runChannelID == channelID && runThreadID == threadID && runThinkingNodeID == thinkingNodeID, nil
+}
+
+func (s *AgentRunService) HasVisibleMessage(ctx context.Context, runID string) (bool, error) {
+	var visible bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			  FROM agent_runs r
+			  JOIN messages m
+			    ON m.sender_type = 'agent'
+			   AND m.sender_id = r.agent_id
+			   AND m.channel_id = r.channel_id
+			   AND COALESCE(m.thread_id::text, '') = COALESCE(r.thread_id::text, '')
+			   AND COALESCE(m.thinking_node_id::text, '') = COALESCE(r.thinking_node_id::text, '')
+			   AND m.metadata->>'agent_run_id' = r.id::text
+			 WHERE r.id = $1
+		)`, runID,
+	).Scan(&visible)
+	return visible, err
 }
 
 func (s *AgentRunService) GetRunTranscript(ctx context.Context, runID string, limit int) ([]AgentTranscriptEntry, error) {

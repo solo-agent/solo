@@ -45,6 +45,7 @@ const ACTIVITY_TEXT_KEYS: Record<string, TranslationKey> = {
   'agent.activity.cancelled': 'agentActivityCancelled',
   'agent.activity.timeout': 'agentActivityTimeout',
   'agent.activity.failed': 'agentActivityFailed',
+  'agent.activity.daemon_lost': 'agentActivityDaemonLost',
   '已接收，正在处理': 'agentActivityAccepted',
   '仍在运行，暂无可见回复': 'agentActivityNoVisibleReply',
   '仍在运行，暂无新的进度': 'agentActivityNoProgress',
@@ -56,6 +57,7 @@ const ACTIVITY_TEXT_KEYS: Record<string, TranslationKey> = {
 
 const AGENT_ERROR_KEYS: Record<string, TranslationKey> = {
   'agent.error.no_available_daemon': 'agentErrorNoAvailableDaemon',
+  'agent.error.missing_visible_result': 'agentErrorMissingVisibleResult',
   'No available daemon to run this agent.': 'agentErrorNoAvailableDaemon',
 };
 

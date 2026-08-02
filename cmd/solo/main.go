@@ -407,6 +407,9 @@ func proxyRequest(action, channelID, content, threadID, token string, taskNumber
 	if nodeID := os.Getenv("SOLO_NODE_ID"); nodeID != "" {
 		body["thinking_node_id"] = nodeID
 	}
+	if runID := os.Getenv("SOLO_RUN_ID"); runID != "" {
+		body["run_id"] = runID
+	}
 	if taskNumber > 0 {
 		body["task_number"] = taskNumber
 	}
@@ -855,6 +858,9 @@ func handleMessageSend(args []string, baseURL, token string) {
 	}
 	if nodeID := os.Getenv("SOLO_NODE_ID"); nodeID != "" {
 		reqBody["thinking_node_id"] = nodeID
+	}
+	if runID := os.Getenv("SOLO_RUN_ID"); runID != "" {
+		reqBody["run_id"] = runID
 	}
 
 	body, _ := json.Marshal(reqBody)

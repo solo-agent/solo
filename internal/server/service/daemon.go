@@ -183,7 +183,7 @@ func (dm *DaemonManager) Unregister(daemonID string) {
 	dm.mu.Unlock()
 
 	for _, task := range timedOutTasks {
-		dm.timeoutPendingTaskRun(task)
+		dm.daemonLostPendingTaskRun(task)
 	}
 
 	slog.Info("daemon unregistered",
@@ -272,6 +272,13 @@ func (dm *DaemonManager) GetDaemonPendingTasks(daemonID string) []PendingTaskInf
 		}
 	}
 	return result
+}
+
+func (dm *DaemonManager) IsTaskTracked(taskID string) bool {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+	_, ok := dm.pendingTasks[taskID]
+	return ok
 }
 
 // SelectDaemon picks the daemon with the lowest current load.
@@ -446,6 +453,12 @@ func (dm *DaemonManager) StreamTask(ctx context.Context, daemon *DaemonInfo, req
 		return nil, fmt.Errorf("daemon returned empty task_id")
 	}
 
+	return dm.SubscribeTask(ctx, daemon, taskID)
+}
+
+// SubscribeTask reconnects to an already-dispatched daemon task. The daemon
+// replays lifecycle events, so a restarted server can converge the same Run.
+func (dm *DaemonManager) SubscribeTask(ctx context.Context, daemon *DaemonInfo, taskID string) (<-chan SSEDaemonEvent, error) {
 	// Connect to SSE endpoint
 	eventsURL := fmt.Sprintf("http://%s:%d/internal/daemon/tasks/%s/events", daemon.Host, daemon.Port, taskID)
 
@@ -462,6 +475,12 @@ func (dm *DaemonManager) StreamTask(ctx context.Context, daemon *DaemonInfo, req
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("connect to SSE stream: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		resp.Body.Close()
+		cancel()
+		return nil, fmt.Errorf("daemon returned status %d for task events: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	eventCh := make(chan SSEDaemonEvent, 64)
@@ -651,7 +670,7 @@ func (dm *DaemonManager) healthCheckLoop() {
 }
 
 func (dm *DaemonManager) checkHealth() {
-	var timedOutTasks []PendingTaskInfo
+	var lostTasks []PendingTaskInfo
 
 	dm.mu.Lock()
 	now := time.Now()
@@ -684,7 +703,7 @@ func (dm *DaemonManager) checkHealth() {
 		cleanedCount := 0
 		for taskID, task := range dm.pendingTasks {
 			if task.DaemonID == id {
-				timedOutTasks = append(timedOutTasks, task)
+				lostTasks = append(lostTasks, task)
 				delete(dm.pendingTasks, taskID)
 				cleanedCount++
 			}
@@ -698,9 +717,12 @@ func (dm *DaemonManager) checkHealth() {
 	}
 
 	// Remove tasks that have exceeded their phase-specific timeout threshold.
-	timedOutTasks = append(timedOutTasks, dm.removeStaleTasks(now)...)
+	timedOutTasks := dm.removeStaleTasks(now)
 	dm.mu.Unlock()
 
+	for _, task := range lostTasks {
+		dm.daemonLostPendingTaskRun(task)
+	}
 	for _, task := range timedOutTasks {
 		dm.timeoutPendingTaskRun(task)
 	}
@@ -738,44 +760,82 @@ func (dm *DaemonManager) removeStaleTasks(now time.Time) []PendingTaskInfo {
 }
 
 func (dm *DaemonManager) timeoutPendingTaskRun(task PendingTaskInfo) {
+	activity := agentActivityTimeout
+	if task.TimeoutPhase == "queue" {
+		activity = agentActivityQueueTimeout
+	}
+	dm.finishPendingTaskRun(task, AgentRunStatusTimeout, activity, agentFailureTimeout, true)
+}
+
+func (dm *DaemonManager) daemonLostPendingTaskRun(task PendingTaskInfo) {
+	dm.finishPendingTaskRun(task, AgentRunStatusFailed, agentActivityDaemonLost, agentFailureDaemonLost, true)
+}
+
+func (dm *DaemonManager) finishPendingTaskRun(task PendingTaskInfo, status AgentRunStatus, activity, failureCode string, retryable bool) {
 	if task.RunID == "" || dm.pool == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	if daemon, ok := dm.GetDaemon(task.DaemonID); ok && daemon.Status == DaemonStatusOnline {
+		if err := dm.CancelTask(ctx, daemon, task.TaskID); err != nil {
+			retryable = false
+			slog.Warn("failed to stop daemon task before terminal transition", "task_id", task.TaskID, "daemon_id", task.DaemonID, "error", err)
+		}
+	}
+
 	runSvc := NewAgentRunService(dm.pool)
 	run, err := runSvc.GetRun(ctx, task.RunID)
 	if err != nil {
-		slog.Warn("failed to load pending task run for timeout", "task_id", task.TaskID, "run_id", task.RunID, "error", err)
+		slog.Warn("failed to load pending task run", "task_id", task.TaskID, "run_id", task.RunID, "error", err)
 		return
 	}
 	if !isActiveAgentRunStatus(run.Status) {
 		return
 	}
-	activity := agentActivityTimeout
-	if task.TimeoutPhase == "queue" {
-		activity = agentActivityQueueTimeout
-	}
 	finished, err := runSvc.FinishRun(ctx, FinishRunInput{
 		RunID:        run.ID,
-		Status:       AgentRunStatusTimeout,
+		Status:       status,
 		ActivityText: activity,
 	})
 	if errors.Is(err, ErrAgentRunAlreadyFinished) {
 		return
 	}
 	if err != nil {
-		slog.Warn("failed to timeout pending task run", "task_id", task.TaskID, "run_id", task.RunID, "error", err)
+		slog.Warn("failed to finish pending task run", "task_id", task.TaskID, "run_id", task.RunID, "error", err)
 		return
 	}
-	if dm.hub != nil {
-		dm.hub.Broadcast(realtime.Envelope("agent.run.finished", runPayload(finished, finished.AgentID, finished.AgentName, "")))
+	event, eventErr := runSvc.AppendEvent(ctx, AppendRunEventInput{
+		RunID:   finished.ID,
+		Type:    AgentRunEventError,
+		Message: activity,
+		Payload: map[string]any{
+			"status":       status,
+			"failure_code": failureCode,
+			"retryable":    retryable,
+		},
+	})
+	if eventErr != nil {
+		slog.Warn("failed to append pending task failure event", "task_id", task.TaskID, "run_id", task.RunID, "error", eventErr)
 	}
-	if daemon, ok := dm.GetDaemon(task.DaemonID); ok {
-		if err := dm.CancelTask(ctx, daemon, task.TaskID); err != nil {
-			slog.Warn("failed to cancel timed out daemon task", "task_id", task.TaskID, "daemon_id", task.DaemonID, "error", err)
+	if dm.hub != nil {
+		if event != nil {
+			dm.hub.Broadcast(realtime.Envelope("agent.run.event", map[string]any{
+				"id":         event.ID,
+				"run_id":     finished.ID,
+				"agent_id":   finished.AgentID,
+				"agent_name": finished.AgentName,
+				"channel_id": finished.ChannelID,
+				"thread_id":  finished.ThreadID,
+				"seq":        event.Seq,
+				"event_type": event.Type,
+				"message":    event.Message,
+				"payload":    json.RawMessage(event.Payload),
+				"timestamp":  event.CreatedAt.UTC().Format(time.RFC3339),
+			}))
 		}
+		dm.hub.Broadcast(realtime.Envelope("agent.run.finished", runPayload(finished, finished.AgentID, finished.AgentName, "")))
 	}
 }
 
@@ -807,6 +867,7 @@ type DaemonRegisterRequest struct {
 	CurrentLoad   int32            `json:"current_load"`
 	AgentTypes    []string         `json:"agent_types"`
 	SystemInfo    DaemonSystemInfo `json:"system_info"`
+	Tasks         []string         `json:"tasks,omitempty"`
 }
 
 type DaemonRegisterResponse struct {

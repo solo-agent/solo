@@ -44,6 +44,27 @@ func TestBackendFinalStatusMapping(t *testing.T) {
 	}
 }
 
+func TestFinishCancelledTaskDefersTerminalStateDuringShutdown(t *testing.T) {
+	taskID := "task-daemon-shutdown"
+	tm := newTaskManager()
+	tm.AddTask(taskID, &taskState{TaskID: taskID, Status: taskStatusRunning})
+	h := newDaemonHandler(nil, tm, nil, "", "")
+	h.shuttingDown.Store(true)
+
+	h.finishCancelledTask(runTaskRequest{TaskID: taskID})
+
+	task, ok := tm.GetTask(taskID)
+	if !ok {
+		t.Fatal("task was removed")
+	}
+	if task.Status != taskStatusRunning {
+		t.Fatalf("task status = %q, want server-owned daemon_lost transition", task.Status)
+	}
+	if len(tm.eventHistory[taskID]) != 0 {
+		t.Fatalf("shutdown emitted terminal events: %#v", tm.eventHistory[taskID])
+	}
+}
+
 func TestProcessTaskWithProviderFailsWhenStreamClosesWithoutDone(t *testing.T) {
 	taskID := "task-missing-done"
 	tm := newTaskManager()

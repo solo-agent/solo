@@ -27,6 +27,15 @@
 
 </div>
 
+---
+
+## 🎬 Video Demo
+
+| 平台 | 链接 | 时长 | 说明 |
+| --- | --- | --- | --- |
+| 🎬 **Bilibili** | [观看教程](https://www.bilibili.com/video/BV1943K6MEGw) | 5:30 | 中文讲解，包含安装和使用 |
+| 🌏 **YouTube** | [Watch Tutorial](https://www.youtube.com/watch?v=Dnzy4XpQpiY) | 5:30 | English subtitles |
+
 ## Why Solo
 
 Solo is built for the moment when AI agents stop feeling like command-line tools and start working like human teammates.

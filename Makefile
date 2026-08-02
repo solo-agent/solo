@@ -1,4 +1,4 @@
-.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset
+.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-e2e-agent-delivery test-e2e-agent-session-resume
 .DEFAULT_GOAL := help
 
 ENV_FILE ?= .env
@@ -38,6 +38,12 @@ start: ## Start all services (ensures DB, runs migrations, auto-builds if needed
 restart: stop start ## Restart all services
 
 rebuild: stop clean-pids build start ## Rebuild binaries from a clean .pids dir and restart all services
+
+test-e2e-agent-delivery: rebuild ## Rebuild and verify the real Agent result delivery contract
+	@cd frontend && CI=1 SOLO_E2E_REAL_AGENT_DELIVERY=1 npx playwright test e2e/agent-result-delivery.spec.ts
+
+test-e2e-agent-session-resume: rebuild ## Rebuild and verify real Channel Session restart continuity
+	@cd frontend && CI=1 SOLO_E2E_REAL_AGENT_DELIVERY=1 npx playwright test e2e/agent-result-delivery.spec.ts --grep "resumes the same real Channel provider Session"
 
 stop: ## Shut down all services
 	@bash scripts/stop-services.sh

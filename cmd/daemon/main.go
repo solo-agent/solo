@@ -108,6 +108,7 @@ func main() {
 	daemonH = h
 
 	// v1.4: Initialize persistent agent session managers for all registered types.
+	var sessionManagers []*agent.AgentSessionManager
 	for _, meta := range agent.GlobalRegistry().ListMeta() {
 		psBackend, err := agent.NewPersistentBackend(meta.Type)
 		if err != nil {
@@ -117,8 +118,8 @@ func main() {
 		memoryMgr := agent.NewMemoryManager("")
 		sessionMgr := agent.NewAgentSessionManager(psBackend, workspaceMgr, memoryMgr, slog.Default())
 		h.SetSessionManager(meta.Type, sessionMgr)
+		sessionManagers = append(sessionManagers, sessionMgr)
 		slog.Info("persistent agent session manager initialized", "provider", meta.Type)
-		defer sessionMgr.CloseAll()
 	}
 
 	r := chi.NewRouter()
@@ -191,8 +192,19 @@ func main() {
 	<-ctx.Done()
 	slog.Info("daemon server shutting down")
 
+	h.shuttingDown.Store(true)
+
+	// Stop every provider runtime before the server can observe daemon_lost and
+	// reassign its Runs. Keep the machine lock until all subprocesses are reaped.
+	for _, sessionMgr := range sessionManagers {
+		sessionMgr.CloseAll()
+	}
+
 	// Unregister on shutdown
 	unregisterFromServer()
+	for _, taskID := range taskMgr.ListTaskIDs() {
+		taskMgr.CloseAllSubscribers(taskID)
+	}
 
 	// Release machine lock
 	if machineLock != nil {
@@ -249,6 +261,7 @@ func registerWithServer(ctx context.Context) error {
 		CurrentLoad:   0,
 		AgentTypes:    registeredAgentTypes(),
 		SystemInfo:    collectSystemInfo(),
+		Tasks:         taskMgr.ListTaskIDs(),
 	}
 
 	payload, err := json.Marshal(req)
@@ -414,6 +427,7 @@ type daemonRegisterPayload struct {
 	CurrentLoad   int32      `json:"current_load"`
 	AgentTypes    []string   `json:"agent_types"`
 	SystemInfo    SystemInfo `json:"system_info"`
+	Tasks         []string   `json:"tasks,omitempty"`
 }
 
 type daemonRegisterResponse struct {

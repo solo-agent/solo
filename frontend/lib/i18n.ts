@@ -606,8 +606,10 @@ const en = {
   agentActivityCancelled: 'Cancelled',
   agentActivityTimeout: 'Timed out',
   agentActivityFailed: 'Failed',
+  agentActivityDaemonLost: 'Stopped because the local daemon restarted',
   agentRunFailedToast: '{name} failed: {reason}',
   agentErrorNoAvailableDaemon: 'No available runtime. Start a daemon and try again.',
+  agentErrorMissingVisibleResult: 'The agent finished without delivering a message. Please try again.',
 
   // ── Agent Run Status ──
   runQueued: 'Queued',
@@ -1497,8 +1499,10 @@ const zhCN = {
   agentActivityCancelled: '已取消',
   agentActivityTimeout: '执行超时',
   agentActivityFailed: '执行失败',
+  agentActivityDaemonLost: '本地 Daemon 重启，执行已中断',
   agentRunFailedToast: '{name} 运行失败：{reason}',
   agentErrorNoAvailableDaemon: '没有可用运行时。请先启动 daemon 后重试。',
+  agentErrorMissingVisibleResult: 'Agent 已结束，但没有交付消息，请重试。',
   runQueued: '排队中',
   runThinking: '思考中',
   runRunning: '运行中',

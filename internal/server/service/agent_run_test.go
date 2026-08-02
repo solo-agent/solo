@@ -633,6 +633,62 @@ INSERT INTO messages (session_id, role, content, timestamp) VALUES ('hermes-live
 	}
 }
 
+func TestAgentRunVisibleMessageDelivery(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, ownerID)
+	channelID := agentRunChannel(t, pool, ownerID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM messages WHERE channel_id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE created_by = $1`, ownerID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	runSvc := NewAgentRunService(pool)
+	run, err := runSvc.StartRun(ctx, StartRunInput{
+		AgentID:      agentID,
+		TriggerType:  AgentRunTriggerMessage,
+		ChannelID:    channelID,
+		Status:       AgentRunStatusRunning,
+		ActivityText: "执行中",
+	})
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+
+	matches, err := runSvc.ValidateMessageDelivery(ctx, run.ID, agentID, channelID, "", "")
+	if err != nil || !matches {
+		t.Fatalf("ValidateMessageDelivery correct scope = %v, %v", matches, err)
+	}
+	matches, err = runSvc.ValidateMessageDelivery(ctx, run.ID, agentID, uuid.NewString(), "", "")
+	if err != nil || matches {
+		t.Fatalf("ValidateMessageDelivery other scope = %v, %v", matches, err)
+	}
+	if _, err := runSvc.ValidateMessageDelivery(ctx, run.ID, uuid.NewString(), channelID, "", ""); err == nil {
+		t.Fatal("ValidateMessageDelivery accepted another agent")
+	}
+
+	visible, err := runSvc.HasVisibleMessage(ctx, run.ID)
+	if err != nil || visible {
+		t.Fatalf("HasVisibleMessage before insert = %v, %v", visible, err)
+	}
+	_, err = pool.Exec(ctx, `
+		INSERT INTO messages (id, channel_id, sender_type, sender_id, content, metadata)
+		VALUES ($1, $2, 'agent', $3, 'delivered', jsonb_build_object('agent_run_id', $4::text, 'delivery', 'visible'))`,
+		uuid.NewString(), channelID, agentID, run.ID,
+	)
+	if err != nil {
+		t.Fatalf("insert visible message: %v", err)
+	}
+	visible, err = runSvc.HasVisibleMessage(ctx, run.ID)
+	if err != nil || !visible {
+		t.Fatalf("HasVisibleMessage after insert = %v, %v", visible, err)
+	}
+}
+
 func agentRunListContains(runs []AgentRun, id string) bool {
 	for _, run := range runs {
 		if run.ID == id {
@@ -756,6 +812,19 @@ func agentRunTranscriptFileWithText(t *testing.T, text string) string {
 	t.Helper()
 	path := t.TempDir() + "/session.jsonl"
 	raw := fmt.Sprintf(`{"type":"user","timestamp":%q,"message":{"content":%q}}`+"\n", time.Now().UTC().Format(time.RFC3339), text)
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	return path
+}
+
+func agentRunTranscriptFileWithUsage(t *testing.T, text string, inputTokens, outputTokens int) string {
+	t.Helper()
+	path := t.TempDir() + "/session.jsonl"
+	raw := fmt.Sprintf(
+		`{"type":"user","timestamp":%q,"message":{"content":%q,"usage":{"input_tokens":%d,"output_tokens":%d}}}`+"\n",
+		time.Now().UTC().Format(time.RFC3339), text, inputTokens, outputTokens,
+	)
 	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
 		t.Fatalf("write transcript: %v", err)
 	}

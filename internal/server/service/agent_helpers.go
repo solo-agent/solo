@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/google/uuid"
 	"github.com/solo-ai/solo/internal/realtime"
 	"github.com/solo-ai/solo/pkg/agent"
 )
@@ -76,13 +75,13 @@ func (s *AgentService) TriggerAgentGreeting(ctx context.Context, channelID, agen
 	}
 
 	taskReq := daemonTaskRequest{
-		TaskID:    uuid.New().String(),
 		AgentID:   ag.ID,
 		ChannelID: channelID,
 		Messages: []agent.Message{
 			{Role: agent.RoleUser, Content: greetingContent, SenderID: ""},
 		},
-		SystemPrompt: ag.SystemPrompt,
+		SystemPrompt:   ag.SystemPrompt,
+		ResultContract: agentResultContractVisibleMessage,
 		ModelConfig: agent.ModelConfig{
 			Provider: ag.ModelProvider,
 			Model:    ag.ModelName,

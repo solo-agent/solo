@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -54,6 +55,7 @@ type daemonHandler struct {
 	sessionManagers  map[string]*agent.AgentSessionManager // v1.4: per-provider persistent sessions
 	thinkingIdleTTL  time.Duration
 	thinkingSweep    time.Duration
+	shuttingDown     atomic.Bool
 
 	// v1.4: per-agent token store for persistent session token auto-refresh (SOLO-254-B).
 	agentTokens   map[string]*agentTokenState // agentID -> cached token + expiry
@@ -380,6 +382,7 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		Content    string `json:"content,omitempty"`
 		ThreadID   string `json:"thread_id,omitempty"`
 		NodeID     string `json:"thinking_node_id,omitempty"`
+		RunID      string `json:"run_id,omitempty"`
 		TaskNumber int    `json:"task_number,omitempty"`
 		TaskID     string `json:"task_id,omitempty"`
 		Status     string `json:"status,omitempty"`
@@ -402,6 +405,11 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			req.NodeID = runtimeNodeID
 		}
 	}
+	if req.Action == "message_send" {
+		if taskID := h.taskManager.ExecutingTaskID(req.AgentID, req.ChannelID, req.NodeID); taskID != "" {
+			req.RunID = taskID
+		}
+	}
 
 	// Generate or reuse auth token for this agent (SOLO-254-B: token store).
 	token, err := h.getOrGenerateToken(r.Context(), req.AgentID)
@@ -422,6 +430,9 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.NodeID != "" {
 			bodyMap["thinking_node_id"] = req.NodeID
+		}
+		if req.RunID != "" {
+			bodyMap["run_id"] = req.RunID
 		}
 		serverBody, _ = json.Marshal(bodyMap)
 	case "task_claim":
@@ -639,6 +650,7 @@ func (h *daemonHandler) Run(w http.ResponseWriter, r *http.Request) {
 		AgentID:    req.AgentID,
 		ChannelID:  req.ChannelID,
 		ThreadID:   req.ThreadID,
+		NodeID:     req.NodeID,
 		Status:     taskStatusQueued,
 		ReceivedAt: time.Now(),
 	})
@@ -680,6 +692,9 @@ func (h *daemonHandler) processTaskStreaming(ctx context.Context, req runTaskReq
 }
 
 func (h *daemonHandler) finishCancelledTask(req runTaskRequest) {
+	if h.shuttingDown.Load() {
+		return
+	}
 	h.taskManager.UpdateStatus(req.TaskID, taskStatusCancelled)
 	h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
 		"agent_id":  req.AgentID,
@@ -964,6 +979,11 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	} else {
 		delete(agentEnv, "SOLO_NODE_ID")
 	}
+	if req.RunID != "" {
+		agentEnv["SOLO_RUN_ID"] = req.RunID
+	} else {
+		delete(agentEnv, "SOLO_RUN_ID")
+	}
 
 	// Build system prompt using PromptBuilder
 	hostname, _ := os.Hostname()
@@ -1146,7 +1166,6 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 
 	// Stream output chunks
 	var fullContent string
-	var messageSentViaCLI bool
 
 	streamOpen := true
 	for streamOpen {
@@ -1210,6 +1229,9 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 			})
 
 		case string(agent.MessageError):
+			if h.shuttingDown.Load() {
+				return
+			}
 			slog.Error("task: backend stream error", "task_id", req.TaskID, "error", chunk.Content)
 			h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
 			h.notifyServerError(req, chunk.Content)
@@ -1221,14 +1243,6 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 
 		case string(agent.MessageToolUse):
 			if chunk.Tool != nil {
-				// Detect solo message send for routing
-				if chunk.Tool.Name == "Bash" {
-					if input, ok := chunk.Tool.Input["command"].(string); ok {
-						if strings.Contains(input, "solo message send") {
-							messageSentViaCLI = true
-						}
-					}
-				}
 				// Forward tool_use as SSE for agent view
 				inputJSON, _ := json.Marshal(chunk.Tool.Input)
 				h.pushEventJSON(req.TaskID, "tool_use", map[string]interface{}{
@@ -1254,6 +1268,10 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		}
 	}
 
+	if h.shuttingDown.Load() {
+		return
+	}
+
 	// v1.3: - only CLI-sent messages appear in channel.
 	// If solo message send was called, API already created the message.
 	// Direct text output is internal thinking, not channel messages.
@@ -1275,7 +1293,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	// v1.3: — NEVER persist text output as channel messages.
 	// Only solo message send API (via proxy) creates visible messages.
 	// All text output is internal thinking. Always skip persist.
-	if !messageSentViaCLI && strings.TrimSpace(fullContent) != "" {
+	if strings.TrimSpace(fullContent) != "" {
 		slog.Info("task: suppressing text output (not sent via CLI)", "agent_id", req.AgentID, "length", len(fullContent))
 	}
 
@@ -1285,15 +1303,16 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		"status", result.Status,
 		"content_length", len(result.Output),
 		"duration_ms", result.DurationMs,
-		"message_sent_via_cli", messageSentViaCLI,
 	)
 
 	// Extract usage from result
-	var inputTokens, outputTokens int
+	var inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int
 	if result.Usage != nil {
 		for _, u := range result.Usage {
 			inputTokens += int(u.InputTokens)
 			outputTokens += int(u.OutputTokens)
+			cacheReadTokens += int(u.CacheReadTokens)
+			cacheWriteTokens += int(u.CacheWriteTokens)
 		}
 	}
 
@@ -1321,8 +1340,10 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		"external_session_id": providerSessionID,
 		"transcript_path":     transcriptPath,
 		"usage": map[string]int{
-			"input_tokens":  inputTokens,
-			"output_tokens": outputTokens,
+			"input_tokens":       inputTokens,
+			"output_tokens":      outputTokens,
+			"cache_read_tokens":  cacheReadTokens,
+			"cache_write_tokens": cacheWriteTokens,
 		},
 	})
 

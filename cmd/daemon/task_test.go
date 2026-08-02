@@ -26,6 +26,37 @@ func TestTaskManagerReplaysBackendStartSessionAndTerminalEvents(t *testing.T) {
 	}
 }
 
+func TestTaskManagerIDsIncludeActiveAndTerminalTasks(t *testing.T) {
+	tm := newTaskManager()
+	tm.AddTask("active", &taskState{TaskID: "active", Status: taskStatusRunning})
+	tm.AddTask("done", &taskState{TaskID: "done", Status: taskStatusCompleted})
+
+	got := map[string]bool{}
+	for _, taskID := range tm.ListTaskIDs() {
+		got[taskID] = true
+	}
+	if !got["active"] || !got["done"] {
+		t.Fatalf("snapshots = %#v", got)
+	}
+}
+
+func TestTaskManagerExecutingTaskIDUsesRuntimeScope(t *testing.T) {
+	tm := newTaskManager()
+	tm.AddTask("old", &taskState{
+		AgentID: "agent-1", ChannelID: "channel-1", Status: taskStatusCompleted,
+	})
+	tm.AddTask("current", &taskState{
+		AgentID: "agent-1", ChannelID: "channel-1", Status: taskStatusThinking,
+	})
+	tm.AddTask("other-channel", &taskState{
+		AgentID: "agent-1", ChannelID: "channel-2", Status: taskStatusThinking,
+	})
+
+	if got := tm.ExecutingTaskID("agent-1", "channel-1", ""); got != "current" {
+		t.Fatalf("ExecutingTaskID = %q, want current", got)
+	}
+}
+
 func TestTaskManagerClearsCompletedTaskCancellation(t *testing.T) {
 	tm := newTaskManager()
 	called := false

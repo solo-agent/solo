@@ -1264,6 +1264,31 @@ func TestProxyRequestTimeoutAllowsTeamFormationToFinish(t *testing.T) {
 	}
 }
 
+func TestProxyRequestCarriesAgentRunID(t *testing.T) {
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode proxy request: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	t.Setenv("SOLO_DAEMON_URL", server.URL)
+	t.Setenv("SOLO_AGENT_ID", "agent-1")
+	t.Setenv("SOLO_RUN_ID", "run-1")
+	status, _, err := proxyRequest("message_send", "channel-1", "done", "", "token", 0, "")
+	if err != nil {
+		t.Fatalf("proxyRequest: %v", err)
+	}
+	if status != http.StatusCreated {
+		t.Fatalf("status = %d", status)
+	}
+	if got["run_id"] != "run-1" {
+		t.Fatalf("run_id = %#v, want run-1", got["run_id"])
+	}
+}
+
 func TestIsTeamFormationInProgress(t *testing.T) {
 	if !isTeamFormationInProgress(http.StatusConflict, []byte(`{"error":"team formation is already in progress"}`)) {
 		t.Fatal("expected in-progress response to be retryable")

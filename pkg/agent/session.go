@@ -399,7 +399,7 @@ func (m *AgentSessionManager) ForceCloseSession(agentID string) error {
 	return firstErr
 }
 
-// CloseAll terminates all sessions.
+// CloseAll immediately terminates all sessions for daemon shutdown.
 func (m *AgentSessionManager) CloseAll() {
 	m.mu.Lock()
 	entries := make([]*agentSessionEntry, 0, len(m.sessions))
@@ -412,8 +412,8 @@ func (m *AgentSessionManager) CloseAll() {
 	for _, entry := range entries {
 		ps, asleep, _ := entry.snapshot()
 		if !asleep && ps != nil {
-			m.logger.Info("session: closing (shutdown)", "agent_id", entry.AgentID)
-			_ = m.backend.Close(ps)
+			m.logger.Warn("session: force-closing (shutdown)", "agent_id", entry.AgentID)
+			_ = m.backend.ForceClose(ps)
 		}
 	}
 }

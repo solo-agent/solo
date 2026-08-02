@@ -34,6 +34,21 @@ func TestBuildClaudeArgs(t *testing.T) {
 		assertContains(t, args, "sonnet")
 	})
 
+	t.Run("with runtime-owned resume session", func(t *testing.T) {
+		req := &ExecuteRequest{}
+		opts := &ExecuteOptions{
+			ResumeSessionID: "provider-session",
+			CustomArgs:      []string{"--resume", "wrong-session", "--continue", "--fork-session"},
+		}
+		args := buildClaudeArgs(req, opts)
+
+		assertContains(t, args, "--resume")
+		assertContains(t, args, "provider-session")
+		assertNotContains(t, args, "wrong-session")
+		assertNotContains(t, args, "--continue")
+		assertNotContains(t, args, "--fork-session")
+	})
+
 	t.Run("with system prompt", func(t *testing.T) {
 		req := &ExecuteRequest{}
 		opts := &ExecuteOptions{SystemPrompt: "Be helpful.", WorkspaceDir: t.TempDir()}

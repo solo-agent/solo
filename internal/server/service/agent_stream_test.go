@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -32,7 +33,7 @@ func TestStreamingAgentTaskBindsSessionAndTranscript(t *testing.T) {
 	agentID := agentRunAgent(t, pool, ownerID)
 	channelID := agentRunChannel(t, pool, ownerID)
 	messageID := agentRunMessage(t, pool, channelID, ownerID)
-	transcriptPath := agentRunTranscriptFileWithText(t, "stream transcript")
+	transcriptPath := agentRunTranscriptFileWithUsage(t, "stream transcript", 3, 4)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = $1`, agentID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_sessions WHERE agent_id = $1`, agentID)
@@ -43,17 +44,22 @@ func TestStreamingAgentTaskBindsSessionAndTranscript(t *testing.T) {
 	})
 
 	daemonID := uuid.NewString()
-	taskID := uuid.NewString()
+	var gotTaskID, gotRunID string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/internal/daemon/run":
+		switch {
+		case r.URL.Path == "/internal/daemon/run":
+			var req daemonTaskRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("decode daemon request: %v", err)
+			}
+			gotTaskID, gotRunID = req.TaskID, req.RunID
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusAccepted)
-			_, _ = fmt.Fprintf(w, `{"task_id":%q,"status":"accepted"}`, taskID)
-		case "/internal/daemon/tasks/" + taskID + "/events":
+			_, _ = fmt.Fprintf(w, `{"task_id":%q,"status":"accepted"}`, req.TaskID)
+		case r.URL.Path == "/internal/daemon/tasks/"+gotTaskID+"/events":
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = fmt.Fprintf(w, "event: session\ndata: {\"external_session_id\":\"provider-session-1\"}\n\n")
-			_, _ = fmt.Fprintf(w, "event: complete\ndata: {\"external_session_id\":\"provider-session-1\",\"transcript_path\":%q,\"usage\":{\"input_tokens\":3,\"output_tokens\":4}}\n\n", transcriptPath)
+			_, _ = fmt.Fprintf(w, "event: complete\ndata: {\"external_session_id\":\"provider-session-1\",\"transcript_path\":%q,\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}\n\n", transcriptPath)
 			_, _ = fmt.Fprint(w, "event: done\ndata: {}\n\n")
 		default:
 			http.NotFound(w, r)
@@ -66,22 +72,25 @@ func TestStreamingAgentTaskBindsSessionAndTranscript(t *testing.T) {
 	dm.Register(daemon)
 	svc := NewAgentService(pool, dm, noopBroadcaster{}, nil)
 	svc.handleStreamingAgentTask(ctx, daemon, daemonTaskRequest{
-		TaskID:           taskID,
 		AgentID:          agentID,
 		ChannelID:        channelID,
 		TriggerMessageID: messageID,
 		Messages:         []agent.Message{{Role: agent.RoleUser, Content: "hello"}},
 		ModelConfig:      agent.ModelConfig{Provider: "claude", Model: "test"},
+		ResultContract:   agentResultContractNone,
 	}, agentChannelInfo{ID: agentID, Name: "Test Agent"})
 
 	var runID, sessionID, runStatus, runTranscript string
+	var inputUsage, outputUsage int
 	err := pool.QueryRow(ctx,
-		`SELECT id::text, COALESCE(session_id::text, ''), status, COALESCE(transcript_path, '')
+		`SELECT id::text, COALESCE(session_id::text, ''), status, COALESCE(transcript_path, ''),
+		        COALESCE((usage_json->>'input_tokens')::int, 0),
+		        COALESCE((usage_json->>'output_tokens')::int, 0)
 		   FROM agent_runs
 		  WHERE agent_id = $1
 		  ORDER BY started_at DESC
 		  LIMIT 1`, agentID,
-	).Scan(&runID, &sessionID, &runStatus, &runTranscript)
+	).Scan(&runID, &sessionID, &runStatus, &runTranscript, &inputUsage, &outputUsage)
 	if err != nil {
 		t.Fatalf("query run: %v", err)
 	}
@@ -93,6 +102,12 @@ func TestStreamingAgentTaskBindsSessionAndTranscript(t *testing.T) {
 	}
 	if runTranscript != transcriptPath {
 		t.Fatalf("run transcript path = %q, want %q", runTranscript, transcriptPath)
+	}
+	if gotTaskID != runID || gotRunID != runID {
+		t.Fatalf("daemon identity = task %q run %q, want agent run %q", gotTaskID, gotRunID, runID)
+	}
+	if inputUsage != 3 || outputUsage != 4 {
+		t.Fatalf("usage = (%d, %d), want (3, 4)", inputUsage, outputUsage)
 	}
 
 	var externalID, sessionTranscript string
@@ -114,6 +129,62 @@ func TestStreamingAgentTaskBindsSessionAndTranscript(t *testing.T) {
 	}
 	if len(timeline.Entries) != 1 || timeline.Entries[0].Text != "stream transcript" {
 		t.Fatalf("timeline entries = %+v", timeline.Entries)
+	}
+}
+
+func TestStreamingAgentTaskFailsWithoutVisibleMessage(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, ownerID)
+	channelID := agentRunChannel(t, pool, ownerID)
+	messageID := agentRunMessage(t, pool, channelID, ownerID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM messages WHERE channel_id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE created_by = $1`, ownerID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	taskID, server := streamingTestDaemon(t)
+	defer server.Close()
+	rec := newRecordingBroadcaster()
+	dm := NewDaemonManager(pool, rec)
+	daemon := daemonInfoForTest(t, server.URL, uuid.NewString())
+	dm.Register(daemon)
+	svc := NewAgentService(pool, dm, rec, nil)
+	svc.handleStreamingAgentTask(ctx, daemon, daemonTaskRequest{
+		TaskID:           taskID,
+		AgentID:          agentID,
+		ChannelID:        channelID,
+		TriggerMessageID: messageID,
+		ModelConfig:      agent.ModelConfig{Provider: "claude", Model: "test"},
+	}, agentChannelInfo{ID: agentID, Name: "Test Agent"})
+
+	var runID, status, failureCode string
+	err := pool.QueryRow(ctx, `
+		SELECT r.id::text, r.status, COALESCE((
+			SELECT e.payload->>'failure_code'
+			  FROM agent_run_events e
+			 WHERE e.run_id = r.id AND e.type = $2
+			 ORDER BY e.seq DESC
+			 LIMIT 1
+		), '')
+		  FROM agent_runs r
+		 WHERE r.agent_id = $1
+		 ORDER BY r.started_at DESC
+		 LIMIT 1`,
+		agentID, AgentRunEventError,
+	).Scan(&runID, &status, &failureCode)
+	if err != nil {
+		t.Fatalf("query failed run: %v", err)
+	}
+	if status != string(AgentRunStatusFailed) || failureCode != agentFailureMissingVisibleResult {
+		t.Fatalf("run %s = status %q failure %q", runID, status, failureCode)
+	}
+	if !rec.hasChannelEvent(channelID, "agent.error", agentErrorMissingVisibleResult) {
+		t.Fatalf("missing visible-result error not broadcast: %q", rec.channelMessages[channelID])
 	}
 }
 

@@ -27,6 +27,15 @@
 
 </div>
 
+---
+
+## 🎬 视频演示
+
+| 平台 | 链接 | 时长 | 说明 |
+| --- | --- | --- | --- |
+| 🎬 **Bilibili** | [观看教程](https://www.bilibili.com/video/BV1943K6MEGw) | 5:30 | 中文讲解，包含安装和使用 |
+| 🌏 **YouTube** | [Watch Tutorial](https://www.youtube.com/watch?v=Dnzy4XpQpiY) | 5:30 | English subtitles |
+
 ## 为什么选择 Solo
 
 Solo 是一个本地优先的工作区，用来让人类和 AI 编码智能体像团队成员一样协作。

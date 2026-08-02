@@ -958,9 +958,9 @@ func (b *ClaudeBackend) handleUser(msg claudeSDKMessage, ch chan<- OutputChunk) 
 
 // ── CLI argument construction ──
 
-// claudeBlockedArgs are flags hardcoded by the Backend that must not be
-// overridden by user-configured CustomArgs. Overriding these would break
-// the daemon-to-claude communication protocol.
+// claudeBlockedArgs are flags owned by the Backend that must not be overridden
+// by user-configured CustomArgs. Overriding these would break the protocol or
+// route a Channel turn into the wrong provider session.
 //
 // Note: "-p" is intentionally NOT blocked. We run Claude Code in interactive
 // mode (without -p) so agents can autonomously execute shell commands
@@ -972,6 +972,12 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"--permission-mode": blockedWithValue,
 	"--disallowedTools": blockedWithValue,
 	"--max-turns":       blockedWithValue,
+	"--resume":          blockedWithValue,
+	"-r":                blockedWithValue,
+	"--continue":        blockedStandalone,
+	"-c":                blockedStandalone,
+	"--session-id":      blockedWithValue,
+	"--fork-session":    blockedStandalone,
 }
 
 // buildClaudeArgs constructs the CLI arguments for spawning Claude Code.
@@ -996,6 +1002,9 @@ func buildClaudeArgs(req *ExecuteRequest, opts *ExecuteOptions) []string {
 	}
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", strconv.Itoa(opts.MaxTurns))
+	}
+	if opts.ResumeSessionID != "" {
+		args = append(args, "--resume", opts.ResumeSessionID)
 	}
 	if opts.SystemPrompt != "" {
 		// Write system prompt to .solo/system-prompt.md.

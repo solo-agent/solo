@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/solo-ai/solo/internal/realtime"
 	"github.com/solo-ai/solo/pkg/agent"
@@ -42,8 +43,18 @@ const (
 	agentActivityCancelled      = "agent.activity.cancelled"
 	agentActivityTimeout        = "agent.activity.timeout"
 	agentActivityFailed         = "agent.activity.failed"
+	agentActivityDaemonLost     = "agent.activity.daemon_lost"
 
-	agentErrorNoAvailableDaemon = "agent.error.no_available_daemon"
+	agentErrorNoAvailableDaemon    = "agent.error.no_available_daemon"
+	agentErrorMissingVisibleResult = "agent.error.missing_visible_result"
+
+	agentResultContractVisibleMessage = "visible_message"
+	agentResultContractHandoff        = "handoff"
+	agentResultContractNone           = "none"
+	agentFailureMissingVisibleResult  = "missing_visible_result"
+	agentFailureDaemonLost            = "daemon_lost"
+	agentFailureTimeout               = "timeout"
+	agentFailureProviderTransient     = "provider_transient"
 )
 
 // maxAgentChainDepth limits the depth of agent-to-agent trigger chains
@@ -225,7 +236,6 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 
 		// Build the task request
 		taskReq := daemonTaskRequest{
-			TaskID:           uuid.New().String(),
 			AgentID:          ag.ID,
 			ChannelID:        channelID,
 			TriggerMessageID: messageID,
@@ -238,6 +248,7 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 			TaskContext:    taskContext,
 			AgentChain:     newChain,
 			MentionedNames: mentionedNames,
+			ResultContract: agentResultContractVisibleMessage,
 		}
 
 		// Dispatch via streaming SSE and handle events
@@ -370,7 +381,6 @@ func (s *AgentService) triggerAgentResponseInNode(ctx context.Context, channelID
 			continue
 		}
 		taskReq := daemonTaskRequest{
-			TaskID:                uuid.NewString(),
 			AgentID:               ag.ID,
 			ChannelID:             channelID,
 			NodeID:                nodeID,
@@ -384,6 +394,10 @@ func (s *AgentService) triggerAgentResponseInNode(ctx context.Context, channelID
 			MentionedNames:        mentionedNames,
 			ResumeSessionID:       nodeCtx.ResumeSessionID,
 			ReturnHandoff:         returnHandoff,
+			ResultContract:        agentResultContractVisibleMessage,
+		}
+		if handoffRun {
+			taskReq.ResultContract = agentResultContractHandoff
 		}
 		go s.handleStreamingAgentTask(context.Background(), daemon, taskReq, ag)
 		dispatched = true
@@ -593,6 +607,14 @@ func (s *AgentService) broadcastAgentError(threadID, channelID, agentID, agentNa
 // handleStreamingAgentTask dispatches a task to a daemon via SSE streaming
 // and forwards events to WebSocket subscribers.
 func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *DaemonInfo, taskReq daemonTaskRequest, ag agentChannelInfo) {
+	s.runStreamingAgentTask(ctx, daemon, taskReq, ag, nil)
+}
+
+func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *DaemonInfo, taskReq daemonTaskRequest, ag agentChannelInfo, existingRun *AgentRun) {
+	resultContract := taskReq.ResultContract
+	if resultContract == "" {
+		resultContract = agentResultContractVisibleMessage
+	}
 	if taskReq.ReturnHandoff {
 		defer func() {
 			cleared, err := NewThinkingService(s.pool).CancelReturn(context.Background(), taskReq.NodeID)
@@ -616,41 +638,62 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 		agentName = "Agent"
 	}
 
-	// Track this task for daemon offline cleanup (cleanup on return)
-	s.dm.TrackTask(taskReq.TaskID, daemon.ID, ag.ID)
-	defer s.dm.RemoveTask(taskReq.TaskID)
-
 	// Queue and backend execution are timed independently by DaemonManager.
 	// This context is cancelled when either phase exceeds its own deadline.
 	streamCtx, streamCancel := context.WithCancel(ctx)
 	defer streamCancel()
 
-	// Pre-generate a message ID for the streaming message
-	streamMessageID := uuid.New().String()
 	runSvc := NewAgentRunService(s.pool)
 	triggerType := AgentRunTriggerMessage
 	if taskReq.OriginTaskID != "" {
 		triggerType = AgentRunTriggerTask
 	}
-	run, err := runSvc.StartRun(ctx, StartRunInput{
-		AgentID:          ag.ID,
-		TriggerType:      triggerType,
-		TriggerMessageID: taskReq.TriggerMessageID,
-		ChannelID:        taskReq.ChannelID,
-		ThreadID:         taskReq.ThreadID,
-		ThinkingNodeID:   taskReq.NodeID,
-		Status:           AgentRunStatusQueued,
-		ActivityText:     "等待执行",
-		Source:           taskReq.ModelConfig.Provider,
-	})
-	if err != nil {
-		slog.Warn("failed to start agent run", "task_id", taskReq.TaskID, "agent_id", ag.ID, "error", err)
+	newRun := existingRun == nil
+	run := existingRun
+	if newRun && taskReq.NodeID == "" && taskReq.ResumeSessionID == "" {
+		err := s.pool.QueryRow(ctx, `
+			SELECT sess.external_session_id
+			  FROM agent_runs r
+			  JOIN agent_sessions sess ON sess.id = r.session_id
+			 WHERE r.agent_id = $1
+			   AND r.channel_id = $2
+			   AND r.thinking_node_id IS NULL
+			   AND sess.provider = $3
+			   AND sess.status = 'active'
+			   AND COALESCE(sess.external_session_id, '') <> ''
+			 ORDER BY sess.last_active_at DESC, r.updated_at DESC
+			 LIMIT 1`,
+			ag.ID, taskReq.ChannelID, taskReq.ModelConfig.Provider,
+		).Scan(&taskReq.ResumeSessionID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("failed to load channel session for resume", "agent_id", ag.ID, "channel_id", taskReq.ChannelID, "error", err)
+		}
 	}
-	if run != nil {
-		s.dm.AttachTaskRun(taskReq.TaskID, run.ID)
-		taskReq.RunID = run.ID
+	if newRun {
+		var err error
+		run, err = runSvc.StartRun(ctx, StartRunInput{
+			AgentID:          ag.ID,
+			TriggerType:      triggerType,
+			TriggerMessageID: taskReq.TriggerMessageID,
+			ChannelID:        taskReq.ChannelID,
+			ThreadID:         taskReq.ThreadID,
+			ThinkingNodeID:   taskReq.NodeID,
+			Status:           AgentRunStatusQueued,
+			ActivityText:     "等待执行",
+			Source:           taskReq.ModelConfig.Provider,
+		})
+		if err != nil {
+			slog.Warn("failed to start agent run", "agent_id", ag.ID, "error", err)
+			s.broadcastAgentError(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, err.Error())
+			return
+		}
 	}
-	if run != nil && taskReq.OriginTaskID != "" {
+	taskReq.TaskID = run.ID
+	taskReq.RunID = run.ID
+	s.dm.TrackTask(run.ID, daemon.ID, ag.ID)
+	s.dm.AttachTaskRun(run.ID, run.ID)
+	defer s.dm.RemoveTask(run.ID)
+	if newRun && taskReq.OriginTaskID != "" {
 		if err := runSvc.LinkTask(ctx, LinkRunTaskInput{RunID: run.ID, TaskID: taskReq.OriginTaskID, Role: AgentRunTaskRolePrimary, Confidence: 1}); err != nil {
 			slog.Warn("failed to link agent run task", "run_id", run.ID, "task_id", taskReq.OriginTaskID, "error", err)
 		} else {
@@ -661,7 +704,7 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 			})
 		}
 	}
-	if run != nil {
+	if newRun {
 		s.broadcastAgentRun(taskReq.ChannelID, "agent.run.started", runPayload(run, ag.ID, agentName, taskReq.OriginTaskID))
 		if taskReq.TriggerMessageID != "" {
 			s.appendAndBroadcastRunEvent(ctx, runSvc, run, ag.ID, agentName, AgentRunEventUserMessageReceived, "用户消息触发 run", "", map[string]any{
@@ -674,6 +717,7 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 			"trigger_type":       triggerType,
 			"trigger_message_id": taskReq.TriggerMessageID,
 			"task_id":            taskReq.OriginTaskID,
+			"result_contract":    resultContract,
 		})
 	}
 
@@ -700,6 +744,9 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 		s.broadcastAgentChunk(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "context", lastMsg.Content, nil)
 	}
 
+	var inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int
+	failureCode := ""
+	retryable := false
 	finishRun := func(status AgentRunStatus) {
 		if run == nil {
 			return
@@ -709,10 +756,56 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 			run = current
 			return
 		}
+		if run.TranscriptPath != "" {
+			entries, transcriptErr := ReadAgentTranscriptWindow(run.TranscriptPath, run.StartedAt.Add(-time.Second), time.Now().UTC().Add(time.Second), 10000)
+			if transcriptErr != nil {
+				slog.Warn("failed to read agent usage from transcript", "run_id", run.ID, "error", transcriptErr)
+			} else {
+				var transcriptInput, transcriptOutput, transcriptCacheRead, transcriptCacheWrite int
+				for _, entry := range entries {
+					if entry.Usage == nil {
+						continue
+					}
+					transcriptInput += int(entry.Usage.InputTokens)
+					transcriptOutput += int(entry.Usage.OutputTokens)
+					transcriptCacheRead += int(entry.Usage.CacheReadInputTokens)
+					transcriptCacheWrite += int(entry.Usage.CacheCreationInputTokens)
+				}
+				if transcriptInput > 0 || transcriptOutput > 0 || transcriptCacheRead > 0 || transcriptCacheWrite > 0 {
+					inputTokens = transcriptInput
+					outputTokens = transcriptOutput
+					cacheReadTokens = transcriptCacheRead
+					cacheWriteTokens = transcriptCacheWrite
+				}
+			}
+		}
+		if status == AgentRunStatusCompleted && resultContract == agentResultContractVisibleMessage {
+			visible, visibleErr := runSvc.HasVisibleMessage(ctx, run.ID)
+			if visibleErr != nil {
+				slog.Warn("failed to verify visible agent result", "run_id", run.ID, "error", visibleErr)
+			}
+			if visibleErr != nil || !visible {
+				status = AgentRunStatusFailed
+				failureCode = agentFailureMissingVisibleResult
+				retryable = true
+				s.broadcastAgentError(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, agentErrorMissingVisibleResult)
+			}
+		}
+		activityText := finalStateActivityText(status)
+		if failureCode == agentFailureDaemonLost {
+			activityText = agentActivityDaemonLost
+		}
+		usage := map[string]int{
+			"input_tokens":       inputTokens,
+			"output_tokens":      outputTokens,
+			"cache_read_tokens":  cacheReadTokens,
+			"cache_write_tokens": cacheWriteTokens,
+		}
 		finished, err := runSvc.FinishRun(ctx, FinishRunInput{
 			RunID:        run.ID,
 			Status:       status,
-			ActivityText: finalStateActivityText(status),
+			ActivityText: activityText,
+			Usage:        usage,
 		})
 		if errors.Is(err, ErrAgentRunAlreadyFinished) {
 			run = finished
@@ -722,20 +815,32 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 			slog.Warn("failed to finish agent run", "run_id", run.ID, "status", status, "error", err)
 			finished = run
 			finished.Status = status
-			finished.ActivityText = finalStateActivityText(status)
+			finished.ActivityText = activityText
+		}
+		if inputTokens > 0 || outputTokens > 0 || cacheReadTokens > 0 || cacheWriteTokens > 0 {
+			s.appendAndBroadcastRunEvent(ctx, runSvc, finished, ag.ID, agentName, AgentRunEventUsage, "usage", "", usage)
 		}
 		eventType := AgentRunEventDone
 		if status != AgentRunStatusCompleted {
 			eventType = AgentRunEventError
 		}
-		s.appendAndBroadcastRunEvent(ctx, runSvc, finished, ag.ID, agentName, eventType, finalStateActivityText(status), "", map[string]any{
-			"status": status,
-		})
+		eventPayload := map[string]any{"status": status}
+		if failureCode != "" {
+			eventPayload["failure_code"] = failureCode
+			eventPayload["retryable"] = retryable
+		}
+		s.appendAndBroadcastRunEvent(ctx, runSvc, finished, ag.ID, agentName, eventType, activityText, "", eventPayload)
 		s.broadcastAgentRun(taskReq.ChannelID, "agent.run.finished", runPayload(finished, ag.ID, agentName, taskReq.OriginTaskID))
 	}
 
 	// Send via SSE streaming
-	eventCh, err := s.dm.StreamTask(streamCtx, daemon, taskReq)
+	var eventCh <-chan SSEDaemonEvent
+	var err error
+	if newRun {
+		eventCh, err = s.dm.StreamTask(streamCtx, daemon, taskReq)
+	} else {
+		eventCh, err = s.dm.SubscribeTask(streamCtx, daemon, taskReq.TaskID)
+	}
 	if err != nil {
 		slog.Error("failed to stream agent task",
 			"task_id", taskReq.TaskID,
@@ -744,12 +849,16 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 			"error", err,
 		)
 		s.broadcastAgentError(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, err.Error())
+		retryable = true
+		if newRun {
+			failureCode = agentFailureProviderTransient
+		} else {
+			failureCode = agentFailureDaemonLost
+		}
 		finishRun(AgentRunStatusFailed)
 		return
 	}
 
-	// Track usage for logging
-	var inputTokens, outputTokens int
 	taskCompleted := false
 	// Track final state for the run finished broadcast. Updated by event handlers
 	// and read by the deferred broadcaster. Defaults to "aborted" if the stream
@@ -920,23 +1029,28 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 				ExternalSessionID string `json:"external_session_id"`
 				TranscriptPath    string `json:"transcript_path"`
 				Usage             struct {
-					InputTokens  int `json:"input_tokens"`
-					OutputTokens int `json:"output_tokens"`
+					InputTokens      int `json:"input_tokens"`
+					OutputTokens     int `json:"output_tokens"`
+					CacheReadTokens  int `json:"cache_read_tokens"`
+					CacheWriteTokens int `json:"cache_write_tokens"`
 				} `json:"usage"`
 			}
 			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
 				bindRunSession(data.ExternalSessionID, data.TranscriptPath)
 				inputTokens = data.Usage.InputTokens
 				outputTokens = data.Usage.OutputTokens
+				cacheReadTokens = data.Usage.CacheReadTokens
+				cacheWriteTokens = data.Usage.CacheWriteTokens
 				taskCompleted = true
 				finalState = "completed"
 			}
 
 		case "error":
 			var data struct {
-				AgentID string `json:"agent_id"`
-				Error   string `json:"error"`
-				Status  string `json:"status"`
+				AgentID   string `json:"agent_id"`
+				Error     string `json:"error"`
+				Status    string `json:"status"`
+				Retryable bool   `json:"retryable"`
 			}
 			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
 				slog.Error("agent task stream error",
@@ -946,6 +1060,14 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 				)
 				s.broadcastAgentError(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, data.Error)
 				finalState = finalStateFromErrorEventStatus(data.Status)
+				retryable = data.Retryable
+				if data.Retryable {
+					if finalState == "timeout" {
+						failureCode = agentFailureTimeout
+					} else {
+						failureCode = agentFailureProviderTransient
+					}
+				}
 			} else {
 				finalState = "failed"
 			}
@@ -1032,7 +1154,7 @@ func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *Dae
 	slog.Info("agent streaming task completed",
 		"agent_id", ag.ID,
 		"channel_id", taskReq.ChannelID,
-		"message_id", streamMessageID,
+		"run_id", run.ID,
 		"input_tokens", inputTokens,
 		"output_tokens", outputTokens,
 	)
@@ -1125,6 +1247,117 @@ func (s *AgentService) StartAgentRunWatchdogLoop(ctx context.Context) {
 	}
 }
 
+// ReconcileDaemonRuns converges PostgreSQL Run state with the one local
+// daemon's in-memory task list after either process restarts.
+func (s *AgentService) ReconcileDaemonRuns(ctx context.Context, daemon *DaemonInfo, taskIDs []string) {
+	if daemon == nil {
+		return
+	}
+	runs, err := NewAgentRunService(s.pool).ListActiveRuns(ctx)
+	if err != nil {
+		slog.Warn("failed to list active runs for daemon reconciliation", "daemon_id", daemon.ID, "error", err)
+		return
+	}
+	known := make(map[string]bool, len(taskIDs))
+	for _, taskID := range taskIDs {
+		known[taskID] = true
+	}
+	for i := range runs {
+		run := &runs[i]
+		if !known[run.ID] {
+			s.dm.RemoveTask(run.ID)
+			if err := s.finishDaemonLostRun(ctx, run); err != nil {
+				slog.Warn("failed to converge lost daemon run", "run_id", run.ID, "error", err)
+			}
+			continue
+		}
+		if s.dm.IsTaskTracked(run.ID) {
+			continue
+		}
+		taskReq, ag, err := s.loadRecoveredRun(ctx, run)
+		if err != nil {
+			slog.Warn("failed to load daemon run recovery context", "run_id", run.ID, "error", err)
+			continue
+		}
+		s.dm.TrackTask(run.ID, daemon.ID, run.AgentID)
+		s.dm.AttachTaskRun(run.ID, run.ID)
+		go s.runStreamingAgentTask(context.Background(), daemon, taskReq, ag, run)
+	}
+}
+
+func (s *AgentService) loadRecoveredRun(ctx context.Context, run *AgentRun) (daemonTaskRequest, agentChannelInfo, error) {
+	var ag agentChannelInfo
+	if err := s.pool.QueryRow(ctx, `
+		SELECT id::text, name, model_provider, model_name, system_prompt
+		  FROM agents
+		 WHERE id = $1 AND is_active = true`, run.AgentID,
+	).Scan(&ag.ID, &ag.Name, &ag.ModelProvider, &ag.ModelName, &ag.SystemPrompt); err != nil {
+		return daemonTaskRequest{}, ag, err
+	}
+
+	var resultContract, taskID string
+	if err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE((
+		         SELECT payload->>'result_contract'
+		           FROM agent_run_events
+		          WHERE run_id = $1 AND type = $2
+		          ORDER BY seq ASC
+		          LIMIT 1
+		       ), $3),
+		       COALESCE((
+		         SELECT task_id::text
+		           FROM agent_run_task_links
+		          WHERE run_id = $1 AND role = $4
+		          ORDER BY created_at DESC
+		          LIMIT 1
+		       ), '')`,
+		run.ID, AgentRunEventRunStarted, agentResultContractVisibleMessage, AgentRunTaskRolePrimary,
+	).Scan(&resultContract, &taskID); err != nil {
+		return daemonTaskRequest{}, ag, err
+	}
+
+	return daemonTaskRequest{
+		TaskID:           run.ID,
+		RunID:            run.ID,
+		AgentID:          run.AgentID,
+		ChannelID:        run.ChannelID,
+		ThreadID:         run.ThreadID,
+		NodeID:           run.ThinkingNodeID,
+		TriggerMessageID: run.TriggerMessageID,
+		SystemPrompt:     ag.SystemPrompt,
+		ModelConfig: agent.ModelConfig{
+			Provider: ag.ModelProvider,
+			Model:    ag.ModelName,
+		},
+		OriginTaskID:   taskID,
+		ReturnHandoff:  resultContract == agentResultContractHandoff,
+		ResultContract: resultContract,
+	}, ag, nil
+}
+
+func (s *AgentService) finishDaemonLostRun(ctx context.Context, run *AgentRun) error {
+	runSvc := NewAgentRunService(s.pool)
+	finished, err := runSvc.FinishRun(ctx, FinishRunInput{
+		RunID:        run.ID,
+		Status:       AgentRunStatusFailed,
+		ActivityText: agentActivityDaemonLost,
+	})
+	if errors.Is(err, ErrAgentRunAlreadyFinished) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	s.appendAndBroadcastRunEvent(ctx, runSvc, finished, finished.AgentID, finished.AgentName, AgentRunEventError, agentActivityDaemonLost, "", map[string]any{
+		"status":       AgentRunStatusFailed,
+		"failure_code": agentFailureDaemonLost,
+		"retryable":    true,
+	})
+	s.broadcastAgentError(finished.ThreadID, finished.ChannelID, finished.AgentID, finished.AgentName, agentActivityDaemonLost)
+	s.broadcastAgentRun(finished.ChannelID, "agent.run.finished", runPayload(finished, finished.AgentID, finished.AgentName, ""))
+	return nil
+}
+
 func (s *AgentService) CheckAgentRunWatchdogs(ctx context.Context, now time.Time) error {
 	runSvc := NewAgentRunService(s.pool)
 	staleQueuedRuns, err := s.listStaleQueuedRuns(ctx, now.Add(-agentRunQueueTimeout))
@@ -1166,7 +1399,7 @@ func (s *AgentService) CheckAgentRunWatchdogs(ctx context.Context, now time.Time
 			return err
 		}
 	}
-	return nil
+	return s.retryFailedTaskRuns(ctx)
 }
 
 func (s *AgentService) listStaleQueuedRuns(ctx context.Context, before time.Time) ([]AgentRun, error) {
@@ -1196,19 +1429,27 @@ func (s *AgentService) listRunsWithoutVisibleReply(ctx context.Context, before t
 	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
 		 WHERE r.status = ANY($1)
 		   AND r.backend_started_at <= $2
-		   AND NOT EXISTS (
-		         SELECT 1 FROM agent_run_events e
+		   AND COALESCE((
+		         SELECT e.payload->>'result_contract'
+		           FROM agent_run_events e
 		          WHERE e.run_id = r.id AND e.type = $3
+		          ORDER BY e.seq ASC
+		          LIMIT 1
+		       ), $4) = $4
+		   AND NOT EXISTS (
+		         SELECT 1 FROM messages m
+		          WHERE m.metadata->>'agent_run_id' = r.id::text
 		       )
 		   AND NOT EXISTS (
 		         SELECT 1 FROM agent_run_events e
-		          WHERE e.run_id = r.id AND e.type = $4
+		          WHERE e.run_id = r.id AND e.type = $5
 		       )
 		 ORDER BY r.started_at ASC
 		 LIMIT 100`,
 		executingAgentRunStatuses(),
 		before,
-		AgentRunEventAssistantMessage,
+		AgentRunEventRunStarted,
+		agentResultContractVisibleMessage,
 		agentRunEventNoVisibleReplyWatchdog,
 	))
 }
@@ -1269,6 +1510,14 @@ func (s *AgentService) timeoutStaleQueuedAgentRun(ctx context.Context, runSvc *A
 }
 
 func (s *AgentService) finishTimedOutAgentRun(ctx context.Context, runSvc *AgentRunService, run *AgentRun, activity string) error {
+	retryable := false
+	if daemon := s.dm.SelectDaemon("llm"); daemon != nil {
+		if err := s.dm.CancelTask(ctx, daemon, run.ID); err != nil {
+			slog.Warn("failed to stop timed out daemon task", "run_id", run.ID, "error", err)
+		} else {
+			retryable = true
+		}
+	}
 	finished, err := runSvc.FinishRun(ctx, FinishRunInput{
 		RunID:        run.ID,
 		Status:       AgentRunStatusTimeout,
@@ -1281,7 +1530,9 @@ func (s *AgentService) finishTimedOutAgentRun(ctx context.Context, runSvc *Agent
 		return err
 	}
 	s.appendAndBroadcastRunEvent(ctx, runSvc, finished, finished.AgentID, finished.AgentName, AgentRunEventError, activity, "", map[string]any{
-		"status": AgentRunStatusTimeout,
+		"status":       AgentRunStatusTimeout,
+		"failure_code": agentFailureTimeout,
+		"retryable":    retryable,
 	})
 	s.broadcastAgentRun(finished.ChannelID, "agent.run.finished", runPayload(finished, finished.AgentID, finished.AgentName, ""))
 	return nil
@@ -1787,7 +2038,6 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 		}
 
 		taskReq := daemonTaskRequest{
-			TaskID:           uuid.New().String(),
 			AgentID:          ag.ID,
 			ChannelID:        channelID,
 			ThreadID:         threadID,
@@ -1801,6 +2051,7 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 			TaskContext:    taskContext,
 			AgentChain:     newChain,
 			MentionedNames: threadMentionedNames,
+			ResultContract: agentResultContractVisibleMessage,
 		}
 
 		// Use streaming for thread as well
@@ -1873,7 +2124,7 @@ func (s *AgentService) TriggerAllAgentsForTask(ctx context.Context, channelID, t
 	}
 }
 
-func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskID, agentID string, taskNumber int, taskTitle, taskDescription string, agentChain, mentionedAgentIDs []string) {
+func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskID, agentID string, taskNumber int, taskTitle, taskDescription string, agentChain, mentionedAgentIDs []string) bool {
 	// Get agent info
 	var ag agentChannelInfo
 	err := s.pool.QueryRow(ctx,
@@ -1886,22 +2137,25 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 		slog.Error("failed to get agent info for task trigger",
 			"agent_id", agentID, "task_id", taskID, "error", err,
 		)
-		return
+		return false
 	}
 
 	// Look up the task's message_id so we can route the agent response to the
 	// task's thread rather than the main channel.
 	var messageID string
 	var taskMsgChannelID string
+	var taskStatus string
+	var taskClaimerID string
 	err = s.pool.QueryRow(ctx,
-		`SELECT COALESCE(message_id::text, ''), channel_id FROM tasks WHERE id = $1`,
+		`SELECT COALESCE(message_id::text, ''), channel_id, status, COALESCE(claimer_id::text, '')
+		 FROM tasks WHERE id = $1`,
 		taskID,
-	).Scan(&messageID, &taskMsgChannelID)
+	).Scan(&messageID, &taskMsgChannelID, &taskStatus, &taskClaimerID)
 	if err != nil {
 		slog.Error("failed to look up task for thread routing",
 			"task_id", taskID, "error", err,
 		)
-		return
+		return false
 	}
 
 	// Resolve thread ID from the task's message. If the task was created from
@@ -1940,7 +2194,7 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 			slog.Error("TriggerAgentForTask: failed to create system message for task",
 				"task_id", taskID, "error", dbErr,
 			)
-			return
+			return false
 		}
 		_, _ = s.pool.Exec(ctx,
 			`UPDATE tasks SET message_id = $1 WHERE id = $2`,
@@ -1952,7 +2206,7 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 			slog.Error("TriggerAgentForTask: failed to create thread for task",
 				"task_id", taskID, "error", tErr,
 			)
-			return
+			return false
 		}
 		threadID = tid
 		messageID = msgID
@@ -1966,7 +2220,7 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 	if daemon == nil {
 		slog.Warn("no available daemon for task agent trigger", "agent_id", ag.ID, "task_id", taskID)
 		s.broadcastAgentError(threadID, channelID, ag.ID, ag.Name, agentErrorNoAvailableDaemon)
-		return
+		return false
 
 	}
 
@@ -1974,11 +2228,11 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 	if agentChain != nil {
 		if len(agentChain) >= maxAgentChainDepth {
 			slog.Debug("agent chain depth limit reached (task)", "agent_id", agentID, "channel_id", channelID, "depth", len(agentChain))
-			return
+			return false
 		}
 		if containsStr(agentChain, agentID) {
 			slog.Debug("agent already in trigger chain (task), skipping", "agent_id", agentID, "channel_id", channelID)
-			return
+			return false
 		}
 	}
 	newChain := append([]string(nil), agentChain...)
@@ -2023,17 +2277,19 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 
 	taskContent := fmt.Sprintf("New message received:\n\n[target=%s msg=%s time=%s type=%s] @%s: %s",
 		target, shortMsgID, msgCreatedAt, senderType, senderName, msgContent)
-	taskContent += fmt.Sprintf(" [task #%d status=todo channel=%s]", taskNumber, channelID)
+	taskContent += fmt.Sprintf(" [task #%d status=%s channel=%s]", taskNumber, taskStatus, channelID)
 	taskContent += "\n\nRespond as appropriate. Complete all your work before stopping."
 	taskContent += "\n- To reply to this message, use the `target` and `msg` fields above."
 	taskContent += "\n- To claim or update this task, use the `channel` field above (e.g. `solo task claim -n N -c <channel>`)."
+	if taskClaimerID == agentID {
+		taskContent += fmt.Sprintf("\n- This Task is currently assigned to you (@%s). Execute it now even if the original message names a previous assignee; do not claim it again.", ag.Name)
+	}
 
 	contextMsgs := []agent.Message{
 		{Role: agent.RoleUser, Content: taskContent, SenderID: ""},
 	}
 
 	taskReq := daemonTaskRequest{
-		TaskID:           uuid.New().String(),
 		AgentID:          ag.ID,
 		ChannelID:        channelID,
 		ThreadID:         threadID,
@@ -2044,7 +2300,8 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 			Provider: ag.ModelProvider,
 			Model:    ag.ModelName,
 		},
-		OriginTaskID: taskID,
+		OriginTaskID:   taskID,
+		ResultContract: agentResultContractVisibleMessage,
 	}
 
 	slog.Info("triggering agent for task",
@@ -2058,6 +2315,7 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 	// The daemon task request includes task context. The agent evaluates the task,
 	// and if it decides to claim, outputs /claim #N which is parsed by
 	go s.handleStreamingAgentTask(context.Background(), daemon, taskReq, ag)
+	return true
 }
 
 func (s *AgentService) TriggerAgentForArtifact(ctx context.Context, task *Task, data artifactRenderData, requestedBy, mode string) error {
@@ -2085,11 +2343,11 @@ func (s *AgentService) TriggerAgentForArtifact(ctx context.Context, task *Task, 
 	}
 
 	taskReq := daemonTaskRequest{
-		TaskID:       uuid.New().String(),
-		AgentID:      ag.ID,
-		ChannelID:    task.ChannelID,
-		ThreadID:     threadID,
-		OriginTaskID: task.ID,
+		AgentID:        ag.ID,
+		ChannelID:      task.ChannelID,
+		ThreadID:       threadID,
+		OriginTaskID:   task.ID,
+		ResultContract: agentResultContractNone,
 		Messages: []agent.Message{
 			{Role: agent.RoleUser, Content: renderArtifactAgentPrompt(data, mode)},
 		},
@@ -2447,6 +2705,7 @@ type daemonTaskRequest struct {
 	MentionedNames        []string          `json:"mentioned_names,omitempty"`  // v1.3: names of @mentioned agents for context awareness
 	InitialGreeting       string            `json:"initial_greeting,omitempty"` // greeting message to prepend as system context
 	ReturnHandoff         bool              `json:"return_handoff,omitempty"`
+	ResultContract        string            `json:"-"`
 }
 
 // containsStr returns true if the slice s contains value v.

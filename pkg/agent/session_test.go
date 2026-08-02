@@ -125,6 +125,30 @@ func TestSessionManagerClosesReturnedThinkingSession(t *testing.T) {
 	}
 }
 
+func TestSessionManagerCloseAllForceCloses(t *testing.T) {
+	backend := &scopedRecordingBackend{}
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	ps, err := mgr.GetOrCreateSession(context.Background(), "agent-1", AgentConfig{
+		AgentID: "agent-1", Name: "Agent", Provider: "claude",
+	}, ChannelContext{}, []Message{{Role: RoleUser, Content: "work"}}, nil)
+	if err != nil {
+		t.Fatalf("start session: %v", err)
+	}
+	<-ps.Result
+
+	mgr.CloseAll()
+
+	backend.mu.Lock()
+	forced, closed := backend.forceCloseCount, backend.closeCount
+	backend.mu.Unlock()
+	if forced != 1 || closed != 0 {
+		t.Fatalf("shutdown closes = force %d graceful %d, want 1/0", forced, closed)
+	}
+	if mgr.IsActive("agent-1") {
+		t.Fatal("session remains active after CloseAll")
+	}
+}
+
 func TestSessionManagerSleepsOnlyIdleThinkingSessionsAndResumes(t *testing.T) {
 	backend := &scopedRecordingBackend{}
 	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())

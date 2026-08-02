@@ -27,6 +27,7 @@ type taskState struct {
 	AgentID     string
 	ChannelID   string
 	ThreadID    string
+	NodeID      string
 	Status      string
 	Result      string
 	Error       string
@@ -106,6 +107,20 @@ func (tm *taskManager) ListActiveTasks() []string {
 	return active
 }
 
+// ListTaskIDs returns the daemon's durable-recovery evidence. Terminal
+// tasks are included because their replayable completion events may not yet
+// have reached a restarted server.
+func (tm *taskManager) ListTaskIDs() []string {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	tasks := make([]string, 0, len(tm.tasks))
+	for id := range tm.tasks {
+		tasks = append(tasks, id)
+	}
+	return tasks
+}
+
 // ActiveTaskCount returns the number of currently running tasks.
 func (tm *taskManager) ActiveTaskCount() int {
 	return len(tm.ListActiveTasks())
@@ -128,6 +143,25 @@ func (tm *taskManager) ActiveAgentIDs() []string {
 		ids = []string{}
 	}
 	return ids
+}
+
+// ExecutingTaskID returns the task currently owning an agent's runtime scope.
+func (tm *taskManager) ExecutingTaskID(agentID, channelID, nodeID string) string {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	var taskID string
+	for id, t := range tm.tasks {
+		if t.AgentID != agentID || t.ChannelID != channelID || t.NodeID != nodeID ||
+			(t.Status != taskStatusRunning && t.Status != taskStatusThinking) {
+			continue
+		}
+		if taskID != "" {
+			return ""
+		}
+		taskID = id
+	}
+	return taskID
 }
 
 // --- SSE subscriber management ---
