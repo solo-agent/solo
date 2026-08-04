@@ -284,13 +284,15 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 			contentForMentions += " " + task.Description
 		}
 		var mentionedAgentIDs []string
+		var hasMentions bool
 		if h.mentionSvc != nil {
-			ids, _, err := h.mentionSvc.ResolveMentions(r.Context(), contentForMentions, task.ChannelID)
+			ids, hasRefs, err := h.mentionSvc.ResolveMentions(r.Context(), contentForMentions, task.ChannelID)
+			hasMentions = hasRefs
 			if err == nil {
 				mentionedAgentIDs = ids
 			}
 		}
-		go h.agentSvc.TriggerAllAgentsForTask(context.Background(), task.ChannelID, task.ID, task.TaskNumber, task.Title, mentionedAgentIDs, nil)
+		go h.agentSvc.TriggerAllAgentsForTask(context.Background(), task.ChannelID, task.ID, task.TaskNumber, task.Title, task.MessageID, mentionedAgentIDs, hasMentions, nil)
 	}
 }
 
@@ -905,13 +907,15 @@ func (h *TaskHandler) ConvertToTask(w http.ResponseWriter, r *http.Request) {
 			contentForMentions += " " + task.Description
 		}
 		var mentionedAgentIDs []string
+		var hasMentions bool
 		if h.mentionSvc != nil {
-			ids, _, err := h.mentionSvc.ResolveMentions(r.Context(), contentForMentions, task.ChannelID)
+			ids, hasRefs, err := h.mentionSvc.ResolveMentions(r.Context(), contentForMentions, task.ChannelID)
+			hasMentions = hasRefs
 			if err == nil {
 				mentionedAgentIDs = ids
 			}
 		}
-		go h.agentSvc.TriggerAllAgentsForTask(context.Background(), task.ChannelID, task.ID, task.TaskNumber, task.Title, mentionedAgentIDs, nil)
+		go h.agentSvc.TriggerAllAgentsForTask(context.Background(), task.ChannelID, task.ID, task.TaskNumber, task.Title, task.MessageID, mentionedAgentIDs, hasMentions, nil)
 	}
 
 	// Broadcast message.updated for the original message so the frontend
@@ -1223,13 +1227,15 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 			contentForMentions += " " + task.Description
 		}
 		var mentionedAgentIDs []string
+		var hasMentions bool
 		if h.mentionSvc != nil {
-			ids, _, err := h.mentionSvc.ResolveMentions(r.Context(), contentForMentions, task.ChannelID)
+			ids, hasRefs, err := h.mentionSvc.ResolveMentions(r.Context(), contentForMentions, task.ChannelID)
+			hasMentions = hasRefs
 			if err == nil {
 				mentionedAgentIDs = ids
 			}
 		}
-		go h.agentSvc.TriggerAllAgentsForTask(context.Background(), task.ChannelID, task.ID, task.TaskNumber, task.Title, mentionedAgentIDs, nil)
+		go h.agentSvc.TriggerAllAgentsForTask(context.Background(), task.ChannelID, task.ID, task.TaskNumber, task.Title, task.MessageID, mentionedAgentIDs, hasMentions, nil)
 	}
 }
 

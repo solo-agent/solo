@@ -257,7 +257,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve @mentions (SOLO-52-B)
-	mentionedAgentIDs, _, err := h.mentionSvc.ResolveMentions(r.Context(), content, channelID)
+	mentionedAgentIDs, hasMentions, err := h.mentionSvc.ResolveMentions(r.Context(), content, channelID)
 	if err != nil {
 		slog.Error("failed to resolve mentions", "error", err)
 		mentionedAgentIDs = nil
@@ -605,7 +605,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 			// Trigger all channel agents for this task (auto-claim)
 			if h.agentSvc != nil {
-				go h.agentSvc.TriggerAllAgentsForTask(context.Background(), channelID, task.ID, task.TaskNumber, task.Title, mentionedAgentIDs, nil)
+				go h.agentSvc.TriggerAllAgentsForTask(context.Background(), channelID, task.ID, task.TaskNumber, task.Title, task.MessageID, mentionedAgentIDs, hasMentions, nil)
 			}
 		}
 	}
@@ -665,7 +665,6 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// thread context and know to reply in the thread. Channel messages use
 	// TriggerAgentResponse (existing behavior).
 	if h.agentSvc != nil && !req.AsTask {
-		hasMentions := len(mentionedAgentIDs) > 0
 		if thinkingNodeID != "" {
 			go h.agentSvc.TriggerAgentResponseInNode(context.Background(), channelID, thinkingNodeID, messageID, senderType, userID, mentionedAgentIDs, hasMentions, nil)
 		} else if threadID != "" {

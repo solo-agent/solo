@@ -788,7 +788,7 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		threadSvc := service.NewThreadService(h.pool)
 		_, _, _ = threadSvc.GetOrCreateThread(r.Context(), dmID, task.MessageID)
 		if h.agentSvc != nil {
-			go h.agentSvc.TriggerAllAgentsForTask(context.Background(), dmID, task.ID, task.TaskNumber, task.Title, nil, nil)
+			go h.agentSvc.TriggerAllAgentsForTask(context.Background(), dmID, task.ID, task.TaskNumber, task.Title, task.MessageID, nil, false, nil)
 		}
 		taskResponse := TaskResponse{
 			ID:          taskResp.ID,
@@ -1205,7 +1205,7 @@ func (h *DMHandler) ConvertMessageToTask(w http.ResponseWriter, r *http.Request)
 
 	// Trigger DM agent participant for auto-claim
 	if h.agentSvc != nil {
-		go h.agentSvc.TriggerAllAgentsForTask(context.Background(), dmID, task.ID, task.TaskNumber, task.Title, nil, nil)
+		go h.agentSvc.TriggerAllAgentsForTask(context.Background(), dmID, task.ID, task.TaskNumber, task.Title, task.MessageID, nil, false, nil)
 	}
 }
 
@@ -1332,7 +1332,7 @@ func (h *DMHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Trigger DM agent participant for auto-claim
 	if h.agentSvc != nil {
-		go h.agentSvc.TriggerAllAgentsForTask(context.Background(), dmID, task.ID, task.TaskNumber, task.Title, nil, nil)
+		go h.agentSvc.TriggerAllAgentsForTask(context.Background(), dmID, task.ID, task.TaskNumber, task.Title, task.MessageID, nil, false, nil)
 	}
 
 	writeJSON(w, http.StatusCreated, TaskResponse{

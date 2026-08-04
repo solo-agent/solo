@@ -233,11 +233,11 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 	var mentionHasMentions bool
 	if len(mentionedAgentIDs) == 0 && h.mentionSvc != nil {
 		resolved, hasRefs, err := h.mentionSvc.ResolveMentions(r.Context(), content, channelID)
+		mentionHasMentions = hasRefs
 		if err != nil {
 			slog.Warn("failed to resolve mentions in thread reply", "error", err)
 		} else {
 			mentionedAgentIDs = resolved
-			mentionHasMentions = hasRefs
 		}
 	}
 
