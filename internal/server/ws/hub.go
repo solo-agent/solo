@@ -321,6 +321,11 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 // handleMessageSend processes a message.send event from a client.
 func (h *Hub) handleMessageSend(client *Client, payload MessageSendPayload) {
 	// Validate
+	payload.ClientMsgID = strings.TrimSpace(payload.ClientMsgID)
+	if len(payload.ClientMsgID) > 128 {
+		client.sendError("INVALID_PAYLOAD", "client_msg_id exceeds maximum length of 128 characters")
+		return
+	}
 	if payload.ChannelID == "" {
 		client.sendError("INVALID_PAYLOAD", "channel_id is required")
 		return
@@ -441,6 +446,7 @@ func (h *Hub) handleMessageSend(client *Client, payload MessageSendPayload) {
 		ContentType:   "text",
 		AttachmentIDs: attachmentIDs,
 		CreatedAt:     now.Format(time.RFC3339),
+		ClientMsgID:   payload.ClientMsgID,
 	}
 
 	h.BroadcastToChannel(payload.ChannelID, Envelope(EventMessageNew, msgNewPayload))
@@ -510,6 +516,7 @@ func (h *Hub) broadcastDMMessageIfNeeded(channelID string, msg MessageNewPayload
 		ContentType:   msg.ContentType,
 		AttachmentIDs: msg.AttachmentIDs,
 		CreatedAt:     msg.CreatedAt,
+		ClientMsgID:   msg.ClientMsgID,
 	}
 	h.BroadcastToChannel(channelID, Envelope(EventDMMessageNew, dmPayload))
 }
@@ -531,6 +538,11 @@ func (h *Hub) handleTyping(client *Client, payload TypingPayload) {
 // handleThreadReply processes a thread.reply event from a client.
 func (h *Hub) handleThreadReply(client *Client, payload ThreadReplyPayload) {
 	// Validate
+	payload.ClientMsgID = strings.TrimSpace(payload.ClientMsgID)
+	if len(payload.ClientMsgID) > 128 {
+		client.sendError("INVALID_PAYLOAD", "client_msg_id exceeds maximum length of 128 characters")
+		return
+	}
 	if payload.ChannelID == "" {
 		client.sendError("INVALID_PAYLOAD", "channel_id is required")
 		return
@@ -700,6 +712,7 @@ func (h *Hub) handleThreadReply(client *Client, payload ThreadReplyPayload) {
 			ContentType:   "text",
 			AttachmentIDs: attachmentIDs,
 			CreatedAt:     now.Format(time.RFC3339),
+			ClientMsgID:   payload.ClientMsgID,
 		},
 		Thread: ThreadMetadataItem{
 			ThreadID:    payload.ThreadID,

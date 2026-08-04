@@ -686,6 +686,9 @@ func TestHandleMessageSend(t *testing.T) {
 	if body["content"] != "hello" {
 		t.Errorf("expected content=hello, got %s", body["content"])
 	}
+	if body["client_msg_id"] == "" {
+		t.Error("expected client_msg_id")
+	}
 	if _, ok := body["thread_id"]; ok {
 		t.Errorf("expected no thread_id when -t not provided, got %v", body["thread_id"])
 	}
@@ -1277,7 +1280,7 @@ func TestProxyRequestCarriesAgentRunID(t *testing.T) {
 	t.Setenv("SOLO_DAEMON_URL", server.URL)
 	t.Setenv("SOLO_AGENT_ID", "agent-1")
 	t.Setenv("SOLO_RUN_ID", "run-1")
-	status, _, err := proxyRequest("message_send", "channel-1", "done", "", "token", 0, "")
+	status, _, err := proxyRequest("message_send", "channel-1", "done", "", "token", 0, "", "client-1")
 	if err != nil {
 		t.Fatalf("proxyRequest: %v", err)
 	}
@@ -1286,6 +1289,9 @@ func TestProxyRequestCarriesAgentRunID(t *testing.T) {
 	}
 	if got["run_id"] != "run-1" {
 		t.Fatalf("run_id = %#v, want run-1", got["run_id"])
+	}
+	if got["client_msg_id"] != "client-1" {
+		t.Fatalf("client_msg_id = %#v, want client-1", got["client_msg_id"])
 	}
 }
 

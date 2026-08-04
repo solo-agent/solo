@@ -83,6 +83,8 @@ type TaskResponse struct {
 	ArtifactStatus   string  `json:"artifact_status,omitempty"`
 	CreatedAt        string  `json:"created_at"`
 	UpdatedAt        string  `json:"updated_at"`
+	ClientMsgID      string  `json:"client_msg_id,omitempty"`
+	Deduplicated     bool    `json:"deduplicated,omitempty"`
 }
 
 func toTaskResponse(t *service.Task) TaskResponse {

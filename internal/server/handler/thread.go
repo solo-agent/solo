@@ -29,12 +29,13 @@ type ThreadHandler struct {
 	mentionSvc *service.MentionService
 	agentSvc   *service.AgentService
 	hub        *ws.Hub
+	sendDedupe *service.SendDedupe
 }
 
 // NewThreadHandler creates a new ThreadHandler.
-func NewThreadHandler(pool *pgxpool.Pool, hub *ws.Hub, agentSvc *service.AgentService) *ThreadHandler {
+func NewThreadHandler(pool *pgxpool.Pool, hub *ws.Hub, agentSvc *service.AgentService, sendDedupe *service.SendDedupe) *ThreadHandler {
 	mentionSvc := service.NewMentionService(pool)
-	return &ThreadHandler{pool: pool, hub: hub, agentSvc: agentSvc, mentionSvc: mentionSvc}
+	return &ThreadHandler{pool: pool, hub: hub, agentSvc: agentSvc, mentionSvc: mentionSvc, sendDedupe: sendDedupe}
 }
 
 // --- Request/Response types ---
@@ -43,6 +44,7 @@ type ThreadReplyRequest struct {
 	Content           string   `json:"content"`
 	MentionedAgentIDs []string `json:"mentioned_agent_ids,omitempty"`
 	AttachmentIDs     []string `json:"attachment_ids,omitempty"`
+	ClientMsgID       string   `json:"client_msg_id,omitempty"`
 }
 
 type ThreadResponse struct {
@@ -68,6 +70,8 @@ type ThreadReplyResponse struct {
 	AttachmentIDs []string         `json:"attachment_ids,omitempty"`
 	Attachments   []AttachmentMeta `json:"attachments,omitempty"`
 	CreatedAt     string           `json:"created_at"`
+	ClientMsgID   string           `json:"client_msg_id,omitempty"`
+	Deduplicated  bool             `json:"deduplicated,omitempty"`
 }
 
 type ThreadMessageListResponse struct {
@@ -131,6 +135,16 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "reply content exceeds maximum length of 10000 characters")
 		return
 	}
+	clientMsgID, validClientMsgID := validateClientMessageID(req.ClientMsgID)
+	if !validClientMsgID {
+		writeError(w, http.StatusBadRequest, "client message ID exceeds maximum length of 128 characters")
+		return
+	}
+	sendClaim, proceed := beginReliableSend(w, r, h.sendDedupe, userID, clientMsgID)
+	if !proceed {
+		return
+	}
+	defer sendClaim.Abort()
 
 	// Verify user is a member of the channel (or DM)
 	isMember, err := h.isChannelOrDMMember(r.Context(), channelID, userID)
@@ -360,6 +374,7 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 				AttachmentIDs: attachmentIDs,
 				Attachments:   toWSAttachmentMeta(attachments),
 				CreatedAt:     now.UTC().Format(time.RFC3339),
+				ClientMsgID:   clientMsgID,
 			},
 			Thread: ws.ThreadMetadataItem{
 				ThreadID:    threadID,
@@ -367,10 +382,12 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 				LastReplyAt: now.UTC().Format(time.RFC3339),
 			},
 		}
-		h.hub.BroadcastToThread(threadID, ws.Envelope(ws.EventThreadMessageNew, threadMsg))
+		message := ws.Envelope(ws.EventThreadMessageNew, threadMsg)
+		h.hub.BroadcastToThread(threadID, message)
+		h.hub.SendToUser(userID, message)
 	}
 
-	writeJSON(w, http.StatusCreated, ThreadReplyResponse{
+	resp := ThreadReplyResponse{
 		ID:            replyID,
 		ChannelID:     channelID,
 		ThreadID:      threadID,
@@ -383,7 +400,9 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 		AttachmentIDs: attachmentIDs,
 		Attachments:   attachments,
 		CreatedAt:     now.Format(time.RFC3339),
-	})
+		ClientMsgID:   clientMsgID,
+	}
+	completeReliableSend(w, http.StatusCreated, resp, sendClaim)
 }
 
 // ListThreadMessages handles GET /api/v1/channels/{channelID}/messages/{messageID}/thread

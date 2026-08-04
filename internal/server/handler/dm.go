@@ -26,16 +26,18 @@ type DMHandler struct {
 	agentSvc   *service.AgentService
 	mentionSvc *service.MentionService
 	taskSvc    *service.TaskService
+	sendDedupe *service.SendDedupe
 }
 
 // NewDMHandler creates a new DMHandler.
-func NewDMHandler(pool *pgxpool.Pool, hub *ws.Hub, agentSvc *service.AgentService, taskSvc *service.TaskService) *DMHandler {
+func NewDMHandler(pool *pgxpool.Pool, hub *ws.Hub, agentSvc *service.AgentService, taskSvc *service.TaskService, sendDedupe *service.SendDedupe) *DMHandler {
 	return &DMHandler{
 		pool:       pool,
 		hub:        hub,
 		agentSvc:   agentSvc,
 		mentionSvc: service.NewMentionService(pool),
 		taskSvc:    taskSvc,
+		sendDedupe: sendDedupe,
 	}
 }
 
@@ -620,6 +622,16 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "message content exceeds maximum length of 10000 characters")
 		return
 	}
+	clientMsgID, validClientMsgID := validateClientMessageID(req.ClientMsgID)
+	if !validClientMsgID {
+		writeError(w, http.StatusBadRequest, "client message ID exceeds maximum length of 128 characters")
+		return
+	}
+	sendClaim, proceed := beginReliableSend(w, r, h.sendDedupe, userID, clientMsgID)
+	if !proceed {
+		return
+	}
+	defer sendClaim.Abort()
 
 	// Verify user is a DM participant
 	var isParticipant bool
@@ -729,9 +741,15 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// If as_task, convert to task and return task response (align with channel behavior)
 	if req.AsTask && h.taskSvc != nil {
-		// Broadcast message.new first so other DM participants see the message
+		task, convertErr := h.taskSvc.ConvertMessageToTask(r.Context(), dmID, messageID, userID)
+		if convertErr != nil {
+			slog.Error("failed to convert DM message to task", "error", convertErr, "message_id", messageID)
+			writeError(w, http.StatusInternalServerError, "failed to create task")
+			return
+		}
+		taskResp := toTaskResponse(task)
 		if h.hub != nil {
-			msgPayload := ws.Envelope(ws.EventMessageNew, ws.MessageNewPayload{
+			h.hub.BroadcastToChannel(dmID, ws.Envelope(ws.EventMessageNew, ws.MessageNewPayload{
 				ID:            messageID,
 				ChannelID:     dmID,
 				SenderType:    senderType,
@@ -742,18 +760,12 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 				ContentType:   "text",
 				AttachmentIDs: attachmentIDs,
 				Attachments:   toWSAttachmentMeta(attachments),
+				TaskNumber:    task.TaskNumber,
+				TaskStatus:    task.Status,
 				CreatedAt:     now.Format(time.RFC3339),
-			})
-			h.hub.BroadcastToChannel(dmID, msgPayload)
+				ClientMsgID:   clientMsgID,
+			}))
 		}
-
-		task, convertErr := h.taskSvc.ConvertMessageToTask(r.Context(), dmID, messageID, userID)
-		if convertErr != nil {
-			slog.Error("failed to convert DM message to task", "error", convertErr, "message_id", messageID)
-			writeError(w, http.StatusInternalServerError, "failed to create task")
-			return
-		}
-		taskResp := toTaskResponse(task)
 		ws.BroadcastTaskCreated(h.hub, ws.TaskCreatedPayload{
 			ID:               task.ID,
 			TaskNumber:       task.TaskNumber,
@@ -778,7 +790,7 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		if h.agentSvc != nil {
 			go h.agentSvc.TriggerAllAgentsForTask(context.Background(), dmID, task.ID, task.TaskNumber, task.Title, nil, nil)
 		}
-		writeJSON(w, http.StatusCreated, TaskResponse{
+		taskResponse := TaskResponse{
 			ID:          taskResp.ID,
 			TaskNumber:  taskResp.TaskNumber,
 			ChannelID:   taskResp.ChannelID,
@@ -794,7 +806,9 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 			MessageID:   taskResp.MessageID,
 			CreatedAt:   taskResp.CreatedAt,
 			UpdatedAt:   taskResp.UpdatedAt,
-		})
+			ClientMsgID: clientMsgID,
+		}
+		completeReliableSend(w, http.StatusCreated, taskResponse, sendClaim)
 		return
 	}
 
@@ -811,6 +825,7 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		AttachmentIDs: attachmentIDs,
 		Attachments:   toWSAttachmentMeta(attachments),
 		CreatedAt:     now.Format(time.RFC3339),
+		ClientMsgID:   clientMsgID,
 	})
 	h.hub.BroadcastToChannel(dmID, msgPayload)
 
@@ -828,6 +843,7 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		AttachmentIDs: attachmentIDs,
 		Attachments:   toWSAttachmentMeta(attachments),
 		CreatedAt:     now.Format(time.RFC3339),
+		ClientMsgID:   clientMsgID,
 	})
 	h.hub.BroadcastToChannel(dmID, dmMsgPayload)
 
@@ -865,7 +881,7 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
-	writeJSON(w, http.StatusCreated, MessageResponse{
+	resp := MessageResponse{
 		ID:            messageID,
 		ChannelID:     dmID,
 		SenderType:    senderType,
@@ -877,7 +893,9 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		AttachmentIDs: attachmentIDs,
 		Attachments:   attachments,
 		CreatedAt:     now.Format(time.RFC3339),
-	})
+		ClientMsgID:   clientMsgID,
+	}
+	completeReliableSend(w, http.StatusCreated, resp, sendClaim)
 }
 
 // UpdateMessage handles PATCH /api/v1/dm/{dmID}/messages/{messageID}

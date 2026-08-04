@@ -14,6 +14,14 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { useWebSocket } from '@/lib/ws-context';
+import {
+  acknowledgeReliableSend,
+  cancelReliableSend,
+  createClientMessageID,
+  postMessageWithTimeout,
+  retryReliableSend,
+  sendReliably,
+} from '@/lib/reliable-send';
 import type { Attachment, DMChannel, Message, CreateDMInput } from '@/lib/types';
 
 // ---- Constants ----
@@ -38,6 +46,7 @@ interface DMChannelResponse {
 
 interface DMMessageResponse {
   id: string;
+  client_msg_id?: string;
   channel_id: string;
   sender_type: string;
   sender_id: string;
@@ -92,6 +101,7 @@ function mapDMChannel(resp: DMChannelResponse): DMChannel {
 function mapDMMessageResponse(resp: DMMessageResponse): Message {
   return {
     id: resp.id,
+    client_msg_id: resp.client_msg_id,
     channel_id: resp.channel_id,
     user_id: resp.sender_id,
     display_name: resp.sender_name || resp.sender_id,
@@ -114,6 +124,7 @@ function mapDMMessageResponse(resp: DMMessageResponse): Message {
 /** Convert a flattened WS DM message event to a Message */
 function flatDMToMessage(event: {
   id: string;
+  client_msg_id?: string;
   dm_id: string;
   sender_type: string;
   sender_id: string;
@@ -130,6 +141,7 @@ function flatDMToMessage(event: {
 }): Message {
   return {
     id: event.id,
+    client_msg_id: event.client_msg_id,
     channel_id: event.dm_id,
     user_id: event.sender_id,
     display_name: event.sender_name || event.sender_id,
@@ -150,6 +162,7 @@ function flatDMToMessage(event: {
 /** Convert a message.new WS event to a Message (channel_id IS the DM ID) */
 function flatToMessage(event: {
   id: string;
+  client_msg_id?: string;
   channel_id: string;
   sender_type: string;
   sender_id: string;
@@ -167,6 +180,7 @@ function flatToMessage(event: {
 }): Message {
   return {
     id: event.id,
+    client_msg_id: event.client_msg_id,
     channel_id: event.channel_id,
     user_id: event.sender_id,
     display_name: event.sender_name || event.sender_id,
@@ -226,8 +240,8 @@ export function useDM(dmId: string | null = null) {
       const currentMsgs = messagesRef.current;
       if (currentMsgs.length === 0) return;
 
-      const lastMsg = currentMsgs[currentMsgs.length - 1];
-      if (lastMsg.id && !lastMsg.id.startsWith('dm-temp-')) {
+      const lastMsg = [...currentMsgs].reverse().find((message) => message.status === 'sent');
+      if (lastMsg?.id) {
         apiClient
           .get<DMMessageListResponse>(`/api/v1/dm/${did}/messages`, {
             limit: '50',
@@ -348,10 +362,16 @@ export function useDM(dmId: string | null = null) {
       if (event.type === 'message.new') {
         if (event.channel_id !== did) return;
         if (event.thread_id) return; // thread messages handled by thread hook
+        const wsMessage = flatToMessage(event);
+        if (event.client_msg_id && acknowledgeReliableSend(event.client_msg_id, {
+          message: wsMessage,
+          id: event.id,
+          task_number: event.task_number,
+        })) return;
 
         setMessages((prev) => {
           const existing = prev.find((m) => m.id === event.id);
-          const newMsg = flatToMessage(event);
+          const newMsg = wsMessage;
 
           if (existing) {
             if (existing.status === 'streaming') {
@@ -369,7 +389,7 @@ export function useDM(dmId: string | null = null) {
           }
 
           // Clean up orphaned temp/sending messages
-          const cleaned = prev.filter(
+          const cleaned = event.client_msg_id ? prev : prev.filter(
             (m) =>
               !(
                 (m.id.startsWith('dm-temp-') || m.status === 'sending') &&
@@ -386,12 +406,18 @@ export function useDM(dmId: string | null = null) {
       if (event.type === 'dm.message.new') {
         if (event.dm_id !== did) return;
         if (event.thread_id) return; // thread replies handled by thread hook
+        const wsMessage = flatDMToMessage(event);
+        if (event.client_msg_id && acknowledgeReliableSend(event.client_msg_id, {
+          message: wsMessage,
+          id: event.id,
+          task_number: event.task_number,
+        })) return;
 
         setMessages((prev) => {
           const existing = prev.find((m) => m.id === event.id);
           if (existing) {
             if (existing.status === 'streaming') {
-              const newMsg = flatDMToMessage(event);
+              const newMsg = wsMessage;
               return prev.map((m) =>
                 m.id === event.id
                   ? { ...m, ...newMsg, status: 'sent' as const }
@@ -400,7 +426,7 @@ export function useDM(dmId: string | null = null) {
             }
             return prev;
           }
-          return [...prev, flatDMToMessage(event)];
+          return [...prev, wsMessage];
         });
       }
 
@@ -624,9 +650,10 @@ export function useDM(dmId: string | null = null) {
       const hasAttachments = Boolean(attachmentIds && attachmentIds.length > 0);
       if (!id || (!trimmedContent && !hasAttachments) || (asTask && !trimmedContent)) return null;
 
-      const tempId = `dm-temp-${Date.now()}`;
+      const clientMsgID = createClientMessageID();
       const optimisticMessage: Message = {
-        id: tempId,
+        id: clientMsgID,
+        client_msg_id: clientMsgID,
         channel_id: id,
         user_id: user?.id ?? '',
         display_name: user?.display_name ?? 'You',
@@ -638,89 +665,74 @@ export function useDM(dmId: string | null = null) {
 
       setMessages((prev) => [...prev, optimisticMessage]);
 
-      try {
-        const body: Record<string, unknown> = { content: trimmedContent };
-        if (_mentionedAgentIds && _mentionedAgentIds.length > 0) {
-          body.mentioned_agent_ids = _mentionedAgentIds;
-        }
-        if (asTask) {
-          body.as_task = true;
-        }
-        if (attachmentIds && attachmentIds.length > 0) {
-          body.attachment_ids = attachmentIds;
-        }
-        const confirmed = await apiClient.post<DMMessageResponse & { task_number?: number; message_id?: string }>(
-          `/api/v1/dm/${id}/messages`,
-          body,
-        );
-
-        const isTaskResponse = asTask && (confirmed as unknown as Record<string, unknown>).message_id !== undefined;
-        const realMessageId = isTaskResponse
-          ? (confirmed as unknown as Record<string, unknown>).message_id as string
-          : confirmed.id;
-
-        setMessages((prev) => {
-          if (isTaskResponse) {
-            const taskResp = confirmed as unknown as Record<string, unknown>;
-            const creatorName = (taskResp.creator_name as string) || undefined;
-            return prev.map((m) => {
-              if (m.id === tempId) {
-                return {
-                  ...m,
-                  id: realMessageId,
-                  status: 'sent' as const,
-                  ...(creatorName && { display_name: creatorName }),
-                  task_number: taskResp.task_number as number | undefined,
-                  task_status: taskResp.status as string | undefined,
-                  task_claimer_name: taskResp.claimer_name as string | undefined,
-                  task_claimer_deleted: taskResp.claimer_deleted as boolean | undefined,
-                };
-              }
-              if (m.id === realMessageId) {
-                return {
-                  ...m,
-                  task_number: taskResp.task_number as number | undefined,
-                  task_status: taskResp.status as string | undefined,
-                  task_claimer_name: taskResp.claimer_name as string | undefined,
-                  task_claimer_deleted: taskResp.claimer_deleted as boolean | undefined,
-                };
-              }
-              return m;
-            });
-          }
-          // Non-asTask: replace temp message and any WS duplicate
-          const confirmedMessage: Message = { ...mapDMMessageResponse(confirmed), status: 'sent' as const };
-          const skipIds = new Set([tempId, confirmed.id]);
-          let hasConfirmed = false;
-          const result: Message[] = [];
-          for (const m of prev) {
-            if (skipIds.has(m.id)) {
-              if (!hasConfirmed) {
-                result.push(confirmedMessage);
-                hasConfirmed = true;
-              }
-            } else {
-              result.push(m);
-            }
-          }
-          if (!hasConfirmed) {
-            result.push(confirmedMessage);
-          }
-          return result;
-        });
-
-        return {
-          id: realMessageId,
-          task_number: (confirmed as unknown as Record<string, unknown>).task_number as number | undefined,
-        };
-      } catch {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === tempId ? { ...m, status: 'failed' as const } : m,
-          ),
-        );
-        return null;
+      const body: Record<string, unknown> = {
+        content: trimmedContent,
+        client_msg_id: clientMsgID,
+      };
+      if (_mentionedAgentIds && _mentionedAgentIds.length > 0) {
+        body.mentioned_agent_ids = _mentionedAgentIds;
       }
+      if (asTask) body.as_task = true;
+      if (attachmentIds && attachmentIds.length > 0) {
+        body.attachment_ids = attachmentIds;
+      }
+
+      const confirmation = await sendReliably(clientMsgID, {
+        request: async () => {
+          const confirmed = await postMessageWithTimeout<DMMessageResponse & { task_number?: number; message_id?: string }>(
+            `/api/v1/dm/${id}/messages`,
+            body,
+          );
+          const task = confirmed as unknown as Record<string, unknown>;
+          const isTaskResponse = asTask && task.message_id !== undefined;
+          const messageID = isTaskResponse ? task.message_id as string : confirmed.id;
+          const message = isTaskResponse
+            ? {
+                ...optimisticMessage,
+                id: messageID,
+                status: 'sent' as const,
+                display_name: task.creator_name as string || optimisticMessage.display_name,
+                task_number: task.task_number as number | undefined,
+                task_status: task.status as string | undefined,
+                task_claimer_name: task.claimer_name as string | undefined,
+                task_claimer_deleted: task.claimer_deleted as boolean | undefined,
+              }
+            : mapDMMessageResponse(confirmed);
+          return { message, id: messageID, task_number: task.task_number as number | undefined };
+        },
+        onConfirmed: (confirmed) => {
+          if (dmIdRef.current !== id) return;
+          setMessages((prev) => {
+            const result: Message[] = [];
+            let replaced = false;
+            for (const message of prev) {
+              if (message.id === clientMsgID || message.id === confirmed.id) {
+                if (!replaced) result.push({ ...confirmed.message, status: 'sent' as const });
+                replaced = true;
+              } else {
+                result.push(message);
+              }
+            }
+            if (!replaced) result.push({ ...confirmed.message, status: 'sent' as const });
+            return result;
+          });
+        },
+        onFailed: () => {
+          if (dmIdRef.current !== id) return;
+          setMessages((prev) => prev.map((message) =>
+            message.id === clientMsgID ? { ...message, status: 'failed' as const } : message,
+          ));
+        },
+        onRetrying: () => {
+          if (dmIdRef.current !== id) return;
+          setMessages((prev) => prev.map((message) =>
+            message.id === clientMsgID ? { ...message, status: 'sending' as const } : message,
+          ));
+        },
+      });
+      return confirmation
+        ? { id: confirmation.id, task_number: confirmation.task_number }
+        : null;
     },
     [user],
   );
@@ -729,32 +741,8 @@ export function useDM(dmId: string | null = null) {
 
   const retryMessage = useCallback(
     async (messageId: string, content: string) => {
-      const id = dmIdRef.current;
-      if (!id) return;
-
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === messageId ? { ...m, status: 'sending' as const } : m,
-        ),
-      );
-
-      try {
-        const confirmed = await apiClient.post<DMMessageResponse>(
-          `/api/v1/dm/${id}/messages`,
-          { content },
-        );
-
-        setMessages((prev) => {
-          const filtered = prev.filter((m) => m.id !== messageId && m.id !== confirmed.id);
-          return [...filtered, { ...mapDMMessageResponse(confirmed), status: 'sent' as const }];
-        });
-      } catch {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === messageId ? { ...m, status: 'failed' as const } : m,
-          ),
-        );
-      }
+      void content;
+      retryReliableSend(messageId);
     },
     [],
   );
@@ -767,6 +755,7 @@ export function useDM(dmId: string | null = null) {
 
   /** Cancel (remove from list) a failed or sending message */
   const cancelMessage = useCallback((messageId: string) => {
+    cancelReliableSend(messageId);
     setMessages((prev) => prev.filter((m) => m.id !== messageId));
   }, []);
 

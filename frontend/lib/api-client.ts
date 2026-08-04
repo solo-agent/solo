@@ -117,10 +117,11 @@ export class ApiClient {
     return this.requestText(url, { method: 'GET' });
   }
 
-  async post<T>(path: string, body?: unknown): Promise<T> {
+  async post<T>(path: string, body?: unknown, options?: Pick<RequestInit, 'signal'>): Promise<T> {
     return this.request<T>(path, {
       method: 'POST',
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      ...options,
     });
   }
 

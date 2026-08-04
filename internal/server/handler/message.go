@@ -71,16 +71,18 @@ type MessageHandler struct {
 	mentionSvc *service.MentionService
 	agentSvc   *service.AgentService
 	taskSvc    *service.TaskService
+	sendDedupe *service.SendDedupe
 }
 
 // NewMessageHandler creates a new MessageHandler.
-func NewMessageHandler(pool *pgxpool.Pool, hub *ws.Hub, agentSvc *service.AgentService, taskSvc *service.TaskService) *MessageHandler {
+func NewMessageHandler(pool *pgxpool.Pool, hub *ws.Hub, agentSvc *service.AgentService, taskSvc *service.TaskService, sendDedupe *service.SendDedupe) *MessageHandler {
 	return &MessageHandler{
 		pool:       pool,
 		hub:        hub,
 		mentionSvc: service.NewMentionService(pool),
 		agentSvc:   agentSvc,
 		taskSvc:    taskSvc,
+		sendDedupe: sendDedupe,
 	}
 }
 
@@ -93,6 +95,7 @@ type CreateMessageRequest struct {
 	ThreadID       string   `json:"thread_id,omitempty"`
 	ThinkingNodeID string   `json:"thinking_node_id,omitempty"`
 	RunID          string   `json:"run_id,omitempty"`
+	ClientMsgID    string   `json:"client_msg_id,omitempty"`
 }
 
 // AttachmentMeta is the attachment metadata included in message responses.
@@ -128,6 +131,8 @@ type MessageResponse struct {
 	TaskClaimerDeleted bool             `json:"task_claimer_deleted"`
 	HasUnreadThread    bool             `json:"has_unread_thread,omitempty"`
 	ThinkingNodeID     string           `json:"thinking_node_id,omitempty"`
+	ClientMsgID        string           `json:"client_msg_id,omitempty"`
+	Deduplicated       bool             `json:"deduplicated,omitempty"`
 }
 
 type MessageListResponse struct {
@@ -187,6 +192,16 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	clientMsgID, validClientMsgID := validateClientMessageID(req.ClientMsgID)
+	if !validClientMsgID {
+		writeError(w, http.StatusBadRequest, "client message ID exceeds maximum length of 128 characters")
+		return
+	}
+	sendClaim, proceed := beginReliableSend(w, r, h.sendDedupe, userID, clientMsgID)
+	if !proceed {
+		return
+	}
+	defer sendClaim.Abort()
 
 	// Verify sender is a member of the channel and channel is not archived
 	var isMember bool
@@ -412,11 +427,12 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 				"channel_id": channelID, "node_id": updatedNodeID,
 			}))
 		}
-		writeJSON(w, http.StatusCreated, MessageResponse{
+		resp := MessageResponse{
 			ID: uuid.NewString(), ChannelID: channelID, SenderType: "agent", SenderID: userID,
 			ContentType: "thinking_handoff_protocol", ThinkingNodeID: thinkingNodeID,
-			CreatedAt: time.Now().UTC().Format(time.RFC3339),
-		})
+			ClientMsgID: clientMsgID, CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		}
+		completeReliableSend(w, http.StatusCreated, resp, sendClaim)
 		return
 	}
 
@@ -615,6 +631,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 			TaskNumber:        taskNumber,
 			TaskStatus:        taskStatus,
 			CreatedAt:         now.Format(time.RFC3339),
+			ClientMsgID:       clientMsgID,
 		}
 		msgPayload := ws.Envelope(ws.EventMessageNew, msgData)
 		h.hub.BroadcastToChannel(channelID, msgPayload)
@@ -672,14 +689,16 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		AttachmentIDs:     attachmentIDs,
 		Attachments:       attachments,
 		ThinkingNodeID:    thinkingNodeID,
+		ClientMsgID:       clientMsgID,
 		CreatedAt:         now.Format(time.RFC3339),
 	}
 
 	// If as_task, return the created task response instead of the message response.
 	if taskResp != nil {
-		writeJSON(w, http.StatusCreated, taskResp)
+		taskResp.ClientMsgID = clientMsgID
+		completeReliableSend(w, http.StatusCreated, *taskResp, sendClaim)
 	} else {
-		writeJSON(w, http.StatusCreated, resp)
+		completeReliableSend(w, http.StatusCreated, resp, sendClaim)
 	}
 }
 
@@ -1154,6 +1173,7 @@ func (h *MessageHandler) broadcastDMIfNeeded(channelID string, msg ws.MessageNew
 		Attachments:   msg.Attachments,
 		ThreadID:      msg.ThreadID,
 		CreatedAt:     msg.CreatedAt,
+		ClientMsgID:   msg.ClientMsgID,
 	}
 	h.hub.BroadcastToChannel(channelID, ws.Envelope(ws.EventDMMessageNew, dmPayload))
 }

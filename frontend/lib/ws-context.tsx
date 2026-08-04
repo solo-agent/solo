@@ -18,6 +18,7 @@ import {
 } from 'react';
 import { defaultTokenStorage } from './api-client';
 import { WSClient, type WSClientConfig } from './ws-client';
+import { retryFailedReliableSends } from './reliable-send';
 import type {
   ConnectionState,
   WSMessage,
@@ -41,6 +42,7 @@ export interface WSContextValue {
   connect: () => void;
   /** 手动断开连接 */
   disconnect: () => void;
+  forceReconnect: () => void;
   /** 订阅频道 */
   subscribe: (channelId: string) => void;
   /** 取消订阅频道 */
@@ -116,6 +118,7 @@ export function WSProvider({
         if (event.type === 'message.new') {
           setLastMessage({
             id: event.id,
+            client_msg_id: event.client_msg_id,
             channel_id: event.channel_id,
             sender_type: event.sender_type as WSMessage['sender_type'],
             sender_id: event.sender_id,
@@ -156,6 +159,32 @@ export function WSProvider({
   const disconnect = useCallback(() => {
     clientRef.current?.disconnect();
   }, []);
+
+  const forceReconnect = useCallback(() => {
+    clientRef.current?.forceReconnect();
+  }, []);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') retryFailedReliableSends();
+    };
+    const onPageShow = () => {
+      retryFailedReliableSends();
+      forceReconnect();
+    };
+    const onOnline = () => {
+      retryFailedReliableSends();
+      forceReconnect();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pageshow', onPageShow);
+    window.addEventListener('online', onOnline);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onPageShow);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [forceReconnect]);
 
   const subscribe = useCallback((channelId: string) => {
     clientRef.current?.subscribe(channelId);
@@ -200,6 +229,7 @@ export function WSProvider({
       lastMessage,
       connect,
       disconnect,
+      forceReconnect,
       subscribe,
       unsubscribe,
       subscribeThread,
@@ -215,6 +245,7 @@ export function WSProvider({
       lastMessage,
       connect,
       disconnect,
+      forceReconnect,
       subscribe,
       unsubscribe,
       subscribeThread,
@@ -237,4 +268,3 @@ export function useWebSocket(): WSContextValue {
   }
   return context;
 }
-

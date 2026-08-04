@@ -14,6 +14,7 @@ export type WSMessageSource = 'user' | 'agent' | 'system';
 /** 消息体（用于前端展示和状态管理） */
 export interface WSMessage {
   id: string;
+  client_msg_id?: string;
   channel_id: string;
   sender_type: WSMessageSource;
   sender_id: string;
@@ -49,13 +50,13 @@ export type WSServerEvent =
   | { type: 'connected'; user_id: string }
   | { type: 'error'; code: string; message: string }
   // ---- 消息事件 ----
-  | { type: 'message.new'; id: string; channel_id: string; sender_type: string; sender_id: string; sender_name?: string; sender_avatar?: string | null; content: string; content_type: string; metadata?: Record<string, unknown>; thread_id?: string; thinking_node_id?: string; created_at: string; attachments?: Attachment[] }
+  | { type: 'message.new'; id: string; client_msg_id?: string; channel_id: string; sender_type: string; sender_id: string; sender_name?: string; sender_avatar?: string | null; content: string; content_type: string; metadata?: Record<string, unknown>; thread_id?: string; thinking_node_id?: string; created_at: string; attachments?: Attachment[]; task_number?: number; task_title?: string; task_status?: string; task_claimer_name?: string; task_claimer_deleted?: boolean; reply_count?: number; has_unread_thread?: boolean }
   | { type: 'message.updated'; id: string; channel_id: string; content: string; sender_type?: string; sender_id?: string; updated_at: string; task_number?: number; task_title?: string; task_status?: string; task_claimer_name?: string; task_claimer_deleted?: boolean; reply_count?: number }
   | { type: 'message.deleted'; channel_id: string; message_id: string }
   | { type: 'thinking.updated'; channel_id: string; space_id?: string; node_id?: string }
   // ---- 线程事件 ----
   // thread.message.new: 后端 ThreadMessageNewPayload 为 {message:{...}, thread:{...}} 嵌套结构
-  | { type: 'thread.message.new'; message: { id: string; channel_id: string; thread_id: string; sender_type: string; sender_id: string; sender_name?: string; sender_avatar?: string | null; content: string; content_type: string; created_at: string; attachments?: Attachment[] }; thread: { thread_id: string; reply_count: number; last_reply_at: string } }
+  | { type: 'thread.message.new'; message: { id: string; client_msg_id?: string; channel_id: string; thread_id: string; sender_type: string; sender_id: string; sender_name?: string; sender_avatar?: string | null; content: string; content_type: string; created_at: string; attachments?: Attachment[] }; thread: { thread_id: string; reply_count: number; last_reply_at: string } }
   // thread.reply: 后端 ThreadReplyNotifyPayload 包含 latest_reply 子对象
   | { type: 'thread.reply'; channel_id: string; thread_id: string; root_message_id?: string; reply_count: number; last_reply_at: string; latest_reply?: { id: string; sender_id: string; sender_name: string; content: string; created_at: string } }
   // ---- 输入状态 ----
@@ -86,7 +87,7 @@ export type WSServerEvent =
   | { type: 'relationship_deleted'; id: string; from_agent_id: string; to_agent_id: string }
   | { type: 'agent_deleted'; agent_id: string }
   // ---- DM 事件 ----
-  | { type: 'dm.message.new'; id: string; dm_id: string; sender_type: string; sender_id: string; sender_name?: string; sender_avatar?: string | null; content: string; content_type: string; created_at: string; attachments?: Attachment[]; thread_id?: string }
+  | { type: 'dm.message.new'; id: string; client_msg_id?: string; dm_id: string; sender_type: string; sender_id: string; sender_name?: string; sender_avatar?: string | null; content: string; content_type: string; created_at: string; attachments?: Attachment[]; thread_id?: string; task_number?: number; task_title?: string; task_status?: string; task_claimer_name?: string; task_claimer_deleted?: boolean }
   | { type: 'dm.updated'; dm_id: string; last_message?: { content: string; sender_id: string; sender_name: string; created_at: string }; last_reply_at?: string; unread_count: number }
   // ---- Inbox events (v1.5) ----
   | { type: 'inbox.updated'; }
@@ -101,6 +102,8 @@ export type WSClientCommand =
   | { type: 'thread.unsubscribe'; thread_id: string }
   | { type: 'dm.subscribe'; dm_id: string }
   | { type: 'dm.unsubscribe'; dm_id: string }
+  | { type: 'message.send'; channel_id: string; content: string; attachment_ids?: string[]; client_msg_id?: string }
+  | { type: 'thread.reply'; channel_id: string; thread_id: string; content: string; attachment_ids?: string[]; client_msg_id?: string }
   | { type: 'ping' };
 
 /** WebSocket 连接状态 */
