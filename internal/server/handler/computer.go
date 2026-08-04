@@ -297,10 +297,10 @@ type ComputerAgentsResponse struct {
 // Returns agents persistently bound to this computer (via agents.runtime_id).
 // Only shows agents owned by the current user.
 //
-// Agent status is determined by heartbeat agent_ids (persistent session state):
-//   - "online"  — active persistent session on the daemon
-//   - "offline" — bound but no active session (or computer offline)
-//   - "running" — active session + currently executing a task
+// Agent status is determined by heartbeat agent_ids (persistent session cache):
+//   - "online"  — resumable persistent session on the daemon, awake or asleep
+//   - "offline" — bound but no cached session (or computer offline)
+//   - "running" — cached session + currently executing a task
 func (h *ComputerHandler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {
@@ -325,7 +325,7 @@ func (h *ComputerHandler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build lookup set from heartbeat agent_ids (persistent session state).
+	// Build lookup set from heartbeat agent_ids (resumable session cache).
 	sessionSet := make(map[string]struct{}, len(c.AgentIDs))
 	for _, id := range c.AgentIDs {
 		if id != "" {
