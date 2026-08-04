@@ -1,4 +1,4 @@
-.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-e2e-agent-delivery test-e2e-agent-session-resume test-e2e-agent-scope-router test-e2e-send-freshness
+.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-e2e-agent-delivery test-e2e-agent-session-resume test-e2e-agent-idle-resume test-e2e-agent-scope-router test-e2e-send-freshness
 .DEFAULT_GOAL := help
 
 ENV_FILE ?= .env
@@ -44,6 +44,11 @@ test-e2e-agent-delivery: rebuild ## Rebuild and verify the real Agent result del
 
 test-e2e-agent-session-resume: rebuild ## Rebuild and verify real Channel Session restart continuity
 	@cd frontend && CI=1 SOLO_E2E_REAL_AGENT_DELIVERY=1 npx playwright test e2e/agent-result-delivery.spec.ts --grep "resumes the same real Channel provider Session"
+
+test-e2e-agent-idle-resume: export AGENT_SESSION_IDLE_TTL=3s
+test-e2e-agent-idle-resume: export SESSION_IDLE_SWEEP_INTERVAL=1s
+test-e2e-agent-idle-resume: rebuild ## Rebuild and verify real Channel Agent idle sleep and wake
+	@cd frontend && CI=1 SOLO_E2E_REAL_AGENT_DELIVERY=1 SOLO_E2E_EXPECT_AGENT_IDLE_REAPER=1 npx playwright test e2e/agent-result-delivery.spec.ts --grep "sleeps an idle Channel Agent"
 
 test-e2e-agent-scope-router: rebuild ## Rebuild and verify the real Coordinator-first Agent router
 	@cd frontend && CI=1 SOLO_E2E_REAL_AGENT_DELIVERY=1 npx playwright test e2e/agent-result-delivery.spec.ts --grep "routes an unmentioned Channel message only to the unique Coordinator"

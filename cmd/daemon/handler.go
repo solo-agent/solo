@@ -31,8 +31,9 @@ import (
 const backendFinalResultWaitAfter = 5 * time.Second
 
 const (
-	defaultThinkingSessionIdleTTL       = 30 * time.Minute
-	defaultThinkingSessionSweepInterval = time.Minute
+	defaultAgentSessionIdleTTL      = 30 * time.Minute
+	defaultThinkingSessionIdleTTL   = 30 * time.Minute
+	defaultSessionIdleSweepInterval = time.Minute
 )
 
 // agentTokenState holds a cached JWT for an agent plus its expiry.
@@ -53,8 +54,9 @@ type daemonHandler struct {
 	workspaceManager *agent.WorkspaceManager
 	memoryManager    *agent.MemoryManager
 	sessionManagers  map[string]*agent.AgentSessionManager // v1.4: per-provider persistent sessions
+	agentIdleTTL     time.Duration
 	thinkingIdleTTL  time.Duration
-	thinkingSweep    time.Duration
+	sessionIdleSweep time.Duration
 	shuttingDown     atomic.Bool
 
 	// v1.4: per-agent token store for persistent session token auto-refresh (SOLO-254-B).
@@ -77,8 +79,9 @@ func newDaemonHandler(pool *pgxpool.Pool, tm *taskManager, provider llm.Provider
 		workspaceManager: agent.NewWorkspaceManager(""),
 		memoryManager:    agent.NewMemoryManager(""),
 		agentTokens:      make(map[string]*agentTokenState),
+		agentIdleTTL:     durationFromEnv("AGENT_SESSION_IDLE_TTL", defaultAgentSessionIdleTTL),
 		thinkingIdleTTL:  durationFromEnv("THINKING_SESSION_IDLE_TTL", defaultThinkingSessionIdleTTL),
-		thinkingSweep:    durationFromEnv("THINKING_SESSION_SWEEP_INTERVAL", defaultThinkingSessionSweepInterval),
+		sessionIdleSweep: durationFromEnv("SESSION_IDLE_SWEEP_INTERVAL", durationFromEnv("THINKING_SESSION_SWEEP_INTERVAL", defaultSessionIdleSweepInterval)),
 	}
 }
 
@@ -111,17 +114,17 @@ func (h *daemonHandler) getSessionManager(providerType string) *agent.AgentSessi
 	return h.sessionManagers[providerType]
 }
 
-// activeSessionAgentIDs returns all agent IDs that have active persistent
-// sessions across all registered session managers. This is the source of
-// truth for which agents are "online" on this daemon.
-func (h *daemonHandler) activeSessionAgentIDs() []string {
+// cachedSessionAgentIDs returns all Agent IDs with a cached persistent session,
+// including idle sessions whose provider process is asleep. A resumable Agent
+// remains online and routable while its local process is released.
+func (h *daemonHandler) cachedSessionAgentIDs() []string {
 	if h.sessionManagers == nil {
 		return nil
 	}
 	seen := make(map[string]bool)
 	var ids []string
 	for _, sm := range h.sessionManagers {
-		for _, id := range sm.ActiveAgentIDs() {
+		for _, id := range sm.CachedAgentIDs() {
 			if !seen[id] {
 				seen[id] = true
 				ids = append(ids, id)
@@ -146,19 +149,27 @@ func (h *daemonHandler) activeThinkingNodeID(agentID string) (string, error) {
 	return nodeID, nil
 }
 
-// runThinkingSessionReaper releases only idle Thinking node processes. The
-// provider session ID remains in the session manager so the next turn resumes
-// the same conversation; ordinary Agent sessions are deliberately untouched.
-func (h *daemonHandler) runThinkingSessionReaper(ctx context.Context) {
-	ticker := time.NewTicker(h.thinkingSweep)
+// runSessionReaper releases idle provider processes while retaining their
+// session IDs so the next tracked turn resumes the same conversation.
+func (h *daemonHandler) runSessionReaper(ctx context.Context) {
+	ticker := time.NewTicker(h.sessionIdleSweep)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case now := <-ticker.C:
-			idleBefore := now.Add(-h.thinkingIdleTTL)
+			agentIdleBefore := now.Add(-h.agentIdleTTL)
+			thinkingIdleBefore := now.Add(-h.thinkingIdleTTL)
 			for provider, sm := range h.sessionManagers {
-				slept, err := sm.SleepIdleThinkingSessions(idleBefore)
+				slept, err := sm.SleepIdleAgentSessions(agentIdleBefore)
+				if err != nil {
+					slog.Warn("daemon: failed to sleep idle Agent sessions", "provider", provider, "error", err)
+				}
+				if slept > 0 {
+					slog.Info("daemon: slept idle Agent sessions", "provider", provider, "count", slept)
+				}
+
+				slept, err = sm.SleepIdleThinkingSessions(thinkingIdleBefore)
 				if err != nil {
 					slog.Warn("daemon: failed to sleep idle Thinking sessions", "provider", provider, "error", err)
 				}

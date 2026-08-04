@@ -266,6 +266,63 @@ func TestSessionManagerSleepsOnlyIdleThinkingSessionsAndResumes(t *testing.T) {
 	}
 }
 
+func TestSessionManagerSleepsIdleAgentSessionAndResumes(t *testing.T) {
+	backend := &scopedRecordingBackend{}
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	cfg := AgentConfig{AgentID: "agent-1", Name: "Agent", Provider: "claude"}
+	sessionKey := ChannelSessionKey("agent-1", "channel-1")
+
+	first, err := mgr.GetOrCreateScopedSession(context.Background(), sessionKey, "agent-1", cfg, ChannelContext{}, []Message{{Role: RoleUser, Content: "first"}}, nil, "", nil)
+	if err != nil {
+		t.Fatalf("start Agent session: %v", err)
+	}
+	if result := <-first.Result; result == nil || result.Status != "completed" {
+		t.Fatalf("Agent result = %#v", result)
+	}
+	waitForScopedTurnRelease(t, mgr, sessionKey)
+
+	mgr.mu.RLock()
+	entry := mgr.sessions[sessionKey]
+	mgr.mu.RUnlock()
+	entry.mu.Lock()
+	entry.LastActive = time.Now().Add(-time.Hour)
+	entry.mu.Unlock()
+
+	slept, err := mgr.SleepIdleAgentSessions(time.Now().Add(-30 * time.Minute))
+	if err != nil {
+		t.Fatalf("sleep idle Agent sessions: %v", err)
+	}
+	if slept != 1 || mgr.IsScopedActive(sessionKey) {
+		t.Fatalf("slept = %d active = %v, want 1/false", slept, mgr.IsScopedActive(sessionKey))
+	}
+	if ids := mgr.ActiveAgentIDs(); len(ids) != 0 {
+		t.Fatalf("ActiveAgentIDs = %v, want no live process", ids)
+	}
+	if ids := mgr.CachedAgentIDs(); len(ids) != 1 || ids[0] != "agent-1" {
+		t.Fatalf("CachedAgentIDs = %v, want resumable agent-1", ids)
+	}
+
+	resumed, err := mgr.GetOrCreateScopedSession(context.Background(), sessionKey, "agent-1", cfg, ChannelContext{}, []Message{{Role: RoleUser, Content: "continue"}}, nil, "", nil)
+	if err != nil {
+		t.Fatalf("resume Agent session: %v", err)
+	}
+	if result := <-resumed.Result; result == nil || result.Status != "completed" {
+		t.Fatalf("resumed result = %#v", result)
+	}
+	if resumed.SessionID != first.SessionID {
+		t.Fatalf("resumed SessionID = %q, want %q", resumed.SessionID, first.SessionID)
+	}
+
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.closeCount != 1 || len(backend.startOptions) != 2 {
+		t.Fatalf("close/start counts = %d/%d, want 1/2", backend.closeCount, len(backend.startOptions))
+	}
+	if backend.startOptions[1].ResumeSessionID != first.SessionID {
+		t.Fatalf("resume ID = %q, want %q", backend.startOptions[1].ResumeSessionID, first.SessionID)
+	}
+}
+
 func TestSessionManagerUsesProtocolResumeWithoutInjectingCLIFlag(t *testing.T) {
 	backend := &scopedRecordingBackend{}
 	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
@@ -360,6 +417,47 @@ func TestSessionManagerDoesNotSleepThinkingSessionWithActiveTurn(t *testing.T) {
 		t.Fatal("active Thinking turn was closed")
 	}
 	backend.finishStart()
+}
+
+func TestSessionManagerDoesNotSleepAgentSessionWithActiveTurn(t *testing.T) {
+	backend := newEarlyReturnBackend()
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	sessionKey := ChannelSessionKey("agent-1", "channel-1")
+
+	_, err := mgr.GetOrCreateScopedSession(context.Background(), sessionKey, "agent-1", AgentConfig{
+		AgentID: "agent-1", Name: "Agent", Provider: "claude",
+	}, ChannelContext{}, []Message{{Role: RoleUser, Content: "working"}}, nil, "", nil)
+	if err != nil {
+		t.Fatalf("start Agent session: %v", err)
+	}
+	mgr.mu.RLock()
+	entry := mgr.sessions[sessionKey]
+	mgr.mu.RUnlock()
+	old := time.Now().Add(-time.Hour)
+	entry.mu.Lock()
+	entry.LastActive = old
+	entry.mu.Unlock()
+
+	slept, err := mgr.SleepIdleAgentSessions(time.Now().Add(-30 * time.Minute))
+	if err != nil {
+		t.Fatalf("sleep idle Agent sessions: %v", err)
+	}
+	if slept != 0 || !mgr.IsScopedActive(sessionKey) {
+		t.Fatalf("slept = %d active = %v, want 0/true", slept, mgr.IsScopedActive(sessionKey))
+	}
+
+	backend.finishStart()
+	waitForScopedTurnRelease(t, mgr, sessionKey)
+	entry.mu.RLock()
+	lastActive := entry.LastActive
+	entry.mu.RUnlock()
+	if !lastActive.After(old) {
+		t.Fatalf("LastActive = %v, want turn completion after %v", lastActive, old)
+	}
+	slept, err = mgr.SleepIdleAgentSessions(time.Now().Add(-time.Minute))
+	if err != nil || slept != 0 {
+		t.Fatalf("freshly completed Agent sleep = %d, %v, want 0/nil", slept, err)
+	}
 }
 
 func waitForScopedTurnRelease(t *testing.T, mgr *AgentSessionManager, sessionKey string) {

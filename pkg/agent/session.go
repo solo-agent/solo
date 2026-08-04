@@ -14,9 +14,8 @@ import (
 const failedStartRetryInterval = 30 * time.Second
 
 // AgentSessionManager manages a pool of Agent and Thinking-node sessions.
-// Crash recovery is automatic via --resume, concurrent starts are rate-limited,
-// and callers may explicitly sleep idle Thinking sessions without affecting
-// ordinary Agent session lifetime.
+// Crash recovery and idle wake are automatic via provider resume, and
+// concurrent starts are rate-limited.
 type AgentSessionManager struct {
 	backend      PersistentBackend
 	workspaceMgr *WorkspaceManager
@@ -72,6 +71,12 @@ func (e *agentSessionEntry) updateSession(ps *PersistentSession) {
 	if sessionID != "" {
 		e.sessionID = sessionID
 	}
+	e.mu.Unlock()
+}
+
+func (e *agentSessionEntry) markActive() {
+	e.mu.Lock()
+	e.LastActive = time.Now()
 	e.mu.Unlock()
 }
 
@@ -203,9 +208,8 @@ func (m *AgentSessionManager) IsScopedActive(sessionKey string) bool {
 }
 
 // ActiveAgentIDs returns the IDs of all agents with an active (non-asleep,
-// process-alive) persistent session. This is used by the daemon heartbeat to
-// report which agents are "online" on this computer — distinct from the
-// task-level ActiveAgentIDs which only reports currently-executing tasks.
+// process-alive) persistent session. This is distinct from cached sessions and
+// from task-level ActiveAgentIDs, which only reports currently-executing tasks.
 func (m *AgentSessionManager) ActiveAgentIDs() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -215,6 +219,24 @@ func (m *AgentSessionManager) ActiveAgentIDs() []string {
 	for _, entry := range m.sessions {
 		_, asleep, _ := entry.snapshot()
 		if !asleep && m.isSessionAlive(entry) && !seen[entry.AgentID] {
+			seen[entry.AgentID] = true
+			ids = append(ids, entry.AgentID)
+		}
+	}
+	return ids
+}
+
+// CachedAgentIDs returns agents whose provider session is tracked by this
+// daemon, including sessions whose idle process has been released. Heartbeats
+// use this so an idle, resumable Agent is not reported as offline.
+func (m *AgentSessionManager) CachedAgentIDs() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	seen := make(map[string]bool)
+	var ids []string
+	for _, entry := range m.sessions {
+		if !seen[entry.AgentID] {
 			seen[entry.AgentID] = true
 			ids = append(ids, entry.AgentID)
 		}
@@ -242,10 +264,24 @@ func (m *AgentSessionManager) ForceCloseThinkingSession(nodeID string) error {
 // SleepIdleThinkingSessions gracefully releases idle node processes while
 // retaining their provider session IDs for the next --resume.
 func (m *AgentSessionManager) SleepIdleThinkingSessions(idleBefore time.Time) (int, error) {
+	return m.sleepIdleSessions(idleBefore, func(sessionKey string) bool {
+		return strings.HasPrefix(sessionKey, "thinking:")
+	}, "Thinking")
+}
+
+// SleepIdleAgentSessions gracefully releases idle Channel/DM Agent processes
+// while keeping their scoped provider sessions resumable.
+func (m *AgentSessionManager) SleepIdleAgentSessions(idleBefore time.Time) (int, error) {
+	return m.sleepIdleSessions(idleBefore, func(sessionKey string) bool {
+		return strings.HasPrefix(sessionKey, "agent:") || strings.HasPrefix(sessionKey, "channel:")
+	}, "Agent")
+}
+
+func (m *AgentSessionManager) sleepIdleSessions(idleBefore time.Time, matches func(string) bool, scope string) (int, error) {
 	m.mu.RLock()
 	keys := make([]string, 0)
 	for sessionKey := range m.sessions {
-		if strings.HasPrefix(sessionKey, "thinking:") {
+		if matches(sessionKey) {
 			keys = append(keys, sessionKey)
 		}
 	}
@@ -274,14 +310,18 @@ func (m *AgentSessionManager) SleepIdleThinkingSessions(idleBefore time.Time) (i
 			continue
 		}
 		ps := entry.Session
-		if ps.SessionID != "" {
-			entry.sessionID = ps.SessionID
+		resumeID := ps.SessionID
+		if state, ok := ps.state.(SessionStater); ok {
+			resumeID = firstNonEmpty(state.SessionID(), resumeID)
+		}
+		if resumeID != "" {
+			entry.sessionID = resumeID
 		}
 		entry.Session = nil
 		entry.asleep = true
 		entry.mu.Unlock()
 
-		m.logger.Info("session: sleeping idle Thinking process", "agent_id", entry.AgentID, "session_key", sessionKey)
+		m.logger.Info("session: sleeping idle "+scope+" process", "agent_id", entry.AgentID, "session_key", sessionKey)
 		if err := m.backend.Close(ps); err != nil && firstErr == nil {
 			firstErr = err
 		}
@@ -414,7 +454,10 @@ func (m *AgentSessionManager) deliverToSession(ctx context.Context, sessionKey s
 	}
 
 	entry.updateSession(ps)
-	holdTurnUntilResult(ps, release)
+	holdTurnUntilResult(ps, func() {
+		entry.markActive()
+		release()
+	})
 	releaseOnReturn = false
 	return ps, nil
 }
@@ -445,7 +488,10 @@ func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, age
 				return nil, fmt.Errorf("session backend returned a nil session for %s", sessionKey)
 			}
 			entry.updateSession(ps)
-			holdTurnUntilResult(ps, release)
+			holdTurnUntilResult(ps, func() {
+				entry.markActive()
+				release()
+			})
 			releaseOnReturn = false
 			return ps, nil
 		}
@@ -555,7 +601,10 @@ func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, age
 
 	state, _ := ps.state.(SessionStater)
 	go m.watchCrash(sessionKey, agentID, agentCfg, channelCtx, entry, state)
-	holdTurnUntilResult(ps, release)
+	holdTurnUntilResult(ps, func() {
+		entry.markActive()
+		release()
+	})
 	releaseOnReturn = false
 
 	// If the process died immediately (CLI broken/missing), record failure

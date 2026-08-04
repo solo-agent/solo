@@ -1,8 +1,11 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
 const credentials = { email: 'agent-result-delivery-e2e@solo.local', password: 'SoloE2E-2026!' };
+const daemonLogPath = join(process.cwd(), '..', 'daemon.log');
 
 interface AuthResponse {
   access_token: string;
@@ -46,6 +49,13 @@ interface ChannelSessionState {
   external_session_id: string;
   message_id: string;
   message_content: string;
+}
+
+interface AgentHeartbeatState {
+  agent_active: boolean;
+  computer_online: boolean;
+  heartbeat_has_agent: boolean;
+  heartbeat_epoch: number;
 }
 
 interface TaskRetryState {
@@ -194,6 +204,71 @@ function channelSessionState(triggerMessageID: string): ChannelSessionState {
        LIMIT 1
     ), '{"run_id":"","status":"","external_session_id":"","message_id":"","message_content":""}')
   `);
+}
+
+function triggerMessageID(channelID: string, content: string): string {
+  return databaseJSON<{ id: string }>(`
+    SELECT json_build_object('id', COALESCE((
+      SELECT id::text
+        FROM messages
+       WHERE channel_id = '${channelID}'
+         AND sender_type = 'user'
+         AND content = '${content}'
+       ORDER BY created_at DESC
+       LIMIT 1
+    ), ''))::text
+  `).id;
+}
+
+function agentHeartbeatState(agentID: string): AgentHeartbeatState {
+  return databaseJSON<AgentHeartbeatState>(`
+    SELECT json_build_object(
+      'agent_active', a.is_active,
+      'computer_online', EXISTS(SELECT 1 FROM computers c WHERE c.status = 'online'),
+      'heartbeat_has_agent', EXISTS(
+        SELECT 1 FROM computers c
+         WHERE c.status = 'online'
+           AND a.id = ANY(COALESCE(c.agent_ids, '{}'::uuid[]))
+      ),
+      'heartbeat_epoch', COALESCE((
+        SELECT MAX(EXTRACT(EPOCH FROM c.last_heartbeat))
+          FROM computers c
+         WHERE c.status = 'online'
+           AND a.id = ANY(COALESCE(c.agent_ids, '{}'::uuid[]))
+      ), 0)
+    )::text
+      FROM agents a
+     WHERE a.id = '${agentID}'
+  `);
+}
+
+function logLinesAfterRun(runID: string): string[] {
+  const lines = readFileSync(daemonLogPath, 'utf8').split('\n');
+  const completed = lines.findLastIndex((line) =>
+    line.includes('"msg":"task backend completed"') && line.includes(`"task_id":"${runID}"`));
+  return completed < 0 ? [] : lines.slice(completed + 1);
+}
+
+async function expectAgentSessionSleptAfterRun(runID: string, sessionKey: string, providerSessionID: string) {
+  await expect.poll(() => {
+    const lines = logLinesAfterRun(runID);
+    return lines.some((line) =>
+      line.includes('"msg":"session: sleeping idle Agent process"')
+      && line.includes(`"session_key":"${sessionKey}"`))
+      && lines.some((line) =>
+        line.includes('"msg":"claude: persistent session closed"')
+        && line.includes(`"session_id":"${providerSessionID}"`));
+  }, { timeout: 30000, intervals: [250, 500, 1000] }).toBe(true);
+}
+
+async function expectAgentSessionResumed(logOffset: number, sessionKey: string, providerSessionID: string) {
+  await expect.poll(() => {
+    const log = readFileSync(daemonLogPath, 'utf8').slice(logOffset);
+    return log.split('\n').some((line) =>
+      line.includes('"msg":"session: creating"')
+      && line.includes(`"session_key":"${sessionKey}"`)
+      && line.includes(`"resume":"${providerSessionID}"`));
+  }, { timeout: 30000, intervals: [250, 500, 1000] }).toBe(true);
 }
 
 function taskRetryState(taskID: string): TaskRetryState {
@@ -561,6 +636,97 @@ test.describe('real Agent result delivery contract', () => {
       const recalled = channelSessionState(recallMessage.id);
       await authenticatePage(page, auth);
       await page.goto(`/dashboard?channel=${channel.id}`);
+      await expect(page.locator(`[data-message-id="${recalled.message_id}"]`)).toContainText(`RECALLED ${secret}`);
+    } finally {
+      if (agent) await api(request, auth.access_token, 'delete', `/api/v1/agents/${agent.id}`).catch(() => undefined);
+      if (channel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
+    }
+  });
+
+  test('sleeps an idle Channel Agent and resumes the same real provider Session', async ({ page, request }) => {
+    test.skip(process.env.SOLO_E2E_EXPECT_AGENT_IDLE_REAPER !== '1', 'requires a short-TTL daemon started through make rebuild');
+    test.setTimeout(360000);
+
+    const auth = await authenticate(request);
+    const suffix = `idle-${Date.now().toString(36)}`;
+    const secret = `IDLE_MEMORY_${suffix.toUpperCase()}`;
+    const rememberContent = `REMEMBER ${secret}`;
+    const recallContent = `RECALL ${suffix}`;
+    let channel: Entity | null = null;
+    let agent: Entity | null = null;
+
+    try {
+      channel = await api<Entity>(request, auth.access_token, 'post', '/api/v1/channels', {
+        name: `channel-idle-resume-e2e-${suffix}`,
+        description: 'Real Channel Agent idle sleep and wake E2E',
+      });
+      agent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
+        name: `Channel Idle Resume E2E ${suffix}`,
+        model_provider: 'claude',
+        model_name: 'sonnet',
+        system_prompt: [
+          'Always deliver replies with solo message send.',
+          'When introducing yourself, send exactly READY.',
+          'When a user message starts with REMEMBER followed by a value, retain it only in the current provider conversation and send exactly STORED.',
+          'When a user message starts with RECALL, send exactly RECALLED followed by the remembered value.',
+          'Never use message read, files, MEMORY.md, databases, or any other storage for REMEMBER or RECALL.',
+        ].join(' '),
+      });
+
+      await expect.poll(() => deliveryState(agent!.id).status, {
+        timeout: 180000, intervals: [500, 1000, 2000],
+      }).toBe('completed');
+
+      await authenticatePage(page, auth);
+      await page.goto(`/dashboard?channel=${channel.id}`);
+      const composer = page.getByPlaceholder('Type a message...');
+      await expect(composer).toBeVisible();
+      await composer.fill(rememberContent);
+      await composer.press('Enter');
+
+      await expect.poll(() => triggerMessageID(channel!.id, rememberContent), {
+        timeout: 30000, intervals: [250, 500, 1000],
+      }).not.toBe('');
+      const rememberMessageID = triggerMessageID(channel.id, rememberContent);
+      await expect.poll(() => {
+        const state = channelSessionState(rememberMessageID);
+        return `${state.status}/${Boolean(state.external_session_id)}/${state.message_content}`;
+      }, { timeout: 180000, intervals: [500, 1000, 2000] }).toBe('completed/true/STORED');
+      const first = channelSessionState(rememberMessageID);
+      await expect(page.locator(`[data-message-id="${first.message_id}"]`)).toContainText('STORED');
+
+      await expect.poll(() => {
+        const state = agentHeartbeatState(agent!.id);
+        return `${state.agent_active}/${state.computer_online}/${state.heartbeat_has_agent}`;
+      }, { timeout: 45000, intervals: [1000, 2000] }).toBe('true/true/true');
+      const heartbeatBeforeSleep = agentHeartbeatState(agent.id).heartbeat_epoch;
+      const sessionKey = `channel:${channel.id}:agent:${agent.id}`;
+
+      await expectAgentSessionSleptAfterRun(first.run_id, sessionKey, first.external_session_id);
+      await expect.poll(() => {
+        const state = agentHeartbeatState(agent!.id);
+        return state.agent_active
+          && state.computer_online
+          && state.heartbeat_has_agent
+          && state.heartbeat_epoch > heartbeatBeforeSleep;
+      }, { timeout: 45000, intervals: [1000, 2000] }).toBe(true);
+
+      const resumeLogOffset = readFileSync(daemonLogPath, 'utf8').length;
+      await composer.fill(recallContent);
+      await composer.press('Enter');
+      await expect.poll(() => triggerMessageID(channel!.id, recallContent), {
+        timeout: 30000, intervals: [250, 500, 1000],
+      }).not.toBe('');
+      const recallMessageID = triggerMessageID(channel.id, recallContent);
+      await expect.poll(() => {
+        const state = channelSessionState(recallMessageID);
+        return `${state.status}/${state.external_session_id}/${state.message_content}`;
+      }, { timeout: 180000, intervals: [500, 1000, 2000] }).toBe(
+        `completed/${first.external_session_id}/RECALLED ${secret}`,
+      );
+
+      await expectAgentSessionResumed(resumeLogOffset, sessionKey, first.external_session_id);
+      const recalled = channelSessionState(recallMessageID);
       await expect(page.locator(`[data-message-id="${recalled.message_id}"]`)).toContainText(`RECALLED ${secret}`);
     } finally {
       if (agent) await api(request, auth.access_token, 'delete', `/api/v1/agents/${agent.id}`).catch(() => undefined);

@@ -170,7 +170,7 @@ func main() {
 	// Graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	go h.runThinkingSessionReaper(ctx)
+	go h.runSessionReaper(ctx)
 
 	go func() {
 		slog.Info("daemon server starting", "addr", srv.Addr)
@@ -354,7 +354,7 @@ func sendHeartbeat() {
 		MaxLoad:     10,
 		UptimeSec:   int64(time.Since(startTime).Seconds()),
 		ActiveTasks: taskMgr.ListActiveTasks(),
-		AgentIDs:    daemonH.activeSessionAgentIDs(),
+		AgentIDs:    daemonH.cachedSessionAgentIDs(),
 		SystemInfo:  collectSystemInfo(),
 		// Skills served on-demand via /internal/daemon/skills
 	}
