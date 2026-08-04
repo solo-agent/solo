@@ -42,6 +42,8 @@ import (
 
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Exit codes matching the v1.3 CLI spec.
@@ -294,7 +296,7 @@ func handleTeamForm(args []string, baseURL, token string) {
 }
 
 func requestTeamFormation(baseURL, token, channelID string, reqBody []byte) (int, []byte, error) {
-	statusCode, body, err := proxyRequest("team_form", channelID, string(reqBody), "", token, 0, "")
+	statusCode, body, err := proxyRequest("team_form", channelID, string(reqBody), "", token, 0, "", "")
 	if err != nil || statusCode == http.StatusBadGateway || statusCode == http.StatusGatewayTimeout {
 		statusCode, body, err = doHTTPWithTimeout(http.MethodPost, baseURL+"/api/v1/team-formations", token, reqBody, teamFormationRequestTimeout)
 	}
@@ -386,7 +388,7 @@ func handleArtifactPublish(args []string, baseURL, token string) {
 
 // proxyRequest calls the daemon proxy instead of the server API directly.
 // This keeps local thinking separate from channel communication.
-func proxyRequest(action, channelID, content, threadID, token string, taskNumber int, status string) (int, []byte, error) {
+func proxyRequest(action, channelID, content, threadID, token string, taskNumber int, status, clientMsgID string) (int, []byte, error) {
 	daemonURL := os.Getenv("SOLO_DAEMON_URL")
 	if daemonURL == "" {
 		daemonURL = "http://127.0.0.1:8081"
@@ -415,6 +417,9 @@ func proxyRequest(action, channelID, content, threadID, token string, taskNumber
 	}
 	if status != "" {
 		body["status"] = status
+	}
+	if clientMsgID != "" {
+		body["client_msg_id"] = clientMsgID
 	}
 	// For task_claim with -m, the message_id is passed in the content field.
 	// Forward it as task_id so the proxy can construct the correct URL path.
@@ -566,7 +571,7 @@ func handleTaskClaim(args []string, baseURL, token string) {
 
 	// Try daemon proxy first (uses fresh JWT).
 	// Pass messageID via taskID parameter so the proxy uses it in the URL path.
-	statusCode, body, err := proxyRequest("task_claim", channelID, taskID, "", token, number, "")
+	statusCode, body, err := proxyRequest("task_claim", channelID, taskID, "", token, number, "", "")
 	if err != nil {
 		// Fallback to direct API
 		apiURL := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%s/claim", baseURL, channelID, taskID)
@@ -730,7 +735,7 @@ func handleTaskUnclaim(args []string, baseURL, token string) {
 	}
 
 	// Try daemon proxy first (uses fresh JWT)
-	statusCode, body, err := proxyRequest("task_unclaim", channelID, "", "", token, number, "")
+	statusCode, body, err := proxyRequest("task_unclaim", channelID, "", "", token, number, "", "")
 	if err != nil {
 		// Fallback to direct API
 		url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d/claim", baseURL, channelID, number)
@@ -852,7 +857,8 @@ func handleMessageSend(args []string, baseURL, token string) {
 		doExit(exitUsage)
 	}
 
-	reqBody := map[string]string{"content": content}
+	clientMsgID := uuid.NewString()
+	reqBody := map[string]string{"content": content, "client_msg_id": clientMsgID}
 	if threadID != "" {
 		reqBody["thread_id"] = threadID
 	}
@@ -865,8 +871,8 @@ func handleMessageSend(args []string, baseURL, token string) {
 
 	body, _ := json.Marshal(reqBody)
 	// Try daemon proxy first
-	statusCode, respBody, err := proxyRequest("message_send", channelID, content, threadID, token, 0, "")
-	if err != nil {
+	statusCode, respBody, err := proxyRequest("message_send", channelID, content, threadID, token, 0, "", clientMsgID)
+	if err != nil || statusCode == http.StatusBadGateway || statusCode == http.StatusGatewayTimeout {
 		// Fallback to direct API
 		url := fmt.Sprintf("%s/api/v1/channels/%s/messages", baseURL, channelID)
 		statusCode, respBody, err = doHTTP(http.MethodPost, url, token, body)
@@ -910,7 +916,7 @@ func handleChannel(args []string, baseURL, token string) {
 // proxyOrDirect tries the daemon proxy first, then falls back to direct API.
 // Used for read-only commands that need fresh auth tokens in persistent sessions.
 func proxyOrDirect(action, channelID, content string, token string) (int, []byte, error) {
-	statusCode, body, err := proxyRequest(action, channelID, content, "", token, 0, "")
+	statusCode, body, err := proxyRequest(action, channelID, content, "", token, 0, "", "")
 	if err != nil {
 		// Fallback handled by caller
 		return 0, nil, err
@@ -1001,7 +1007,7 @@ func handleMessageCheck(args []string, baseURL, token string) {
 		}
 	}
 
-	statusCode, body, err := proxyRequest("message_check", channelID, "", "", token, 0, "")
+	statusCode, body, err := proxyRequest("message_check", channelID, "", "", token, 0, "", "")
 	if err != nil {
 		statusCode, body, err = doHTTP(http.MethodGet, requestURL, token, nil)
 	}

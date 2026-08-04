@@ -13,6 +13,14 @@ import { apiClient, ApiError } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
 import { useAuth } from '@/lib/auth-context';
 import { t } from '@/lib/i18n';
+import {
+  acknowledgeReliableSend,
+  cancelReliableSend,
+  createClientMessageID,
+  postMessageWithTimeout,
+  retryReliableSend,
+  sendReliably,
+} from '@/lib/reliable-send';
 import type { Attachment, Message } from '@/lib/types';
 
 // ---- Constants ----
@@ -23,6 +31,7 @@ const PAGE_SIZE = 50;
 
 interface MessageResponse {
   id: string;
+  client_msg_id?: string;
   channel_id: string;
   sender_type: string;
   sender_id: string;
@@ -56,6 +65,7 @@ interface MessageListResponse {
 function mapMessageResponse(resp: MessageResponse): Message {
   return {
     id: resp.id,
+    client_msg_id: resp.client_msg_id,
     channel_id: resp.channel_id,
     user_id: resp.sender_id,
     display_name: resp.sender_name || resp.sender_id,
@@ -83,6 +93,7 @@ function mapMessageResponse(resp: MessageResponse): Message {
 /** Convert a flattened WS message event to a Message */
 function flatToMessage(event: {
   id: string;
+  client_msg_id?: string;
   channel_id: string;
   sender_type: string;
   sender_id: string;
@@ -105,6 +116,7 @@ function flatToMessage(event: {
 }): Message {
   return {
     id: event.id,
+    client_msg_id: event.client_msg_id,
     channel_id: event.channel_id,
     user_id: event.sender_id,
     display_name: event.sender_name || event.sender_id,
@@ -181,8 +193,8 @@ export function useMessages(channelId: string | null, thinkingNodeId: string | n
 
       // Use the most recent message ID as the "after" cursor
       // to fetch messages that arrived during disconnection
-      const lastMsg = currentMsgs[currentMsgs.length - 1];
-      if (lastMsg.id && !lastMsg.id.startsWith('temp-')) {
+      const lastMsg = [...currentMsgs].reverse().find((message) => message.status === 'sent');
+      if (lastMsg?.id) {
         apiClient
           .get<MessageListResponse>(`/api/v1/channels/${cid}/messages`, {
             limit: '50',
@@ -235,10 +247,16 @@ export function useMessages(channelId: string | null, thinkingNodeId: string | n
         if (event.channel_id !== cid) return;
         if (event.thread_id) return;
         if ((event.thinking_node_id ?? null) !== thinkingNodeIdRef.current) return;
+        const wsMessage = flatToMessage(event);
+        if (event.client_msg_id && acknowledgeReliableSend(event.client_msg_id, {
+          message: wsMessage,
+          id: event.id,
+          task_number: event.task_number,
+        })) return;
 
         setMessages((prev) => {
           const existing = prev.find((m) => m.id === event.id);
-          const newMsg = flatToMessage(event);
+          const newMsg = wsMessage;
 
           if (existing) {
             // Merge WS data into existing message. WS is authoritative
@@ -263,7 +281,7 @@ export function useMessages(channelId: string | null, thinkingNodeId: string | n
           // New message — clean up any orphaned temp/sending messages
           // that might be optimistic duplicates of this real message.
           // Only remove temp messages whose content matches (best-effort dedup).
-          const cleaned = prev.filter(
+          const cleaned = event.client_msg_id ? prev : prev.filter(
             (m) =>
               !(
                 (m.id.startsWith('temp-') || m.status === 'sending') &&
@@ -513,9 +531,10 @@ export function useMessages(channelId: string | null, thinkingNodeId: string | n
       const hasAttachments = Boolean(attachmentIds && attachmentIds.length > 0);
       if (!id || (!trimmedContent && !hasAttachments) || (asTask && !trimmedContent)) return null;
 
-      const tempId = `temp-${Date.now()}`;
+      const clientMsgID = createClientMessageID();
       const optimisticMessage: Message = {
-        id: tempId,
+        id: clientMsgID,
+        client_msg_id: clientMsgID,
         channel_id: id,
         user_id: user?.id || 'local-user',
         display_name: user?.display_name || 'You',
@@ -529,110 +548,74 @@ export function useMessages(channelId: string | null, thinkingNodeId: string | n
 
       setMessages((prev) => [...prev, optimisticMessage]);
 
-      try {
-        const body: Record<string, unknown> = { content: trimmedContent };
-        if (nodeID) {
-          body.thinking_node_id = nodeID;
-        }
-        if (mentionedAgentIds && mentionedAgentIds.length > 0) {
-          body.mentioned_agent_ids = mentionedAgentIds;
-        }
-        if (asTask) {
-          body.as_task = true;
-        }
-        if (attachmentIds && attachmentIds.length > 0) {
-          body.attachment_ids = attachmentIds;
-        }
-        const confirmed = await apiClient.post<MessageResponse & { task_number?: number; message_id?: string }>(
-          `/api/v1/channels/${id}/messages`,
-          body,
-        );
-
-        // asTask responses return a TaskResponse shape (id=task UUID, message_id=message UUID)
-        // instead of MessageResponse (id=message UUID, sender_name, content, etc.).
-        // Detect by checking for the message_id field.
-        const isTaskResponse = asTask && (confirmed as unknown as Record<string, unknown>).message_id !== undefined;
-        const realMessageId = isTaskResponse
-          ? (confirmed as unknown as Record<string, unknown>).message_id as string
-          : confirmed.id;
-
-        if (channelRef.current !== id || thinkingNodeIdRef.current !== nodeID) {
-          return {
-            id: realMessageId,
-            task_number: (confirmed as unknown as Record<string, unknown>).task_number as number | undefined,
-          };
-        }
-
-        setMessages((prev) => {
-          if (isTaskResponse) {
-            // Map the optimistic temp message to the real message ID from the TaskResponse.
-            // Preserve the optimistic fields (display_name, content) — the WS message.new
-            // broadcast will handle final dedup and enrichment.
-            const taskResp = confirmed as unknown as Record<string, unknown>;
-            return prev.map((m) => {
-              if (m.id === tempId) {
-                return {
-                  ...m,
-                  id: realMessageId,
-                  status: 'sent' as const,
-                  task_number: taskResp.task_number as number | undefined,
-                  task_status: taskResp.status as string | undefined,
-                  task_claimer_name: taskResp.claimer_name as string | undefined,
-                  task_claimer_deleted: taskResp.claimer_deleted as boolean | undefined,
-                };
-              }
-              // If WS message.new already arrived with the real message ID,
-              // update its task fields in place.
-              if (m.id === realMessageId) {
-                return {
-                  ...m,
-                  task_number: taskResp.task_number as number | undefined,
-                  task_status: taskResp.status as string | undefined,
-                  task_claimer_name: taskResp.claimer_name as string | undefined,
-                  task_claimer_deleted: taskResp.claimer_deleted as boolean | undefined,
-                };
-              }
-              return m;
-            });
-          }
-          // Non-asTask: replace temp message (and any WS duplicate) with the confirmed response.
-          // Use reduce to guarantee exactly one confirmed message in the output,
-          // regardless of whether 0, 1, or 2 matching messages existed in prev.
-          const confirmedMessage: Message = { ...mapMessageResponse(confirmed), status: 'sent' as const };
-          const skipIds = new Set([tempId, confirmed.id]);
-          let hasConfirmed = false;
-          const result: Message[] = [];
-          for (const m of prev) {
-            if (skipIds.has(m.id)) {
-              if (!hasConfirmed) {
-                result.push(confirmedMessage);
-                hasConfirmed = true;
-              }
-              // else: duplicate — skip it
-            } else {
-              result.push(m);
-            }
-          }
-          // Edge case: neither temp nor WS-dup was in prev (shouldn't happen but safe)
-          if (!hasConfirmed) {
-            result.push(confirmedMessage);
-          }
-          return result;
-        });
-
-        return {
-          id: realMessageId,
-          task_number: (confirmed as unknown as Record<string, unknown>).task_number as number | undefined,
-        };
-      } catch {
-        if (channelRef.current !== id || thinkingNodeIdRef.current !== nodeID) return null;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === tempId ? { ...m, status: 'failed' as const } : m,
-          ),
-        );
-        return null;
+      const body: Record<string, unknown> = {
+        content: trimmedContent,
+        client_msg_id: clientMsgID,
+      };
+      if (nodeID) body.thinking_node_id = nodeID;
+      if (mentionedAgentIds && mentionedAgentIds.length > 0) {
+        body.mentioned_agent_ids = mentionedAgentIds;
       }
+      if (asTask) body.as_task = true;
+      if (attachmentIds && attachmentIds.length > 0) {
+        body.attachment_ids = attachmentIds;
+      }
+
+      const confirmation = await sendReliably(clientMsgID, {
+        request: async () => {
+          const confirmed = await postMessageWithTimeout<MessageResponse & { task_number?: number; message_id?: string }>(
+            `/api/v1/channels/${id}/messages`,
+            body,
+          );
+          const task = confirmed as unknown as Record<string, unknown>;
+          const isTaskResponse = asTask && task.message_id !== undefined;
+          const messageID = isTaskResponse ? task.message_id as string : confirmed.id;
+          const message = isTaskResponse
+            ? {
+                ...optimisticMessage,
+                id: messageID,
+                status: 'sent' as const,
+                task_number: task.task_number as number | undefined,
+                task_status: task.status as string | undefined,
+                task_claimer_name: task.claimer_name as string | undefined,
+                task_claimer_deleted: task.claimer_deleted as boolean | undefined,
+              }
+            : mapMessageResponse(confirmed);
+          return { message, id: messageID, task_number: task.task_number as number | undefined };
+        },
+        onConfirmed: (confirmed) => {
+          if (channelRef.current !== id || thinkingNodeIdRef.current !== nodeID) return;
+          setMessages((prev) => {
+            const result: Message[] = [];
+            let replaced = false;
+            for (const message of prev) {
+              if (message.id === clientMsgID || message.id === confirmed.id) {
+                if (!replaced) result.push({ ...confirmed.message, status: 'sent' as const });
+                replaced = true;
+              } else {
+                result.push(message);
+              }
+            }
+            if (!replaced) result.push({ ...confirmed.message, status: 'sent' as const });
+            return result;
+          });
+        },
+        onFailed: () => {
+          if (channelRef.current !== id || thinkingNodeIdRef.current !== nodeID) return;
+          setMessages((prev) => prev.map((message) =>
+            message.id === clientMsgID ? { ...message, status: 'failed' as const } : message,
+          ));
+        },
+        onRetrying: () => {
+          if (channelRef.current !== id || thinkingNodeIdRef.current !== nodeID) return;
+          setMessages((prev) => prev.map((message) =>
+            message.id === clientMsgID ? { ...message, status: 'sending' as const } : message,
+          ));
+        },
+      });
+      return confirmation
+        ? { id: confirmation.id, task_number: confirmation.task_number }
+        : null;
     },
     [user],
   );
@@ -641,39 +624,8 @@ export function useMessages(channelId: string | null, thinkingNodeId: string | n
 
   const retryMessage = useCallback(
     async (messageId: string, content: string) => {
-      const id = channelRef.current;
-      const nodeID = thinkingNodeIdRef.current;
-      if (!id) return;
-
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === messageId ? { ...m, status: 'sending' as const } : m,
-        ),
-      );
-
-      try {
-        const confirmed = await apiClient.post<MessageResponse>(
-          `/api/v1/channels/${id}/messages`,
-          {
-            content,
-            ...(nodeID ? { thinking_node_id: nodeID } : {}),
-          },
-        );
-
-        if (channelRef.current !== id || thinkingNodeIdRef.current !== nodeID) return;
-
-        setMessages((prev) => {
-          const filtered = prev.filter((m) => m.id !== messageId && m.id !== confirmed.id);
-          return [...filtered, { ...mapMessageResponse(confirmed), status: 'sent' as const }];
-        });
-      } catch {
-        if (channelRef.current !== id || thinkingNodeIdRef.current !== nodeID) return;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === messageId ? { ...m, status: 'failed' as const } : m,
-          ),
-        );
-      }
+      void content;
+      retryReliableSend(messageId);
     },
     [],
   );
@@ -686,6 +638,7 @@ export function useMessages(channelId: string | null, thinkingNodeId: string | n
 
   /** Cancel (remove from list) a failed or sending message */
   const cancelMessage = useCallback((messageId: string) => {
+    cancelReliableSend(messageId);
     setMessages((prev) => prev.filter((m) => m.id !== messageId));
   }, []);
 

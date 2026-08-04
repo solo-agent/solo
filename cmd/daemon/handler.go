@@ -376,16 +376,17 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		AgentID    string `json:"agent_id"`
-		Action     string `json:"action"`
-		ChannelID  string `json:"channel_id"`
-		Content    string `json:"content,omitempty"`
-		ThreadID   string `json:"thread_id,omitempty"`
-		NodeID     string `json:"thinking_node_id,omitempty"`
-		RunID      string `json:"run_id,omitempty"`
-		TaskNumber int    `json:"task_number,omitempty"`
-		TaskID     string `json:"task_id,omitempty"`
-		Status     string `json:"status,omitempty"`
+		AgentID     string `json:"agent_id"`
+		Action      string `json:"action"`
+		ChannelID   string `json:"channel_id"`
+		Content     string `json:"content,omitempty"`
+		ThreadID    string `json:"thread_id,omitempty"`
+		NodeID      string `json:"thinking_node_id,omitempty"`
+		RunID       string `json:"run_id,omitempty"`
+		TaskNumber  int    `json:"task_number,omitempty"`
+		TaskID      string `json:"task_id,omitempty"`
+		Status      string `json:"status,omitempty"`
+		ClientMsgID string `json:"client_msg_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -433,6 +434,9 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.RunID != "" {
 			bodyMap["run_id"] = req.RunID
+		}
+		if req.ClientMsgID != "" {
+			bodyMap["client_msg_id"] = req.ClientMsgID
 		}
 		serverBody, _ = json.Marshal(bodyMap)
 	case "task_claim":

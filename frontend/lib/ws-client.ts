@@ -158,6 +158,14 @@ export class WSClient {
     this.setState('disconnected');
   }
 
+  forceReconnect(): void {
+    this.intentionalClose = false;
+    this.cancelReconnect();
+    this.cleanupSocket();
+    this.setState('disconnected');
+    this.connect();
+  }
+
   /** 订阅频道（未连接时自动触发连接） */
   subscribe(channelId: string): void {
     this.subscribedChannels.add(channelId);

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -49,6 +50,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	workspaceRoot := defaultAgentWorkspaceRoot()
 	relationshipMD := service.NewRelationshipsMDGenerator(pool, workspaceRoot)
 	taskSvc := service.NewTaskService(pool)
+	sendDedupe := service.NewSendDedupe(1000, 5*time.Minute)
 	taskSvc.SetAgentNotifier(service.NewAgentNotifier(pool, hub, agentSvc))
 	relationshipSvc := service.NewAgentRelationshipService(pool, relationshipMD)
 	templateSvc := service.NewTemplateService(pool, relationshipMD)
@@ -82,13 +84,13 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	authHandler := handler.NewAuthHandler(pool, agentSvc)
 	channelHandler := handler.NewChannelHandler(pool, dm, templateSvc)
 	memberHandler := handler.NewMemberHandler(pool, agentSvc, dm)
-	messageHandler := handler.NewMessageHandler(pool, hub, agentSvc, taskSvc)
+	messageHandler := handler.NewMessageHandler(pool, hub, agentSvc, taskSvc, sendDedupe)
 	agentHandler := handler.NewAgentHandler(pool, dm, hub, agentSvc)
 	agentRunHandler := handler.NewAgentRunHandler(pool)
 	dashboardHandler := handler.NewDashboardHandler(pool)
-	threadHandler := handler.NewThreadHandler(pool, hub, agentSvc)
+	threadHandler := handler.NewThreadHandler(pool, hub, agentSvc, sendDedupe)
 	thinkingHandler := handler.NewThinkingHandler(pool, hub, agentSvc)
-	dmHandler := handler.NewDMHandler(pool, hub, agentSvc, taskSvc)
+	dmHandler := handler.NewDMHandler(pool, hub, agentSvc, taskSvc, sendDedupe)
 	daemonHandler := handler.NewDaemonHandler(dm, agentSvc, computerSvc)
 	mentionSvc := service.NewMentionService(pool)
 	taskHandler := handler.NewTaskHandler(pool, hub, agentSvc, taskSvc, mentionSvc)

@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/solo-ai/solo/internal/server/service"
 )
 
 // ErrorResponse is the standard API error response body.
@@ -23,6 +26,47 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, ErrorResponse{Error: http.StatusText(status), Message: message})
+}
+
+func validateClientMessageID(raw string) (string, bool) {
+	id := strings.TrimSpace(raw)
+	return id, len(id) <= 128
+}
+
+func beginReliableSend(w http.ResponseWriter, r *http.Request, dedupe *service.SendDedupe, senderID, clientMessageID string) (*service.SendDedupeClaim, bool) {
+	if dedupe == nil || clientMessageID == "" {
+		return nil, true
+	}
+	claim, cached, err := dedupe.Acquire(r.Context(), senderID+":"+clientMessageID)
+	if err != nil {
+		return nil, false
+	}
+	if cached != nil {
+		writeJSON(w, cached.Status, markSendDeduplicated(cached.Body))
+		return nil, false
+	}
+	return claim, true
+}
+
+func completeReliableSend(w http.ResponseWriter, status int, body any, claim *service.SendDedupeClaim) {
+	claim.Complete(status, body)
+	writeJSON(w, status, body)
+}
+
+func markSendDeduplicated(body any) any {
+	switch response := body.(type) {
+	case MessageResponse:
+		response.Deduplicated = true
+		return response
+	case ThreadReplyResponse:
+		response.Deduplicated = true
+		return response
+	case TaskResponse:
+		response.Deduplicated = true
+		return response
+	default:
+		return body
+	}
 }
 
 // requireUserID extracts the X-User-ID header set by the auth middleware.

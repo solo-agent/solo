@@ -367,36 +367,25 @@ export function MessageInput({
   const hasUploading = uploads.some((u) => u.status === 'uploading');
   const canSend = (trimmed.length > 0 || (!asTask && doneUploads.length > 0)) && !isSending && !hasUploading && !disabled;
 
-  const handleSend = useCallback(async () => {
+  const handleSend = useCallback(() => {
     if (!canSend || isSendingRef.current) return;
 
     isSendingRef.current = true;
     setIsSending(true);
-    try {
-      const attachmentIds =
-        doneUploads.length > 0
-          ? doneUploads.map((u) => u.id)
-          : undefined;
-
-      await onSend(
-        trimmed,
-        mentionedAgentIds,
-        asTask,
-        undefined,
-        attachmentIds,
-      );
-      setContent('');
-      setAsTask(false);
-      setUploads([]);
-      resetMention();
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-      }
-    } finally {
-      isSendingRef.current = false;
-      setIsSending(false);
-      textareaRef.current?.focus();
+    const attachmentIds = doneUploads.length > 0
+      ? doneUploads.map((u) => u.id)
+      : undefined;
+    void onSend(trimmed, mentionedAgentIds, asTask, undefined, attachmentIds);
+    setContent('');
+    setAsTask(false);
+    setUploads([]);
+    resetMention();
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
     }
+    isSendingRef.current = false;
+    setIsSending(false);
+    textareaRef.current?.focus();
   }, [canSend, trimmed, onSend, mentionedAgentIds, asTask, doneUploads, resetMention]);
 
   // ---- Keyboard handling ----

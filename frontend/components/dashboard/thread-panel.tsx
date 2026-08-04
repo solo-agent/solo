@@ -503,22 +503,19 @@ function ThreadReplyInput({
   const trimmed = content.trim();
   const canSend = trimmed.length > 0 && !isSending && !disabled;
 
-  const handleSend = useCallback(async () => {
+  const handleSend = useCallback(() => {
     if (!canSend || isSendingRef.current) return;
     isSendingRef.current = true;
     setIsSending(true);
-    try {
-      await onSend(trimmed, mentionedAgentIds);
-      setContent('');
-      resetMention();
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-      }
-    } finally {
-      isSendingRef.current = false;
-      setIsSending(false);
-      textareaRef.current?.focus();
+    void onSend(trimmed, mentionedAgentIds);
+    setContent('');
+    resetMention();
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
     }
+    isSendingRef.current = false;
+    setIsSending(false);
+    textareaRef.current?.focus();
   }, [canSend, trimmed, onSend, mentionedAgentIds, resetMention]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

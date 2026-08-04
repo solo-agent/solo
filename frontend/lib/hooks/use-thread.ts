@@ -13,6 +13,12 @@ import { apiClient } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
 import { useAuth } from '@/lib/auth-context';
 import { t } from '@/lib/i18n';
+import {
+  acknowledgeReliableSend,
+  createClientMessageID,
+  postMessageWithTimeout,
+  sendReliably,
+} from '@/lib/reliable-send';
 import type { Attachment } from '@/lib/types';
 import type { WSMessage, WSMessageSource } from '@/lib/ws-types';
 
@@ -20,6 +26,7 @@ import type { WSMessage, WSMessageSource } from '@/lib/ws-types';
 
 interface ThreadReplyResponse {
   id: string;
+  client_msg_id?: string;
   channel_id: string;
   thread_id: string;
   sender_type: string;
@@ -44,6 +51,7 @@ interface ThreadMessageListResponse {
 function toWSMessage(r: ThreadReplyResponse): WSMessage {
   return {
     id: r.id,
+    client_msg_id: r.client_msg_id,
     channel_id: r.channel_id,
     sender_type: r.sender_type as WSMessageSource,
     sender_id: r.sender_id,
@@ -148,10 +156,9 @@ export function useThread(): UseThreadReturn {
   useEffect(() => {
     const unsub = onEvent((event) => {
       const tid = threadIdRef.current;
-      if (!tid) return;
 
       // Streaming tokens from agent in thread (P25-10-F)
-      if (event.type === 'message.agent_typing' && event.thread_id === tid) {
+      if (tid && event.type === 'message.agent_typing' && event.thread_id === tid) {
         setMessages((prev) => {
           const existing = prev.find((m) => m.id === event.id);
           if (existing) {
@@ -182,30 +189,31 @@ export function useThread(): UseThreadReturn {
         return;
       }
 
-      if (event.type === 'thread.message.new' && event.thread.thread_id === tid) {
+      if (event.type === 'thread.message.new') {
+        const newMsg: WSMessage = {
+          id: event.message.id,
+          client_msg_id: event.message.client_msg_id,
+          channel_id: event.message.channel_id,
+          sender_type: event.message.sender_type as WSMessageSource,
+          sender_id: event.message.sender_id,
+          sender_name: event.message.sender_name,
+          sender_avatar: event.message.sender_avatar,
+          display_name: event.message.sender_name,
+          content: event.message.content,
+          content_type: event.message.content_type,
+          thread_parent_id: event.message.thread_id,
+          attachments: event.message.attachments,
+          created_at: event.message.created_at,
+        };
+        if (event.message.client_msg_id && acknowledgeReliableSend(event.message.client_msg_id, {
+          message: newMsg,
+          thread_id: event.message.thread_id,
+        })) return;
+        if (!tid || event.thread.thread_id !== tid) return;
         // Replace streaming placeholder if one exists, otherwise append
         setMessages((prev) => {
-          // Skip WS if the user has a pending send — API response will handle it.
-          // Otherwise WS and API race and the same message appears twice.
-          if (event.message.sender_type === 'user' && prev.some((m) => m.status === 'sending' && m.sender_type === 'user')) {
-            return prev;
-          }
           const hasStreaming = prev.some((m) => m.id === event.message.id && m.status === 'streaming');
           const exists = prev.some((m) => m.id === event.message.id);
-          const newMsg = {
-            id: event.message.id,
-            channel_id: event.message.channel_id,
-            sender_type: event.message.sender_type as WSMessageSource,
-            sender_id: event.message.sender_id,
-            sender_name: event.message.sender_name,
-            sender_avatar: event.message.sender_avatar,
-            display_name: event.message.sender_name,
-            content: event.message.content,
-            content_type: event.message.content_type,
-            thread_parent_id: event.message.thread_id,
-            attachments: event.message.attachments,
-            created_at: event.message.created_at,
-          };
           const result = prev.map((m) =>
             m.id === event.message.id ? newMsg : m,
           );
@@ -227,9 +235,10 @@ export function useThread(): UseThreadReturn {
       const mid = messageIdRef.current;
       if (!cid || !mid || !content.trim()) return;
 
-      const tempId = `thread-temp-${Date.now()}`;
+      const clientMsgID = createClientMessageID();
       const optimistic: WSMessage = {
-        id: tempId,
+        id: clientMsgID,
+        client_msg_id: clientMsgID,
         channel_id: cid,
         sender_type: 'user',
         sender_id: user?.id || 'local-user',
@@ -243,28 +252,49 @@ export function useThread(): UseThreadReturn {
 
       setMessages((prev) => [...prev, optimistic]);
 
-      try {
-        const res = await apiClient.post<ThreadReplyResponse>(
-          `/api/v1/channels/${cid}/messages/${mid}/thread`,
-          { content: content.trim(), mentioned_agent_ids: mentionedAgentIds || [] },
-        );
-
-        const confirmed = { ...toWSMessage(res), status: 'sent' as const };
-        setMessages((prev) =>
-          prev.map((m) => (m.id === tempId ? confirmed : m)),
-        );
-
-        // 如果这是第一条回复，thread_id 刚刚创建，更新并订阅
-        if (res.thread_id && !threadIdRef.current) {
-          setThreadId(res.thread_id);
-        }
-      } catch {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === tempId ? { ...m, status: 'failed' as const } : m,
-          ),
-        );
-      }
+      await sendReliably(clientMsgID, {
+        request: async () => {
+          const response = await postMessageWithTimeout<ThreadReplyResponse>(
+            `/api/v1/channels/${cid}/messages/${mid}/thread`,
+            {
+              content: content.trim(),
+              mentioned_agent_ids: mentionedAgentIds || [],
+              client_msg_id: clientMsgID,
+            },
+          );
+          return { message: toWSMessage(response), thread_id: response.thread_id };
+        },
+        onConfirmed: (confirmed) => {
+          if (channelIdRef.current !== cid || messageIdRef.current !== mid) return;
+          setMessages((prev) => {
+            const result: WSMessage[] = [];
+            let replaced = false;
+            for (const message of prev) {
+              if (message.id === clientMsgID || message.id === confirmed.message.id) {
+                if (!replaced) result.push({ ...confirmed.message, status: 'sent' as const });
+                replaced = true;
+              } else {
+                result.push(message);
+              }
+            }
+            if (!replaced) result.push({ ...confirmed.message, status: 'sent' as const });
+            return result;
+          });
+          if (confirmed.thread_id && !threadIdRef.current) setThreadId(confirmed.thread_id);
+        },
+        onFailed: () => {
+          if (channelIdRef.current !== cid || messageIdRef.current !== mid) return;
+          setMessages((prev) => prev.map((message) =>
+            message.id === clientMsgID ? { ...message, status: 'failed' as const } : message,
+          ));
+        },
+        onRetrying: () => {
+          if (channelIdRef.current !== cid || messageIdRef.current !== mid) return;
+          setMessages((prev) => prev.map((message) =>
+            message.id === clientMsgID ? { ...message, status: 'sending' as const } : message,
+          ));
+        },
+      });
     },
     [user],
   );

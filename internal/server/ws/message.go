@@ -107,6 +107,7 @@ type MessageSendPayload struct {
 	ChannelID     string   `json:"channel_id"`
 	Content       string   `json:"content"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	ClientMsgID   string   `json:"client_msg_id,omitempty"`
 }
 
 type TypingPayload struct {
@@ -118,6 +119,7 @@ type ThreadReplyPayload struct {
 	ThreadID      string   `json:"thread_id"`
 	Content       string   `json:"content"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	ClientMsgID   string   `json:"client_msg_id,omitempty"`
 }
 
 type ThreadSubscribePayload struct {
@@ -167,6 +169,7 @@ type MessageNewPayload struct {
 	TaskStatus         string           `json:"task_status,omitempty"`
 	TaskClaimerName    string           `json:"task_claimer_name,omitempty"`
 	TaskClaimerDeleted bool             `json:"task_claimer_deleted"`
+	ClientMsgID        string           `json:"client_msg_id,omitempty"`
 }
 
 // AgentStreamTokenPayload is broadcast on message.agent_typing for streaming tokens.
@@ -260,6 +263,7 @@ type ThreadMessageItem struct {
 	AttachmentIDs []string         `json:"attachment_ids,omitempty"`
 	Attachments   []AttachmentMeta `json:"attachments,omitempty"`
 	CreatedAt     string           `json:"created_at"`
+	ClientMsgID   string           `json:"client_msg_id,omitempty"`
 }
 
 // ThreadMetadataItem is the thread metadata portion of a thread.message.new payload.
@@ -340,6 +344,7 @@ type DMMessageNewPayload struct {
 	Attachments   []AttachmentMeta `json:"attachments,omitempty"`
 	ThreadID      string           `json:"thread_id,omitempty"`
 	CreatedAt     string           `json:"created_at"`
+	ClientMsgID   string           `json:"client_msg_id,omitempty"`
 }
 
 // TaskCreatedPayload is broadcast on task.created.

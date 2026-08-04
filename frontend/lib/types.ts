@@ -26,6 +26,7 @@ export interface Channel {
 
 export interface Message {
   id: string;
+  client_msg_id?: string;
   channel_id: string;
   user_id: string;
   display_name: string;

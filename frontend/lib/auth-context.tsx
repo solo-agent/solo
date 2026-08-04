@@ -20,6 +20,7 @@ import {
   type ReactNode,
 } from 'react';
 import { ApiError, apiClient, defaultTokenStorage, setAuthTokens, clearAuthTokens } from './api-client';
+import { cancelAllReliableSends } from './reliable-send';
 
 // ---- 类型定义 ----
 
@@ -208,6 +209,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } catch {
       // 即使登出 API 失败，也清除本地 token
     }
+    cancelAllReliableSends();
     clearAuthTokens();
     dispatch({ type: 'LOGOUT' });
   }, []);
