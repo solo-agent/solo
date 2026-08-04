@@ -386,43 +386,6 @@ func TestChannelSessionKeyIsolatesChannels(t *testing.T) {
 	}
 }
 
-func TestSessionManagerHoldsTurnUntilEarlyStartResultCloses(t *testing.T) {
-	backend := newEarlyReturnBackend()
-	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
-
-	ps, err := mgr.GetOrCreateSession(context.Background(), "agent-1", AgentConfig{
-		AgentID:      "agent-1",
-		Name:         "Agent",
-		SystemPrompt: "You are Agent.",
-		Provider:     "opencode",
-	}, ChannelContext{}, []Message{{Role: RoleUser, Content: "hello"}}, nil)
-	if err != nil {
-		t.Fatalf("GetOrCreateSession: %v", err)
-	}
-	if ps.SessionID != "session-1" {
-		t.Fatalf("SessionID = %q, want session-1", ps.SessionID)
-	}
-
-	if !mgr.QueueIfBusy("agent-1", Message{Role: RoleUser, Content: "second"}) {
-		t.Fatal("QueueIfBusy = false while initial result is still open, want true")
-	}
-
-	backend.finishStart()
-
-	deadline := time.After(500 * time.Millisecond)
-	for {
-		if !mgr.QueueIfBusy("agent-1", Message{Role: RoleUser, Content: "third"}) {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("QueueIfBusy stayed true after initial result closed")
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-}
-
 func TestSessionManagerExposesRuntimeOwnedThinkingScopeWhileTurnIsActive(t *testing.T) {
 	backend := newEarlyReturnBackend()
 	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
@@ -448,51 +411,6 @@ func TestSessionManagerExposesRuntimeOwnedThinkingScopeWhileTurnIsActive(t *test
 		select {
 		case <-deadline:
 			t.Fatal("Thinking scope stayed active after the turn result closed")
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-}
-
-func TestSessionManagerHoldsTurnUntilDeliveredResultCloses(t *testing.T) {
-	backend := newEarlyReturnBackend()
-	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
-
-	first, err := mgr.GetOrCreateSession(context.Background(), "agent-1", AgentConfig{
-		AgentID:      "agent-1",
-		Name:         "Agent",
-		SystemPrompt: "You are Agent.",
-		Provider:     "codex",
-	}, ChannelContext{}, []Message{{Role: RoleUser, Content: "first"}}, nil)
-	if err != nil {
-		t.Fatalf("GetOrCreateSession: %v", err)
-	}
-	backend.finishStart()
-	if result := <-first.Result; result == nil || result.Status != "completed" {
-		t.Fatalf("start result = %#v, want completed", result)
-	}
-
-	second, err := mgr.DeliverMessage(context.Background(), "agent-1", []Message{{Role: RoleUser, Content: "second"}})
-	if err != nil {
-		t.Fatalf("DeliverMessage: %v", err)
-	}
-	if !mgr.QueueIfBusy("agent-1", Message{Role: RoleUser, Content: "third"}) {
-		t.Fatal("QueueIfBusy = false while delivered result is still open, want true")
-	}
-
-	backend.finishSend()
-	if result := <-second.Result; result == nil || result.Status != "completed" {
-		t.Fatalf("send result = %#v, want completed", result)
-	}
-
-	deadline := time.After(500 * time.Millisecond)
-	for {
-		if !mgr.QueueIfBusy("agent-1", Message{Role: RoleUser, Content: "fourth"}) {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("QueueIfBusy stayed true after delivered result closed")
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}

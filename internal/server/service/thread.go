@@ -22,6 +22,7 @@ func NewThreadService(pool *pgxpool.Pool) *ThreadService {
 // ThreadMessage represents a message in a thread for agent context.
 type ThreadMessage struct {
 	ID            string    `json:"id"`
+	Seq           int64     `json:"-"`
 	ThreadID      string    `json:"thread_id"`
 	SenderType    string    `json:"sender_type"`
 	SenderID      string    `json:"sender_id"`
@@ -49,7 +50,7 @@ func (s *ThreadService) GetThreadContextMessages(ctx context.Context, threadID s
 
 	// Fetch all messages in the thread, ordered chronologically (oldest first)
 	rows, err := s.pool.Query(ctx,
-		`SELECT m.id, COALESCE(m.thread_id::text, ''), m.sender_type, m.sender_id,
+		`SELECT m.id, m.seq, COALESCE(m.thread_id::text, ''), m.sender_type, m.sender_id,
 		        COALESCE(u.display_name, a.name, m.sender_id::text) AS sender_name,
 			m.content, COALESCE(m.attachment_ids, '{}') as attachment_ids, m.created_at
 		 FROM messages m
@@ -67,7 +68,7 @@ func (s *ThreadService) GetThreadContextMessages(ctx context.Context, threadID s
 	var messages []ThreadMessage
 	for rows.Next() {
 		var msg ThreadMessage
-		if err := rows.Scan(&msg.ID, &msg.ThreadID, &msg.SenderType, &msg.SenderID, &msg.SenderName, &msg.Content, &msg.AttachmentIDs, &msg.CreatedAt); err != nil {
+		if err := rows.Scan(&msg.ID, &msg.Seq, &msg.ThreadID, &msg.SenderType, &msg.SenderID, &msg.SenderName, &msg.Content, &msg.AttachmentIDs, &msg.CreatedAt); err != nil {
 			return nil, err
 		}
 		messages = append(messages, msg)

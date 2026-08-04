@@ -263,6 +263,11 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 	if isAgent {
 		senderType = "agent"
 	}
+	if err := service.LockMessageScope(r.Context(), tx, channelID, threadID, ""); err != nil {
+		slog.Error("failed to lock thread message scope", "error", err, "thread_id", threadID)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 
 	// Insert reply message
 	now := time.Now()

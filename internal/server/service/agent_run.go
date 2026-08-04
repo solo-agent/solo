@@ -56,6 +56,7 @@ const (
 	AgentRunEventToolFinished        = "tool_finished"
 	AgentRunEventAssistantMessage    = "assistant_message"
 	AgentRunEventVisibleMessageSent  = "visible_message_sent"
+	AgentRunEventVisibleMessageHeld  = "visible_message_held"
 	AgentRunEventTaskLinked          = "task_linked"
 	AgentRunEventTaskReassigned      = "task_reassigned"
 	AgentRunEventTaskRetryExhausted  = "task_retry_exhausted"
@@ -168,6 +169,7 @@ type StartRunInput struct {
 	ToolInputSummary string
 	Source           string
 	Usage            any
+	FreshnessSeenSeq int64
 }
 
 type AppendRunEventInput struct {
@@ -304,8 +306,8 @@ func (s *AgentRunService) StartRun(ctx context.Context, input StartRunInput) (*A
 	return scanAgentRun(s.pool.QueryRow(ctx,
 		`INSERT INTO agent_runs (
 		   id, agent_id, session_id, trigger_type, trigger_message_id, channel_id, thread_id, thinking_node_id,
-		   status, activity_text, tool_name, tool_input_summary, source, usage_json
-		 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		   status, activity_text, tool_name, tool_input_summary, source, usage_json, freshness_seen_seq
+		 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		 RETURNING id::text, agent_id::text,
 		       COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
 		       COALESCE(session_id::text, ''), trigger_type,
@@ -316,7 +318,7 @@ func (s *AgentRunService) StartRun(ctx context.Context, input StartRunInput) (*A
 		uuid.NewString(), input.AgentID, nullableUUID(input.SessionID), input.TriggerType,
 		nullableUUID(input.TriggerMessageID), nullableUUID(input.ChannelID), nullableUUID(input.ThreadID), nullableUUID(input.ThinkingNodeID),
 		string(input.Status), input.ActivityText, nullableStr(input.ToolName),
-		nullableStr(input.ToolInputSummary), nullableStr(input.Source), usage,
+		nullableStr(input.ToolInputSummary), nullableStr(input.Source), usage, nullableInt64(input.FreshnessSeenSeq),
 	))
 }
 
@@ -733,6 +735,16 @@ func (s *AgentRunService) HasVisibleMessage(ctx context.Context, runID string) (
 	return visible, err
 }
 
+func (s *AgentRunService) HasFreshnessHold(ctx context.Context, runID string) (bool, error) {
+	var held bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT freshness_held_at IS NOT NULL
+		  FROM agent_runs
+		 WHERE id = $1`, runID,
+	).Scan(&held)
+	return held, err
+}
+
 func (s *AgentRunService) GetRunTranscript(ctx context.Context, runID string, limit int) ([]AgentTranscriptEntry, error) {
 	var path string
 	var agentID string
@@ -902,6 +914,13 @@ func scanAgentRunEvent(row interface {
 
 func nullableUUID(v string) any {
 	if v == "" {
+		return nil
+	}
+	return v
+}
+
+func nullableInt64(v int64) any {
+	if v == 0 {
 		return nil
 	}
 	return v

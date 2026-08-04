@@ -403,13 +403,30 @@ func (h *Hub) handleMessageSend(client *Client, payload MessageSendPayload) {
 	now := time.Now()
 	messageID := uuid.New().String()
 
-	_, err = h.pool.Exec(context.Background(),
+	tx, err := h.pool.Begin(context.Background())
+	if err != nil {
+		client.sendError("INTERNAL_ERROR", "failed to send message")
+		return
+	}
+	defer tx.Rollback(context.Background())
+	if err := service.LockMessageScope(context.Background(), tx, payload.ChannelID, "", ""); err != nil {
+		slog.Error("ws: failed to lock message scope", "error", err, "channel_id", payload.ChannelID)
+		client.sendError("INTERNAL_ERROR", "failed to send message")
+		return
+	}
+
+	_, err = tx.Exec(context.Background(),
 		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, mentioned_agent_ids, attachment_ids, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6::uuid[], $7::uuid[], $8, $8)`,
 		messageID, payload.ChannelID, senderType, client.userID, payload.Content, formatUUIDArray(mentionedAgentIDs), formatUUIDArray(attachmentIDs), now,
 	)
 	if err != nil {
 		slog.Error("ws: failed to persist message", "error", err, "user_id", client.userID)
+		client.sendError("INTERNAL_ERROR", "failed to send message")
+		return
+	}
+	if err := tx.Commit(context.Background()); err != nil {
+		slog.Error("ws: failed to commit message", "error", err, "user_id", client.userID)
 		client.sendError("INTERNAL_ERROR", "failed to send message")
 		return
 	}
@@ -639,6 +656,11 @@ func (h *Hub) handleThreadReply(client *Client, payload ThreadReplyPayload) {
 	senderType := "user"
 	if isAgentReply {
 		senderType = "agent"
+	}
+	if err := service.LockMessageScope(context.Background(), tx, payload.ChannelID, payload.ThreadID, ""); err != nil {
+		slog.Error("ws: failed to lock thread message scope", "error", err, "thread_id", payload.ThreadID)
+		client.sendError("INTERNAL_ERROR", "failed to send reply")
+		return
 	}
 
 	now := time.Now()

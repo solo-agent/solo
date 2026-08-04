@@ -29,6 +29,8 @@ type Message struct {
 	Content     string       `json:"content"`
 	SenderID    string       `json:"sender_id,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
+	// Seq is Server-only context metadata. It is not sent to providers.
+	Seq int64 `json:"-"`
 }
 
 // ModelConfig represents the LLM model configuration for an agent run.

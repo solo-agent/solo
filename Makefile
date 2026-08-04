@@ -1,4 +1,4 @@
-.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-e2e-agent-delivery test-e2e-agent-session-resume test-e2e-agent-scope-router
+.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-e2e-agent-delivery test-e2e-agent-session-resume test-e2e-agent-scope-router test-e2e-send-freshness
 .DEFAULT_GOAL := help
 
 ENV_FILE ?= .env
@@ -47,6 +47,9 @@ test-e2e-agent-session-resume: rebuild ## Rebuild and verify real Channel Sessio
 
 test-e2e-agent-scope-router: rebuild ## Rebuild and verify the real Coordinator-first Agent router
 	@cd frontend && CI=1 SOLO_E2E_REAL_AGENT_DELIVERY=1 npx playwright test e2e/agent-result-delivery.spec.ts --grep "routes an unmentioned Channel message only to the unique Coordinator"
+
+test-e2e-send-freshness: rebuild ## Rebuild and verify three real Agents relay through send freshness holds
+	@cd frontend && CI=1 SOLO_E2E_REAL_AGENT_FRESHNESS=1 npx playwright test e2e/send-freshness.spec.ts --workers=1
 
 stop: ## Shut down all services
 	@bash scripts/stop-services.sh

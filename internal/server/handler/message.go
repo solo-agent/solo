@@ -135,6 +135,30 @@ type MessageResponse struct {
 	Deduplicated       bool             `json:"deduplicated,omitempty"`
 }
 
+type FreshnessHeldMessageResponse struct {
+	ID         string `json:"id"`
+	Seq        int64  `json:"seq"`
+	SenderType string `json:"sender_type"`
+	SenderID   string `json:"sender_id"`
+	SenderName string `json:"sender_name"`
+	Content    string `json:"content"`
+	CreatedAt  string `json:"created_at"`
+}
+
+type FreshnessHeldResponse struct {
+	State               string                         `json:"state"`
+	Reason              string                         `json:"reason"`
+	ChannelID           string                         `json:"channel_id"`
+	ThreadID            string                         `json:"thread_id,omitempty"`
+	HeldMessages        []FreshnessHeldMessageResponse `json:"held_messages"`
+	NewMessageCount     int                            `json:"new_message_count"`
+	ShownMessageCount   int                            `json:"shown_message_count"`
+	OmittedMessageCount int                            `json:"omitted_message_count"`
+	SeenUpToSeq         int64                          `json:"seen_up_to_seq"`
+	ClientMsgID         string                         `json:"client_msg_id,omitempty"`
+	Deduplicated        bool                           `json:"deduplicated,omitempty"`
+}
+
 type MessageListResponse struct {
 	Messages []MessageResponse `json:"messages"`
 	HasMore  bool              `json:"has_more"`
@@ -436,10 +460,72 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Insert message with mentioned_agent_ids and attachment_ids
+	// Serialize check/insert inside the conversation scope. Human and Agent
+	// writes use the same lock so a correction cannot land between freshness
+	// validation and persistence.
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to send message")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if err := service.LockMessageScope(r.Context(), tx, channelID, threadID, thinkingNodeID); err != nil {
+		slog.Error("failed to lock message scope", "error", err, "channel_id", channelID, "thread_id", threadID)
+		writeError(w, http.StatusInternalServerError, "failed to send message")
+		return
+	}
+
+	if deliveryRunID != "" && thinkingNodeID == "" {
+		hold, freshnessErr := service.CheckAndHoldAgentSend(r.Context(), tx, service.AgentSendFreshnessInput{
+			RunID: deliveryRunID, AgentID: userID, ChannelID: channelID, ThreadID: threadID,
+		})
+		if freshnessErr != nil {
+			if errors.Is(freshnessErr, service.ErrFreshnessRunUnavailable) {
+				writeError(w, http.StatusConflict, "invalid agent run")
+			} else {
+				slog.Error("failed to check message freshness", "error", freshnessErr, "run_id", deliveryRunID)
+				writeError(w, http.StatusInternalServerError, "failed to send message")
+			}
+			return
+		}
+		if hold != nil {
+			if err := tx.Commit(r.Context()); err != nil {
+				slog.Error("failed to commit freshness hold", "error", err, "run_id", deliveryRunID)
+				writeError(w, http.StatusInternalServerError, "failed to send message")
+				return
+			}
+			heldMessages := make([]FreshnessHeldMessageResponse, 0, len(hold.Messages))
+			for _, message := range hold.Messages {
+				heldMessages = append(heldMessages, FreshnessHeldMessageResponse{
+					ID: message.ID, Seq: message.Seq, SenderType: message.SenderType,
+					SenderID: message.SenderID, SenderName: message.SenderName,
+					Content: message.Content, CreatedAt: message.CreatedAt.UTC().Format(time.RFC3339),
+				})
+			}
+			resp := FreshnessHeldResponse{
+				State: "held", Reason: "newer_messages", ChannelID: channelID, ThreadID: threadID,
+				HeldMessages: heldMessages, NewMessageCount: hold.NewMessageCount,
+				ShownMessageCount: hold.ShownMessageCount, OmittedMessageCount: hold.OmittedMessageCount,
+				SeenUpToSeq: hold.SeenUpToSeq, ClientMsgID: clientMsgID,
+			}
+			if _, eventErr := service.NewAgentRunService(h.pool).AppendEvent(r.Context(), service.AppendRunEventInput{
+				RunID: deliveryRunID, Type: service.AgentRunEventVisibleMessageHeld,
+				Message: "visible message held for newer context",
+				Payload: map[string]any{
+					"client_msg_id": clientMsgID, "new_message_count": hold.NewMessageCount,
+					"seen_up_to_seq": hold.SeenUpToSeq,
+				},
+			}); eventErr != nil {
+				slog.Warn("failed to append freshness hold event", "run_id", deliveryRunID, "error", eventErr)
+			}
+			slog.Info("agent message held for newer context", "run_id", deliveryRunID, "channel_id", channelID, "thread_id", threadID, "new_message_count", hold.NewMessageCount)
+			completeReliableSend(w, http.StatusOK, resp, sendClaim)
+			return
+		}
+	}
+
 	now := time.Now()
 	messageID := uuid.New().String()
-
 	var nullableThreadID interface{}
 	if threadID != "" {
 		nullableThreadID = threadID
@@ -450,7 +536,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		metadata["delivery"] = "visible"
 	}
 	metadataJSON, _ := json.Marshal(metadata)
-	_, err = h.pool.Exec(r.Context(),
+	_, err = tx.Exec(r.Context(),
 		`INSERT INTO messages (id, channel_id, thread_id, thinking_node_id, sender_type, sender_id, content, mentioned_agent_ids, attachment_ids, metadata, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uuid[], $9::uuid[], $10::jsonb, $11, $11)`,
 		messageID, channelID, nullableThreadID, nullableUUIDString(thinkingNodeID), senderType, userID, content, formatUUIDArray(mentionedAgentIDs), formatUUIDArray(attachmentIDs), metadataJSON, now,
@@ -460,12 +546,26 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to send message")
 		return
 	}
+
+	var threadRootMsgID string
+	var threadReplyCount int
+	if threadID != "" {
+		_, _ = tx.Exec(r.Context(),
+			`UPDATE threads SET reply_count = reply_count + 1, last_reply_at = $1
+			 WHERE id = $2`, now, threadID)
+		_ = tx.QueryRow(r.Context(),
+			`SELECT t.root_message_id, t.reply_count FROM threads t WHERE t.id = $1`, threadID,
+		).Scan(&threadRootMsgID, &threadReplyCount)
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Error("failed to commit message", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to send message")
+		return
+	}
 	if deliveryRunID != "" {
 		if _, err := service.NewAgentRunService(h.pool).AppendEvent(r.Context(), service.AppendRunEventInput{
-			RunID:   deliveryRunID,
-			Type:    service.AgentRunEventVisibleMessageSent,
-			Message: "visible message persisted",
-			Payload: map[string]string{"message_id": messageID},
+			RunID: deliveryRunID, Type: service.AgentRunEventVisibleMessageSent,
+			Message: "visible message persisted", Payload: map[string]string{"message_id": messageID},
 		}); err != nil {
 			slog.Warn("failed to append visible message run event", "run_id", deliveryRunID, "message_id", messageID, "error", err)
 		}
@@ -490,20 +590,6 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 			h.hub.BroadcastToChannel(channelID, ws.Envelope(ws.EventThinkingUpdated, map[string]string{"channel_id": channelID, "node_id": thinkingNodeID}))
 		}
 	}
-	// Update thread reply_count and store threadRootMsgID for later broadcast
-	var threadRootMsgID string
-	var threadReplyCount int
-	if threadID != "" {
-		_, _ = h.pool.Exec(r.Context(),
-			`UPDATE threads SET reply_count = reply_count + 1, last_reply_at = $1
-			 WHERE id = $2`, now, threadID)
-
-		_ = h.pool.QueryRow(r.Context(),
-			`SELECT t.root_message_id, t.reply_count FROM threads t WHERE t.id = $1`,
-			threadID,
-		).Scan(&threadRootMsgID, &threadReplyCount)
-	}
-
 	// Get sender identity
 	var displayName, senderAvatar string
 	err = h.pool.QueryRow(r.Context(),

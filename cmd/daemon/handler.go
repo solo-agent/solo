@@ -307,62 +307,6 @@ func (h *daemonHandler) fetchChannelAgentWorkspaces(ctx context.Context, channel
 	return result, rows.Err()
 }
 
-// holdAndRevise injects pending messages into the agent session so it can
-// revise its draft based on the latest context. Returns the revised content.
-func (h *daemonHandler) holdAndRevise(ctx context.Context, req runTaskRequest, draftContent string, pending []agent.Message) (string, bool) {
-	if len(pending) == 0 {
-		return draftContent, false
-	}
-
-	var revBuilder strings.Builder
-	revBuilder.WriteString("Newer messages arrived while you were composing. Your draft may be stale.\n\n")
-	revBuilder.WriteString("## New Messages\n")
-	for _, m := range pending {
-		revBuilder.WriteString(m.Content)
-		revBuilder.WriteString("\n")
-	}
-	revBuilder.WriteString("\n## Your Draft\n")
-	revBuilder.WriteString(draftContent)
-	revBuilder.WriteString("\n\nIf your draft is still accurate, reply with the same text. If the new messages change anything, revise. Reply NOW.")
-
-	pendingMsgs := []agent.Message{
-		{Role: agent.RoleUser, Content: revBuilder.String()},
-	}
-
-	sm := h.getSessionManager(req.ModelConfig.Provider)
-	if sm == nil {
-		slog.Warn("task: holdAndRevise: no session manager", "provider", req.ModelConfig.Provider)
-		return draftContent, false
-	}
-	ps, err := sm.DeliverScopedMessage(
-		ctx,
-		agent.ChannelSessionKey(req.AgentID, req.ChannelID),
-		pendingMsgs,
-	)
-	if err != nil {
-		slog.Warn("task: holdAndRevise failed to deliver", "agent_id", req.AgentID, "error", err)
-		return draftContent, false
-	}
-
-	// Collect the revised response.
-	var revised strings.Builder
-	for chunk := range ps.Messages {
-		if chunk.Type == string(agent.MessageText) {
-			revised.WriteString(chunk.Content)
-		}
-	}
-	result := <-ps.Result
-
-	finalText := revised.String()
-	if result.Output != "" {
-		finalText = result.Output
-	}
-	if strings.TrimSpace(finalText) == "" {
-		return draftContent, false
-	}
-	return finalText, true
-}
-
 // ProxyRequest handles POST /internal/daemon/proxy
 // Agents call this local endpoint instead of hitting the server API directly.
 // The daemon adds auth and forwards the request to the server. This keeps

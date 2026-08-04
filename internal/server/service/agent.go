@@ -257,6 +257,7 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 			AgentChain:     newChain,
 			MentionedNames: mentionedNames,
 			ResultContract: agentResultContractVisibleMessage,
+			ModelSeenSeq:   highestMessageSeq(contextMessages),
 		}
 
 		// Dispatch via streaming SSE and handle events
@@ -403,6 +404,7 @@ func (s *AgentService) triggerAgentResponseInNode(ctx context.Context, channelID
 			ResumeSessionID:       nodeCtx.ResumeSessionID,
 			ReturnHandoff:         returnHandoff,
 			ResultContract:        agentResultContractVisibleMessage,
+			ModelSeenSeq:          highestMessageSeq(coldStartMessages),
 		}
 		if handoffRun {
 			taskReq.ResultContract = agentResultContractHandoff
@@ -638,6 +640,7 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 			Status:           AgentRunStatusQueued,
 			ActivityText:     "等待执行",
 			Source:           taskReq.ModelConfig.Provider,
+			FreshnessSeenSeq: taskReq.ModelSeenSeq,
 		})
 		if err != nil {
 			slog.Warn("failed to start agent run", "agent_id", ag.ID, "error", err)
@@ -741,7 +744,15 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 			if visibleErr != nil {
 				slog.Warn("failed to verify visible agent result", "run_id", run.ID, "error", visibleErr)
 			}
-			if visibleErr != nil || !visible {
+			held := false
+			var heldErr error
+			if visibleErr == nil && !visible {
+				held, heldErr = runSvc.HasFreshnessHold(ctx, run.ID)
+				if heldErr != nil {
+					slog.Warn("failed to verify held agent result", "run_id", run.ID, "error", heldErr)
+				}
+			}
+			if visibleErr != nil || heldErr != nil || (!visible && !held) {
 				status = AgentRunStatusFailed
 				failureCode = agentFailureMissingVisibleResult
 				retryable = true
@@ -1906,6 +1917,7 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 			Content:     header + " " + messageContent,
 			SenderID:    tm.SenderID,
 			Attachments: attachments,
+			Seq:         tm.Seq,
 		}
 	}
 	// Prepend a system header when the agent is @mentioned into a new thread.
@@ -1979,6 +1991,7 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 			AgentChain:     newChain,
 			MentionedNames: threadMentionedNames,
 			ResultContract: agentResultContractVisibleMessage,
+			ModelSeenSeq:   highestMessageSeq(contextMsgs),
 		}
 
 		// Use streaming for thread as well
@@ -2172,18 +2185,20 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 
 	// Fetch sender info from the task's linked message
 	var senderType, senderID, senderName, msgContent, msgCreatedAt string
+	var messageSeq int64
 	if messageID != "" {
 		_ = s.pool.QueryRow(ctx,
 			`SELECT m.sender_type, m.sender_id,
 			        COALESCE(u.display_name, a.name, m.sender_id::text),
 			        COALESCE(m.content, ''),
-			        COALESCE(to_char(m.created_at, 'YYYY-MM-DD HH24:MI:SS'), '')
+			        COALESCE(to_char(m.created_at, 'YYYY-MM-DD HH24:MI:SS'), ''),
+			        m.seq
 			 FROM messages m
 			 LEFT JOIN users u ON m.sender_id = u.id
 			 LEFT JOIN agents a ON m.sender_id = a.id
 			 WHERE m.id = $1`,
 			messageID,
-		).Scan(&senderType, &senderID, &senderName, &msgContent, &msgCreatedAt)
+		).Scan(&senderType, &senderID, &senderName, &msgContent, &msgCreatedAt, &messageSeq)
 	}
 
 	if senderName == "" || senderName == messageID {
@@ -2201,7 +2216,7 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 	}
 
 	contextMsgs := []agent.Message{
-		{Role: agent.RoleUser, Content: taskContent, SenderID: ""},
+		{Role: agent.RoleUser, Content: taskContent, SenderID: "", Seq: messageSeq},
 	}
 
 	taskReq := daemonTaskRequest{
@@ -2217,6 +2232,7 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 		},
 		OriginTaskID:   taskID,
 		ResultContract: agentResultContractVisibleMessage,
+		ModelSeenSeq:   messageSeq,
 	}
 
 	slog.Info("triggering agent for task",
@@ -2366,7 +2382,7 @@ func (s *AgentService) getRecentMessagesForNode(ctx context.Context, channelID, 
 	}
 
 	rows, err := s.pool.Query(ctx,
-		`SELECT m.id, m.sender_type, m.sender_id, m.content, m.created_at, COALESCE(m.attachment_ids, '{}') as attachment_ids
+		`SELECT m.id, m.seq, m.sender_type, m.sender_id, m.content, m.created_at, COALESCE(m.attachment_ids, '{}') as attachment_ids
 		 FROM messages m
 			 WHERE m.channel_id = $1 AND m.thread_id IS NULL
 			   AND (($3 = '' AND m.thinking_node_id IS NULL) OR m.thinking_node_id = NULLIF($3, '')::uuid)
@@ -2381,6 +2397,7 @@ func (s *AgentService) getRecentMessagesForNode(ctx context.Context, channelID, 
 
 	type msgRow struct {
 		id            string
+		seq           int64
 		senderType    string
 		senderID      string
 		content       string
@@ -2391,7 +2408,7 @@ func (s *AgentService) getRecentMessagesForNode(ctx context.Context, channelID, 
 	for rows.Next() {
 		var r msgRow
 		var t time.Time
-		if err := rows.Scan(&r.id, &r.senderType, &r.senderID, &r.content, &t, &r.attachmentIDs); err != nil {
+		if err := rows.Scan(&r.id, &r.seq, &r.senderType, &r.senderID, &r.content, &t, &r.attachmentIDs); err != nil {
 			return nil, err
 		}
 		r.createdAt = t.Format(time.RFC3339)
@@ -2438,6 +2455,7 @@ func (s *AgentService) getRecentMessagesForNode(ctx context.Context, channelID, 
 			Content:     content,
 			SenderID:    row.senderID,
 			Attachments: attachments,
+			Seq:         row.seq,
 		})
 	}
 
@@ -2581,6 +2599,17 @@ type daemonTaskRequest struct {
 	InitialGreeting       string            `json:"initial_greeting,omitempty"` // greeting message to prepend as system context
 	ReturnHandoff         bool              `json:"return_handoff,omitempty"`
 	ResultContract        string            `json:"-"`
+	ModelSeenSeq          int64             `json:"-"`
+}
+
+func highestMessageSeq(messages []agent.Message) int64 {
+	var highest int64
+	for _, message := range messages {
+		if message.Seq > highest {
+			highest = message.Seq
+		}
+	}
+	return highest
 }
 
 // containsStr returns true if the slice s contains value v.

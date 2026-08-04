@@ -699,17 +699,33 @@ func (h *DMHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		senderType = "agent"
 	}
 
-	// Persist message
+	// Persist inside the same scope lock used by Agent freshness checks.
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to send message")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if err := service.LockMessageScope(r.Context(), tx, dmID, "", ""); err != nil {
+		slog.Error("failed to lock DM message scope", "error", err, "dm_id", dmID)
+		writeError(w, http.StatusInternalServerError, "failed to send message")
+		return
+	}
 	now := time.Now()
 	messageID := uuid.New().String()
 
-	_, err = h.pool.Exec(r.Context(),
+	_, err = tx.Exec(r.Context(),
 		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, attachment_ids, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6::uuid[], $7, $7)`,
 		messageID, dmID, senderType, userID, content, formatUUIDArray(attachmentIDs), now,
 	)
 	if err != nil {
 		slog.Error("failed to persist DM message", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to send message")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Error("failed to commit DM message", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to send message")
 		return
 	}
@@ -1270,13 +1286,29 @@ func (h *DMHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
-	_, msgErr := h.pool.Exec(r.Context(),
+	tx, msgErr := h.pool.Begin(r.Context())
+	if msgErr != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create task")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if msgErr = service.LockMessageScope(r.Context(), tx, dmID, "", ""); msgErr != nil {
+		slog.Error("failed to lock DM task message scope", "error", msgErr, "dm_id", dmID)
+		writeError(w, http.StatusInternalServerError, "failed to create task")
+		return
+	}
+	_, msgErr = tx.Exec(r.Context(),
 		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, 'text', $6, $6)`,
 		msgID, dmID, senderType, userID, req.Title, now,
 	)
 	if msgErr != nil {
 		slog.Error("failed to insert DM task user message", "error", msgErr)
+		writeError(w, http.StatusInternalServerError, "failed to create task")
+		return
+	}
+	if msgErr = tx.Commit(r.Context()); msgErr != nil {
+		slog.Error("failed to commit DM task user message", "error", msgErr)
 		writeError(w, http.StatusInternalServerError, "failed to create task")
 		return
 	}
