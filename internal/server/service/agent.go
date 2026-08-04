@@ -152,8 +152,8 @@ func (s *AgentService) updateThreadDebounce(channelID, threadID, agentID string)
 //
 // mentionedAgentIDs: if non-empty, only the mentioned agents are triggered.
 // If empty but hasMentions is true, @patterns existed but none resolved — suppress
-// all agent responses. If empty and hasMentions is false, trigger the channel
-// coordinator (or the first active agent as fallback).
+// all agent responses. If empty and hasMentions is false, use the shared
+// Coordinator-first Channel fallback.
 //
 // Called after a message is persisted and broadcast.
 func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, messageID, senderType, senderID string, mentionedAgentIDs []string, hasMentions bool, agentChain []string) {
@@ -174,10 +174,18 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 	// This tells each agent WHO was mentioned, enabling "if it's for someone else, stay out."
 	mentionedNames := s.resolveMentionedNames(ctx, mentionedAgentIDs)
 
-	targetAgents := s.routeChannelTargets(ctx, agents, mentionedAgentIDs, hasMentions)
+	excludeAgentID := ""
 	if senderType == "agent" {
-		targetAgents = excludeAgent(targetAgents, senderID)
+		excludeAgentID = senderID
 	}
+	targetAgents, _ := s.routeWakeTargets(ctx, agents, wakeRouteRequest{
+		Scope:             wakeScopeChannel,
+		ChannelID:         channelID,
+		TriggerMessageID:  messageID,
+		MentionedAgentIDs: mentionedAgentIDs,
+		HasMentions:       hasMentions,
+		ExcludeAgentID:    excludeAgentID,
+	})
 
 	if len(targetAgents) == 0 {
 		return
@@ -511,17 +519,6 @@ func (s *AgentService) thinkingHandoffs(ctx context.Context, query, nodeID strin
 	return result, rows.Err()
 }
 
-func (s *AgentService) routeChannelTargets(ctx context.Context, agents []agentChannelInfo, mentionedAgentIDs []string, hasMentions bool) []agentChannelInfo {
-	if len(mentionedAgentIDs) > 0 || hasMentions {
-		return filterAgentsByID(agents, selectWakeAgentIDs(wakeRouteInput{
-			ActiveIDs:    agentIDs(agents),
-			MentionedIDs: mentionedAgentIDs,
-			HasMention:   hasMentions,
-		}))
-	}
-	return s.chooseCoordinator(ctx, agents)
-}
-
 func filterAgentsByID(agents []agentChannelInfo, ids []string) []agentChannelInfo {
 	idSet := make(map[string]bool, len(ids))
 	for _, id := range ids {
@@ -534,46 +531,6 @@ func filterAgentsByID(agents []agentChannelInfo, ids []string) []agentChannelInf
 		}
 	}
 	return out
-}
-
-type relationshipEdge struct {
-	from string
-	to   string
-}
-
-func (s *AgentService) chooseCoordinator(ctx context.Context, agents []agentChannelInfo) []agentChannelInfo {
-	if len(agents) <= 1 {
-		return agents
-	}
-
-	rows, err := s.pool.Query(ctx, `
-		SELECT from_agent_id::text, to_agent_id::text
-		  FROM agent_relationships
-		 WHERE rel_type = 'assigns_to'
-	`)
-	if err == nil {
-		defer rows.Close()
-		edges := []relationshipEdge{}
-		for rows.Next() {
-			var fromID, toID string
-			if scanErr := rows.Scan(&fromID, &toID); scanErr != nil {
-				continue
-			}
-			edges = append(edges, relationshipEdge{from: fromID, to: toID})
-		}
-		if chosen := chooseCoordinatorFromEdges(agents, edges); len(chosen) > 0 {
-			return chosen
-		}
-	}
-
-	return agents[:1]
-}
-
-func chooseCoordinatorFromEdges(agents []agentChannelInfo, edges []relationshipEdge) []agentChannelInfo {
-	return filterAgentsByID(agents, selectWakeAgentIDs(wakeRouteInput{
-		ActiveIDs: agentIDs(agents),
-		Edges:     edges,
-	}))
 }
 
 func agentIDs(agents []agentChannelInfo) []string {
@@ -1886,48 +1843,18 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 		return
 	}
 
-	// Determine target agents for this thread follow-up:
-	// - If @mentions provided: only trigger the mentioned agents.
-	// - If no @mentions: only trigger agents that have already replied in this thread.
-	var targetAgents []agentChannelInfo
-	if len(mentionedAgentIDs) > 0 {
-		mentionedSet := make(map[string]bool, len(mentionedAgentIDs))
-		for _, id := range mentionedAgentIDs {
-			mentionedSet[id] = true
-		}
-		for _, ag := range agents {
-			if mentionedSet[ag.ID] {
-				targetAgents = append(targetAgents, ag)
-			}
-		}
-	} else if hasMentions {
-		// Mentions were present but none resolved to active agents — do not fall back.
-		slog.Info("mentions found but none resolved to active agents in thread, skipping", "channel_id", channelID, "thread_id", threadID)
-		return
-	} else {
-		// No @mentions — prefer agents that have already replied in this thread.
-		threadAgentIDs, _ := s.getThreadParticipantAgents(ctx, threadID)
-		if len(threadAgentIDs) > 0 {
-			targetAgents = s.chooseCoordinator(ctx, filterAgentsByID(agents, threadAgentIDs))
-		}
-		// Fallback: if nobody has replied in this thread yet, trigger the
-		// agent whose message was replied to (the root message sender).
-		if len(targetAgents) == 0 {
-			if rootSenderID := s.getThreadRootAgentSender(ctx, threadID); rootSenderID != "" {
-				targetAgents = filterAgentsByID(agents, []string{rootSenderID})
-			}
-		}
-		if len(targetAgents) == 0 {
-			targetAgents = s.chooseCoordinator(ctx, agents)
-		}
-	}
-
-	if len(targetAgents) == 0 {
-		return
-	}
+	excludeAgentID := ""
 	if senderType == "agent" {
-		targetAgents = excludeAgent(targetAgents, senderID)
+		excludeAgentID = senderID
 	}
+	targetAgents, _ := s.routeWakeTargets(ctx, agents, wakeRouteRequest{
+		Scope:             wakeScopeThread,
+		ChannelID:         channelID,
+		ThreadID:          threadID,
+		MentionedAgentIDs: mentionedAgentIDs,
+		HasMentions:       hasMentions,
+		ExcludeAgentID:    excludeAgentID,
+	})
 	if len(targetAgents) == 0 {
 		return
 	}
@@ -2066,19 +1993,6 @@ func shouldTriggerAgentForSender(senderType string, mentionedAgentIDs []string) 
 	return true
 }
 
-func excludeAgent(agents []agentChannelInfo, agentID string) []agentChannelInfo {
-	if agentID == "" {
-		return agents
-	}
-	filtered := make([]agentChannelInfo, 0, len(agents))
-	for _, ag := range agents {
-		if ag.ID != agentID {
-			filtered = append(filtered, ag)
-		}
-	}
-	return filtered
-}
-
 // CheckClaimWindow checks whether the given claimerID is allowed to claim the
 // task at this time. Returns (allowed bool, reason string).
 func (s *AgentService) CheckClaimWindow(taskID, claimerID string) (bool, string) {
@@ -2098,28 +2012,29 @@ func (s *AgentService) CloseClaimWindow(taskID string) {
 // TriggerAllAgentsForTask triggers active agents in a channel to respond
 // to a newly created task. Agent replies are routed to the task's thread.
 //
-// If mentionedAgentIDs is non-empty, only the @mentioned agents are triggered
-// immediately and a 30-second priority claim window is opened. After the window
-// expires, remaining agents are triggered if the task is still unclaimed.
-// Without @mentions, the channel coordinator is triggered.
-func (s *AgentService) TriggerAllAgentsForTask(ctx context.Context, channelID, taskID string, taskNumber int, taskTitle string, mentionedAgentIDs []string, agentChain []string) {
+// Explicit @mentions retain the priority claim window. Otherwise the shared
+// Channel/Task router chooses the coordinator or fallback targets.
+func (s *AgentService) TriggerAllAgentsForTask(ctx context.Context, channelID, taskID string, taskNumber int, taskTitle, triggerMessageID string, mentionedAgentIDs []string, hasMentions bool, agentChain []string) {
 	agents, err := s.getChannelActiveAgents(ctx, channelID)
-	if err != nil || len(agents) == 0 {
+	if err != nil {
+		slog.Error("failed to get channel active agents for task", "channel_id", channelID, "task_id", taskID, "error", err)
 		return
 	}
 
+	targetAgents, _ := s.routeWakeTargets(ctx, agents, wakeRouteRequest{
+		Scope:             wakeScopeTask,
+		ChannelID:         channelID,
+		TriggerMessageID:  triggerMessageID,
+		MentionedAgentIDs: mentionedAgentIDs,
+		HasMentions:       hasMentions,
+	})
+	if len(targetAgents) == 0 {
+		return
+	}
 	if len(mentionedAgentIDs) > 0 {
 		s.claimWindow.OpenWindow(taskID, mentionedAgentIDs)
-		for _, ag := range filterAgentsByID(agents, selectWakeAgentIDs(wakeRouteInput{
-			ActiveIDs:    agentIDs(agents),
-			MentionedIDs: mentionedAgentIDs,
-		})) {
-			go s.TriggerAgentForTask(ctx, channelID, taskID, ag.ID, taskNumber, taskTitle, "", agentChain, mentionedAgentIDs)
-		}
-		return
 	}
-
-	for _, ag := range s.chooseCoordinator(ctx, agents) {
+	for _, ag := range targetAgents {
 		go s.TriggerAgentForTask(ctx, channelID, taskID, ag.ID, taskNumber, taskTitle, "", agentChain, mentionedAgentIDs)
 	}
 }
@@ -2431,46 +2346,6 @@ func (s *AgentService) getChannelActiveAgents(ctx context.Context, channelID str
 	}
 
 	return agents, nil
-}
-
-// getThreadParticipantAgents returns the distinct agent sender IDs that have
-// already replied in the given thread. Used to scope thread follow-up triggers.
-func (s *AgentService) getThreadParticipantAgents(ctx context.Context, threadID string) ([]string, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT DISTINCT sender_id FROM messages
-		 WHERE thread_id = $1 AND sender_type = 'agent'`,
-		threadID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var agentIDs []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		agentIDs = append(agentIDs, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return agentIDs, nil
-}
-
-// getThreadRootAgentSender returns the agent ID of the root message sender
-// in a thread, or empty string if the root message was sent by a human.
-func (s *AgentService) getThreadRootAgentSender(ctx context.Context, threadID string) string {
-	var senderID string
-	_ = s.pool.QueryRow(ctx,
-		`SELECT m.sender_id FROM messages m
-		 JOIN threads t ON t.root_message_id = m.id
-		 WHERE t.id = $1 AND m.sender_type = 'agent'`,
-		threadID,
-	).Scan(&senderID)
-	return senderID
 }
 
 // getRecentMessages returns the most recent N messages in a channel as agent messages.

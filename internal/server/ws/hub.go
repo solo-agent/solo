@@ -373,7 +373,6 @@ func (h *Hub) handleMessageSend(client *Client, payload MessageSendPayload) {
 		slog.Error("ws: failed to resolve mentions", "error", err, "user_id", client.userID)
 		// Non-fatal: continue without mentions
 		mentionedAgentIDs = nil
-		hasMentions = false
 	}
 
 	// Validate attachment ownership
@@ -594,7 +593,6 @@ func (h *Hub) handleThreadReply(client *Client, payload ThreadReplyPayload) {
 	if err != nil {
 		slog.Error("ws: failed to resolve mentions", "error", err, "user_id", client.userID)
 		mentionedAgentIDs = nil
-		hasMentions = false
 	}
 
 	// Validate attachment ownership

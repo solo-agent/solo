@@ -61,6 +61,16 @@ interface TaskRetryState {
   exhausted_messages: number;
 }
 
+interface RouterState {
+  runs: number;
+  lead_runs: number;
+  worker_runs: number;
+  completed: number;
+  lead_message_id: string;
+  worker_replies: number;
+  unresolved_runs: number;
+}
+
 function databaseJSON<T>(query: string): T {
   const output = execFileSync('docker', [
     'exec',
@@ -307,6 +317,107 @@ test.describe('real Agent result delivery contract', () => {
       await expect(persistedMessage).toBeVisible();
     } finally {
       if (agent) await api(request, auth.access_token, 'delete', `/api/v1/agents/${agent.id}`).catch(() => undefined);
+      if (channel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
+    }
+  });
+
+  test('routes an unmentioned Channel message only to the unique Coordinator', async ({ page, request }) => {
+    const auth = await authenticate(request);
+    const suffix = Date.now().toString(36);
+    const leadAck = `ROUTER_LEAD_ACK_${suffix.toUpperCase()}`;
+    const workerAck = `ROUTER_WORKER_ACK_${suffix.toUpperCase()}`;
+    const unresolvedContent = `@MissingRouter${suffix} SHOULD_NOT_WAKE`;
+    const routedContent = `ROUTER_E2E_${suffix}`;
+    let channel: Entity | null = null;
+    let lead: Entity | null = null;
+    let worker: Entity | null = null;
+
+    try {
+      channel = await api<Entity>(request, auth.access_token, 'post', '/api/v1/channels', {
+        name: `scope-router-e2e-${suffix}`,
+        description: 'Real Agent scope router E2E',
+      });
+      lead = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
+        name: `RouterLead${suffix}`,
+        model_provider: 'claude',
+        model_name: 'sonnet',
+        system_prompt: `When introducing yourself, use solo message send to send exactly LEAD_READY. For a human message beginning ROUTER_E2E_, use solo message send to send exactly ${leadAck}. Send no other visible text.`,
+      });
+      worker = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
+        name: `RouterWorker${suffix}`,
+        model_provider: 'claude',
+        model_name: 'sonnet',
+        system_prompt: `When introducing yourself, use solo message send to send exactly WORKER_READY. For a human message beginning ROUTER_E2E_, use solo message send to send exactly ${workerAck}. Send no other visible text.`,
+      });
+      await api(request, auth.access_token, 'post', '/api/v1/agent-relationships', {
+        from_agent_id: lead.id,
+        to_agent_id: worker.id,
+        rel_type: 'assigns_to',
+      });
+
+      await expect.poll(() => databaseJSON<{ done: boolean }>(`
+        SELECT json_build_object('done',
+          COUNT(DISTINCT agent_id) FILTER (WHERE status = 'completed') = 2
+          AND COUNT(*) FILTER (WHERE status IN ('queued','thinking','running','streaming','waiting_input','waiting_approval')) = 0
+        )::text
+          FROM agent_runs
+         WHERE agent_id IN ('${lead!.id}', '${worker!.id}')
+      `).done, { timeout: 180000, intervals: [500, 1000, 2000] }).toBe(true);
+
+      await authenticatePage(page, auth);
+      await page.goto(`/dashboard?channel=${channel.id}`);
+      const composer = page.getByPlaceholder('Type a message...');
+      await composer.fill(unresolvedContent);
+      await composer.press('Enter');
+      await expect(page.getByLabel('Message list').getByText(unresolvedContent, { exact: true })).toBeVisible();
+      await composer.fill(routedContent);
+      await composer.press('Enter');
+
+      await expect.poll(() => databaseJSON<{ unresolved: string; routed: string }>(`
+        SELECT json_build_object(
+          'unresolved', COALESCE((SELECT id::text FROM messages WHERE channel_id = '${channel!.id}' AND content = '${unresolvedContent}' LIMIT 1), ''),
+          'routed', COALESCE((SELECT id::text FROM messages WHERE channel_id = '${channel!.id}' AND content = '${routedContent}' LIMIT 1), '')
+        )::text
+      `), { intervals: [250, 500, 1000] }).toMatchObject({
+        unresolved: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        routed: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      });
+      const triggerIDs = databaseJSON<{ unresolved: string; routed: string }>(`
+        SELECT json_build_object(
+          'unresolved', COALESCE((SELECT id::text FROM messages WHERE channel_id = '${channel.id}' AND content = '${unresolvedContent}' LIMIT 1), ''),
+          'routed', COALESCE((SELECT id::text FROM messages WHERE channel_id = '${channel.id}' AND content = '${routedContent}' LIMIT 1), '')
+        )::text
+      `);
+
+      const readRouterState = () => databaseJSON<RouterState>(`
+        SELECT json_build_object(
+          'runs', COUNT(*) FILTER (WHERE trigger_message_id = '${triggerIDs.routed}'),
+          'lead_runs', COUNT(*) FILTER (WHERE trigger_message_id = '${triggerIDs.routed}' AND agent_id = '${lead.id}'),
+          'worker_runs', COUNT(*) FILTER (WHERE trigger_message_id = '${triggerIDs.routed}' AND agent_id = '${worker.id}'),
+          'completed', COUNT(*) FILTER (WHERE trigger_message_id = '${triggerIDs.routed}' AND status = 'completed'),
+          'lead_message_id', COALESCE((SELECT id::text FROM messages WHERE channel_id = '${channel.id}' AND sender_id = '${lead.id}' AND content = '${leadAck}' ORDER BY created_at DESC LIMIT 1), ''),
+          'worker_replies', (SELECT COUNT(*) FROM messages WHERE channel_id = '${channel.id}' AND sender_id = '${worker.id}' AND content = '${workerAck}'),
+          'unresolved_runs', COUNT(*) FILTER (WHERE trigger_message_id = '${triggerIDs.unresolved}')
+        )::text
+          FROM agent_runs
+         WHERE agent_id IN ('${lead.id}', '${worker.id}')
+      `);
+      await expect.poll(readRouterState, { timeout: 180000, intervals: [500, 1000, 2000] }).toMatchObject({
+        runs: 1,
+        lead_runs: 1,
+        worker_runs: 0,
+        completed: 1,
+        lead_message_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        worker_replies: 0,
+        unresolved_runs: 0,
+      });
+
+      const state = readRouterState();
+      await expect(page.locator(`[data-message-id="${state.lead_message_id}"]`)).toContainText(leadAck);
+      await expect(page.getByLabel('Message list').getByText(workerAck, { exact: true })).toHaveCount(0);
+    } finally {
+      if (worker) await api(request, auth.access_token, 'delete', `/api/v1/agents/${worker.id}`).catch(() => undefined);
+      if (lead) await api(request, auth.access_token, 'delete', `/api/v1/agents/${lead.id}`).catch(() => undefined);
       if (channel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
     }
   });
