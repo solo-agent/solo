@@ -1133,13 +1133,29 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 	if isAgent {
 		senderType = "agent"
 	}
-	_, msgErr := h.pool.Exec(r.Context(),
+	tx, msgErr := h.pool.Begin(r.Context())
+	if msgErr != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create task")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if msgErr = service.LockMessageScope(r.Context(), tx, req.ChannelID, "", ""); msgErr != nil {
+		slog.Error("failed to lock task message scope", "error", msgErr, "channel_id", req.ChannelID)
+		writeError(w, http.StatusInternalServerError, "failed to create task")
+		return
+	}
+	_, msgErr = tx.Exec(r.Context(),
 		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, content_type, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, 'text', $6, $6)`,
 		msgID, req.ChannelID, senderType, userID, req.Title, now,
 	)
 	if msgErr != nil {
 		slog.Error("failed to insert task user message", "error", msgErr)
+		writeError(w, http.StatusInternalServerError, "failed to create task")
+		return
+	}
+	if msgErr = tx.Commit(r.Context()); msgErr != nil {
+		slog.Error("failed to commit task user message", "error", msgErr)
 		writeError(w, http.StatusInternalServerError, "failed to create task")
 		return
 	}

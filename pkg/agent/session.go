@@ -31,12 +31,6 @@ type AgentSessionManager struct {
 	activeAgentScopes map[string]string
 	turnsMu           sync.Mutex
 
-	// pendingMessages holds messages queued while an agent is busy.
-	// Used for freshness hold: before an agent's reply is persisted,
-	// we flush pending messages and let the agent revise.
-	pendingMessages map[string][]Message
-	pendingMu       sync.Mutex
-
 	// startSlots limits concurrent agent process starts to prevent CPU
 	// spikes when multiple agents are triggered at once.
 	startSlots chan struct{}
@@ -96,7 +90,6 @@ func NewAgentSessionManager(backend PersistentBackend, workspaceMgr *WorkspaceMa
 		activeTurns:       make(map[string]chan struct{}),
 		agentTurns:        make(map[string]chan struct{}),
 		activeAgentScopes: make(map[string]string),
-		pendingMessages:   make(map[string][]Message),
 		startSlots:        slots,
 		failedStarts:      make(map[string]time.Time),
 	}
@@ -190,59 +183,6 @@ func (m *AgentSessionManager) DeliverScopedMessage(ctx context.Context, sessionK
 	}
 
 	return m.deliverToSession(ctx, sessionKey, entry, messages)
-}
-
-// QueueIfBusy attempts to deliver a message. If the agent is currently
-// processing another turn, the message is queued for freshness hold instead
-// of blocking. Returns true if the message was queued.
-func (m *AgentSessionManager) QueueIfBusy(agentID string, msg Message) bool {
-	return m.QueueScopedIfBusy(AgentSessionKey(agentID), msg)
-}
-
-// QueueScopedIfBusy queues a message when the scoped session is in a turn.
-func (m *AgentSessionManager) QueueScopedIfBusy(sessionKey string, msg Message) bool {
-	m.turnsMu.Lock()
-	ch, exists := m.activeTurns[sessionKey]
-	if !exists {
-		ch = make(chan struct{}, 1)
-		ch <- struct{}{}
-		m.activeTurns[sessionKey] = ch
-	}
-	m.turnsMu.Unlock()
-
-	// Non-blocking try: if turn is available, message would have been
-	// delivered directly. If not available, queue for freshness hold.
-	select {
-	case <-ch:
-		// Turn is free — release and let caller deliver normally.
-		ch <- struct{}{}
-		return false
-	default:
-		// Turn is held — queue the message.
-		m.pendingMu.Lock()
-		m.pendingMessages[sessionKey] = append(m.pendingMessages[sessionKey], msg)
-		count := len(m.pendingMessages[sessionKey])
-		m.pendingMu.Unlock()
-		m.logger.Info("session: message queued", "session_key", sessionKey, "pending_count", count)
-		// v1.3: Write inbox notification to agent stdin.
-		m.notifyInbox(sessionKey, count)
-		return true
-	}
-}
-
-// FlushPending returns and clears all pending messages for an agent.
-// Called after a turn completes to check if newer messages arrived.
-func (m *AgentSessionManager) FlushPending(agentID string) []Message {
-	return m.FlushScopedPending(AgentSessionKey(agentID))
-}
-
-// FlushScopedPending returns and clears queued messages for a scoped session.
-func (m *AgentSessionManager) FlushScopedPending(sessionKey string) []Message {
-	m.pendingMu.Lock()
-	msgs := m.pendingMessages[sessionKey]
-	delete(m.pendingMessages, sessionKey)
-	m.pendingMu.Unlock()
-	return msgs
 }
 
 // IsActive returns true if the agent has a running (non-asleep) session.
@@ -711,29 +651,6 @@ func (m *AgentSessionManager) watchCrash(sessionKey, agentID string, agentCfg Ag
 	}
 	entry.mu.Unlock()
 	m.mu.Unlock()
-}
-
-// notifyInbox writes a lightweight notification to the agent's stdin,
-// "1 pending inbox message(s)" pattern. The agent sees
-// this notification at the start of its next stdin read and can call
-// solo message check to pull the actual content.
-func (m *AgentSessionManager) notifyInbox(sessionKey string, count int) {
-	m.mu.RLock()
-	entry, exists := m.sessions[sessionKey]
-	m.mu.RUnlock()
-	if !exists {
-		return
-	}
-	ps, asleep, _ := entry.snapshot()
-	if asleep || ps == nil {
-		return
-	}
-	state, ok := ps.state.(SessionStater)
-	if !ok {
-		return
-	}
-	notification := fmt.Sprintf("\n[Solo] %d pending message(s). Use `solo message check` when ready.\n", count)
-	_ = state.Notify(notification)
 }
 
 func (m *AgentSessionManager) acquireTurn(ctx context.Context, sessionKey, agentID string) (func(), error) {

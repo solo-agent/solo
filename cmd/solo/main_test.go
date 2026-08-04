@@ -694,6 +694,29 @@ func TestHandleMessageSend(t *testing.T) {
 	}
 }
 
+func TestPrintMessageSendResultHeld(t *testing.T) {
+	_, stdout, _ := captureAndRun(t, func() {
+		printMessageSendResult([]byte(`{
+			"state":"held",
+			"reason":"newer_messages",
+			"new_message_count":1,
+			"omitted_message_count":0,
+			"held_messages":[{
+				"seq":42,
+				"sender_type":"agent",
+				"sender_name":"Agent A",
+				"content":"1",
+				"created_at":"2026-08-04T12:00:00Z"
+			}]
+		}`), "channel-1", "")
+	})
+	for _, want := range []string{"HELD:", "was not sent", "Re-evaluate", "@Agent A: 1", "solo message send"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("held output %q does not contain %q", stdout, want)
+		}
+	}
+}
+
 func TestHandleMessageSendWithThread(t *testing.T) {
 	var capturedBody []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

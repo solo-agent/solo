@@ -64,6 +64,9 @@ func markSendDeduplicated(body any) any {
 	case TaskResponse:
 		response.Deduplicated = true
 		return response
+	case FreshnessHeldResponse:
+		response.Deduplicated = true
+		return response
 	default:
 		return body
 	}

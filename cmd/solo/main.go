@@ -1432,6 +1432,32 @@ func printTaskUpdateResult(body []byte, number int) {
 // printMessageSendResult prints a message send confirmation
 // including the thread target for easy follow-up.
 func printMessageSendResult(body []byte, channelID, threadID string) {
+	var held struct {
+		State               string `json:"state"`
+		Reason              string `json:"reason"`
+		NewMessageCount     int    `json:"new_message_count"`
+		OmittedMessageCount int    `json:"omitted_message_count"`
+		HeldMessages        []struct {
+			Seq        int64  `json:"seq"`
+			SenderType string `json:"sender_type"`
+			SenderName string `json:"sender_name"`
+			Content    string `json:"content"`
+			CreatedAt  string `json:"created_at"`
+		} `json:"held_messages"`
+	}
+	if json.Unmarshal(body, &held) == nil && held.State == "held" {
+		fmt.Println("HELD: Your original message was not sent because newer messages arrived while you were working.")
+		fmt.Println("Review the original request, the message you intended to send, and the new messages below. Re-evaluate the situation and take the action you judge most appropriate. Do not stop by default, and do not repeat the original message without reconsidering it. If you still need to send something, call `solo message send` again.")
+		fmt.Println("\nNew messages:")
+		for _, message := range held.HeldMessages {
+			fmt.Printf("[seq=%d time=%s type=%s] @%s: %s\n", message.Seq, message.CreatedAt, message.SenderType, message.SenderName, message.Content)
+		}
+		if held.OmittedMessageCount > 0 {
+			fmt.Printf("%d earlier unseen message(s) omitted; %d newer message(s) were detected in total.\n", held.OmittedMessageCount, held.NewMessageCount)
+		}
+		return
+	}
+
 	var resp struct {
 		ID        string `json:"id"`
 		ChannelID string `json:"channel_id"`
