@@ -441,6 +441,17 @@ func (h *ThreadHandler) ListThreadMessages(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
+	after := r.URL.Query().Get("after")
+	if after != "" {
+		if _, err := uuid.Parse(after); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid cursor: must be a valid message ID")
+			return
+		}
+	}
+	if before != "" && after != "" {
+		writeError(w, http.StatusBadRequest, "before and after cannot be used together")
+		return
+	}
 
 	// Verify user is a member of the channel and channel is not archived
 	var isArchived bool
@@ -521,8 +532,18 @@ func (h *ThreadHandler) ListThreadMessages(w http.ResponseWriter, r *http.Reques
 		args = append(args, before)
 		argIdx = 3
 	}
+	if after != "" {
+		query += ` AND (m.created_at, m.id) > (SELECT c.created_at, c.id FROM messages c WHERE c.id = $2)`
+		args = append(args, after)
+		argIdx = 3
+	}
 
-	query += ` ORDER BY m.created_at DESC, m.id DESC LIMIT $` + strconv.Itoa(argIdx)
+	if after != "" {
+		query += ` ORDER BY m.created_at ASC, m.id ASC`
+	} else {
+		query += ` ORDER BY m.created_at DESC, m.id DESC`
+	}
+	query += ` LIMIT $` + strconv.Itoa(argIdx)
 	args = append(args, limit+1)
 
 	rows, err := h.pool.Query(r.Context(), query, args...)
@@ -576,9 +597,11 @@ func (h *ThreadHandler) ListThreadMessages(w http.ResponseWriter, r *http.Reques
 		messages = messages[:limit]
 	}
 
-	// Reverse to ASC for natural reading order (oldest first)
-	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
-		messages[i], messages[j] = messages[j], messages[i]
+	// Non-after queries arrive newest-first and need reversing for display.
+	if after == "" {
+		for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+			messages[i], messages[j] = messages[j], messages[i]
+		}
 	}
 
 	writeJSON(w, http.StatusOK, ThreadMessageListResponse{

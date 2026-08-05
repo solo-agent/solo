@@ -49,6 +49,7 @@ export interface WSMessage {
 export type WSServerEvent =
   | { type: 'connected'; user_id: string }
   | { type: 'error'; code: string; message: string }
+  | { type: 'ping' }
   // ---- 消息事件 ----
   | { type: 'message.new'; id: string; client_msg_id?: string; channel_id: string; sender_type: string; sender_id: string; sender_name?: string; sender_avatar?: string | null; content: string; content_type: string; metadata?: Record<string, unknown>; thread_id?: string; thinking_node_id?: string; created_at: string; attachments?: Attachment[]; task_number?: number; task_title?: string; task_status?: string; task_claimer_name?: string; task_claimer_deleted?: boolean; reply_count?: number; has_unread_thread?: boolean }
   | { type: 'message.updated'; id: string; channel_id: string; content: string; sender_type?: string; sender_id?: string; updated_at: string; task_number?: number; task_title?: string; task_status?: string; task_claimer_name?: string; task_claimer_deleted?: boolean; reply_count?: number }

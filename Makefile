@@ -1,4 +1,4 @@
-.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-e2e-agent-delivery test-e2e-agent-session-resume test-e2e-agent-idle-resume test-e2e-agent-scope-router test-e2e-send-freshness
+.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-e2e-agent-delivery test-e2e-agent-session-resume test-e2e-agent-idle-resume test-e2e-agent-scope-router test-e2e-send-freshness test-e2e-websocket-recovery
 .DEFAULT_GOAL := help
 
 ENV_FILE ?= .env
@@ -55,6 +55,9 @@ test-e2e-agent-scope-router: rebuild ## Rebuild and verify the real Coordinator-
 
 test-e2e-send-freshness: rebuild ## Rebuild and verify three real Agents relay through send freshness holds
 	@cd frontend && CI=1 SOLO_E2E_REAL_AGENT_FRESHNESS=1 npx playwright test e2e/send-freshness.spec.ts --workers=1
+
+test-e2e-websocket-recovery: rebuild ## Rebuild and verify browser WebSocket recovery and message backfill
+	@cd frontend && CI=1 npx playwright test e2e/websocket-message-send.spec.ts e2e/websocket-recovery.spec.ts --workers=1
 
 stop: ## Shut down all services
 	@bash scripts/stop-services.sh

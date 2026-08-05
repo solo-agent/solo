@@ -166,7 +166,10 @@ export function WSProvider({
 
   useEffect(() => {
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') retryFailedReliableSends();
+      if (document.visibilityState === 'visible') {
+        retryFailedReliableSends();
+        forceReconnect();
+      }
     };
     const onPageShow = () => {
       retryFailedReliableSends();

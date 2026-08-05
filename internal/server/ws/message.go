@@ -30,6 +30,7 @@ const (
 
 // Event types (server -> client)
 const (
+	EventPing              = "ping"
 	EventMessageNew        = "message.new"
 	EventMessageUpdated    = "message.updated"
 	EventMessageDeleted    = "message.deleted"

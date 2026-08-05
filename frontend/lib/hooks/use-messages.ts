@@ -195,28 +195,34 @@ export function useMessages(channelId: string | null, thinkingNodeId: string | n
       // to fetch messages that arrived during disconnection
       const lastMsg = [...currentMsgs].reverse().find((message) => message.status === 'sent');
       if (lastMsg?.id) {
-        apiClient
-          .get<MessageListResponse>(`/api/v1/channels/${cid}/messages`, {
-            limit: '50',
-            after: lastMsg.id,
-            ...(nodeID ? { thinking_node_id: nodeID } : {}),
-          })
-          .then((res) => {
+        void (async () => {
+          const missed: MessageResponse[] = [];
+          let cursor = lastMsg.id;
+          for (;;) {
+            const res = await apiClient.get<MessageListResponse>(
+              `/api/v1/channels/${cid}/messages`,
+              {
+                limit: String(PAGE_SIZE),
+                after: cursor,
+                ...(nodeID ? { thinking_node_id: nodeID } : {}),
+              },
+            );
             if (channelIdRef.current !== cid || thinkingNodeIdRef.current !== nodeID) return;
-            if (res.messages.length > 0) {
-              setMessages((prev) => {
-                const existingIds = new Set(prev.map((m) => m.id));
-                const newMsgs = res.messages
-                  .map(mapMessageResponse)
-                  .filter((m) => !existingIds.has(m.id));
-                if (newMsgs.length === 0) return prev;
-                return [...prev, ...newMsgs];
-              });
-            }
-          })
-          .catch(() => {
-            // Silently fail — messages will arrive via WS subscription
+            missed.push(...res.messages);
+            if (!res.has_more || res.messages.length === 0) break;
+            cursor = res.messages[res.messages.length - 1].id;
+          }
+          if (missed.length === 0) return;
+          setMessages((prev) => {
+            const existingIds = new Set(prev.map((m) => m.id));
+            const newMsgs = missed
+              .map(mapMessageResponse)
+              .filter((m) => !existingIds.has(m.id));
+            return newMsgs.length === 0 ? prev : [...prev, ...newMsgs];
           });
+        })().catch(() => {
+          // Silently fail — the next reconnect or refresh will retry from the same cursor.
+        });
       }
     }
   }, [isConnected]);
