@@ -25,6 +25,8 @@ interface TaskEntity {
 
 interface DeliveryState {
   run_id: string;
+  daemon_id: string;
+  bound_daemon_id: string;
   status: string;
   contract: string;
   message_id: string;
@@ -106,6 +108,13 @@ function deliveryState(agentID: string): DeliveryState {
     SELECT COALESCE((
       SELECT json_build_object(
         'run_id', r.id::text,
+        'daemon_id', COALESCE(r.daemon_id, ''),
+        'bound_daemon_id', COALESCE((
+          SELECT c.daemon_id
+            FROM agents a
+            JOIN computers c ON c.id::text = a.runtime_id
+           WHERE a.id = r.agent_id
+        ), ''),
         'status', r.status,
         'contract', COALESCE((
           SELECT e.payload->>'result_contract'
@@ -136,7 +145,7 @@ function deliveryState(agentID: string): DeliveryState {
         ), '')
       )::text
       FROM latest r
-    ), '{"run_id":"","status":"","contract":"","message_id":"","visible_event":false,"input_tokens":0,"output_tokens":0,"failure_code":""}')
+    ), '{"run_id":"","daemon_id":"","bound_daemon_id":"","status":"","contract":"","message_id":"","visible_event":false,"input_tokens":0,"output_tokens":0,"failure_code":""}')
   `);
 }
 
@@ -385,6 +394,8 @@ test.describe('real Agent result delivery contract', () => {
 
       const state = deliveryState(agent.id);
       expect(state.input_tokens + state.output_tokens).toBeGreaterThan(0);
+      expect(state.daemon_id).not.toBe('');
+      expect(state.daemon_id).toBe(state.bound_daemon_id);
 
       await authenticatePage(page, auth);
       await page.goto(`/dashboard?channel=${channel.id}`);

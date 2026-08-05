@@ -54,9 +54,9 @@ func (s *AgentService) TriggerAgentGreeting(ctx context.Context, channelID, agen
 		channelID,
 	).Scan(&channelName)
 
-	daemon := s.dm.SelectDaemon("llm")
-	if daemon == nil {
-		slog.Warn("TriggerAgentGreeting: no available daemon", "agent_id", agentID)
+	daemon, err := s.dm.ResolveDaemonForAgent(ctx, agentID, "llm")
+	if err != nil {
+		slog.Warn("TriggerAgentGreeting: no available daemon", "agent_id", agentID, "error", err)
 		return
 	}
 

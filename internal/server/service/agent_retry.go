@@ -211,7 +211,7 @@ func (s *AgentService) retryTaskRun(ctx context.Context, failed retryableTaskRun
 		}
 		return err
 	}
-	if s.dm.SelectDaemon("llm") == nil {
+	if _, err := s.dm.ResolveDaemonForAgent(ctx, nextAgentID, "llm"); err != nil {
 		return nil
 	}
 
