@@ -590,14 +590,13 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Disconnect from any computer that had this agent in its connected list.
-	// Capture the daemon URL before array_remove strips this agent from
-	// agent_ids — once we leave the transaction, no computer row references
-	// this agent, and we need the URL to tell the daemon to drop the session,
-	// workspace, and memory.
+	// Capture the bound daemon before disconnecting the Agent.
 	var daemonURL string
 	err = tx.QueryRow(r.Context(),
-		`SELECT COALESCE(daemon_url, '') FROM computers WHERE $1::uuid = ANY(agent_ids) LIMIT 1`,
+		`SELECT COALESCE(c.daemon_url, '')
+		   FROM agents a
+		   LEFT JOIN computers c ON c.id::text = a.runtime_id
+		  WHERE a.id = $1`,
 		agentID,
 	).Scan(&daemonURL)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -639,9 +638,7 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // notifyDaemonCleanup asks the given daemon to drop the agent's session,
-// workspace, and memory. daemonURL is captured inside the Delete transaction
-// before array_remove strips the agent from computers.agent_ids — querying
-// afterwards would always return no rows.
+// workspace, and memory. daemonURL is captured inside the Delete transaction.
 //
 // Best-effort: errors are logged, never surfaced to the user — the soft-delete
 // already succeeded.

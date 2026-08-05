@@ -310,6 +310,74 @@ func (dm *DaemonManager) SelectDaemon(capability string) *DaemonInfo {
 	return best
 }
 
+// ResolveDaemonForAgent returns the daemon owned by the Agent's persisted
+// computer binding. Legacy unbound Agents remain supported only when there is
+// exactly one usable daemon, so adding a second computer cannot silently move
+// their work.
+func (dm *DaemonManager) ResolveDaemonForAgent(ctx context.Context, agentID, capability string) (*DaemonInfo, error) {
+	if dm.pool == nil {
+		if daemon := dm.SelectDaemon(capability); daemon != nil {
+			return daemon, nil
+		}
+		return nil, fmt.Errorf("no available daemon for agent %s", agentID)
+	}
+
+	var runtimeID, daemonID string
+	err := dm.pool.QueryRow(ctx, `
+		SELECT COALESCE(a.runtime_id, ''), COALESCE(c.daemon_id, '')
+		  FROM agents a
+		  LEFT JOIN computers c ON c.id::text = a.runtime_id
+		 WHERE a.id = $1`, agentID,
+	).Scan(&runtimeID, &daemonID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve agent computer: %w", err)
+	}
+	if runtimeID != "" {
+		if daemonID == "" {
+			return nil, fmt.Errorf("agent %s is bound to computer %s without a daemon", agentID, runtimeID)
+		}
+		daemon, ok := dm.GetDaemon(daemonID)
+		if !ok || !daemonUsable(daemon, capability) {
+			return nil, fmt.Errorf("agent %s daemon %s is unavailable", agentID, daemonID)
+		}
+		return daemon, nil
+	}
+
+	var only *DaemonInfo
+	for _, daemon := range dm.ListDaemons() {
+		if !daemonUsable(daemon, capability) {
+			continue
+		}
+		if only != nil {
+			return nil, fmt.Errorf("agent %s has no computer binding and multiple daemons are available", agentID)
+		}
+		only = daemon
+	}
+	if only == nil {
+		return nil, fmt.Errorf("no available daemon for agent %s", agentID)
+	}
+	if _, err := dm.pool.Exec(ctx, `
+		UPDATE agents a
+		   SET runtime_id = c.id::text, updated_at = now()
+		  FROM computers c
+		 WHERE a.id = $1
+		   AND a.runtime_id IS NULL
+		   AND c.daemon_id = $2`, agentID, only.ID); err != nil {
+		return nil, fmt.Errorf("persist agent computer binding: %w", err)
+	}
+	return only, nil
+}
+
+func daemonUsable(daemon *DaemonInfo, capability string) bool {
+	if daemon == nil || daemon.Status != DaemonStatusOnline {
+		return false
+	}
+	if capability == "" {
+		return true
+	}
+	return daemon.CurrentLoad < int32(daemon.MaxConcurrent) && hasCapability(daemon.Capabilities, capability)
+}
+
 // SendTask dispatches a task to a specific daemon via HTTP.
 func (dm *DaemonManager) SendTask(ctx context.Context, daemon *DaemonInfo, req interface{}) ([]byte, error) {
 	url := fmt.Sprintf("http://%s:%d/internal/daemon/run", daemon.Host, daemon.Port)
@@ -385,35 +453,36 @@ func (dm *DaemonManager) CleanupThinkingSessions(ctx context.Context, nodeIDs []
 }
 
 // CleanupAgents force-closes every scoped runtime session for the supplied
-// Agents and removes their local runtime state. It is idempotent and fans out
-// because runtime affinity is not durable.
+// Agents and removes their local runtime state from their bound daemon.
 func (dm *DaemonManager) CleanupAgents(ctx context.Context, agentIDs []string) error {
 	var firstErr error
-	for _, daemon := range dm.ListDaemons() {
-		if daemon.Status != DaemonStatusOnline {
+	for _, agentID := range agentIDs {
+		daemon, err := dm.ResolveDaemonForAgent(ctx, agentID, "")
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
 			continue
 		}
-		for _, agentID := range agentIDs {
-			url := fmt.Sprintf("http://%s:%d/internal/daemon/agents/%s/cleanup", daemon.Host, daemon.Port, agentID)
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
-			if err != nil {
-				if firstErr == nil {
-					firstErr = err
-				}
-				continue
+		url := fmt.Sprintf("http://%s:%d/internal/daemon/agents/%s/cleanup", daemon.Host, daemon.Port, agentID)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
 			}
-			resp, err := dm.httpClient.Do(req)
-			if err != nil {
-				if firstErr == nil {
-					firstErr = err
-				}
-				continue
+			continue
+		}
+		resp, err := dm.httpClient.Do(req)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
 			}
-			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
-			resp.Body.Close()
-			if resp.StatusCode != http.StatusNoContent && firstErr == nil {
-				firstErr = fmt.Errorf("daemon %s returned status %d while cleaning agent %s", daemon.ID, resp.StatusCode, agentID)
-			}
+			continue
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent && firstErr == nil {
+			firstErr = fmt.Errorf("daemon %s returned status %d while cleaning agent %s", daemon.ID, resp.StatusCode, agentID)
 		}
 	}
 	return firstErr
@@ -555,24 +624,13 @@ func (dm *DaemonManager) CancelTask(ctx context.Context, daemon *DaemonInfo, tas
 
 // ---- workspace.Proxy implementation ----
 
-// FindDaemonForAgent finds an online daemon that can serve workspace files.
-// TODO: implement agent-to-daemon affinity when persistent agent-daemon
-// assignment is available. Currently returns the first online daemon,
-// which is correct for single-daemon deployments.
+// FindDaemonForAgent finds the Agent's bound online daemon for workspace files.
 func (dm *DaemonManager) FindDaemonForAgent(ctx context.Context, agentID string) (*workspace.Daemon, bool) {
-	dm.mu.RLock()
-	defer dm.mu.RUnlock()
-
-	for _, d := range dm.daemons {
-		if d.Status != DaemonStatusOnline {
-			continue
-		}
-		return &workspace.Daemon{
-			Host: d.Host,
-			Port: d.Port,
-		}, true
+	daemon, err := dm.ResolveDaemonForAgent(ctx, agentID, "")
+	if err != nil {
+		return nil, false
 	}
-	return nil, false
+	return &workspace.Daemon{Host: daemon.Host, Port: daemon.Port}, true
 }
 
 // ProxyWorkspaceList sends a workspace list request to a daemon.

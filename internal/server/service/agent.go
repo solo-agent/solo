@@ -226,10 +226,9 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 		newChain := append([]string(nil), agentChain...)
 		newChain = append(newChain, ag.ID)
 
-		// Select a daemon that supports this agent's model provider
-		daemon := s.dm.SelectDaemon("llm")
-		if daemon == nil {
-			slog.Warn("no available daemon for agent task", "agent_id", ag.ID)
+		daemon, err := s.dm.ResolveDaemonForAgent(ctx, ag.ID, "llm")
+		if err != nil {
+			slog.Warn("no available daemon for agent task", "agent_id", ag.ID, "error", err)
 			s.broadcastAgentError("", channelID, ag.ID, ag.Name, agentErrorNoAvailableDaemon)
 			continue
 		}
@@ -381,8 +380,8 @@ func (s *AgentService) triggerAgentResponseInNode(ctx context.Context, channelID
 			continue
 		}
 		newChain := append(append([]string(nil), agentChain...), ag.ID)
-		daemon := s.dm.SelectDaemon("llm")
-		if daemon == nil {
+		daemon, err := s.dm.ResolveDaemonForAgent(ctx, ag.ID, "llm")
+		if err != nil {
 			s.broadcastAgentError("", channelID, ag.ID, ag.Name, agentErrorNoAvailableDaemon)
 			if handoffRun {
 				return errors.New("no available local Agent daemon")
@@ -632,6 +631,7 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 		var err error
 		run, err = runSvc.StartRun(ctx, StartRunInput{
 			AgentID:          ag.ID,
+			DaemonID:         daemon.ID,
 			TriggerType:      triggerType,
 			TriggerMessageID: taskReq.TriggerMessageID,
 			ChannelID:        taskReq.ChannelID,
@@ -1215,13 +1215,13 @@ func (s *AgentService) StartAgentRunWatchdogLoop(ctx context.Context) {
 	}
 }
 
-// ReconcileDaemonRuns converges PostgreSQL Run state with the one local
-// daemon's in-memory task list after either process restarts.
+// ReconcileDaemonRuns converges PostgreSQL Run state with this daemon's
+// in-memory task list after either process restarts.
 func (s *AgentService) ReconcileDaemonRuns(ctx context.Context, daemon *DaemonInfo, taskIDs []string) {
 	if daemon == nil {
 		return
 	}
-	runs, err := NewAgentRunService(s.pool).ListActiveRuns(ctx)
+	runs, err := NewAgentRunService(s.pool).ListActiveRunsByDaemon(ctx, daemon.ID)
 	if err != nil {
 		slog.Warn("failed to list active runs for daemon reconciliation", "daemon_id", daemon.ID, "error", err)
 		return
@@ -1479,7 +1479,15 @@ func (s *AgentService) timeoutStaleQueuedAgentRun(ctx context.Context, runSvc *A
 
 func (s *AgentService) finishTimedOutAgentRun(ctx context.Context, runSvc *AgentRunService, run *AgentRun, activity string) error {
 	retryable := false
-	if daemon := s.dm.SelectDaemon("llm"); daemon != nil {
+	var daemon *DaemonInfo
+	if daemonID, err := runSvc.GetRunDaemonID(ctx, run.ID); err == nil && daemonID != "" {
+		if candidate, ok := s.dm.GetDaemon(daemonID); ok && candidate.Status == DaemonStatusOnline {
+			daemon = candidate
+		}
+	} else if err == nil {
+		daemon, _ = s.dm.ResolveDaemonForAgent(ctx, run.AgentID, "")
+	}
+	if daemon != nil {
 		if err := s.dm.CancelTask(ctx, daemon, run.ID); err != nil {
 			slog.Warn("failed to stop timed out daemon task", "run_id", run.ID, "error", err)
 		} else {
@@ -1969,8 +1977,8 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 		newChain := append([]string(nil), agentChain...)
 		newChain = append(newChain, ag.ID)
 
-		daemon := s.dm.SelectDaemon("llm")
-		if daemon == nil {
+		daemon, err := s.dm.ResolveDaemonForAgent(ctx, ag.ID, "llm")
+		if err != nil {
 			slog.Warn("no available daemon for thread agent task", "agent_id", ag.ID)
 			s.broadcastAgentError(threadID, channelID, ag.ID, ag.Name, agentErrorNoAvailableDaemon)
 			continue
@@ -2143,9 +2151,8 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 		)
 	}
 
-	// Select daemon
-	daemon := s.dm.SelectDaemon("llm")
-	if daemon == nil {
+	daemon, err := s.dm.ResolveDaemonForAgent(ctx, ag.ID, "llm")
+	if err != nil {
 		slog.Warn("no available daemon for task agent trigger", "agent_id", ag.ID, "task_id", taskID)
 		s.broadcastAgentError(threadID, channelID, ag.ID, ag.Name, agentErrorNoAvailableDaemon)
 		return false
@@ -2268,8 +2275,8 @@ func (s *AgentService) TriggerAgentForArtifact(ctx context.Context, task *Task, 
 		}
 	}
 
-	daemon := s.dm.SelectDaemon("llm")
-	if daemon == nil {
+	daemon, err := s.dm.ResolveDaemonForAgent(ctx, ag.ID, "llm")
+	if err != nil {
 		return fmt.Errorf("no available daemon for artifact agent trigger")
 	}
 

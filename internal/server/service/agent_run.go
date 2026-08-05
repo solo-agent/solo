@@ -157,6 +157,7 @@ type UpdateSessionMetadataInput struct {
 
 type StartRunInput struct {
 	AgentID          string
+	DaemonID         string
 	SessionID        string
 	TriggerType      string
 	TriggerMessageID string
@@ -305,9 +306,9 @@ func (s *AgentRunService) StartRun(ctx context.Context, input StartRunInput) (*A
 	}
 	return scanAgentRun(s.pool.QueryRow(ctx,
 		`INSERT INTO agent_runs (
-		   id, agent_id, session_id, trigger_type, trigger_message_id, channel_id, thread_id, thinking_node_id,
+		   id, agent_id, daemon_id, session_id, trigger_type, trigger_message_id, channel_id, thread_id, thinking_node_id,
 		   status, activity_text, tool_name, tool_input_summary, source, usage_json, freshness_seen_seq
-		 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		 RETURNING id::text, agent_id::text,
 		       COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
 		       COALESCE(session_id::text, ''), trigger_type,
@@ -315,7 +316,7 @@ func (s *AgentRunService) StartRun(ctx context.Context, input StartRunInput) (*A
 		       COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		       COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
 		       started_at, backend_started_at, updated_at, finished_at`,
-		uuid.NewString(), input.AgentID, nullableUUID(input.SessionID), input.TriggerType,
+		uuid.NewString(), input.AgentID, nullableStr(input.DaemonID), nullableUUID(input.SessionID), input.TriggerType,
 		nullableUUID(input.TriggerMessageID), nullableUUID(input.ChannelID), nullableUUID(input.ThreadID), nullableUUID(input.ThinkingNodeID),
 		string(input.Status), input.ActivityText, nullableStr(input.ToolName),
 		nullableStr(input.ToolInputSummary), nullableStr(input.Source), usage, nullableInt64(input.FreshnessSeenSeq),
@@ -548,6 +549,19 @@ func (s *AgentRunService) ListActiveRuns(ctx context.Context) ([]AgentRun, error
 			string(AgentRunStatusWaitingApproval),
 		},
 	))
+}
+
+func (s *AgentRunService) ListActiveRunsByDaemon(ctx context.Context, daemonID string) ([]AgentRun, error) {
+	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
+		 WHERE r.status = ANY($1) AND r.daemon_id = $2
+		 ORDER BY r.updated_at DESC
+		 LIMIT 100`, activeAgentRunStatuses(), daemonID))
+}
+
+func (s *AgentRunService) GetRunDaemonID(ctx context.Context, runID string) (string, error) {
+	var daemonID string
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(daemon_id, '') FROM agent_runs WHERE id = $1`, runID).Scan(&daemonID)
+	return daemonID, err
 }
 
 // ResolveExecutingThinkingNode returns the node scope of the single Agent turn

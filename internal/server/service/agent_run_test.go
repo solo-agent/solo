@@ -61,6 +61,7 @@ func TestAgentRunServiceLifecycle(t *testing.T) {
 
 	run, err := svc.StartRun(ctx, StartRunInput{
 		AgentID:          agentID,
+		DaemonID:         "daemon-agent-run-test",
 		TriggerType:      AgentRunTriggerMessage,
 		TriggerMessageID: messageID,
 		ChannelID:        channelID,
@@ -77,6 +78,14 @@ func TestAgentRunServiceLifecycle(t *testing.T) {
 	}
 	if run.SessionID != "" {
 		t.Fatalf("run session_id = %q, want empty before provider session is known", run.SessionID)
+	}
+	daemonID, err := svc.GetRunDaemonID(ctx, run.ID)
+	if err != nil || daemonID != "daemon-agent-run-test" {
+		t.Fatalf("run daemon_id = %q, %v", daemonID, err)
+	}
+	activeOnDaemon, err := svc.ListActiveRunsByDaemon(ctx, daemonID)
+	if err != nil || !agentRunListContains(activeOnDaemon, run.ID) {
+		t.Fatalf("active runs for daemon = %#v, %v", activeOnDaemon, err)
 	}
 	run, err = svc.BindRunSession(ctx, BindRunSessionInput{
 		RunID:     run.ID,

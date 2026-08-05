@@ -160,7 +160,7 @@ func main() {
 
 	// SSE requires long-lived connections — no write timeout.
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%s", port),
+		Addr:         net.JoinHostPort("127.0.0.1", port),
 		Handler:      r,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 0, // 0 = no timeout (needed for SSE streaming)

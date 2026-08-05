@@ -349,8 +349,10 @@ func TestDaemonReconcileFailsTrackedRunMissingFromNewProcess(t *testing.T) {
 	})
 
 	runSvc := NewAgentRunService(pool)
+	daemonID := "daemon-" + agentID[:8]
 	run, err := runSvc.StartRun(ctx, StartRunInput{
 		AgentID:      agentID,
+		DaemonID:     daemonID,
 		TriggerType:  AgentRunTriggerMessage,
 		ChannelID:    channelID,
 		Status:       AgentRunStatusThinking,
@@ -359,10 +361,20 @@ func TestDaemonReconcileFailsTrackedRunMissingFromNewProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartRun: %v", err)
 	}
+	foreignRun, err := runSvc.StartRun(ctx, StartRunInput{
+		AgentID:      agentID,
+		DaemonID:     "another-daemon",
+		TriggerType:  AgentRunTriggerMessage,
+		ChannelID:    channelID,
+		Status:       AgentRunStatusThinking,
+		ActivityText: agentActivityAccepted,
+	})
+	if err != nil {
+		t.Fatalf("StartRun on another daemon: %v", err)
+	}
 
 	rec := newRecordingBroadcaster()
 	dm := NewDaemonManager(pool, rec)
-	daemonID := "daemon-" + agentID[:8]
 	daemon := &DaemonInfo{ID: daemonID, Host: "127.0.0.1", Port: 1, Capabilities: []string{"agent"}}
 	dm.Register(daemon)
 	dm.TrackTask(run.ID, daemonID, agentID)
@@ -377,6 +389,12 @@ func TestDaemonReconcileFailsTrackedRunMissingFromNewProcess(t *testing.T) {
 	}
 	if status != string(AgentRunStatusFailed) {
 		t.Fatalf("status = %q, want failed", status)
+	}
+	if err := pool.QueryRow(ctx, `SELECT status FROM agent_runs WHERE id = $1`, foreignRun.ID).Scan(&status); err != nil {
+		t.Fatalf("query foreign run: %v", err)
+	}
+	if status != string(AgentRunStatusThinking) {
+		t.Fatalf("foreign run status = %q, want thinking", status)
 	}
 	if !rec.hasBroadcastEvent("agent.run.finished", agentActivityDaemonLost) {
 		t.Fatalf("reconcile daemon-lost finish not broadcast: %q", rec.broadcastMessages)

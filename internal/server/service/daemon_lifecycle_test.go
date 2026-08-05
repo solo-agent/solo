@@ -1,8 +1,11 @@
 package service
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestPendingTaskTimeoutsUseCurrentLifecyclePhase(t *testing.T) {
@@ -40,5 +43,65 @@ func TestPendingTaskTimeoutsUseCurrentLifecyclePhase(t *testing.T) {
 	}
 	if _, ok := dm.pendingTasks["fresh-queue"]; !ok {
 		t.Fatal("fresh queued task was removed by execution timeout")
+	}
+}
+
+func TestResolveDaemonForAgentUsesComputerBinding(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, ownerID)
+	computerA, computerB := uuid.NewString(), uuid.NewString()
+	var homeChannelID string
+	if err := pool.QueryRow(ctx, `SELECT home_channel_id::text FROM agents WHERE id = $1`, agentID).Scan(&homeChannelID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM computers WHERE id = ANY($1::uuid[])`, []string{computerA, computerB})
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE id = $1`, homeChannelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO computers (id, name, owner_id, daemon_id, status)
+		VALUES ($1, 'computer-a', $3, 'daemon-a', 'online'),
+		       ($2, 'computer-b', $3, 'daemon-b', 'online')`, computerA, computerB, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agents SET runtime_id = $2 WHERE id = $1`, agentID, computerA); err != nil {
+		t.Fatal(err)
+	}
+
+	dm := NewDaemonManager(pool, nil)
+	dm.Register(&DaemonInfo{ID: "daemon-a", Capabilities: []string{"llm"}, MaxConcurrent: 1})
+	dm.Register(&DaemonInfo{ID: "daemon-b", Capabilities: []string{"llm"}, MaxConcurrent: 1})
+	daemon, err := dm.ResolveDaemonForAgent(ctx, agentID, "llm")
+	if err != nil || daemon.ID != "daemon-a" {
+		t.Fatalf("bound daemon = %#v, %v; want daemon-a", daemon, err)
+	}
+
+	dm.Unregister("daemon-a")
+	if _, err := dm.ResolveDaemonForAgent(ctx, agentID, "llm"); err == nil {
+		t.Fatal("offline bound daemon fell back to another computer")
+	}
+	dm.Register(&DaemonInfo{ID: "daemon-a", Capabilities: []string{"llm"}, MaxConcurrent: 1})
+	if _, err := pool.Exec(ctx, `UPDATE agents SET runtime_id = NULL WHERE id = $1`, agentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dm.ResolveDaemonForAgent(ctx, agentID, "llm"); err == nil {
+		t.Fatal("unbound agent selected randomly from multiple daemons")
+	}
+	dm.Unregister("daemon-b")
+	daemon, err = dm.ResolveDaemonForAgent(ctx, agentID, "llm")
+	if err != nil || daemon.ID != "daemon-a" {
+		t.Fatalf("single-daemon legacy fallback = %#v, %v; want daemon-a", daemon, err)
+	}
+	var runtimeID string
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(runtime_id, '') FROM agents WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	if runtimeID != computerA {
+		t.Fatalf("persisted runtime_id = %q, want %q", runtimeID, computerA)
 	}
 }
