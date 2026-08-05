@@ -17,8 +17,9 @@ const (
 	// Time allowed to read the next pong message from the peer.
 	pongWait = 60 * time.Second
 
-	// Send pings to peer with this period. Must be less than pongWait.
-	pingPeriod = (pongWait * 9) / 10
+	// Send transport and application pings with this period. The text frame is
+	// observable by browser clients, unlike the WebSocket control frame.
+	pingPeriod = 30 * time.Second
 
 	// Maximum message size allowed from peer.
 	maxMessageSize = 100 * 1024 // 100KB
@@ -117,6 +118,9 @@ func (c *Client) WritePump() {
 
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.WriteMessage(websocket.TextMessage, Envelope(EventPing, struct{}{})); err != nil {
+				return
+			}
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}

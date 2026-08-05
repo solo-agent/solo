@@ -242,26 +242,30 @@ export function useDM(dmId: string | null = null) {
 
       const lastMsg = [...currentMsgs].reverse().find((message) => message.status === 'sent');
       if (lastMsg?.id) {
-        apiClient
-          .get<DMMessageListResponse>(`/api/v1/dm/${did}/messages`, {
-            limit: '50',
-            after: lastMsg.id,
-          })
-          .then((res) => {
-            if (res.messages.length > 0) {
-              setMessages((prev) => {
-                const existingIds = new Set(prev.map((m) => m.id));
-                const newMsgs = res.messages
-                  .map(mapDMMessageResponse)
-                  .filter((m) => !existingIds.has(m.id));
-                if (newMsgs.length === 0) return prev;
-                return [...prev, ...newMsgs];
-              });
-            }
-          })
-          .catch(() => {
-            // Silently fail — messages will arrive via WS subscription
+        void (async () => {
+          const missed: DMMessageResponse[] = [];
+          let cursor = lastMsg.id;
+          for (;;) {
+            const res = await apiClient.get<DMMessageListResponse>(
+              `/api/v1/dm/${did}/messages`,
+              { limit: String(PAGE_SIZE), after: cursor },
+            );
+            if (dmIdRef.current !== did) return;
+            missed.push(...res.messages);
+            if (!res.has_more || res.messages.length === 0) break;
+            cursor = res.messages[res.messages.length - 1].id;
+          }
+          if (missed.length === 0) return;
+          setMessages((prev) => {
+            const existingIds = new Set(prev.map((m) => m.id));
+            const newMsgs = missed
+              .map(mapDMMessageResponse)
+              .filter((m) => !existingIds.has(m.id));
+            return newMsgs.length === 0 ? prev : [...prev, ...newMsgs];
           });
+        })().catch(() => {
+          // Silently fail — the next reconnect or refresh will retry from the same cursor.
+        });
       }
     }
   }, [isConnected]);

@@ -64,6 +64,7 @@ function toWSMessage(r: ThreadReplyResponse): WSMessage {
     thread_parent_id: r.thread_id,
     attachments: r.attachments,
     created_at: r.created_at,
+    status: 'sent',
   };
 }
 
@@ -90,7 +91,7 @@ export interface UseThreadReturn {
 
 export function useThread(): UseThreadReturn {
   const { user } = useAuth();
-  const { subscribeThread, unsubscribeThread, onEvent } = useWebSocket();
+  const { subscribeThread, unsubscribeThread, onEvent, isConnected } = useWebSocket();
   const [messages, setMessages] = useState<WSMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,6 +103,9 @@ export function useThread(): UseThreadReturn {
   const threadIdRef = useRef<string | null>(null);
   threadIdRef.current = threadId;
   const loadingRef = useRef(false);
+  const messagesRef = useRef<WSMessage[]>([]);
+  messagesRef.current = messages;
+  const prevConnectedRef = useRef(false);
 
   // ---- 加载线程消息 ----
 
@@ -137,6 +141,44 @@ export function useThread(): UseThreadReturn {
     [],
   );
 
+  // ---- Fetch missed replies after reconnection ----
+
+  useEffect(() => {
+    const wasConnected = prevConnectedRef.current;
+    prevConnectedRef.current = isConnected;
+    if (!isConnected || wasConnected) return;
+
+    const cid = channelIdRef.current;
+    const mid = messageIdRef.current;
+    const lastMsg = [...messagesRef.current].reverse().find((message) => message.status === 'sent');
+    if (!cid || !mid || !lastMsg?.id) return;
+
+    void (async () => {
+      const missed: ThreadReplyResponse[] = [];
+      let cursor = lastMsg.id;
+      for (;;) {
+        const res = await apiClient.get<ThreadMessageListResponse>(
+          `/api/v1/channels/${cid}/messages/${mid}/thread`,
+          { limit: '50', after: cursor },
+        );
+        if (channelIdRef.current !== cid || messageIdRef.current !== mid) return;
+        missed.push(...res.messages);
+        if (!res.has_more || res.messages.length === 0) break;
+        cursor = res.messages[res.messages.length - 1].id;
+      }
+      if (missed.length === 0) return;
+      const recovered = missed.map(toWSMessage);
+      setMessages((prev) => {
+        const recoveredByID = new Map(recovered.map((message) => [message.id, message]));
+        const merged = prev.map((message) => recoveredByID.get(message.id) ?? message);
+        const existingIDs = new Set(prev.map((message) => message.id));
+        return [...merged, ...recovered.filter((message) => !existingIDs.has(message.id))];
+      });
+    })().catch(() => {
+      // Silently fail — the next reconnect or refresh will retry from the same cursor.
+    });
+  }, [isConnected]);
+
   // ---- WS 订阅生命周期 ----
   // 当获得实际的 thread_id 后，订阅该线程的实时事件
 
@@ -148,7 +190,6 @@ export function useThread(): UseThreadReturn {
     return () => {
       unsubscribeThread(tid);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId, subscribeThread, unsubscribeThread]);
 
   // ---- WS 事件监听：实时接收新线程消息 + 流式输出 ----
@@ -204,6 +245,7 @@ export function useThread(): UseThreadReturn {
           thread_parent_id: event.message.thread_id,
           attachments: event.message.attachments,
           created_at: event.message.created_at,
+          status: 'sent',
         };
         if (event.message.client_msg_id && acknowledgeReliableSend(event.message.client_msg_id, {
           message: newMsg,

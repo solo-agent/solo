@@ -28,6 +28,7 @@ export interface WSClientConfig {
 const INITIAL_RECONNECT_DELAY = 1000; // 1s
 const MAX_RECONNECT_DELAY = 30000;    // 30s
 const BACKOFF_MULTIPLIER = 2;
+const INBOUND_WATCHDOG_MS = 70000;
 
 export class WSClient {
   private readonly config: WSClientConfig;
@@ -38,6 +39,7 @@ export class WSClient {
   private subscribedDMs: Set<string> = new Set();
   private reconnectDelay: number = INITIAL_RECONNECT_DELAY;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private watchdogTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalClose: boolean = false;
   private readonly handlers: Set<(event: WSServerEvent) => void> = new Set();
 
@@ -103,6 +105,7 @@ export class WSClient {
       this.setState('connected');
       this.config.onReconnectChange?.(false, 0);
       this.reconnectDelay = INITIAL_RECONNECT_DELAY;
+      this.resetWatchdog();
 
       // 重连后自动重新订阅之前的频道
       if (this.subscribedChannels.size > 0) {
@@ -127,6 +130,7 @@ export class WSClient {
     };
 
     this.ws.onclose = () => {
+      this.clearWatchdog();
       this.setState('disconnected');
       this.ws = null;
 
@@ -146,6 +150,7 @@ export class WSClient {
     };
 
     this.ws.onmessage = (event: MessageEvent) => {
+      this.resetWatchdog();
       this.handleMessage(event.data);
     };
   }
@@ -250,6 +255,7 @@ export class WSClient {
       // Backend Envelope: { "type": "...", "payload": {...} }
       // 将 payload 展开到顶层，形成扁平结构
       const parsed = JSON.parse(rawData);
+      if (parsed.type === 'ping') return;
       if (parsed.payload && typeof parsed.payload === 'object') {
         event = { type: parsed.type, ...parsed.payload } as WSServerEvent;
       } else {
@@ -295,7 +301,23 @@ export class WSClient {
     }
   }
 
+  private resetWatchdog(): void {
+    this.clearWatchdog();
+    this.watchdogTimer = setTimeout(() => {
+      this.watchdogTimer = null;
+      this.forceReconnect();
+    }, INBOUND_WATCHDOG_MS);
+  }
+
+  private clearWatchdog(): void {
+    if (this.watchdogTimer !== null) {
+      clearTimeout(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+  }
+
   private cleanupSocket(): void {
+    this.clearWatchdog();
     if (this.ws) {
       // 清除回调以防止旧 socket 触发 onclose 导致意外重连
       this.ws.onopen = null;
