@@ -16,6 +16,9 @@ import type { ThinkingNode } from '@/lib/types';
 export type ThinkingNodeData = {
   node: ThinkingNode;
   activityPlacement?: ActivityCardPlacement;
+  synthesisSelectionMode?: boolean;
+  selectedForSynthesis?: boolean;
+  synthesisSelectable?: boolean;
 };
 export type ThinkingFlowNode = Node<ThinkingNodeData, 'thinkingNode'>;
 
@@ -37,6 +40,8 @@ export function ThinkingNodeCard({ data, selected }: NodeProps<ThinkingFlowNode>
       data-thinking-node-id={node.id}
       data-thinking-node-kind={isRoot ? 'root' : isTeam ? 'team' : 'branch'}
       data-agent-run-status={runStatus}
+      data-synthesis-selectable={data.synthesisSelectable ? 'true' : 'false'}
+      data-synthesis-selected={data.selectedForSynthesis ? 'true' : 'false'}
       aria-current={selected ? 'true' : undefined}
       title={node.returned_handoff || node.checkpoint_handoff || node.inherited_handoff || t('thinkingNewBranch')}
     >
@@ -48,6 +53,8 @@ export function ThinkingNodeCard({ data, selected }: NodeProps<ThinkingFlowNode>
           isRoot ? 'h-24 w-24' : isTeam ? 'h-20 w-20' : 'h-16 w-16',
           agentRunShowsHalo(runStatus) && 'team-agent-active-halo',
           selected && 'thinking-node-selected -translate-x-0.5 -translate-y-0.5 bg-brutal-primary shadow-brutal-md ring-2 ring-black ring-offset-2 ring-offset-brutal-cream',
+          data.synthesisSelectionMode && !data.synthesisSelectable && 'opacity-40',
+          data.selectedForSynthesis && 'ring-4 ring-brutal-accent ring-offset-2 ring-offset-brutal-cream',
         )}
         style={{ '--team-agent-status-color': statusColor } as CSSProperties}
       >
@@ -71,6 +78,14 @@ export function ThinkingNodeCard({ data, selected }: NodeProps<ThinkingFlowNode>
         {node.fork_handoff_pending && !node.returning_at && !node.returned_at && (
           <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-black bg-brutal-info-light text-black">
             <Clock3 className="h-3 w-3" />
+          </span>
+        )}
+        {data.synthesisSelectionMode && data.synthesisSelectable && (
+          <span className={cn(
+            'absolute -left-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full border-2 border-black',
+            data.selectedForSynthesis ? 'bg-brutal-accent text-black' : 'bg-white text-transparent',
+          )}>
+            <Check className="h-3.5 w-3.5" />
           </span>
         )}
       </div>

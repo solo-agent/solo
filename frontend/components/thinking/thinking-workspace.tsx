@@ -10,7 +10,7 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { CornerUpLeft, Loader2, Plus, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CornerUpLeft, GitMerge, Loader2, Plus, RefreshCw, X } from 'lucide-react';
 import {
   ThinkingActivityContext,
   ThinkingNodeCard,
@@ -28,12 +28,18 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useTeamAgentActivity } from '@/lib/hooks/use-team-agent-activity';
 import { agentRunShowsHalo } from '@/lib/agent-activity';
 import { t } from '@/lib/i18n';
 import { motionDuration } from '@/lib/motion';
-import type { ThinkingNode, ThinkingSpace } from '@/lib/types';
+import type {
+  CreateThinkingSynthesisInput,
+  ThinkingNode,
+  ThinkingSpace,
+  ThinkingSynthesis,
+} from '@/lib/types';
 
 const nodeTypes = { thinkingNode: ThinkingNodeCard };
 const NODE_WIDTH = 156;
@@ -53,6 +59,8 @@ function outwardActivityPlacement(angle: number, isRoot: boolean): ActivityCardP
 function layoutSpace(
   space: ThinkingSpace,
   selectedNodeId: string | null,
+  synthesisSelectionMode: boolean,
+  selectedSynthesisNodeIds: ReadonlySet<string>,
 ) {
   const children = new Map<string, ThinkingNode[]>();
   for (const node of space.nodes) {
@@ -128,6 +136,9 @@ function layoutSpace(
       data: {
         node,
         activityPlacement: outwardActivityPlacement(angle, !node.parent_id),
+        synthesisSelectionMode,
+        selectedForSynthesis: selectedSynthesisNodeIds.has(node.id),
+        synthesisSelectable: Boolean(node.returned_handoff || node.checkpoint_handoff),
       },
       position: node.parent_id
         ? { x: Math.cos(angle) * radius - NODE_WIDTH / 2, y: Math.sin(angle) * radius - NODE_HEIGHT / 2 }
@@ -154,6 +165,7 @@ interface ThinkingWorkspaceProps {
   onCreateChild: (parentId: string, title: string) => Promise<ThinkingNode>;
   onRetryForkHandoff: (nodeId: string) => Promise<ThinkingNode>;
   onReturnNode: (nodeId: string) => Promise<ThinkingNode>;
+  onCreateSynthesis: (input: CreateThinkingSynthesisInput) => Promise<ThinkingSynthesis>;
 }
 
 export function ThinkingWorkspace({
@@ -165,18 +177,28 @@ export function ThinkingWorkspace({
   onCreateChild,
   onRetryForkHandoff,
   onReturnNode,
+  onCreateSynthesis,
 }: ThinkingWorkspaceProps) {
   const [showSplit, setShowSplit] = useState(false);
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [flow, setFlow] = useState<ReactFlowInstance | null>(null);
+  const [flow, setFlow] = useState<ReactFlowInstance<ThinkingFlowNode, Edge> | null>(null);
+  const [synthesisSelectionMode, setSynthesisSelectionMode] = useState(false);
+  const [selectedSynthesisNodeIds, setSelectedSynthesisNodeIds] = useState<Set<string>>(() => new Set());
+  const [showSynthesis, setShowSynthesis] = useState(false);
+  const [synthesisTitle, setSynthesisTitle] = useState('');
+  const [synthesisObjective, setSynthesisObjective] = useState('');
+  const [hardConstraints, setHardConstraints] = useState('');
+  const [notice, setNotice] = useState<string | null>(null);
   const { liveByThinkingNode } = useTeamAgentActivity();
   const previousNodeIdsRef = useRef<Set<string>>(new Set());
   const lastFocusKeyRef = useRef('');
   const graph = useMemo(
-    () => space ? layoutSpace(space, selectedNodeId) : { nodes: [], edges: [] },
-    [selectedNodeId, space],
+    () => space
+      ? layoutSpace(space, selectedNodeId, synthesisSelectionMode, selectedSynthesisNodeIds)
+      : { nodes: [], edges: [] },
+    [selectedNodeId, selectedSynthesisNodeIds, space, synthesisSelectionMode],
   );
   const selectedNode = space?.nodes.find((node) => node.id === selectedNodeId) ?? null;
   const selectedNodeRunActive = agentRunShowsHalo(liveByThinkingNode.get(selectedNodeId ?? '')?.currentRun?.status);
@@ -202,6 +224,13 @@ export function ThinkingWorkspace({
         ? t('thinkingReturnChildrenFirst')
         : t('thinkingReturnHint');
   const topologyKey = graph.nodes.map((node) => `${node.id}:${node.data.node.parent_id ?? ''}`).join('|');
+  const selectedSynthesisNodes = useMemo(
+    () => space?.nodes.filter((node) => selectedSynthesisNodeIds.has(node.id)) ?? [],
+    [selectedSynthesisNodeIds, space?.nodes],
+  );
+  const hasStaleSynthesisSources = selectedSynthesisNodes.some(
+    (node) => !node.returned_handoff && node.checkpoint_status === 'stale',
+  );
 
   useEffect(() => {
     if (!flow || graph.nodes.length === 0) return;
@@ -253,6 +282,74 @@ export function ThinkingWorkspace({
     setTitle('');
     setActionError(null);
   }, [selectedNodeId]);
+
+  useEffect(() => {
+    if (!space) return;
+    const availableIds = new Set(space.nodes.map((node) => node.id));
+    setSelectedSynthesisNodeIds((current) => {
+      const next = new Set([...current].filter((id) => availableIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [space]);
+
+  const exitSynthesisSelection = () => {
+    setSynthesisSelectionMode(false);
+    setSelectedSynthesisNodeIds(new Set());
+    setShowSynthesis(false);
+    setSynthesisTitle('');
+    setSynthesisObjective('');
+    setHardConstraints('');
+    setActionError(null);
+  };
+
+  const toggleSynthesisNode = (node: ThinkingNode) => {
+    if (!node.returned_handoff && !node.checkpoint_handoff) {
+      setActionError(t('thinkingSynthesisSourceMissing'));
+      return;
+    }
+    if (!selectedSynthesisNodeIds.has(node.id) && selectedSynthesisNodeIds.size >= 8) {
+      setActionError(t('thinkingSynthesisSourceLimit'));
+      return;
+    }
+    setActionError(null);
+    setSelectedSynthesisNodeIds((current) => {
+      const next = new Set(current);
+      if (next.has(node.id)) {
+        next.delete(node.id);
+      } else {
+        next.add(node.id);
+      }
+      return next;
+    });
+  };
+
+  const createSynthesisDraft = async () => {
+    if (busy || selectedSynthesisNodeIds.size < 2 || !synthesisObjective.trim()) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      const lines = hardConstraints.split('\n').map((line) => line.trim()).filter(Boolean);
+      const synthesis = await onCreateSynthesis({
+        title: synthesisTitle.trim() || undefined,
+        objective: synthesisObjective.trim(),
+        node_ids: [...selectedSynthesisNodeIds],
+        constraints: {
+          must_preserve: [],
+          must_exclude: [],
+          hard_constraints: lines,
+          preferences: [],
+          open_questions: [],
+        },
+        mode: 'single_agent',
+      });
+      setNotice(t('thinkingSynthesisCreated', { name: synthesis.title }));
+      exitSynthesisSelection();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : t('thinkingSynthesisCreateError'));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const createBranch = async () => {
     if (!selectedNode || !title.trim() || busy) return;
@@ -312,9 +409,53 @@ export function ThinkingWorkspace({
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <p className="font-mono text-[9px] font-bold uppercase tracking-widest text-muted-foreground">{t('thinkingCurrentBranch')}</p>
-            <p className="truncate font-heading text-sm font-black">{selectedNode?.title ?? t('thinkingMode')}</p>
+            <p className="truncate font-heading text-sm font-black">
+              {synthesisSelectionMode
+                ? t('thinkingSynthesisSelectedCount', { n: selectedSynthesisNodeIds.size })
+                : selectedNode?.title ?? t('thinkingMode')}
+            </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {synthesisSelectionMode ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="bg-white"
+                  onClick={exitSynthesisSelection}
+                  disabled={busy}
+                >
+                  <X className="h-3.5 w-3.5" /> {t('cancel')}
+                </Button>
+                <Button
+                  type="button"
+                  variant="success"
+                  size="sm"
+                  onClick={() => setShowSynthesis(true)}
+                  disabled={selectedSynthesisNodeIds.size < 2 || busy}
+                >
+                  <GitMerge className="h-3.5 w-3.5" /> {t('thinkingSynthesisCreateDraft')}
+                </Button>
+              </>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="bg-white"
+                onClick={() => {
+                  setNotice(null);
+                  setActionError(null);
+                  setSynthesisSelectionMode(true);
+                }}
+                disabled={busy}
+              >
+                <GitMerge className="h-3.5 w-3.5" /> {t('thinkingSynthesisCombine')}
+              </Button>
+            )}
+            {!synthesisSelectionMode && (
+              <>
             {selectedNode?.fork_handoff_pending && (
               <Button
                 type="button"
@@ -352,18 +493,32 @@ export function ThinkingWorkspace({
               {selectedNode?.returning_at ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CornerUpLeft className="h-3.5 w-3.5" />}
               {selectedNode?.returning_at ? t('thinkingReturning') : selectedNode?.returned_at ? t('thinkingReturned') : t('thinkingReturn')}
             </Button>
+              </>
+            )}
           </div>
         </div>
+        {notice && <p className="mt-2 font-mono text-[10px] font-bold text-brutal-success">{notice}</p>}
+        {synthesisSelectionMode && hasStaleSynthesisSources && (
+          <p className="mt-2 flex items-center gap-1 font-mono text-[10px] font-bold text-black">
+            <AlertTriangle className="h-3 w-3" /> {t('thinkingSynthesisStaleWarning')}
+          </p>
+        )}
         {(error || actionError) && <p className="mt-2 font-mono text-[10px] text-brutal-danger">{actionError || error}</p>}
       </div>
       <div className={cn('min-h-0 flex-1 bg-brutal-cream', busy && 'cursor-progress')}>
         <ThinkingActivityContext.Provider value={liveByThinkingNode}>
-          <ReactFlow
+          <ReactFlow<ThinkingFlowNode>
             className="thinking-flow"
             nodes={graph.nodes}
             edges={graph.edges}
             nodeTypes={nodeTypes}
-            onNodeClick={(_, node) => onSelect(node.id)}
+            onNodeClick={(_, node) => {
+              if (synthesisSelectionMode) {
+                toggleSynthesisNode(node.data.node);
+              } else {
+                onSelect(node.id);
+              }
+            }}
             nodesDraggable={false}
             nodesConnectable={false}
             elementsSelectable
@@ -405,6 +560,74 @@ export function ThinkingWorkspace({
             <Button type="button" variant="outline" onClick={() => setShowSplit(false)} disabled={busy}>{t('cancel')}</Button>
             <Button type="submit" variant="success" disabled={!title.trim() || busy}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : t('create')}
+            </Button>
+          </DialogFooter>
+        </form>
+      </Dialog>
+      <Dialog open={showSynthesis} onOpenChange={(open) => { if (!busy) setShowSynthesis(open); }} width="lg">
+        <DialogHeader>
+          <DialogTitle>{t('thinkingSynthesisDialogTitle')}</DialogTitle>
+          <DialogCloseButton onClick={() => setShowSynthesis(false)} />
+        </DialogHeader>
+        <DialogDescription>{t('thinkingSynthesisDialogDescription')}</DialogDescription>
+        <form className="mt-5 space-y-4" onSubmit={(event) => { event.preventDefault(); void createSynthesisDraft(); }}>
+          <div className="border-2 border-black bg-brutal-muted p-3">
+            <p className="font-mono text-[10px] font-bold uppercase tracking-widest">{t('thinkingSynthesisSources')}</p>
+            <ul className="mt-2 space-y-1 font-body text-sm">
+              {selectedSynthesisNodes.map((node) => (
+                <li key={node.id} className="flex items-center justify-between gap-3">
+                  <span className="truncate">{node.title}</span>
+                  <span className="shrink-0 font-mono text-[9px] font-bold uppercase">
+                    {node.returned_handoff ? t('thinkingCurrentStateFinal') : node.checkpoint_status === 'stale' ? t('thinkingCurrentStateStale') : t('thinkingCurrentStateFresh')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="thinking-synthesis-title">{t('thinkingSynthesisTitleLabel')}</Label>
+            <Input
+              id="thinking-synthesis-title"
+              value={synthesisTitle}
+              onChange={(event) => setSynthesisTitle(event.target.value)}
+              maxLength={150}
+              placeholder={t('thinkingSynthesisTitlePlaceholder')}
+              disabled={busy}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="thinking-synthesis-objective">{t('thinkingSynthesisObjectiveLabel')}</Label>
+            <Textarea
+              id="thinking-synthesis-objective"
+              autoFocus
+              value={synthesisObjective}
+              onChange={(event) => setSynthesisObjective(event.target.value)}
+              maxLength={4000}
+              placeholder={t('thinkingSynthesisObjectivePlaceholder')}
+              disabled={busy}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="thinking-synthesis-constraints">{t('thinkingSynthesisConstraintsLabel')}</Label>
+            <Textarea
+              id="thinking-synthesis-constraints"
+              value={hardConstraints}
+              onChange={(event) => setHardConstraints(event.target.value)}
+              placeholder={t('thinkingSynthesisConstraintsPlaceholder')}
+              disabled={busy}
+            />
+            <p className="font-mono text-[9px] text-muted-foreground">{t('thinkingSynthesisConstraintsHint')}</p>
+          </div>
+          {hasStaleSynthesisSources && (
+            <p className="flex items-center gap-1 border-2 border-black bg-brutal-warning-light p-2 font-mono text-[10px] font-bold">
+              <AlertTriangle className="h-3.5 w-3.5" /> {t('thinkingSynthesisStaleWarning')}
+            </p>
+          )}
+          {actionError && <p className="font-mono text-xs text-brutal-danger" role="alert">{actionError}</p>}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setShowSynthesis(false)} disabled={busy}>{t('cancel')}</Button>
+            <Button type="submit" variant="success" disabled={!synthesisObjective.trim() || selectedSynthesisNodeIds.size < 2 || busy}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : t('thinkingSynthesisCreateDraft')}
             </Button>
           </DialogFooter>
         </form>

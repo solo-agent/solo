@@ -98,6 +98,62 @@ export interface ThinkingSpace {
   updated_at: string;
 }
 
+export interface ThinkingSynthesisConstraints {
+  must_preserve: string[];
+  must_exclude: string[];
+  hard_constraints: string[];
+  preferences: string[];
+  open_questions: string[];
+}
+
+export interface ThinkingSynthesisPathNode {
+  id: string;
+  title: string;
+  depth: number;
+}
+
+export interface ThinkingSynthesisSource {
+  node_id: string;
+  node_title: string;
+  handoff_kind: 'checkpoint' | 'returned';
+  handoff_snapshot: string;
+  handoff_at: string;
+  checkpoint_status_snapshot: 'fresh' | 'stale' | 'final';
+  path_snapshot: ThinkingSynthesisPathNode[];
+  user_note?: string;
+  sort_order: number;
+}
+
+export interface ThinkingSynthesis {
+  id: string;
+  space_id: string;
+  channel_id: string;
+  created_by: string;
+  title: string;
+  objective: string;
+  constraints: ThinkingSynthesisConstraints;
+  mode: 'single_agent' | 'review_team';
+  coordinator_agent_id?: string;
+  coordinator_name?: string;
+  status: 'draft' | 'ready' | 'running' | 'reviewing' | 'completed' | 'failed' | 'cancelled';
+  result_artifact_id?: string;
+  result_node_id?: string;
+  error?: string;
+  has_stale_sources: boolean;
+  sources: ThinkingSynthesisSource[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateThinkingSynthesisInput {
+  title?: string;
+  objective: string;
+  node_ids: string[];
+  constraints: ThinkingSynthesisConstraints;
+  mode?: 'single_agent' | 'review_team';
+  coordinator_agent_id?: string;
+}
+
 export interface CreateChannelInput {
   name: string;
   description?: string;

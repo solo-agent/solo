@@ -230,6 +230,9 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 				r.Route("/thinking", func(r chi.Router) {
 					r.Get("/", thinkingHandler.Get)
 					r.Post("/", thinkingHandler.Ensure)
+					r.Get("/syntheses", thinkingHandler.ListSyntheses)
+					r.Post("/syntheses", thinkingHandler.CreateSynthesis)
+					r.Get("/syntheses/{synthesisID}", thinkingHandler.GetSynthesis)
 					r.Post("/nodes/{nodeID}/children", thinkingHandler.CreateChild)
 					r.Post("/nodes/{nodeID}/handoff/retry", thinkingHandler.RetryForkHandoff)
 					r.Post("/nodes/{nodeID}/handoff/refresh", thinkingHandler.RefreshCheckpoint)

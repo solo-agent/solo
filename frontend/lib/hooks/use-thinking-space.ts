@@ -4,7 +4,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
 import { t } from '@/lib/i18n';
-import type { ThinkingNode, ThinkingSpace } from '@/lib/types';
+import type {
+  CreateThinkingSynthesisInput,
+  ThinkingNode,
+  ThinkingSpace,
+  ThinkingSynthesis,
+} from '@/lib/types';
 
 export function useThinkingSpace(
   channelId: string,
@@ -127,6 +132,19 @@ export function useThinkingSpace(
     }
   }, [channelId, setRefreshingNode]);
 
+  const createSynthesis = useCallback(async (input: CreateThinkingSynthesisInput) => {
+    return apiClient.post<ThinkingSynthesis>(
+      `/api/v1/channels/${channelId}/thinking/syntheses`,
+      input,
+    );
+  }, [channelId]);
+
+  const listSyntheses = useCallback(async () => {
+    return apiClient.get<ThinkingSynthesis[]>(
+      `/api/v1/channels/${channelId}/thinking/syntheses`,
+    );
+  }, [channelId]);
+
   return {
     space,
     selectedNodeId,
@@ -139,5 +157,7 @@ export function useThinkingSpace(
     refreshCheckpoint,
     refreshingNodeId,
     returnNode,
+    createSynthesis,
+    listSyntheses,
   } as const;
 }

@@ -64,6 +64,20 @@ interface ThinkingSpace {
   nodes: ThinkingNode[];
 }
 
+interface ThinkingSynthesis {
+  id: string;
+  title: string;
+  objective: string;
+  status: 'draft' | 'ready' | 'running' | 'reviewing' | 'completed' | 'failed' | 'cancelled';
+  constraints: { hard_constraints: string[] };
+  sources: Array<{
+    node_id: string;
+    handoff_snapshot: string;
+    checkpoint_status_snapshot: 'fresh' | 'stale' | 'final';
+    path_snapshot: Array<{ id: string; title: string; depth: number }>;
+  }>;
+}
+
 interface MessageList {
   messages: Array<{ id: string; content: string; content_type?: string; thinking_node_id?: string; sender_type: string; sender_id: string }>;
 }
@@ -77,13 +91,17 @@ interface AgentRun {
   channel_id?: string;
 }
 
-async function authenticate(request: APIRequestContext): Promise<AuthResponse> {
-  const credentials = { email: 'thinking-e2e@solo.local', password };
+async function authenticate(
+  request: APIRequestContext,
+  email = 'thinking-e2e@solo.local',
+  displayName = 'Thinking E2E',
+): Promise<AuthResponse> {
+  const credentials = { email, password };
   const login = await request.post(`${apiBase}/api/v1/auth/login`, { data: credentials });
   if (login.ok()) return login.json();
 
   const register = await request.post(`${apiBase}/api/v1/auth/register`, {
-    data: { ...credentials, display_name: 'Thinking E2E' },
+    data: { ...credentials, display_name: displayName },
   });
   if (!register.ok()) throw new Error(`E2E authentication failed: ${register.status()} ${await register.text()}`);
   return register.json();
@@ -336,6 +354,7 @@ async function sendAutoSplitAndWait(
 
 test('Thinking mode uses real local Agent sessions end to end', async ({ page, request }) => {
   const auth = await authenticate(request);
+  const outsiderAuth = await authenticate(request, 'thinking-outsider@solo.local', 'Thinking E2E Outsider');
   const suffix = Date.now().toString(36);
   const channelName = `thinking-e2e-${suffix}`;
   const manualTitle = `Manual-${suffix}`;
@@ -350,6 +369,9 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
   const autoAck = `AUTO_ACK_${suffix}`;
   const siblingAck = `SIBLING_SEEN_${autoAck}`;
   const returnedAck = `RETURNED_SEEN_${childAck}`;
+  const synthesisTitle = `Convergence-${suffix}`;
+  const synthesisObjective = `Combine FE-${suffix} and ${manualTitle} into one delivery decision.`;
+  const synthesisConstraint = `Preserve ${childAck} as a hard boundary.`;
   const normalAck = `NORMAL_AGENT_ACK_${suffix}`;
   const threadAck = `THREAD_AGENT_ACK_${suffix}`;
   const agents: Entity[] = [];
@@ -681,6 +703,87 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
     await expect(flowNode(page, manualTitle)).toBeVisible();
     await expect(flowNode(page, autoTitle)).toBeVisible();
     await expect(page.getByLabel('Message list').getByText(returnedAck, { exact: true })).toBeVisible();
+
+    // A convergence draft freezes selected branch evidence and boundary
+    // conditions without waking an Agent. The selected conversation branch
+    // remains unchanged while the graph is in multi-select mode.
+    const runsBeforeSynthesis = databaseJSON<{ count: number }>(`
+      SELECT json_build_object('count', COUNT(*))::text
+        FROM agent_runs WHERE channel_id = '${channel.id}'
+    `).count;
+    const selectedBranchURL = page.url();
+    await page.getByRole('button', { name: 'Combine', exact: true }).click();
+    await page.getByTestId(`rf__node-${feNode!.id}`).click();
+    await page.getByTestId(`rf__node-${manualNode.id}`).click();
+    await expect(page.getByTestId(`rf__node-${feNode!.id}`).locator('[data-synthesis-selected="true"]')).toBeVisible();
+    await expect(page.getByTestId(`rf__node-${manualNode.id}`).locator('[data-synthesis-selected="true"]')).toBeVisible();
+    await expect(page).toHaveURL(selectedBranchURL);
+
+    await page.getByRole('button', { name: 'Create draft', exact: true }).click();
+    const synthesisDialog = page.getByRole('dialog', { name: 'Create convergence draft' });
+    await expect(synthesisDialog).toContainText(fe.name);
+    await expect(synthesisDialog).toContainText(manualTitle);
+    await synthesisDialog.getByLabel('Draft title').fill(synthesisTitle);
+    await synthesisDialog.getByLabel('Convergence objective').fill(synthesisObjective);
+    await synthesisDialog.getByLabel('Hard constraints').fill(synthesisConstraint);
+    await synthesisDialog.getByRole('button', { name: 'Create draft', exact: true }).click();
+    await expect(synthesisDialog).toBeHidden();
+    await expect(page.getByText(`Draft “${synthesisTitle}” created. No Agent run has started.`, { exact: true })).toBeVisible();
+
+    let syntheses = await api<ThinkingSynthesis[]>(request, auth.access_token, 'get',
+      `/api/v1/channels/${channel.id}/thinking/syntheses`);
+    expect(syntheses).toHaveLength(1);
+    const synthesis = syntheses[0];
+    expect(synthesis).toMatchObject({
+      title: synthesisTitle,
+      objective: synthesisObjective,
+      status: 'draft',
+      constraints: { hard_constraints: [synthesisConstraint] },
+    });
+    expect(new Set(synthesis.sources.map((source) => source.node_id)))
+      .toEqual(new Set([feNode!.id, manualNode.id]));
+    expect(synthesis.sources.find((source) => source.node_id === feNode!.id)?.handoff_snapshot).toContain(autoAck);
+    expect(synthesis.sources.find((source) => source.node_id === manualNode.id)?.handoff_snapshot).toContain(childAck);
+    for (const source of synthesis.sources) {
+      expect(source.path_snapshot[0].id).toBe(root!.id);
+      expect(source.path_snapshot.at(-1)?.id).toBe(source.node_id);
+    }
+
+    const persistedSynthesis = databaseJSON<{
+      synthesis_count: number;
+      source_count: number;
+      objective: string;
+      hard_constraint: string;
+      status: string;
+      run_count: number;
+    }>(`
+      SELECT json_build_object(
+        'synthesis_count', (SELECT COUNT(*) FROM thinking_syntheses WHERE space_id = '${space.id}'),
+        'source_count', (SELECT COUNT(*) FROM thinking_synthesis_sources WHERE synthesis_id = '${synthesis.id}'),
+        'objective', (SELECT objective FROM thinking_syntheses WHERE id = '${synthesis.id}'),
+        'hard_constraint', (SELECT constraints->'hard_constraints'->>0 FROM thinking_syntheses WHERE id = '${synthesis.id}'),
+        'status', (SELECT status FROM thinking_syntheses WHERE id = '${synthesis.id}'),
+        'run_count', (SELECT COUNT(*) FROM agent_runs WHERE channel_id = '${channel.id}')
+      )::text
+    `);
+    expect(persistedSynthesis).toMatchObject({
+      synthesis_count: 1,
+      source_count: 2,
+      objective: synthesisObjective,
+      hard_constraint: synthesisConstraint,
+      status: 'draft',
+      run_count: runsBeforeSynthesis,
+    });
+    const outsiderRead = await request.get(
+      `${apiBase}/api/v1/channels/${channel.id}/thinking/syntheses/${synthesis.id}`,
+      { headers: { authorization: `Bearer ${outsiderAuth.access_token}` } },
+    );
+    expect(outsiderRead.status()).toBe(404);
+
+    await page.reload();
+    syntheses = await api<ThinkingSynthesis[]>(request, auth.access_token, 'get',
+      `/api/v1/channels/${channel.id}/thinking/syntheses`);
+    expect(syntheses.map((item) => item.id)).toContain(synthesis.id);
 
     await page.getByRole('button', { name: 'Teams', exact: true }).click();
     await expect(page).not.toHaveURL(/view=thinking/);

@@ -1268,6 +1268,7 @@ export function ChannelView({
             onCreateChild={thinking.createChild}
             onRetryForkHandoff={thinking.retryForkHandoff}
             onReturnNode={thinking.returnNode}
+            onCreateSynthesis={thinking.createSynthesis}
           />
         )}
         </div>

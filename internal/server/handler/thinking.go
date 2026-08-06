@@ -16,14 +16,19 @@ import (
 )
 
 type ThinkingHandler struct {
-	pool     *pgxpool.Pool
-	svc      *service.ThinkingService
-	agentSvc *service.AgentService
-	hub      *ws.Hub
+	pool         *pgxpool.Pool
+	svc          *service.ThinkingService
+	synthesisSvc *service.ThinkingSynthesisService
+	agentSvc     *service.AgentService
+	hub          *ws.Hub
 }
 
 func NewThinkingHandler(pool *pgxpool.Pool, hub *ws.Hub, agentSvc *service.AgentService) *ThinkingHandler {
-	return &ThinkingHandler{pool: pool, svc: service.NewThinkingService(pool), agentSvc: agentSvc, hub: hub}
+	return &ThinkingHandler{
+		pool: pool, svc: service.NewThinkingService(pool),
+		synthesisSvc: service.NewThinkingSynthesisService(pool),
+		agentSvc:     agentSvc, hub: hub,
+	}
 }
 
 func (h *ThinkingHandler) requireMember(w http.ResponseWriter, r *http.Request) (string, string, bool) {
