@@ -1,6 +1,6 @@
 // ============================================================================
 // useCliDetection — fetches CLI availability from /api/v1/agent-backends/detect
-// Used to show which provider CLIs are installed on the server
+// Used to show which provider CLIs are installed on the runtime computer
 // v1.4: returns Record<string, AgentBackendDetectItem> keyed by type
 // ============================================================================
 
@@ -69,6 +69,7 @@ export function useCliDetection(): CliDetectionState {
         setError(
           err instanceof Error ? err.message : `${t('cliDetectionError')}`,
         );
+        setIsLoaded(true);
       })
       .finally(() => {
         if (mountedRef.current) setIsLoading(false);

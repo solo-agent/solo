@@ -411,6 +411,44 @@ func (dm *DaemonManager) SendTask(ctx context.Context, daemon *DaemonInfo, req i
 	return result.Bytes(), nil
 }
 
+// ProxyBackendDetect asks the single online daemon to inspect its own machine.
+// Multi-computer selection belongs in the public API once the UI can choose a computer.
+func (dm *DaemonManager) ProxyBackendDetect(ctx context.Context) ([]byte, error) {
+	var selected *DaemonInfo
+	for _, daemon := range dm.ListDaemons() {
+		if daemon.Status != DaemonStatusOnline {
+			continue
+		}
+		if selected != nil {
+			return nil, fmt.Errorf("multiple online daemons; computer selection is required")
+		}
+		selected = daemon
+	}
+	if selected == nil {
+		return nil, fmt.Errorf("no online daemon")
+	}
+
+	url := fmt.Sprintf("http://%s:%d/internal/daemon/backends/detect", selected.Host, selected.Port)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create backend detection request: %w", err)
+	}
+	resp, err := dm.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("detect backends on daemon: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("read backend detection response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("daemon returned status %d: %s", resp.StatusCode, body)
+	}
+	return body, nil
+}
+
 // CleanupThinkingSessions broadcasts node process cleanup to every online
 // daemon. Runtime affinity is not durable, so the operation is intentionally
 // idempotent and fan-out based.

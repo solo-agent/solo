@@ -142,7 +142,11 @@ export function AgentForm({
   const selectedProvider = watch('model_provider') || '';
 
   // v1.4: dynamic CLI detection + backend metadata
-  const { results: detection, isLoading: detectionLoading } = useCliDetection();
+  const {
+    results: detection,
+    isLoading: detectionLoading,
+    error: detectionError,
+  } = useCliDetection();
   const { metas: backendMeta } = useBackendMeta();
 
   // Role template selection state (SOLO-210-F)
@@ -260,9 +264,14 @@ export function AgentForm({
         {detectionLoading && (
           <Skeleton className="h-10 w-full rounded-none" />
         )}
+        {detectionError && (
+          <p className="font-mono text-[11px] text-brutal-danger">
+            {t('cliCheckFailed')}
+          </p>
+        )}
 
         {/* Runtime dropdown — only show available runtimes */}
-        {!detectionLoading && (
+        {!detectionLoading && !detectionError && (
           <Controller
             name="model_provider"
             control={control}

@@ -101,27 +101,25 @@ func InferActivityText(chunk OutputChunk) string {
 // function normalises that.
 // ============================================================================
 
-// Protocol-family classification, keyed by the backend type string
-// registered in builtin.go. Used as the dispatch for per-family
-// normalisations.
+// Protocol-family classification used as the dispatch for per-family
+// normalisations. BackendRegistry is the single source of protocol metadata.
 const (
-	familyStreamJSON = "stream-json" // claude, local, opencode, cursor, gemini, openclaw
-	familyJSONL      = "jsonl"       // copilot, pi
-	familyACP        = "acp"         // kimi, kiro, hermes
-	familyOther      = "other"       // codex (already emits canonical OutputChunk) + unknown
+	familyStreamJSON = "stream-json"
+	familyJSONL      = "jsonl" // copilot, pi
+	familyACP        = "acp"
+	familyOther      = "other" // codex already emits canonical OutputChunk
 )
 
 func backendFamily(provider string) string {
-	switch provider {
-	case "claude", "local", "opencode", "cursor", "gemini", "openclaw":
-		return familyStreamJSON
-	case "copilot", "pi":
-		return familyJSONL
-	case "kimi", "kiro", "hermes":
-		return familyACP
-	default:
+	meta, ok := GlobalRegistry().Meta(provider)
+	if !ok || len(meta.Protocols) == 0 {
 		return familyOther
 	}
+	switch meta.Protocols[0] {
+	case familyStreamJSON, familyJSONL, familyACP:
+		return meta.Protocols[0]
+	}
+	return familyOther
 }
 
 // NormalizeToolName canonicalises a raw tool name from a backend so the

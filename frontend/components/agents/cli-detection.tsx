@@ -1,5 +1,5 @@
 // ============================================================================
-// CliDetection — shows which provider CLIs are installed on the server
+// CliDetection — shows which provider CLIs are installed on the runtime computer
 // Green dot = available, gray dot = not installed (with install hint)
 // ============================================================================
 

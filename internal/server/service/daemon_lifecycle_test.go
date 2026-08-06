@@ -2,11 +2,25 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+func TestProxyBackendDetectRequiresOneOnlineDaemon(t *testing.T) {
+	dm := NewDaemonManager(nil, nil)
+	if _, err := dm.ProxyBackendDetect(context.Background()); err == nil || !strings.Contains(err.Error(), "no online daemon") {
+		t.Fatalf("no-daemon error = %v", err)
+	}
+
+	dm.Register(&DaemonInfo{ID: "daemon-a", Status: DaemonStatusOnline})
+	dm.Register(&DaemonInfo{ID: "daemon-b", Status: DaemonStatusOnline})
+	if _, err := dm.ProxyBackendDetect(context.Background()); err == nil || !strings.Contains(err.Error(), "multiple online daemons") {
+		t.Fatalf("multi-daemon error = %v", err)
+	}
+}
 
 func TestPendingTaskTimeoutsUseCurrentLifecyclePhase(t *testing.T) {
 	now := time.Now().UTC()
