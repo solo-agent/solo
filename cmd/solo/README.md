@@ -54,10 +54,13 @@ Lifecycle status changes no longer use `task update`. Use `claim`, `unclaim`, `s
 
 ```bash
 solo task create -c <channel_id> --title <title> \
-  [--description <desc>] [--priority <p0|p1|p2|p3>] [--parent <task_number>]
+  [--description <desc>] [--priority <p0|p1|p2|p3>] [--parent <task_number>] \
+  [--assignee <agent_id_or_name>]
 ```
 
 When `--parent` is provided, the CLI resolves the parent task's UUID by listing channel tasks and matching the `task_number`. If the parent is not found, the command exits with code 1.
+
+When `--assignee` is provided, the task is atomically assigned to that active Channel Agent and starts in `in_progress`. An unknown or ambiguous Agent fails the whole create request.
 
 ### task unclaim -- release a claimed task
 

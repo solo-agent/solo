@@ -109,6 +109,55 @@ func TestSubmitTaskDoesNotTriggerArtifactForChildTask(t *testing.T) {
 	}
 }
 
+func TestCreateTaskWithAssigneeIsAtomicAndPreclaimed(t *testing.T) {
+	pool := taskSubmitTestPool(t)
+	ctx := context.Background()
+	creatorID := taskSubmitUser(t, pool)
+	agentID := taskSubmitAgent(t, pool, creatorID)
+	channelID := taskSubmitChannel(t, pool, creatorID)
+	taskSubmitMember(t, pool, channelID, "user", creatorID)
+	taskSubmitMember(t, pool, channelID, "agent", agentID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM tasks WHERE channel_id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_members WHERE channel_id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, creatorID)
+	})
+
+	var agentName string
+	if err := pool.QueryRow(ctx, `SELECT name FROM agents WHERE id = $1`, agentID).Scan(&agentName); err != nil {
+		t.Fatalf("load agent name: %v", err)
+	}
+	svc := NewTaskService(pool)
+	task, err := svc.CreateTask(ctx, channelID, creatorID, TaskCreateRequest{Title: "delegated", Assignee: "@" + agentName})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if task.Status != TaskStatusInProgress || task.ClaimerID != agentID || task.ClaimerName != agentName {
+		t.Fatalf("delegated task = %+v", task)
+	}
+
+	var status, claimerID string
+	if err := pool.QueryRow(ctx, `SELECT status, claimer_id::text FROM tasks WHERE id = $1`, task.ID).Scan(&status, &claimerID); err != nil {
+		t.Fatalf("load delegated task: %v", err)
+	}
+	if status != TaskStatusInProgress || claimerID != agentID {
+		t.Fatalf("persisted task = status %q claimer %q", status, claimerID)
+	}
+
+	before := 0
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM tasks WHERE channel_id = $1`, channelID).Scan(&before)
+	if _, err := svc.CreateTask(ctx, channelID, creatorID, TaskCreateRequest{Title: "must not persist", Assignee: "missing-agent"}); !errors.Is(err, ErrTaskAssigneeNotFound) {
+		t.Fatalf("missing assignee error = %v", err)
+	}
+	after := 0
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM tasks WHERE channel_id = $1`, channelID).Scan(&after)
+	if after != before {
+		t.Fatalf("missing assignee persisted a task: before %d after %d", before, after)
+	}
+}
+
 func taskSubmitTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("DATABASE_URL")

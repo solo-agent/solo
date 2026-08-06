@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +24,7 @@ import (
 const (
 	defaultContextMessageCount     = 1 // v1.3: — deliver only the triggering message
 	defaultNodeContextMessageCount = 50
-	defaultDebounceDuration        = 2 * time.Second
+	defaultNodeDebounceDuration    = 2 * time.Second
 )
 
 const (
@@ -44,6 +46,7 @@ const (
 	agentActivityTimeout        = "agent.activity.timeout"
 	agentActivityFailed         = "agent.activity.failed"
 	agentActivityDaemonLost     = "agent.activity.daemon_lost"
+	agentActivityResultReminder = "agent.activity.result_reminder"
 
 	agentErrorNoAvailableDaemon    = "agent.error.no_available_daemon"
 	agentErrorMissingVisibleResult = "agent.error.missing_visible_result"
@@ -55,6 +58,7 @@ const (
 	agentFailureDaemonLost            = "daemon_lost"
 	agentFailureTimeout               = "timeout"
 	agentFailureProviderTransient     = "provider_transient"
+	agentResultReminderPrompt         = "Your previous turn ended without a user-visible message. Re-check the original goal and the latest conversation state. If the goal already has a visible result, you may stop. Otherwise, send the result the user still needs with `solo message send` to the original target. Do not repeat unrelated content."
 )
 
 // maxAgentChainDepth limits the depth of agent-to-agent trigger chains
@@ -62,10 +66,15 @@ const (
 // B triggered C; C cannot trigger another agent because depth == 3.
 const maxAgentChainDepth = 3
 
-// cascadeProtection detects runaway dispatch loops per channel.
-const cascadeWindow = 10 * time.Second
-const cascadeThreshold = 20
-const cascadeCooldown = 60 * time.Second
+// Agent safety defaults mirror Zouk's per-Agent send guard and keep the
+// existing Channel cascade threshold configurable for local calibration.
+const (
+	defaultAgentSendLimit   = 20
+	defaultAgentSendWindow  = 10 * time.Second
+	defaultCascadeWindow    = 10 * time.Second
+	defaultCascadeThreshold = 20
+	defaultCascadeCooldown  = 60 * time.Second
+)
 
 type cascadeCount struct {
 	count         int
@@ -79,11 +88,20 @@ type AgentService struct {
 	dm   *DaemonManager
 	hub  realtime.Broadcaster
 
-	// debounceMap tracks the last trigger time per (channelID, agentID) pair
-	// to prevent rapid re-triggering.
-	debounceMap sync.Map
 	// cascadeMap tracks dispatch velocity per channel for loop detection.
 	cascadeMap sync.Map
+	cascadeMu  sync.Mutex
+
+	agentSendMu       sync.Mutex
+	agentSendAttempts map[string][]time.Time
+	agentSendLimit    int
+	agentSendWindow   time.Duration
+	cascadeWindow     time.Duration
+	cascadeThreshold  int
+	cascadeCooldown   time.Duration
+	// nodeDebounceMap preserves the existing Thinking-node trigger behavior;
+	// M8 only changes canonical Channel, Thread, and DM message delivery.
+	nodeDebounceMap sync.Map
 
 	// httpClient for daemon communication
 	httpClient *http.Client
@@ -99,52 +117,70 @@ type AgentService struct {
 // NewAgentService creates a new AgentService.
 func NewAgentService(pool *pgxpool.Pool, dm *DaemonManager, hub realtime.Broadcaster, mentionSvc *MentionService) *AgentService {
 	return &AgentService{
-		pool:        pool,
-		dm:          dm,
-		hub:         hub,
-		httpClient:  &http.Client{Timeout: 120 * time.Second},
-		claimWindow: NewTaskClaimWindowManager(),
-		mentionSvc:  mentionSvc,
+		pool:              pool,
+		dm:                dm,
+		hub:               hub,
+		httpClient:        &http.Client{Timeout: 120 * time.Second},
+		claimWindow:       NewTaskClaimWindowManager(),
+		mentionSvc:        mentionSvc,
+		agentSendAttempts: make(map[string][]time.Time),
+		agentSendLimit:    positiveIntEnv("AGENT_SEND_RATE_LIMIT", defaultAgentSendLimit),
+		agentSendWindow:   positiveDurationEnv("AGENT_SEND_RATE_WINDOW", defaultAgentSendWindow),
+		cascadeWindow:     positiveDurationEnv("AGENT_CASCADE_WINDOW", defaultCascadeWindow),
+		cascadeThreshold:  positiveIntEnv("AGENT_CASCADE_THRESHOLD", defaultCascadeThreshold),
+		cascadeCooldown:   positiveDurationEnv("AGENT_CASCADE_COOLDOWN", defaultCascadeCooldown),
 	}
 }
 
-// debounceKey generates a unique key for debounce tracking.
-func debounceKey(channelID, agentID string) string {
-	return channelID + ":" + agentID
-}
-
-// checkDebounce returns true if the agent was triggered within the debounce window.
-func (s *AgentService) checkDebounce(channelID, agentID string) bool {
-	key := debounceKey(channelID, agentID)
-	lastTrigger, ok := s.debounceMap.Load(key)
-	if !ok {
-		return false
+func positiveIntEnv(name string, fallback int) int {
+	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv(name)))
+	if err != nil || value <= 0 {
+		return fallback
 	}
-	return time.Since(lastTrigger.(time.Time)) < defaultDebounceDuration
+	return value
 }
 
-// updateDebounce records the last trigger time for debounce.
-func (s *AgentService) updateDebounce(channelID, agentID string) {
-	key := debounceKey(channelID, agentID)
-	s.debounceMap.Store(key, time.Now())
-}
-
-// checkThreadDebounce returns true if the agent was triggered in this thread
-// within the debounce window. Uses a thread-scoped key separate from channel-level
-// debounce so thread follow-ups are not blocked by channel-level triggers.
-func (s *AgentService) checkThreadDebounce(channelID, threadID, agentID string) bool {
-	key := channelID + ":" + threadID + ":" + agentID
-	lastTrigger, ok := s.debounceMap.Load(key)
-	if !ok {
-		return false
+func positiveDurationEnv(name string, fallback time.Duration) time.Duration {
+	value, err := time.ParseDuration(strings.TrimSpace(os.Getenv(name)))
+	if err != nil || value <= 0 {
+		return fallback
 	}
-	return time.Since(lastTrigger.(time.Time)) < defaultDebounceDuration
+	return value
 }
 
-// updateThreadDebounce records the last trigger time for thread-level debounce.
-func (s *AgentService) updateThreadDebounce(channelID, threadID, agentID string) {
-	key := channelID + ":" + threadID + ":" + agentID
-	s.debounceMap.Store(key, time.Now())
+// CheckAgentSendRate applies a process-local sliding window per Agent.
+func (s *AgentService) CheckAgentSendRate(agentID string) (bool, time.Duration) {
+	now := time.Now()
+	cutoff := now.Add(-s.agentSendWindow)
+	s.agentSendMu.Lock()
+	stamps := s.agentSendAttempts[agentID]
+	fresh := stamps[:0]
+	for _, stamp := range stamps {
+		if stamp.After(cutoff) {
+			fresh = append(fresh, stamp)
+		}
+	}
+	fresh = append(fresh, now)
+	s.agentSendAttempts[agentID] = fresh
+	allowed := len(fresh) <= s.agentSendLimit
+	retryAfter := time.Duration(0)
+	if !allowed {
+		retryAfter = time.Until(fresh[0].Add(s.agentSendWindow))
+		if retryAfter < time.Second {
+			retryAfter = time.Second
+		}
+	}
+	s.agentSendMu.Unlock()
+	return allowed, retryAfter
+}
+
+func (s *AgentService) checkNodeDebounce(channelID, nodeID, agentID string) bool {
+	lastTrigger, ok := s.nodeDebounceMap.Load(channelID + ":" + nodeID + ":" + agentID)
+	return ok && time.Since(lastTrigger.(time.Time)) < defaultNodeDebounceDuration
+}
+
+func (s *AgentService) updateNodeDebounce(channelID, nodeID, agentID string) {
+	s.nodeDebounceMap.Store(channelID+":"+nodeID+":"+agentID, time.Now())
 }
 
 // TriggerAgentResponse checks whether an Agent should respond to a new message,
@@ -158,6 +194,10 @@ func (s *AgentService) updateThreadDebounce(channelID, threadID, agentID string)
 // Called after a message is persisted and broadcast.
 func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, messageID, senderType, senderID string, mentionedAgentIDs []string, hasMentions bool, agentChain []string) {
 	if !shouldTriggerAgentForSender(senderType, mentionedAgentIDs) {
+		return
+	}
+	if senderType == "agent" && !s.allowAgentCascade(channelID) {
+		slog.Warn("agent cascade suppressed", "channel_id", channelID, "sender_id", senderID)
 		return
 	}
 	// If the message was sent by an agent, only proceed if it @mentions other agents.
@@ -191,8 +231,9 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 		return
 	}
 
-	// Get last N messages for context
-	contextMessages, err := s.getRecentMessages(ctx, channelID, defaultContextMessageCount)
+	// Anchor this Run to its persisted trigger. A newer message may already
+	// exist by the time this goroutine reaches the database.
+	contextMessages, err := s.getTriggerMessage(ctx, channelID, messageID)
 	if err != nil {
 		slog.Error("failed to get context messages", "channel_id", channelID, "error", err)
 		return
@@ -201,17 +242,9 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 	// Query for open tasks in the channel to provide task context to agents
 	taskContext := s.getChannelOpenTasksSummary(ctx, channelID)
 
-	// For each target agent, check debounce and dispatch via streaming
+	// Each persisted message gets its own Run. Duplicate client sends are
+	// coalesced before persistence by the reliable-send layer.
 	for _, ag := range targetAgents {
-		// Skip if agent was triggered recently
-		if s.checkDebounce(channelID, ag.ID) {
-			slog.Debug("agent debounced", "agent_id", ag.ID, "channel_id", channelID)
-			continue
-		}
-		// Set debounce BEFORE spawning the goroutine to prevent
-		// concurrent duplicate triggers from REST and WS handlers.
-		s.updateDebounce(channelID, ag.ID)
-
 		// SOLO-228-B: Validate agent trigger chain to prevent infinite loops.
 		if agentChain != nil {
 			if len(agentChain) >= maxAgentChainDepth {
@@ -371,11 +404,10 @@ func (s *AgentService) triggerAgentResponseInNode(ctx context.Context, channelID
 	mentionedNames := s.resolveMentionedNames(ctx, mentionedAgentIDs)
 	dispatched := false
 	for _, ag := range targets {
-		debounceScope := "node:" + nodeID
-		if !handoffRun && s.checkThreadDebounce(channelID, debounceScope, ag.ID) {
+		if !handoffRun && s.checkNodeDebounce(channelID, nodeID, ag.ID) {
 			continue
 		}
-		s.updateThreadDebounce(channelID, debounceScope, ag.ID)
+		s.updateNodeDebounce(channelID, nodeID, ag.ID)
 		if len(agentChain) >= maxAgentChainDepth || containsStr(agentChain, ag.ID) {
 			continue
 		}
@@ -648,11 +680,17 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 			return
 		}
 	}
-	taskReq.TaskID = run.ID
+	if taskReq.ResultReminderAttempt {
+		if taskReq.TaskID == "" || taskReq.TaskID == run.ID {
+			taskReq.TaskID = uuid.NewString()
+		}
+	} else {
+		taskReq.TaskID = run.ID
+	}
 	taskReq.RunID = run.ID
-	s.dm.TrackTask(run.ID, daemon.ID, ag.ID)
-	s.dm.AttachTaskRun(run.ID, run.ID)
-	defer s.dm.RemoveTask(run.ID)
+	s.dm.TrackTask(taskReq.TaskID, daemon.ID, ag.ID)
+	s.dm.AttachTaskRun(taskReq.TaskID, run.ID)
+	defer s.dm.RemoveTask(taskReq.TaskID)
 	if newRun && taskReq.OriginTaskID != "" {
 		if err := runSvc.LinkTask(ctx, LinkRunTaskInput{RunID: run.ID, TaskID: taskReq.OriginTaskID, Role: AgentRunTaskRolePrimary, Confidence: 1}); err != nil {
 			slog.Warn("failed to link agent run task", "run_id", run.ID, "task_id", taskReq.OriginTaskID, "error", err)
@@ -752,6 +790,30 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 					slog.Warn("failed to verify held agent result", "run_id", run.ID, "error", heldErr)
 				}
 			}
+			if visibleErr == nil && heldErr == nil && !visible && !held && !taskReq.ResultReminderAttempt {
+				updated, updateErr := runSvc.UpdateStatus(ctx, UpdateRunStatusInput{
+					RunID: run.ID, Status: AgentRunStatusQueued, ActivityText: agentActivityResultReminder,
+				})
+				if updateErr == nil {
+					run = updated
+					s.appendAndBroadcastRunEvent(ctx, runSvc, run, ag.ID, agentName, AgentRunEventResultReminder, "retrying once for a visible result", "", map[string]any{"attempt": 1})
+					s.broadcastAgentRun(taskReq.ChannelID, "agent.run.updated", runPayload(run, ag.ID, agentName, taskReq.OriginTaskID))
+
+					reminder := agent.Message{Role: agent.RoleUser, Content: agentResultReminderPrompt, SenderID: "system"}
+					reminderReq := taskReq
+					reminderReq.TaskID = uuid.NewString()
+					reminderReq.Messages = []agent.Message{reminder}
+					reminderReq.ColdStartMessages = append(append([]agent.Message(nil), taskReq.ColdStartMessages...), reminder)
+					if len(taskReq.ColdStartMessages) == 0 {
+						reminderReq.ColdStartMessages = append(append([]agent.Message(nil), taskReq.Messages...), reminder)
+					}
+					reminderReq.InitialGreeting = ""
+					reminderReq.ResultReminderAttempt = true
+					s.runStreamingAgentTask(ctx, daemon, reminderReq, ag, run)
+					return
+				}
+				slog.Warn("failed to queue visible-result reminder", "run_id", run.ID, "error", updateErr)
+			}
 			if visibleErr != nil || heldErr != nil || (!visible && !held) {
 				status = AgentRunStatusFailed
 				failureCode = agentFailureMissingVisibleResult
@@ -804,7 +866,7 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 	// Send via SSE streaming
 	var eventCh <-chan SSEDaemonEvent
 	var err error
-	if newRun {
+	if newRun || taskReq.ResultReminderAttempt {
 		eventCh, err = s.dm.StreamTask(streamCtx, daemon, taskReq)
 	} else {
 		eventCh, err = s.dm.SubscribeTask(streamCtx, daemon, taskReq.TaskID)
@@ -837,6 +899,9 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 			return false
 		}
 		if run.BackendStartedAt != nil {
+			// A result reminder reuses the database Run but owns a new daemon
+			// task, so its queue timeout must still move into execution mode.
+			s.dm.MarkTaskBackendStarted(taskReq.TaskID, nil)
 			return true
 		}
 		updated, err := runSvc.MarkBackendStarted(ctx, run.ID)
@@ -1851,8 +1916,12 @@ func (s *AgentService) HandleTaskError(ctx context.Context, req *TaskErrorReques
 // --- Thread trigger ---
 
 // TriggerAgentResponseInThread triggers agent auto-response for a thread message.
-func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channelID, threadID, senderType, senderID string, mentionedAgentIDs []string, hasMentions bool, agentChain []string) {
+func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channelID, threadID, messageID, senderType, senderID string, mentionedAgentIDs []string, hasMentions bool, agentChain []string) {
 	if !shouldTriggerAgentForSender(senderType, mentionedAgentIDs) {
+		return
+	}
+	if senderType == "agent" && !s.allowAgentCascade(channelID) {
+		slog.Warn("agent thread cascade suppressed", "channel_id", channelID, "thread_id", threadID, "sender_id", senderID)
 		return
 	}
 
@@ -1870,6 +1939,7 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 		Scope:             wakeScopeThread,
 		ChannelID:         channelID,
 		ThreadID:          threadID,
+		TriggerMessageID:  messageID,
 		MentionedAgentIDs: mentionedAgentIDs,
 		HasMentions:       hasMentions,
 		ExcludeAgentID:    excludeAgentID,
@@ -1896,9 +1966,8 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 	}
 
 	contextMsgs := make([]agent.Message, len(threadMsgs))
-	triggerMessageID := ""
+	turnMessages := make([]agent.Message, 0, 1)
 	for i, tm := range threadMsgs {
-		triggerMessageID = tm.ID
 		role := agent.RoleUser
 		if tm.SenderType == "agent" {
 			role = agent.RoleAssistant
@@ -1927,6 +1996,12 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 			Attachments: attachments,
 			Seq:         tm.Seq,
 		}
+		if tm.ID == messageID {
+			turnMessages = append(turnMessages, contextMsgs[i])
+		}
+	}
+	if len(turnMessages) == 0 && len(contextMsgs) > 0 {
+		turnMessages = append(turnMessages, contextMsgs[len(contextMsgs)-1])
 	}
 	// Prepend a system header when the agent is @mentioned into a new thread.
 	if len(mentionedAgentIDs) > 0 {
@@ -1942,11 +2017,13 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 			"target: %s:%s\n"+
 			"read thread: solo message read --target '%s:%s'",
 			threadTargetPrefix, threadShortID, threadTargetPrefix, threadShortID)
-		contextMsgs = append([]agent.Message{{
+		systemMessage := agent.Message{
 			Role:     agent.RoleSystem,
 			Content:  systemHeader,
 			SenderID: "system",
-		}}, contextMsgs...)
+		}
+		contextMsgs = append([]agent.Message{systemMessage}, contextMsgs...)
+		turnMessages = append([]agent.Message{systemMessage}, turnMessages...)
 	}
 	// Query for open tasks in the channel to provide task context to agents
 	taskContext := s.getChannelOpenTasksSummary(ctx, channelID)
@@ -1955,14 +2032,6 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 	threadMentionedNames := s.resolveMentionedNames(ctx, mentionedAgentIDs)
 
 	for _, ag := range targetAgents {
-		// Use thread-scoped debounce so thread follow-ups are not blocked
-		// by channel-level triggers for the same agent.
-		if s.checkThreadDebounce(channelID, threadID, ag.ID) {
-			slog.Debug("agent debounced for thread", "agent_id", ag.ID, "channel_id", channelID, "thread_id", threadID)
-			continue
-		}
-		s.updateThreadDebounce(channelID, threadID, ag.ID)
-
 		// SOLO-228-B: Validate agent trigger chain to prevent infinite loops.
 		if agentChain != nil {
 			if len(agentChain) >= maxAgentChainDepth {
@@ -1985,12 +2054,13 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 		}
 
 		taskReq := daemonTaskRequest{
-			AgentID:          ag.ID,
-			ChannelID:        channelID,
-			ThreadID:         threadID,
-			TriggerMessageID: triggerMessageID,
-			Messages:         contextMsgs,
-			SystemPrompt:     ag.SystemPrompt,
+			AgentID:           ag.ID,
+			ChannelID:         channelID,
+			ThreadID:          threadID,
+			TriggerMessageID:  messageID,
+			Messages:          turnMessages,
+			ColdStartMessages: contextMsgs,
+			SystemPrompt:      ag.SystemPrompt,
 			ModelConfig: agent.ModelConfig{
 				Provider: ag.ModelProvider,
 				Model:    ag.ModelName,
@@ -1999,7 +2069,7 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 			AgentChain:     newChain,
 			MentionedNames: threadMentionedNames,
 			ResultContract: agentResultContractVisibleMessage,
-			ModelSeenSeq:   highestMessageSeq(contextMsgs),
+			ModelSeenSeq:   highestMessageSeq(turnMessages),
 		}
 
 		// Use streaming for thread as well
@@ -2375,10 +2445,18 @@ func (s *AgentService) getChannelActiveAgents(ctx context.Context, channelID str
 // v1.3: format — each message gets a structured header plus
 // "Respond as appropriate" routing instruction on the last message.
 func (s *AgentService) getRecentMessages(ctx context.Context, channelID string, limit int) ([]agent.Message, error) {
-	return s.getRecentMessagesForNode(ctx, channelID, "", limit)
+	return s.getMessagesForNode(ctx, channelID, "", "", limit)
+}
+
+func (s *AgentService) getTriggerMessage(ctx context.Context, channelID, messageID string) ([]agent.Message, error) {
+	return s.getMessagesForNode(ctx, channelID, "", messageID, defaultContextMessageCount)
 }
 
 func (s *AgentService) getRecentMessagesForNode(ctx context.Context, channelID, nodeID string, limit int) ([]agent.Message, error) {
+	return s.getMessagesForNode(ctx, channelID, nodeID, "", limit)
+}
+
+func (s *AgentService) getMessagesForNode(ctx context.Context, channelID, nodeID, messageID string, limit int) ([]agent.Message, error) {
 	// Get channel name for the target header.
 	var channelName, channelType string
 	_ = s.pool.QueryRow(ctx, `SELECT COALESCE(name, id::text), type FROM channels WHERE id = $1`, channelID).Scan(&channelName, &channelType)
@@ -2393,9 +2471,10 @@ func (s *AgentService) getRecentMessagesForNode(ctx context.Context, channelID, 
 		 FROM messages m
 			 WHERE m.channel_id = $1 AND m.thread_id IS NULL
 			   AND (($3 = '' AND m.thinking_node_id IS NULL) OR m.thinking_node_id = NULLIF($3, '')::uuid)
+			   AND ($4 = '' OR m.id = NULLIF($4, '')::uuid)
 			 ORDER BY m.created_at DESC, m.id DESC
 			 LIMIT $2`,
-		channelID, limit, nodeID,
+		channelID, limit, nodeID, messageID,
 	)
 	if err != nil {
 		return nil, err
@@ -2606,6 +2685,7 @@ type daemonTaskRequest struct {
 	InitialGreeting       string            `json:"initial_greeting,omitempty"` // greeting message to prepend as system context
 	ReturnHandoff         bool              `json:"return_handoff,omitempty"`
 	ResultContract        string            `json:"-"`
+	ResultReminderAttempt bool              `json:"-"`
 	ModelSeenSeq          int64             `json:"-"`
 }
 
@@ -2633,29 +2713,27 @@ func containsStr(s []string, v string) bool {
 // that agents output despite being told to output NOTHING. These should be
 // suppressed so they don't clutter the channel/thread.
 
-// inCascadeCooldown returns true if the channel is in cascade cooldown.
-func (s *AgentService) inCascadeCooldown(channelID string) bool {
-	v, ok := s.cascadeMap.Load(channelID)
-	if !ok {
-		return false
-	}
-	cc := v.(*cascadeCount)
-	return time.Now().Before(cc.cooldownUntil)
-}
-
-// recordCascadeDispatch records a dispatch for cascade detection.
-func (s *AgentService) recordCascadeDispatch(channelID string) {
+// allowAgentCascade returns false once one Channel's Agent-authored wakeups
+// cross the configured window. Human-authored wakeups never call this method.
+func (s *AgentService) allowAgentCascade(channelID string) bool {
 	now := time.Now()
+	s.cascadeMu.Lock()
+	defer s.cascadeMu.Unlock()
 	v, _ := s.cascadeMap.LoadOrStore(channelID, &cascadeCount{windowStart: now})
 	cc := v.(*cascadeCount)
-	if now.Sub(cc.windowStart) > cascadeWindow {
+	if now.Before(cc.cooldownUntil) {
+		return false
+	}
+	if now.Sub(cc.windowStart) > s.cascadeWindow {
 		cc.count = 0
 		cc.windowStart = now
 	}
 	cc.count++
-	if cc.count >= cascadeThreshold {
-		cc.cooldownUntil = now.Add(cascadeCooldown)
+	if cc.count >= s.cascadeThreshold {
+		cc.cooldownUntil = now.Add(s.cascadeCooldown)
 		slog.Warn("cascade detected — pausing agent triggers",
-			"channel_id", channelID, "count", cc.count, "cooldown", cascadeCooldown)
+			"channel_id", channelID, "count", cc.count, "cooldown", s.cascadeCooldown)
+		return false
 	}
+	return true
 }

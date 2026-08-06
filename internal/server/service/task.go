@@ -73,6 +73,8 @@ var (
 	ErrTaskInTerminalState   = errors.New("task is in a terminal state and cannot be claimed")
 	ErrTaskNotClaimable      = errors.New("task status does not allow claiming")
 	ErrTaskNotClaimer        = errors.New("you are not the claimer of this task")
+	ErrTaskAssigneeNotFound  = errors.New("task assignee not found in channel")
+	ErrTaskAssigneeAmbiguous = errors.New("task assignee is ambiguous")
 	ErrTaskNotCreator        = errors.New("you are not the creator of this task")
 	ErrTaskHumanOnly         = errors.New("this task action is human-only")
 	ErrTaskNotSubmittable    = errors.New("task is not ready to submit")
@@ -114,6 +116,7 @@ type TaskCreateRequest struct {
 	DueDate      *time.Time `json:"due_date,omitempty"`
 	MessageID    string     `json:"message_id,omitempty"`
 	ParentTaskID string     `json:"parent_task_id,omitempty"`
+	Assignee     string     `json:"assignee,omitempty"`
 }
 
 // TaskUpdateRequest contains the fields that can be updated on a task.
@@ -172,6 +175,17 @@ func (s *TaskService) CreateTask(ctx context.Context, channelID, creatorID strin
 		req.Priority = "none"
 	}
 
+	assigneeID, assigneeName, err := s.resolveTaskAssignee(ctx, channelID, req.Assignee)
+	if err != nil {
+		return nil, err
+	}
+	taskStatus := TaskStatusTodo
+	var claimerID interface{}
+	if assigneeID != "" {
+		taskStatus = TaskStatusInProgress
+		claimerID = assigneeID
+	}
+
 	// Validate parent_task_id if provided: must be a valid UUID pointing to an
 	// existing task in the same channel.
 	var parentTaskID interface{}
@@ -205,15 +219,15 @@ func (s *TaskService) CreateTask(ctx context.Context, channelID, creatorID strin
 	}
 
 	if req.ParentTaskID != "" {
-		if err := s.createChildTask(ctx, channelID, req.ParentTaskID, id, nextNumber, chanID, creatorID, req, msgID, parentTaskID, now); err != nil {
+		if err := s.createChildTask(ctx, channelID, req.ParentTaskID, id, nextNumber, chanID, creatorID, req, msgID, parentTaskID, taskStatus, claimerID, now); err != nil {
 			return nil, err
 		}
 	} else {
 		_, err = s.pool.Exec(ctx,
-			`INSERT INTO tasks (id, task_number, channel_id, creator_id, title, description, status, priority, due_date, message_id, parent_task_id, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+			`INSERT INTO tasks (id, task_number, channel_id, creator_id, title, description, status, claimer_id, priority, due_date, message_id, parent_task_id, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 			id, nextNumber, chanID, creatorID, req.Title, nullableStr(req.Description),
-			TaskStatusTodo, req.Priority, req.DueDate, msgID, parentTaskID, now, now,
+			taskStatus, claimerID, req.Priority, req.DueDate, msgID, parentTaskID, now, now,
 		)
 		if err != nil {
 			// If unique constraint on (channel_id, task_number) is violated, retry once.
@@ -223,10 +237,10 @@ func (s *TaskService) CreateTask(ctx context.Context, channelID, creatorID strin
 					return nil, fmt.Errorf("retry next task number: %w", err2)
 				}
 				_, err = s.pool.Exec(ctx,
-					`INSERT INTO tasks (id, task_number, channel_id, creator_id, title, description, status, priority, due_date, message_id, parent_task_id, created_at, updated_at)
-					 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+					`INSERT INTO tasks (id, task_number, channel_id, creator_id, title, description, status, claimer_id, priority, due_date, message_id, parent_task_id, created_at, updated_at)
+					 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 					id, nextNumber2, chanID, creatorID, req.Title, nullableStr(req.Description),
-					TaskStatusTodo, req.Priority, req.DueDate, msgID, parentTaskID, now, now,
+					taskStatus, claimerID, req.Priority, req.DueDate, msgID, parentTaskID, now, now,
 				)
 				if err != nil {
 					return nil, err
@@ -249,7 +263,9 @@ func (s *TaskService) CreateTask(ctx context.Context, channelID, creatorID strin
 		CreatorID:    creatorID,
 		Title:        req.Title,
 		Description:  req.Description,
-		Status:       TaskStatusTodo,
+		Status:       taskStatus,
+		ClaimerID:    assigneeID,
+		ClaimerName:  assigneeName,
 		Priority:     req.Priority,
 		DueDate:      req.DueDate,
 		MessageID:    req.MessageID,
@@ -278,7 +294,46 @@ func (s *TaskService) CreateTask(ctx context.Context, channelID, creatorID strin
 	return task, nil
 }
 
-func (s *TaskService) createChildTask(ctx context.Context, channelID, parentID, id string, taskNumber int, chanID interface{}, creatorID string, req TaskCreateRequest, msgID, parentTaskID interface{}, now time.Time) error {
+func (s *TaskService) resolveTaskAssignee(ctx context.Context, channelID, assignee string) (string, string, error) {
+	assignee = strings.TrimPrefix(strings.TrimSpace(assignee), "@")
+	if assignee == "" {
+		return "", "", nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT a.id::text, a.name
+		  FROM agents a
+		  JOIN channel_members cm ON cm.member_type = 'agent' AND cm.member_id = a.id
+		 WHERE cm.channel_id = $1
+		   AND a.is_active = true
+		   AND (a.id::text = $2 OR lower(a.name) = lower($2))
+		 LIMIT 2`, channelID, assignee)
+	if err != nil {
+		return "", "", err
+	}
+	defer rows.Close()
+
+	type match struct{ id, name string }
+	var matches []match
+	for rows.Next() {
+		var candidate match
+		if err := rows.Scan(&candidate.id, &candidate.name); err != nil {
+			return "", "", err
+		}
+		matches = append(matches, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		return "", "", err
+	}
+	if len(matches) == 0 {
+		return "", "", ErrTaskAssigneeNotFound
+	}
+	if len(matches) > 1 {
+		return "", "", ErrTaskAssigneeAmbiguous
+	}
+	return matches[0].id, matches[0].name, nil
+}
+
+func (s *TaskService) createChildTask(ctx context.Context, channelID, parentID, id string, taskNumber int, chanID interface{}, creatorID string, req TaskCreateRequest, msgID, parentTaskID interface{}, taskStatus string, claimerID interface{}, now time.Time) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -303,11 +358,11 @@ func (s *TaskService) createChildTask(ctx context.Context, channelID, parentID, 
 	}
 
 	tag, err := tx.Exec(ctx,
-		`INSERT INTO tasks (id, task_number, channel_id, creator_id, title, description, status, priority, due_date, message_id, parent_task_id, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		`INSERT INTO tasks (id, task_number, channel_id, creator_id, title, description, status, claimer_id, priority, due_date, message_id, parent_task_id, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		 ON CONFLICT ON CONSTRAINT unique_channel_task_number DO NOTHING`,
 		id, taskNumber, chanID, creatorID, req.Title, nullableStr(req.Description),
-		TaskStatusTodo, req.Priority, req.DueDate, msgID, parentTaskID, now, now,
+		taskStatus, claimerID, req.Priority, req.DueDate, msgID, parentTaskID, now, now,
 	)
 	if err != nil {
 		return err
@@ -318,10 +373,10 @@ func (s *TaskService) createChildTask(ctx context.Context, channelID, parentID, 
 			return fmt.Errorf("retry next task number: %w", err)
 		}
 		tag, err = tx.Exec(ctx,
-			`INSERT INTO tasks (id, task_number, channel_id, creator_id, title, description, status, priority, due_date, message_id, parent_task_id, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+			`INSERT INTO tasks (id, task_number, channel_id, creator_id, title, description, status, claimer_id, priority, due_date, message_id, parent_task_id, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 			id, taskNumber, chanID, creatorID, req.Title, nullableStr(req.Description),
-			TaskStatusTodo, req.Priority, req.DueDate, msgID, parentTaskID, now, now,
+			taskStatus, claimerID, req.Priority, req.DueDate, msgID, parentTaskID, now, now,
 		)
 	}
 	if err != nil {

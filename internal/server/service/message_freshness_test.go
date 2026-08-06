@@ -44,6 +44,21 @@ func TestAgentSendFreshnessHoldsAndAdvancesRunCursor(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
 	})
 
+	// A later human message owns its own queued Run. It must not redirect the
+	// current Run away from the trigger it is already processing.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO messages (id, channel_id, sender_type, sender_id, content)
+		VALUES ($1, $2, 'user', $3, 'second question')`,
+		uuid.NewString(), channelID, ownerID,
+	); err != nil {
+		t.Fatalf("insert later user message: %v", err)
+	}
+	if hold := checkFreshnessInTransaction(t, pool, AgentSendFreshnessInput{
+		RunID: runB.ID, AgentID: agentB, ChannelID: channelID,
+	}); hold != nil {
+		t.Fatalf("later user message held current run: %+v", hold)
+	}
+
 	messageA := uuid.NewString()
 	tx, err := pool.Begin(ctx)
 	if err != nil {

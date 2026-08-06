@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"testing"
+	"time"
+)
 
 func TestTaskManagerReplaysBackendStartSessionAndTerminalEvents(t *testing.T) {
 	tm := newTaskManager()
@@ -40,20 +44,55 @@ func TestTaskManagerIDsIncludeActiveAndTerminalTasks(t *testing.T) {
 	}
 }
 
-func TestTaskManagerExecutingTaskIDUsesRuntimeScope(t *testing.T) {
+func TestTaskManagerExecutingRunIDUsesRuntimeScope(t *testing.T) {
 	tm := newTaskManager()
 	tm.AddTask("old", &taskState{
 		AgentID: "agent-1", ChannelID: "channel-1", Status: taskStatusCompleted,
 	})
 	tm.AddTask("current", &taskState{
-		AgentID: "agent-1", ChannelID: "channel-1", Status: taskStatusThinking,
+		RunID: "run-current", AgentID: "agent-1", ChannelID: "channel-1", Status: taskStatusThinking,
 	})
 	tm.AddTask("other-channel", &taskState{
 		AgentID: "agent-1", ChannelID: "channel-2", Status: taskStatusThinking,
 	})
 
-	if got := tm.ExecutingTaskID("agent-1", "channel-1", ""); got != "current" {
-		t.Fatalf("ExecutingTaskID = %q, want current", got)
+	if got := tm.ExecutingRunID("agent-1", "channel-1", ""); got != "run-current" {
+		t.Fatalf("ExecutingRunID = %q, want run-current", got)
+	}
+}
+
+func TestTaskManagerAgentTurnSerializesOneAgentOnly(t *testing.T) {
+	tm := newTaskManager()
+	releaseFirst, err := tm.acquireAgentTurn(context.Background(), "agent-1")
+	if err != nil {
+		t.Fatalf("acquire first turn: %v", err)
+	}
+
+	secondAcquired := make(chan func(), 1)
+	go func() {
+		release, acquireErr := tm.acquireAgentTurn(context.Background(), "agent-1")
+		if acquireErr == nil {
+			secondAcquired <- release
+		}
+	}()
+	select {
+	case <-secondAcquired:
+		t.Fatal("second turn for the same Agent acquired before release")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	releaseOther, err := tm.acquireAgentTurn(context.Background(), "agent-2")
+	if err != nil {
+		t.Fatalf("other Agent was blocked: %v", err)
+	}
+	releaseOther()
+
+	releaseFirst()
+	select {
+	case releaseSecond := <-secondAcquired:
+		releaseSecond()
+	case <-time.After(time.Second):
+		t.Fatal("second turn did not acquire after release")
 	}
 }
 

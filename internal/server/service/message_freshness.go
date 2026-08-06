@@ -87,7 +87,7 @@ func CheckAndHoldAgentSend(ctx context.Context, tx pgx.Tx, input AgentSendFreshn
 		   AND m.thinking_node_id IS NULL
 		   AND COALESCE(m.is_deleted, false) = false
 		   AND m.seq > $3
-		   AND m.sender_type IN ('user', 'agent')
+		   AND m.sender_type = 'agent'
 		   AND COALESCE(m.metadata->>'agent_run_id', '') <> $4
 		 ORDER BY m.seq DESC
 		 LIMIT $5`,

@@ -24,6 +24,7 @@ const (
 // taskState holds the runtime state of a task being processed by the daemon.
 type taskState struct {
 	TaskID      string
+	RunID       string
 	AgentID     string
 	ChannelID   string
 	ThreadID    string
@@ -54,6 +55,7 @@ type taskManager struct {
 	subscribers  map[string][]*sseSubscriber   // taskID -> subscribers
 	eventHistory map[string][]sseEvent         // taskID -> replayable SSE control events
 	cancelFuncs  map[string]context.CancelFunc // taskID -> cancel func
+	agentTurns   map[string]chan struct{}      // agentID -> one executing Run
 }
 
 // newTaskManager creates a new task manager.
@@ -63,6 +65,26 @@ func newTaskManager() *taskManager {
 		subscribers:  make(map[string][]*sseSubscriber),
 		eventHistory: make(map[string][]sseEvent),
 		cancelFuncs:  make(map[string]context.CancelFunc),
+		agentTurns:   make(map[string]chan struct{}),
+	}
+}
+
+// acquireAgentTurn serializes every runtime path before Backend selection.
+func (tm *taskManager) acquireAgentTurn(ctx context.Context, agentID string) (func(), error) {
+	tm.mu.Lock()
+	turn, ok := tm.agentTurns[agentID]
+	if !ok {
+		turn = make(chan struct{}, 1)
+		turn <- struct{}{}
+		tm.agentTurns[agentID] = turn
+	}
+	tm.mu.Unlock()
+
+	select {
+	case <-turn:
+		return func() { turn <- struct{}{} }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 }
 
@@ -145,8 +167,8 @@ func (tm *taskManager) ActiveAgentIDs() []string {
 	return ids
 }
 
-// ExecutingTaskID returns the task currently owning an agent's runtime scope.
-func (tm *taskManager) ExecutingTaskID(agentID, channelID, nodeID string) string {
+// ExecutingRunID returns the database Run currently owning an agent's runtime scope.
+func (tm *taskManager) ExecutingRunID(agentID, channelID, nodeID string) string {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
@@ -159,7 +181,10 @@ func (tm *taskManager) ExecutingTaskID(agentID, channelID, nodeID string) string
 		if taskID != "" {
 			return ""
 		}
-		taskID = id
+		taskID = t.RunID
+		if taskID == "" {
+			taskID = id
+		}
 	}
 	return taskID
 }

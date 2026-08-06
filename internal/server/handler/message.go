@@ -265,6 +265,14 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	senderType := "user"
 	if isAgent {
 		senderType = "agent"
+		if h.agentSvc != nil {
+			allowed, retryAfter := h.agentSvc.CheckAgentSendRate(userID)
+			if !allowed {
+				w.Header().Set("Retry-After", strconv.Itoa(int((retryAfter+time.Second-1)/time.Second)))
+				writeError(w, http.StatusTooManyRequests, "too many agent send requests")
+				return
+			}
+		}
 		thinkingNodeID, err = reconcileThinkingNodeScope(r.Context(), h.pool, userID, channelID, thinkingNodeID)
 		if err != nil {
 			writeThinkingScopeError(w, err)
@@ -754,7 +762,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		if thinkingNodeID != "" {
 			go h.agentSvc.TriggerAgentResponseInNode(context.Background(), channelID, thinkingNodeID, messageID, senderType, userID, mentionedAgentIDs, hasMentions, nil)
 		} else if threadID != "" {
-			go h.agentSvc.TriggerAgentResponseInThread(context.Background(), channelID, threadID, senderType, userID, mentionedAgentIDs, hasMentions, nil)
+			go h.agentSvc.TriggerAgentResponseInThread(context.Background(), channelID, threadID, messageID, senderType, userID, mentionedAgentIDs, hasMentions, nil)
 		} else {
 			go h.agentSvc.TriggerAgentResponse(context.Background(), channelID, messageID, senderType, userID, mentionedAgentIDs, hasMentions, nil)
 		}

@@ -784,6 +784,7 @@ func (h *Hub) handleThreadReply(client *Client, payload ThreadReplyPayload) {
 			context.Background(),
 			payload.ChannelID,
 			payload.ThreadID,
+			messageID,
 			senderType,
 			client.userID,
 			mentionedAgentIDs,

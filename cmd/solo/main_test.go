@@ -578,7 +578,7 @@ func TestHandleTaskCreate(t *testing.T) {
 	defer server.Close()
 
 	code, stdout, _ := captureAndRun(t, func() {
-		handleTaskCreate([]string{"-c", "550e8400-e29b-41d4-a716-446655440001", "--title", "test"}, server.URL, "test-token")
+		handleTaskCreate([]string{"-c", "550e8400-e29b-41d4-a716-446655440001", "--title", "test", "--assignee", "worker"}, server.URL, "test-token")
 	})
 
 	if code != 0 {
@@ -600,6 +600,9 @@ func TestHandleTaskCreate(t *testing.T) {
 	}
 	if body["title"] != "test" {
 		t.Errorf("expected title=test, got %s", body["title"])
+	}
+	if body["assignee"] != "worker" {
+		t.Errorf("expected assignee=worker, got %s", body["assignee"])
 	}
 }
 
