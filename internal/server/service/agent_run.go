@@ -57,6 +57,7 @@ const (
 	AgentRunEventAssistantMessage    = "assistant_message"
 	AgentRunEventVisibleMessageSent  = "visible_message_sent"
 	AgentRunEventVisibleMessageHeld  = "visible_message_held"
+	AgentRunEventResultReminder      = "result_reminder"
 	AgentRunEventTaskLinked          = "task_linked"
 	AgentRunEventTaskReassigned      = "task_reassigned"
 	AgentRunEventTaskRetryExhausted  = "task_retry_exhausted"

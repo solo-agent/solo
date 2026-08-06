@@ -347,7 +347,7 @@ func (h *ThreadHandler) CreateThreadReply(w http.ResponseWriter, r *http.Request
 		// This allows TriggerAgentResponseInThread to correctly fall back to auto-response
 		// when @mentions were intended but failed to resolve.
 		hasMentions := mentionHasMentions || len(mentionedAgentIDs) > 0
-		go h.agentSvc.TriggerAgentResponseInThread(context.Background(), channelID, threadID, senderType, userID, mentionedAgentIDs, hasMentions, nil)
+		go h.agentSvc.TriggerAgentResponseInThread(context.Background(), channelID, threadID, replyID, senderType, userID, mentionedAgentIDs, hasMentions, nil)
 	}
 
 	// Broadcast WS events for real-time thread updates

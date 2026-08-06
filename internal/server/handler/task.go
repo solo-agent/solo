@@ -48,6 +48,7 @@ type CreateTaskRequest struct {
 	DueDate      *time.Time `json:"due_date,omitempty"`
 	ChannelID    string     `json:"channel_id,omitempty"`
 	ParentTaskID string     `json:"parent_task_id,omitempty"`
+	Assignee     string     `json:"assignee,omitempty"`
 }
 
 type UpdateTaskRequest struct {
@@ -185,6 +186,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Priority:     req.Priority,
 		DueDate:      req.DueDate,
 		ParentTaskID: req.ParentTaskID,
+		Assignee:     req.Assignee,
 	}
 
 	task, err := h.svc.CreateTask(r.Context(), channelID, userID, svcReq)
@@ -193,6 +195,10 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		case err == service.ErrTaskNotChannelMember:
 			writeError(w, http.StatusForbidden, "not a channel member")
 		case err == service.ErrTaskInvalidTransition:
+			writeError(w, http.StatusConflict, err.Error())
+		case err == service.ErrTaskAssigneeNotFound:
+			writeError(w, http.StatusNotFound, err.Error())
+		case err == service.ErrTaskAssigneeAmbiguous:
 			writeError(w, http.StatusConflict, err.Error())
 		default:
 			slog.Error("failed to create task", "error", err)
@@ -278,6 +284,10 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Trigger all channel agents for auto-claim (same as asTask message flow)
 	if h.agentSvc != nil {
+		if task.ClaimerID != "" {
+			go h.agentSvc.TriggerAgentForTask(context.Background(), task.ChannelID, task.ID, task.ClaimerID, task.TaskNumber, task.Title, task.Description, nil, nil)
+			return
+		}
 		// Parse @mentions from title + description for priority claim window
 		contentForMentions := task.Title
 		if task.Description != "" {

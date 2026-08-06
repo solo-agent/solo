@@ -9,7 +9,7 @@
 //	solo task list     -c <channel_id> [--status <s>] [--output json]
 //	solo task claim    -n <number> -c <channel_id> [-m <message_id>]
 //	solo task update   -n <number> -c <channel_id> -s <status>
-//	solo task create   -c <channel_id> --title <title> [--description <desc>] [--priority <p0-p3>] [--parent <n>]
+//	solo task create   -c <channel_id> --title <title> [--description <desc>] [--priority <p0-p3>] [--parent <n>] [--assignee <agent>]
 //	solo task unclaim  -n <number> -c <channel_id>
 //	solo task submit   -n <number> -c <channel_id>
 //	solo task accept   -n <number> -c <channel_id>
@@ -641,7 +641,7 @@ func handleTaskUpdate(args []string, baseURL, token string) {
 // --- task create ---
 
 func handleTaskCreate(args []string, baseURL, token string) {
-	var channel, title, description, priority string
+	var channel, title, description, priority, assignee string
 	var parent int
 	fs := flag.NewFlagSet("task create", flag.ExitOnError)
 	fs.StringVar(&channel, "c", "", "Channel ID or #name (required)")
@@ -649,6 +649,7 @@ func handleTaskCreate(args []string, baseURL, token string) {
 	fs.StringVar(&title, "title", "", "Task title (required)")
 	fs.StringVar(&description, "description", "", "Task description")
 	fs.StringVar(&priority, "priority", "", "Task priority: p0|p1|p2|p3")
+	fs.StringVar(&assignee, "assignee", "", "Assign directly to an Agent ID or name")
 	fs.IntVar(&parent, "parent", 0, "Parent task number")
 	fs.Parse(args)
 
@@ -679,6 +680,9 @@ func handleTaskCreate(args []string, baseURL, token string) {
 		"title":       title,
 		"description": description,
 		"priority":    priority,
+	}
+	if assignee != "" {
+		bodyMap["assignee"] = assignee
 	}
 
 	// Resolve --parent: look up the parent task by number in the channel to get its UUID.
@@ -1544,7 +1548,7 @@ func printUsage() {
   solo task list     -c <channel_id> [--status <s>] [--output json]
   solo task claim    -n <number> -c <channel_id> [-m <message_id>]
   solo task update   -n <number> -c <channel_id> -s <status>
-  solo task create   -c <channel_id> --title <title> [--description <desc>] [--priority <p0-p3>] [--parent <n>]
+  solo task create   -c <channel_id> --title <title> [--description <desc>] [--priority <p0-p3>] [--parent <n>] [--assignee <agent>]
   solo task unclaim  -n <number> -c <channel_id>
   solo task submit   -n <number> -c <channel_id>
   solo task accept   -n <number> -c <channel_id>

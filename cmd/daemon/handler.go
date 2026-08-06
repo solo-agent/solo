@@ -362,8 +362,8 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.Action == "message_send" {
-		if taskID := h.taskManager.ExecutingTaskID(req.AgentID, req.ChannelID, req.NodeID); taskID != "" {
-			req.RunID = taskID
+		if runID := h.taskManager.ExecutingRunID(req.AgentID, req.ChannelID, req.NodeID); runID != "" {
+			req.RunID = runID
 		}
 	}
 
@@ -498,6 +498,9 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
+		w.Header().Set("Retry-After", retryAfter)
+	}
 	w.WriteHeader(resp.StatusCode)
 	w.Write(body)
 }
@@ -606,6 +609,7 @@ func (h *daemonHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// Register the task
 	h.taskManager.AddTask(req.TaskID, &taskState{
 		TaskID:     req.TaskID,
+		RunID:      req.RunID,
 		AgentID:    req.AgentID,
 		ChannelID:  req.ChannelID,
 		ThreadID:   req.ThreadID,
@@ -641,6 +645,13 @@ func (h *daemonHandler) Run(w http.ResponseWriter, r *http.Request) {
 // It tries the Backend interface first (for all registered CLI backends);
 // falls back to the old LLM provider path for API-based providers.
 func (h *daemonHandler) processTaskStreaming(ctx context.Context, req runTaskRequest) {
+	release, err := h.taskManager.acquireAgentTurn(ctx, req.AgentID)
+	if err != nil {
+		h.finishCancelledTask(req)
+		return
+	}
+	defer release()
+
 	if backend, err := agent.NewBackend(req.ModelConfig.Provider, os.Getenv("LLM_API_KEY")); err == nil {
 		h.processTaskWithBackend(ctx, req, backend)
 		return

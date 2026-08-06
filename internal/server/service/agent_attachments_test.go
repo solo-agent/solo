@@ -170,6 +170,42 @@ func TestGetRecentMessagesIncludesAttachmentContext(t *testing.T) {
 	}
 }
 
+func TestGetTriggerMessageStaysAnchoredWhenANewerMessageExists(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	channelID := agentRunChannel(t, pool, ownerID)
+	firstID := agentRunMessage(t, pool, channelID, ownerID)
+	secondID := agentRunMessage(t, pool, channelID, ownerID)
+	if _, err := pool.Exec(ctx, `UPDATE messages SET content = CASE WHEN id = $1 THEN 'first trigger' ELSE 'newer trigger' END WHERE id IN ($1, $2)`, firstID, secondID); err != nil {
+		t.Fatalf("label messages: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM messages WHERE channel_id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	svc := NewAgentService(pool, nil, noopBroadcaster{}, nil)
+	msgs, err := svc.getTriggerMessage(ctx, channelID, firstID)
+	if err != nil {
+		t.Fatalf("getTriggerMessage: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].SenderID != ownerID {
+		t.Fatalf("messages = %+v, want the first trigger", msgs)
+	}
+	if strings.Contains(msgs[0].Content, "newer trigger") {
+		t.Fatalf("trigger context included newer message: %s", msgs[0].Content)
+	}
+
+	var firstContent string
+	if err := pool.QueryRow(ctx, `SELECT content FROM messages WHERE id = $1`, firstID).Scan(&firstContent); err != nil {
+		t.Fatalf("load first message: %v", err)
+	}
+	assertContains(t, msgs[0].Content, firstContent)
+}
+
 func assertContains(t *testing.T, got, want string) {
 	t.Helper()
 	if !strings.Contains(got, want) {
