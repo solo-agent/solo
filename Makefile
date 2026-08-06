@@ -1,4 +1,4 @@
-.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-e2e-agent-delivery test-e2e-agent-session-resume test-e2e-agent-idle-resume test-e2e-agent-scope-router test-e2e-send-freshness test-e2e-websocket-recovery test-e2e-m8
+.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-e2e-agent-delivery test-e2e-agent-session-resume test-e2e-agent-idle-resume test-e2e-agent-scope-router test-e2e-send-freshness test-e2e-websocket-recovery test-e2e-m8 test-e2e-m9
 .DEFAULT_GOAL := help
 
 ENV_FILE ?= .env
@@ -66,6 +66,9 @@ test-e2e-m8: export AGENT_CASCADE_WINDOW=10s
 test-e2e-m8: export AGENT_CASCADE_COOLDOWN=5s
 test-e2e-m8: rebuild ## Rebuild and verify real M8 Agent behavior
 	@cd frontend && CI=1 SOLO_E2E_REAL_AGENT_M8=1 SOLO_E2E_REAL_AGENT_FRESHNESS=1 npx playwright test e2e/agent-message-flow.spec.ts e2e/send-freshness.spec.ts --workers=1
+
+test-e2e-m9: rebuild ## Rebuild and verify runtime metadata and daemon-owned CLI detection
+	@cd frontend && CI=1 SOLO_E2E_RUNTIME_DETECTION=1 npx playwright test e2e/runtime-detection.spec.ts --workers=1
 
 stop: ## Shut down all services
 	@bash scripts/stop-services.sh

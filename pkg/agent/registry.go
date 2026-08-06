@@ -24,11 +24,19 @@ type BackendConfig struct {
 
 // AdapterMeta describes a registered backend adapter for discovery and UI.
 type AdapterMeta struct {
-	Type           string   // "claude", "codex", "opencode"...
-	DisplayName    string   // "Claude Code", "Codex CLI"
-	RequiresBinary string   // CLI binary name, e.g. "claude", "codex", "opencode"
-	DetectCommand  string   // e.g. "--version"
-	Protocols      []string // "stream-json", "json-rpc", "acp", "jsonl"
+	Type           string   `json:"type"`            // "claude", "codex", "opencode"...
+	DisplayName    string   `json:"display_name"`    // "Claude Code", "Codex CLI"
+	RequiresBinary string   `json:"requires_binary"` // CLI binary name, e.g. "claude", "codex", "opencode"
+	DetectCommand  string   `json:"-"`               // e.g. "--version"
+	Protocols      []string `json:"protocols"`       // "stream-json", "json-rpc", "acp", "jsonl"
+}
+
+// Meta returns the registered metadata for typ.
+func (r *BackendRegistry) Meta(typ string) (AdapterMeta, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	entry, ok := r.backends[typ]
+	return entry.Meta, ok
 }
 
 // BackendRegistry is a thread-safe registry of backend adapters.

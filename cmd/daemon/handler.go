@@ -114,6 +114,15 @@ func (h *daemonHandler) getSessionManager(providerType string) *agent.AgentSessi
 	return h.sessionManagers[providerType]
 }
 
+// DetectBackends reports CLI availability on the machine that runs agents.
+func (h *daemonHandler) DetectBackends(w http.ResponseWriter, _ *http.Request) {
+	results := agent.GlobalRegistry().Detect()
+	if results == nil {
+		results = []agent.BackendStatus{}
+	}
+	writeJSON(w, http.StatusOK, results)
+}
+
 // cachedSessionAgentIDs returns all Agent IDs with a cached persistent session,
 // including idle sessions whose provider process is asleep. A resumable Agent
 // remains online and routable while its local process is released.

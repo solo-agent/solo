@@ -149,6 +149,7 @@ func main() {
 	r.Route("/internal/daemon", func(r chi.Router) {
 		r.Post("/run", h.Run)            // Server dispatches agent tasks here
 		r.Post("/proxy", h.ProxyRequest) // Agent-to-server proxy
+		r.Get("/backends/detect", h.DetectBackends)
 		r.Post("/thinking/cleanup", h.CleanupThinkingSessions)
 		r.Route("/workspace", func(r chi.Router) {
 			r.Get("/list", h.HandleWorkspaceList)

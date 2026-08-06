@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -145,6 +146,26 @@ func TestRegistry_ListMeta(t *testing.T) {
 		if !seen[want] {
 			t.Errorf("missing entry for type %q", want)
 		}
+	}
+}
+
+func TestRegistry_Meta(t *testing.T) {
+	reg := &BackendRegistry{backends: make(map[string]registryEntry)}
+	reg.Register(AdapterMeta{Type: "acp-agent", DisplayName: "ACP Agent", DetectCommand: "--version", Protocols: []string{"acp"}}, nil)
+
+	meta, ok := reg.Meta("acp-agent")
+	if !ok || len(meta.Protocols) != 1 || meta.Protocols[0] != "acp" {
+		t.Fatalf("Meta(acp-agent) = %+v, %v", meta, ok)
+	}
+	if _, ok := reg.Meta("missing"); ok {
+		t.Fatal("Meta(missing) unexpectedly found an entry")
+	}
+	wire, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(wire); !strings.Contains(got, `"type":"acp-agent"`) || strings.Contains(got, "DetectCommand") || strings.Contains(got, "detect_command") {
+		t.Fatalf("AdapterMeta JSON = %s", got)
 	}
 }
 

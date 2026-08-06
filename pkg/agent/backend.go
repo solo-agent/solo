@@ -179,8 +179,7 @@ type PersistentSession struct {
 // SessionStater exposes session metadata and control to AgentSessionManager
 // without coupling to a specific backend's persistent state type.
 // Any PersistentBackend that wants to participate in the session pool,
-// crash recovery, and inbox notification must have its persistent state
-// implement this interface.
+// and crash recovery must have its persistent state implement this interface.
 type SessionStater interface {
 	// IsAlive returns true if the subprocess is still running.
 	IsAlive() bool
@@ -188,6 +187,4 @@ type SessionStater interface {
 	SessionID() string
 	// Done returns a channel that closes when the session is terminated.
 	Done() <-chan struct{}
-	// Notify writes a lightweight notification to the agent's stdin.
-	Notify(msg string) error
 }

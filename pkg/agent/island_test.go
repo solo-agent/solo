@@ -343,10 +343,10 @@ func TestBackendFamily(t *testing.T) {
 	}{
 		{"claude", familyStreamJSON},
 		{"local", familyStreamJSON},
-		{"opencode", familyStreamJSON},
+		{"opencode", familyACP},
 		{"cursor", familyStreamJSON},
 		{"gemini", familyStreamJSON},
-		{"openclaw", familyStreamJSON},
+		{"openclaw", familyACP},
 		{"copilot", familyJSONL},
 		{"pi", familyJSONL},
 		{"kimi", familyACP},

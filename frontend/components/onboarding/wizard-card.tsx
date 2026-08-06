@@ -15,7 +15,11 @@ interface WizardCardProps {
 }
 
 export function WizardCard({ channelId, onComplete }: WizardCardProps) {
-  const { results: cliResults, isLoaded: cliLoaded } = useCliDetection();
+  const {
+    results: cliResults,
+    isLoaded: cliLoaded,
+    error: cliError,
+  } = useCliDetection();
   const { computers, isLoading: computersLoading, claimComputer, refetch } = useComputers();
   const { createLucy, isCreating, error: createError } = useOnboarding();
 
@@ -157,6 +161,10 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
             </p>
             {!cliLoaded ? (
               <Spinner size="sm" />
+            ) : cliError ? (
+              <p className="font-mono text-xs text-brutal-danger">
+                Could not detect CLI status. Check that the runtime daemon is online.
+              </p>
             ) : hasAvailableRuntime ? (
               <Select
                 options={runtimeOptions}

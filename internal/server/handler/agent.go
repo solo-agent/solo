@@ -37,17 +37,21 @@ type AgentHandler struct {
 	httpClient    *http.Client    // for daemon cleanup callbacks
 	hub           realtime.Broadcaster
 	agentSvc      *service.AgentService
+	dm            *service.DaemonManager
 }
 
 // NewAgentHandler creates a new AgentHandler.
-func NewAgentHandler(pool *pgxpool.Pool, proxy workspace.Proxy, hub realtime.Broadcaster, agentSvc *service.AgentService) *AgentHandler {
+func NewAgentHandler(pool *pgxpool.Pool, dm *service.DaemonManager, hub realtime.Broadcaster, agentSvc *service.AgentService) *AgentHandler {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
 	}
 	workspaceRoot := filepath.Join(home, ".solo", "agents")
-	if proxy == nil {
+	var proxy workspace.Proxy
+	if dm == nil {
 		slog.Warn("agent handler: no workspace proxy configured, falling back to local filesystem only")
+	} else {
+		proxy = dm
 	}
 	return &AgentHandler{
 		pool:          pool,
@@ -56,6 +60,7 @@ func NewAgentHandler(pool *pgxpool.Pool, proxy workspace.Proxy, hub realtime.Bro
 		httpClient:    &http.Client{Timeout: 10 * time.Second},
 		hub:           hub,
 		agentSvc:      agentSvc,
+		dm:            dm,
 	}
 }
 
@@ -736,11 +741,19 @@ func (h *AgentHandler) AgentBackends(w http.ResponseWriter, r *http.Request) {
 
 // AgentBackendsDetect handles GET /api/v1/agent-backends/detect
 func (h *AgentHandler) AgentBackendsDetect(w http.ResponseWriter, r *http.Request) {
-	results := agent.GlobalRegistry().Detect()
-	if results == nil {
-		results = []agent.BackendStatus{}
+	if h.dm == nil {
+		writeError(w, http.StatusServiceUnavailable, "no runtime daemon available")
+		return
 	}
-	writeJSON(w, http.StatusOK, results)
+	results, err := h.dm.ProxyBackendDetect(r.Context())
+	if err != nil {
+		slog.Warn("agent backends: daemon detection failed", "error", err)
+		writeError(w, http.StatusServiceUnavailable, "runtime detection unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(results)
 }
 
 // --- JSONB helpers ---
