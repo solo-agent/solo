@@ -1,7 +1,7 @@
 # Solo Public Remote Product Architecture
 
 > Status: implemented and verified against local real components; public
-> activation still requires ICP filing, production SMTP credentials, and a
+> activation still requires ICP approval, Tencent SES activation/configuration, and a
 > published GitHub Release
 > Baseline: `codex/remote-server` after the Remote Runtime V1 work
 > Goal: a new user can open a public Solo URL, create and recover an account,
@@ -120,10 +120,14 @@ and advanced operators.
 - The browser sends registration and reset codes only over HTTPS.
 - The Server stores hashes, never raw email or machine secrets beyond the email
   address that is already the account identifier.
-- SMTP credentials remain Server environment secrets and are never exposed in
-  an API response or frontend build argument.
-- Development without SMTP logs the one-time code. Production requires a real
-  SMTP host and sender and fails closed at startup if either is absent.
+- Mail-provider credentials remain Server environment secrets and are never
+  exposed in an API response or frontend build argument.
+- The shared mail sender supports the existing SMTP transport and Tencent SES
+  API. Tencent SES uses one approved transactional template with `intro` and
+  `code` variables; registration and password reset continue to share the same
+  challenge lifecycle. Development without a configured transport logs the
+  one-time code. Production validates the selected transport and fails closed
+  when its sender, template, or credentials are absent.
 - The pairing command contains a ten-minute one-time enrollment token. The UI
   marks it as secret, displays it once, and never stores it after exchange.
 - The installer never receives a user JWT, provider key, database URL, or Server
@@ -207,9 +211,10 @@ application version remains observable but does not block compatible clients.
 
 ## 9. Failure recovery
 
-- Mail unavailable: production startup fails when unconfigured; runtime send
-  failures return a retryable service-unavailable response and invalidate the
-  challenge.
+- Mail unavailable: production startup fails when the selected transport is
+  unconfigured; runtime provider, template-review, quota, and network failures
+  return the existing retryable service-unavailable response and invalidate the
+  challenge. A user retry creates a fresh challenge after the cooldown.
 - Code lost/expired: the user resubmits registration or requests another reset
   code after cooldown. Old codes remain unusable.
 - Installer network failure: no existing installed binary is overwritten until
@@ -226,7 +231,12 @@ application version remains observable but does not block compatible clients.
 Production adds:
 
 - `PUBLIC_URL` for operator-visible links and generated setup commands;
-- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`;
+- `AUTH_MAIL_TRANSPORT` (`smtp` or `tencent_ses`);
+- SMTP deployments keep `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`,
+  `SMTP_PASSWORD`, `SMTP_FROM`;
+- Tencent SES deployments use `TENCENTCLOUD_SECRET_ID`,
+  `TENCENTCLOUD_SECRET_KEY`, `TENCENT_SES_REGION`, `TENCENT_SES_FROM`, and
+  `TENCENT_SES_TEMPLATE_ID`;
 - `ALLOW_SIGNUP` (default true);
 - `ALLOWED_EMAILS` and `ALLOWED_EMAIL_DOMAINS` (comma-separated).
 
@@ -242,9 +252,11 @@ and private PostgreSQL networking.
 2. Add `auth_email_challenges` and its lookup/cleanup indexes.
 3. Existing passwords, sessions, user IDs, onboarding Channels, Computers,
    machine credentials, Agents, Runs, and messages are unchanged.
-4. Existing source-built Daemons continue working. Packaged Daemons use the same
+4. Switching mail transports needs no database migration and does not change
+   existing users, challenges, sessions, or frontend state.
+5. Existing source-built Daemons continue working. Packaged Daemons use the same
    environment and credential format.
-5. Existing local development registration remains testable through the logged
+6. Existing local development registration remains testable through the logged
    development code; production never returns a code in an HTTP response.
 
 ## 12. Acceptance matrix

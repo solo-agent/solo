@@ -11,13 +11,14 @@ func TestValidateProductionConfig(t *testing.T) {
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://solo.example.com")
 	t.Setenv("DATABASE_URL", "postgres://solo:secret@postgres/solo")
 	valid := &config.Config{
-		JWTSecret: "0123456789abcdef0123456789abcdef",
-		DBURL:     "postgres://solo:secret@postgres/solo",
-		PublicURL: "https://solo.example.com",
-		SMTPHost:  "smtp.example.com",
-		SMTPFrom:  "Solo <noreply@example.com>",
-		SMTPPort:  "587",
-		SMTPTLS:   "starttls",
+		JWTSecret:         "0123456789abcdef0123456789abcdef",
+		DBURL:             "postgres://solo:secret@postgres/solo",
+		PublicURL:         "https://solo.example.com",
+		AuthMailTransport: "smtp",
+		SMTPHost:          "smtp.example.com",
+		SMTPFrom:          "Solo <noreply@example.com>",
+		SMTPPort:          "587",
+		SMTPTLS:           "starttls",
 	}
 	if err := validateProductionConfig(valid); err != nil {
 		t.Fatalf("valid production config rejected: %v", err)
@@ -38,5 +39,21 @@ func TestValidateProductionConfig(t *testing.T) {
 	t.Setenv("CORS_ALLOWED_ORIGINS", "*")
 	if err := validateProductionConfig(valid); err == nil {
 		t.Fatal("wildcard credentialed CORS accepted")
+	}
+	t.Setenv("CORS_ALLOWED_ORIGINS", "https://solo.example.com")
+
+	tencent := *valid
+	tencent.AuthMailTransport = "tencent_ses"
+	tencent.TencentCloudSecretID = "secret-id"
+	tencent.TencentCloudSecretKey = "secret-key"
+	tencent.TencentSESRegion = "ap-guangzhou"
+	tencent.TencentSESFrom = "Solo <noreply@solo.example.com>"
+	tencent.TencentSESTemplateID = 123
+	if err := validateProductionConfig(&tencent); err != nil {
+		t.Fatalf("valid Tencent SES config rejected: %v", err)
+	}
+	tencent.TencentSESTemplateID = 0
+	if err := validateProductionConfig(&tencent); err == nil {
+		t.Fatal("missing Tencent SES template accepted")
 	}
 }

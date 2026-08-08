@@ -130,18 +130,36 @@ func validateProductionConfig(cfg *config.Config) error {
 	if strings.TrimSpace(cfg.PublicURL) == "" || !strings.HasPrefix(cfg.PublicURL, "https://") {
 		return fmt.Errorf("PUBLIC_URL must be an https URL")
 	}
-	if cfg.SMTPHost == "" || cfg.SMTPFrom == "" {
-		return fmt.Errorf("SMTP_HOST and SMTP_FROM are required")
-	}
-	if _, err := mail.ParseAddress(cfg.SMTPFrom); err != nil {
-		return fmt.Errorf("SMTP_FROM must be a valid email address")
-	}
-	port, err := strconv.Atoi(cfg.SMTPPort)
-	if err != nil || port < 1 || port > 65535 {
-		return fmt.Errorf("SMTP_PORT must be a valid port")
-	}
-	if cfg.SMTPTLS != "starttls" && cfg.SMTPTLS != "implicit" {
-		return fmt.Errorf("SMTP_TLS must be starttls or implicit")
+	switch cfg.AuthMailTransport {
+	case "smtp":
+		if cfg.SMTPHost == "" || cfg.SMTPFrom == "" {
+			return fmt.Errorf("SMTP_HOST and SMTP_FROM are required")
+		}
+		if _, err := mail.ParseAddress(cfg.SMTPFrom); err != nil {
+			return fmt.Errorf("SMTP_FROM must be a valid email address")
+		}
+		port, err := strconv.Atoi(cfg.SMTPPort)
+		if err != nil || port < 1 || port > 65535 {
+			return fmt.Errorf("SMTP_PORT must be a valid port")
+		}
+		if cfg.SMTPTLS != "starttls" && cfg.SMTPTLS != "implicit" {
+			return fmt.Errorf("SMTP_TLS must be starttls or implicit")
+		}
+	case "tencent_ses":
+		if cfg.TencentCloudSecretID == "" || cfg.TencentCloudSecretKey == "" {
+			return fmt.Errorf("TENCENTCLOUD_SECRET_ID and TENCENTCLOUD_SECRET_KEY are required")
+		}
+		if cfg.TencentSESRegion != "ap-guangzhou" && cfg.TencentSESRegion != "ap-hongkong" {
+			return fmt.Errorf("TENCENT_SES_REGION must be ap-guangzhou or ap-hongkong")
+		}
+		if _, err := mail.ParseAddress(cfg.TencentSESFrom); err != nil {
+			return fmt.Errorf("TENCENT_SES_FROM must be a valid email address")
+		}
+		if cfg.TencentSESTemplateID < 1 {
+			return fmt.Errorf("TENCENT_SES_TEMPLATE_ID is required")
+		}
+	default:
+		return fmt.Errorf("AUTH_MAIL_TRANSPORT must be smtp or tencent_ses")
 	}
 	return nil
 }

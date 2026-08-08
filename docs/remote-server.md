@@ -4,12 +4,14 @@ Solo's remote topology keeps the web application, API, PostgreSQL, attachments, 
 
 ## Deploy the Server
 
-Prerequisites: a Linux host with Docker Compose, a DNS record pointing to it, a real SMTP relay, and inbound TCP 80/443 plus UDP 443. Do not expose PostgreSQL or port 8080 publicly.
+Prerequisites: a Linux host with Docker Compose, a DNS record pointing to it,
+a real mail provider, and inbound TCP 80/443 plus UDP 443. Do not expose
+PostgreSQL or port 8080 publicly.
 
 ```bash
 cd deploy/remote
 cp .env.example .env
-# Replace every placeholder, including SMTP settings. URL-escape
+# Replace every placeholder, including mail settings. URL-escape
 # DATABASE_URL's password when necessary.
 docker compose up -d --build
 docker compose ps
@@ -35,7 +37,7 @@ ssh -N \
 Open `http://127.0.0.1:13000`. This private mode uses verification code
 `123456` and must never publish port 13000. After ICP filing, remove
 the private override and deploy the normal HTTPS configuration with a real
-SMTP relay.
+mail provider.
 
 The `127.0.0.1` address is only the Mac/Linux end of the SSH tunnel: the
 browser, API, and PostgreSQL requests still terminate on the remote host.
@@ -63,9 +65,26 @@ credential remains in place.
 ## User accounts and email
 
 Registration sends a six-digit verification code before creating the account.
-Password recovery uses the same SMTP relay and revokes existing refresh
-sessions. Production Server startup fails when `SMTP_HOST` or `SMTP_FROM` is
-missing, so a deployment cannot silently expose a broken registration flow.
+Password recovery uses the same sender and revokes existing refresh sessions.
+Production Server startup validates the selected `AUTH_MAIL_TRANSPORT`, so a
+deployment cannot silently expose a broken registration flow.
+
+For Tencent SES, set `AUTH_MAIL_TRANSPORT=tencent_ses`, use a dedicated CAM
+key, and configure `TENCENT_SES_REGION`, `TENCENT_SES_FROM`, and an approved
+`TENCENT_SES_TEMPLATE_ID`. The template must use the variables `{{intro}}` and
+`{{code}}`; Solo supplies the subject and marks the message as transactional.
+New personal Tencent accounts cannot use SMTP, so the API transport is the
+production path for `soloagent.team`. Existing SMTP providers remain supported
+with `AUTH_MAIL_TRANSPORT=smtp` and the `SMTP_*` variables.
+
+Create one transactional template with this body and wait until its status is
+approved before setting the template ID:
+
+```html
+<p>{{intro}}</p>
+<p style="font-size:28px;font-weight:700;letter-spacing:6px">{{code}}</p>
+<p>This code expires in 10 minutes. If you did not request it, you can ignore this email.</p>
+```
 
 Set `ALLOW_SIGNUP=false` to close public registration. `ALLOWED_EMAILS` and
 `ALLOWED_EMAIL_DOMAINS` are comma-separated exceptions/allowlists for new
