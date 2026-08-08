@@ -160,6 +160,17 @@ func TestCLINoToken(t *testing.T) {
 	}
 }
 
+func TestCLIVersionWithoutToken(t *testing.T) {
+	t.Setenv("SOLO_AUTH_TOKEN", "")
+	t.Setenv("SOLO_TOKEN", "")
+	code, stdout, stderr := captureAndRun(t, func() {
+		doExit(runCLI([]string{"version"}))
+	})
+	if code != 0 || !strings.Contains(stdout, "solo ") || stderr != "" {
+		t.Fatalf("version result: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
 func TestCLIUnknownCommand(t *testing.T) {
 	t.Setenv("SOLO_AUTH_TOKEN", "test-token")
 
@@ -1290,6 +1301,17 @@ func TestProxyRequestTimeoutAllowsTeamFormationToFinish(t *testing.T) {
 	}
 	if got := proxyRequestTimeout("message_send"); got != 30*time.Second {
 		t.Fatalf("message_send timeout = %s, want 30s", got)
+	}
+}
+
+func TestDirectFallbackIsDisabledForExplicitDaemon(t *testing.T) {
+	t.Setenv("SOLO_DAEMON_URL", "http://127.0.0.1:8081")
+	if allowDirectFallback() {
+		t.Fatal("explicit Daemon URL must disable direct Server fallback")
+	}
+	t.Setenv("SOLO_DAEMON_URL", "")
+	if !allowDirectFallback() {
+		t.Fatal("unset Daemon URL must preserve local compatibility fallback")
 	}
 }
 

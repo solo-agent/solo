@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
 const wsBase = apiBase.replace(/^http/, 'ws');
@@ -21,7 +22,7 @@ async function authenticate(request: APIRequestContext): Promise<AuthResponse> {
   const login = await request.post(`${apiBase}/api/v1/auth/login`, { data: credentials });
   if (login.ok()) return login.json();
 
-  const register = await request.post(`${apiBase}/api/v1/auth/register`, {
+  const register = await registerVerified(request, apiBase, {
     data: { ...credentials, display_name: 'WebSocket E2E' },
   });
   if (!register.ok()) {

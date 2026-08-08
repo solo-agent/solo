@@ -34,7 +34,7 @@ func NewOnboardingHandler(pool *pgxpool.Pool, agentSvc *service.AgentService) *O
 // CreateLucyRequest is the request body for creating the Lucy onboarding agent.
 type CreateLucyRequest struct {
 	RuntimeType string `json:"runtime_type"`
-	ComputerID  string `json:"computer_id,omitempty"`
+	ComputerID  string `json:"computer_id"`
 	ChannelID   string `json:"channel_id"`
 }
 
@@ -101,20 +101,29 @@ func (h *OnboardingHandler) CreateLucy(w http.ResponseWriter, r *http.Request) {
 	// Create Lucy agent via direct SQL with the selected runtime as model_provider.
 	// Store computer binding in runtime_id column (dead column from migration 000021, repurposed).
 	computerID := strings.TrimSpace(req.ComputerID)
-	if computerID != "" {
-		var isMember bool
+	if computerID == "" {
+		writeError(w, http.StatusBadRequest, "computer_id is required")
+		return
+	}
+	{
+		var usable bool
 		if err := h.pool.QueryRow(r.Context(),
 			`SELECT EXISTS(
-				SELECT 1 FROM computer_members WHERE computer_id = $1 AND user_id = $2
+				SELECT 1 FROM computers c
+				LEFT JOIN computer_members cm ON cm.computer_id = c.id AND cm.user_id = $2
+				WHERE c.id = $1
+				  AND (c.owner_id = $2 OR cm.user_id IS NOT NULL)
+				  AND ((c.credential_hash IS NOT NULL AND c.credential_revoked_at IS NULL)
+				    OR (c.daemon_id IS NOT NULL AND c.status = 'online'))
 			)`,
 			computerID, userID,
-		).Scan(&isMember); err != nil {
-			slog.Error("onboarding: check computer membership failed", "computer_id", computerID, "user_id", userID, "error", err)
+		).Scan(&usable); err != nil {
+			slog.Error("onboarding: check computer access failed", "computer_id", computerID, "user_id", userID, "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to verify computer access")
 			return
 		}
-		if !isMember {
-			writeError(w, http.StatusForbidden, "computer is not accessible to this user")
+		if !usable {
+			writeError(w, http.StatusBadRequest, "computer is unavailable")
 			return
 		}
 	}

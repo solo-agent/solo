@@ -12,8 +12,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/solo-ai/solo/internal/auth"
+	"github.com/solo-ai/solo/internal/authmail"
 	"github.com/solo-ai/solo/internal/server/onboarding"
 	"github.com/solo-ai/solo/internal/server/service"
+	"github.com/solo-ai/solo/pkg/config"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -22,11 +24,14 @@ type AuthHandler struct {
 	pool     *pgxpool.Pool
 	svc      *service.ChannelService
 	agentSvc *service.AgentService // optional: nil in tests
+	cfg      *config.Config
+	mail     *authmail.Sender
 }
 
 // NewAuthHandler creates a new AuthHandler.
 func NewAuthHandler(pool *pgxpool.Pool, agentSvc *service.AgentService) *AuthHandler {
-	return &AuthHandler{pool: pool, svc: service.NewChannelService(pool), agentSvc: agentSvc}
+	cfg := config.Load()
+	return &AuthHandler{pool: pool, svc: service.NewChannelService(pool), agentSvc: agentSvc, cfg: cfg, mail: authmail.NewSender(cfg)}
 }
 
 // --- Request/Response types ---
@@ -63,114 +68,62 @@ type UserResponse struct {
 	CreatedAt   string  `json:"created_at"`
 }
 
-// Register handles POST /api/v1/auth/register
+// Register validates a pending account and sends its email verification code.
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	email := strings.ToLower(strings.TrimSpace(req.Email))
-	password := req.Password
-	displayName := strings.TrimSpace(req.DisplayName)
-
-	// Validate input
-	if email == "" {
-		writeError(w, http.StatusBadRequest, "email is required")
-		return
-	}
-	if !strings.Contains(email, "@") {
-		writeError(w, http.StatusBadRequest, "invalid email format")
-		return
-	}
-	if len(password) < 8 {
-		writeError(w, http.StatusBadRequest, "password must be at least 8 characters")
-		return
-	}
-	if displayName == "" {
-		// Default display name to email local part
-		displayName = email[:strings.Index(email, "@")]
-	}
-
-	// Hash password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	email, displayName, err := validateRegistration(req)
 	if err != nil {
-		slog.Error("failed to hash password", "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var exists bool
+	if err := h.pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM users WHERE email = $1)`, email).Scan(&exists); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to register user")
 		return
 	}
-
-	// Insert user
-	var userID string
-	var createdAt time.Time
-	err = h.pool.QueryRow(r.Context(),
-		`INSERT INTO users (email, display_name, password_hash)
-		 VALUES ($1, $2, $3)
-		 RETURNING id, created_at`,
-		email, displayName, string(hashedPassword),
-	).Scan(&userID, &createdAt)
-
+	if exists {
+		writeError(w, http.StatusConflict, "email already registered")
+		return
+	}
+	if !h.signupAllowed(email) {
+		writeError(w, http.StatusForbidden, "registration is not available for this email")
+		return
+	}
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		if isUniqueViolation(err) {
-			writeError(w, http.StatusConflict, "email already registered")
-			return
-		}
-		slog.Error("failed to create user", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to register user")
 		return
 	}
-
-	// Issue tokens
-	accessToken, err := auth.GenerateAccessToken(userID, email, displayName)
-	if err != nil {
-		slog.Error("failed to generate access token", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to generate token")
+	challengeID, code, err := h.createEmailChallenge(r.Context(), email, challengeRegister, displayName, string(hashedPassword))
+	if errors.Is(err, errEmailCooldown) {
+		writeError(w, http.StatusTooManyRequests, "please wait before requesting another code")
 		return
 	}
-
-	refreshToken, err := auth.GenerateRefreshToken()
 	if err != nil {
-		slog.Error("failed to generate refresh token", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		slog.Error("failed to create registration challenge", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to send verification code")
 		return
 	}
-
-	// Store refresh token session
-	_, err = h.pool.Exec(r.Context(),
-		`INSERT INTO sessions (user_id, token_hash, expires_at)
-		 VALUES ($1, $2, $3)`,
-		userID, auth.HashToken(refreshToken), time.Now().Add(auth.RefreshTokenDuration),
-	)
-	if err != nil {
-		slog.Error("failed to store session", "error", err)
-		// Non-fatal: user is created, they can retry login
+	if err := h.mail.SendCode(r.Context(), email, code, challengeRegister); err != nil {
+		h.invalidateEmailChallenge(r.Context(), challengeID)
+		slog.Error("failed to send registration code", "error", err)
+		writeError(w, http.StatusServiceUnavailable, "email delivery is temporarily unavailable")
+		return
 	}
-
-	slog.Info("user registered", "user_id", userID, "email", email)
-
-	// Bootstrap onboarding: creates the pinned Lucy Channel and initial system
-	// message. Lucy herself is configured later by the runtime wizard.
-	// Best-effort — failures are logged but never block registration.
-	onboardingChannelID := h.bootstrapOnboarding(r.Context(), userID, displayName, email)
-
-	writeJSON(w, http.StatusCreated, AuthResponse{
-		AccessToken:         accessToken,
-		RefreshToken:        refreshToken,
-		ExpiresIn:           int64(auth.AccessTokenDuration.Seconds()),
-		OnboardingChannelID: onboardingChannelID,
-		User: UserResponse{
-			ID:          userID,
-			Email:       email,
-			DisplayName: displayName,
-			Role:        "member",
-			CreatedAt:   createdAt.Format(time.RFC3339),
-		},
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"message": "verification code sent", "email": email, "expires_in": 600, "retry_after": 60,
 	})
 }
 
 // Login handles POST /api/v1/auth/login
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -191,7 +144,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var createdAt time.Time
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT id, display_name, password_hash, role, created_at, avatar_url
-		 FROM users WHERE email = $1 AND is_active = true`,
+		 FROM users WHERE email = $1 AND is_active = true AND email_verified_at IS NOT NULL`,
 		email,
 	).Scan(&userID, &displayName, &passwordHash, &role, &createdAt, &avatarURL)
 
@@ -234,6 +187,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		slog.Error("failed to store session", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create session")
+		return
 	}
 
 	slog.Info("user logged in", "user_id", userID, "email", email)
@@ -274,6 +229,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 
 // Refresh handles POST /api/v1/auth/refresh
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	var req RefreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")

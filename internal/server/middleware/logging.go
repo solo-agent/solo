@@ -97,7 +97,6 @@ func Logging(logger *slog.Logger) func(http.Handler) http.Handler {
 				"request_id", requestID,
 				"method", r.Method,
 				"path", r.URL.Path,
-				"query", r.URL.RawQuery,
 				"status", rw.statusCode,
 				"duration", duration.String(),
 				"duration_ms", duration.Milliseconds(),

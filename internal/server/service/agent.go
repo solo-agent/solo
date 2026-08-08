@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/solo-ai/solo/internal/auth"
 	"github.com/solo-ai/solo/internal/realtime"
 	"github.com/solo-ai/solo/pkg/agent"
 )
@@ -37,16 +38,17 @@ const (
 	agentRunEventNoVisibleReplyWatchdog = "watchdog_no_visible_reply"
 	agentRunEventNoProgressWatchdog     = "watchdog_no_progress"
 
-	agentActivityAccepted       = "agent.activity.accepted"
-	agentActivityQueueTimeout   = "agent.activity.queue_timeout"
-	agentActivityNoVisibleReply = "agent.activity.no_visible_reply"
-	agentActivityNoProgress     = "agent.activity.no_progress"
-	agentActivityCompleted      = "agent.activity.completed"
-	agentActivityCancelled      = "agent.activity.cancelled"
-	agentActivityTimeout        = "agent.activity.timeout"
-	agentActivityFailed         = "agent.activity.failed"
-	agentActivityDaemonLost     = "agent.activity.daemon_lost"
-	agentActivityResultReminder = "agent.activity.result_reminder"
+	agentActivityAccepted        = "agent.activity.accepted"
+	agentActivityWaitingComputer = "agent.activity.waiting_computer"
+	agentActivityQueueTimeout    = "agent.activity.queue_timeout"
+	agentActivityNoVisibleReply  = "agent.activity.no_visible_reply"
+	agentActivityNoProgress      = "agent.activity.no_progress"
+	agentActivityCompleted       = "agent.activity.completed"
+	agentActivityCancelled       = "agent.activity.cancelled"
+	agentActivityTimeout         = "agent.activity.timeout"
+	agentActivityFailed          = "agent.activity.failed"
+	agentActivityDaemonLost      = "agent.activity.daemon_lost"
+	agentActivityResultReminder  = "agent.activity.result_reminder"
 
 	agentErrorNoAvailableDaemon    = "agent.error.no_available_daemon"
 	agentErrorMissingVisibleResult = "agent.error.missing_visible_result"
@@ -196,10 +198,6 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 	if !shouldTriggerAgentForSender(senderType, mentionedAgentIDs) {
 		return
 	}
-	if senderType == "agent" && !s.allowAgentCascade(channelID) {
-		slog.Warn("agent cascade suppressed", "channel_id", channelID, "sender_id", senderID)
-		return
-	}
 	// If the message was sent by an agent, only proceed if it @mentions other agents.
 	// Agents don't respond to themselves or to non-mentioned agent messages.
 
@@ -228,6 +226,10 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 	})
 
 	if len(targetAgents) == 0 {
+		return
+	}
+	if senderType == "agent" && !s.allowAgentCascade(channelID) {
+		slog.Warn("agent cascade suppressed", "channel_id", channelID, "sender_id", senderID)
 		return
 	}
 
@@ -627,6 +629,13 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 	if agentName == "" {
 		agentName = "Agent"
 	}
+	taskReq.AgentName = agentName
+	_ = s.pool.QueryRow(ctx, `SELECT COALESCE(name, id::text) FROM channels WHERE id = $1`, taskReq.ChannelID).Scan(&taskReq.ChannelName)
+	var customEnv, customArgs json.RawMessage
+	if err := s.pool.QueryRow(ctx, `SELECT custom_env, custom_args FROM agents WHERE id = $1`, ag.ID).Scan(&customEnv, &customArgs); err == nil {
+		_ = json.Unmarshal(customEnv, &taskReq.CustomEnv)
+		_ = json.Unmarshal(customArgs, &taskReq.CustomArgs)
+	}
 
 	// Queue and backend execution are timed independently by DaemonManager.
 	// This context is cancelled when either phase exceeds its own deadline.
@@ -661,6 +670,10 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 	}
 	if newRun {
 		var err error
+		activityText := "等待执行"
+		if daemon.ComputerID != "" && daemon.Status != DaemonStatusOnline {
+			activityText = agentActivityWaitingComputer
+		}
 		run, err = runSvc.StartRun(ctx, StartRunInput{
 			AgentID:          ag.ID,
 			DaemonID:         daemon.ID,
@@ -670,7 +683,7 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 			ThreadID:         taskReq.ThreadID,
 			ThinkingNodeID:   taskReq.NodeID,
 			Status:           AgentRunStatusQueued,
-			ActivityText:     "等待执行",
+			ActivityText:     activityText,
 			Source:           taskReq.ModelConfig.Provider,
 			FreshnessSeenSeq: taskReq.ModelSeenSeq,
 		})
@@ -754,7 +767,7 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 			run = current
 			return
 		}
-		if run.TranscriptPath != "" {
+		if daemon.ComputerID == "" && run.TranscriptPath != "" {
 			entries, transcriptErr := ReadAgentTranscriptWindow(run.TranscriptPath, run.StartedAt.Add(-time.Second), time.Now().UTC().Add(time.Second), 10000)
 			if transcriptErr != nil {
 				slog.Warn("failed to read agent usage from transcript", "run_id", run.ID, "error", transcriptErr)
@@ -775,6 +788,17 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 					cacheReadTokens = transcriptCacheRead
 					cacheWriteTokens = transcriptCacheWrite
 				}
+			}
+		}
+		if resultContract == agentResultContractVisibleMessage &&
+			(status == AgentRunStatusFailed || status == AgentRunStatusTimeout) {
+			visible, visibleErr := runSvc.HasVisibleMessage(ctx, run.ID)
+			if visibleErr != nil {
+				slog.Warn("failed to verify visible result after provider error", "run_id", run.ID, "error", visibleErr)
+			} else if visible {
+				status = AgentRunStatusCompleted
+				failureCode = ""
+				retryable = false
 			}
 		}
 		if status == AgentRunStatusCompleted && resultContract == agentResultContractVisibleMessage {
@@ -866,6 +890,14 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 	// Send via SSE streaming
 	var eventCh <-chan SSEDaemonEvent
 	var err error
+	if daemon.ComputerID == "" && taskReq.AgentToken == "" {
+		taskReq.AgentToken, err = auth.GenerateAgentToken(ag.ID, agentName)
+		if err != nil {
+			slog.Warn("failed to issue legacy local Agent credential", "run_id", run.ID, "error", err)
+			finishRun(AgentRunStatusFailed)
+			return
+		}
+	}
 	if newRun || taskReq.ResultReminderAttempt {
 		eventCh, err = s.dm.StreamTask(streamCtx, daemon, taskReq)
 	} else {
@@ -1318,6 +1350,51 @@ func (s *AgentService) ReconcileDaemonRuns(ctx context.Context, daemon *DaemonIn
 	}
 }
 
+// ReconcileRemoteRuns restores Server-side consumers for every unfinished Run
+// assigned to a reconnected Computer. Delivery itself remains in PostgreSQL,
+// so a Run that has not reached the Daemon yet is recovered too.
+func (s *AgentService) ReconcileRemoteRuns(ctx context.Context, daemon *DaemonInfo) {
+	if daemon == nil {
+		return
+	}
+	runs, err := NewAgentRunService(s.pool).ListActiveRunsByDaemon(ctx, daemon.ID)
+	if err != nil {
+		slog.Warn("failed to list remote runs for reconciliation", "computer_id", daemon.ID, "error", err)
+		return
+	}
+	for i := range runs {
+		run := &runs[i]
+		var payload json.RawMessage
+		if err := s.pool.QueryRow(ctx, `SELECT dispatch_payload FROM agent_runs WHERE id = $1`, run.ID).Scan(&payload); err != nil {
+			slog.Warn("failed to load remote Run payload", "run_id", run.ID, "error", err)
+			continue
+		}
+		var taskReq daemonTaskRequest
+		if err := json.Unmarshal(payload, &taskReq); err != nil {
+			slog.Warn("failed to decode remote Run payload", "run_id", run.ID, "error", err)
+			continue
+		}
+		if taskReq.TaskID == "" {
+			taskReq.TaskID = run.ID
+		}
+		if s.dm.IsTaskTracked(taskReq.TaskID) {
+			continue
+		}
+		var ag agentChannelInfo
+		if err := s.pool.QueryRow(ctx, `
+			SELECT id::text, name, model_provider, model_name, system_prompt
+			  FROM agents
+			 WHERE id = $1 AND is_active = true`, run.AgentID,
+		).Scan(&ag.ID, &ag.Name, &ag.ModelProvider, &ag.ModelName, &ag.SystemPrompt); err != nil {
+			slog.Warn("failed to load remote Run Agent", "run_id", run.ID, "error", err)
+			continue
+		}
+		s.dm.TrackTask(taskReq.TaskID, daemon.ID, run.AgentID)
+		s.dm.AttachTaskRun(taskReq.TaskID, run.ID)
+		go s.runStreamingAgentTask(context.Background(), daemon, taskReq, ag, run)
+	}
+}
+
 func (s *AgentService) loadRecoveredRun(ctx context.Context, run *AgentRun) (daemonTaskRequest, agentChannelInfo, error) {
 	var ag agentChannelInfo
 	if err := s.pool.QueryRow(ctx, `
@@ -1440,6 +1517,7 @@ func (s *AgentService) listStaleQueuedRuns(ctx context.Context, before time.Time
 		 WHERE r.status = $1
 		   AND r.backend_started_at IS NULL
 		   AND r.started_at <= $2
+		   AND (r.computer_id IS NULL OR r.delivery_expires_at IS NULL OR r.delivery_expires_at <= now())
 		 ORDER BY r.started_at ASC
 		 LIMIT 100`,
 		AgentRunStatusQueued,
@@ -1920,10 +1998,6 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 	if !shouldTriggerAgentForSender(senderType, mentionedAgentIDs) {
 		return
 	}
-	if senderType == "agent" && !s.allowAgentCascade(channelID) {
-		slog.Warn("agent thread cascade suppressed", "channel_id", channelID, "thread_id", threadID, "sender_id", senderID)
-		return
-	}
 
 	agents, err := s.getChannelActiveAgents(ctx, channelID)
 	if err != nil {
@@ -1945,6 +2019,10 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 		ExcludeAgentID:    excludeAgentID,
 	})
 	if len(targetAgents) == 0 {
+		return
+	}
+	if senderType == "agent" && !s.allowAgentCascade(channelID) {
+		slog.Warn("agent thread cascade suppressed", "channel_id", channelID, "thread_id", threadID, "sender_id", senderID)
 		return
 	}
 
@@ -2684,9 +2762,14 @@ type daemonTaskRequest struct {
 	MentionedNames        []string          `json:"mentioned_names,omitempty"`  // v1.3: names of @mentioned agents for context awareness
 	InitialGreeting       string            `json:"initial_greeting,omitempty"` // greeting message to prepend as system context
 	ReturnHandoff         bool              `json:"return_handoff,omitempty"`
-	ResultContract        string            `json:"-"`
-	ResultReminderAttempt bool              `json:"-"`
+	ResultContract        string            `json:"result_contract,omitempty"`
+	ResultReminderAttempt bool              `json:"result_reminder_attempt,omitempty"`
 	ModelSeenSeq          int64             `json:"-"`
+	AgentName             string            `json:"agent_name,omitempty"`
+	ChannelName           string            `json:"channel_name,omitempty"`
+	CustomEnv             map[string]string `json:"custom_env,omitempty"`
+	CustomArgs            []string          `json:"custom_args,omitempty"`
+	AgentToken            string            `json:"agent_token,omitempty"`
 }
 
 func highestMessageSeq(messages []agent.Message) int64 {

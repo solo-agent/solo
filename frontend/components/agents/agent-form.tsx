@@ -34,8 +34,8 @@ import { Select } from '@/components/ui/select';
 import { EnvEditor } from '@/components/agents/env-editor';
 import { ArgsEditor } from '@/components/agents/args-editor';
 import { useCliDetection } from '@/lib/hooks/use-cli-detection';
-import { useBackendMeta } from '@/lib/hooks/use-backend-meta';
 import { MODEL_PRESETS } from '@/lib/agent-models';
+import { useComputers } from '@/lib/hooks/use-computers';
 
 // ============================================================================
 // Role Templates (SOLO-210-F) — frontend-defined preset system prompts
@@ -93,6 +93,7 @@ const agentFormSchema = z.object({
     .max(50, t('agentFormNameMaxLen')),
   description: z.string().max(200, t('agentFormDescMaxLen')).optional(),
   model_provider: z.string().min(1, t('agentFormRuntimeRequired')),
+  computer_id: z.string().min(1, t('agentFormComputerRequired')),
   model_name: z.string().optional(),
   system_prompt: z.string().optional(),
   // v1.4: custom_env and custom_args are managed via controlled components,
@@ -129,6 +130,7 @@ export function AgentForm({
       name: '',
       description: '',
       model_provider: '',
+      computer_id: '',
       model_name: '',
       system_prompt: '',
       custom_env: {},
@@ -140,14 +142,20 @@ export function AgentForm({
 
   const currentSystemPrompt = watch('system_prompt') || '';
   const selectedProvider = watch('model_provider') || '';
+  const selectedComputerId = watch('computer_id') || '';
+
+  const { computers, isLoading: computersLoading } = useComputers();
+  const selectableComputers = computers.filter(
+    (computer) => computer.pairing_status === 'paired' || (computer.status === 'online' && !!computer.daemon_id),
+  );
+  const selectedComputer = computers.find((computer) => computer.id === selectedComputerId);
 
   // v1.4: dynamic CLI detection + backend metadata
   const {
     results: detection,
     isLoading: detectionLoading,
     error: detectionError,
-  } = useCliDetection();
-  const { metas: backendMeta } = useBackendMeta();
+  } = useCliDetection(selectedComputerId || undefined, selectedComputer?.runtime_inventory ?? []);
 
   // Role template selection state (SOLO-210-F)
   const [selectedTemplateKey, setSelectedTemplateKey] = useState<string | null>(null);
@@ -255,23 +263,55 @@ export function AgentForm({
       </div>
 
       {/* Runtime Selection (v1.4: dynamic, based on CLI detection) */}
+      <div className="space-y-2">
+        <Label>{t('agentFormComputer')} <span className="text-brutal-danger">*</span></Label>
+        {computersLoading ? <Skeleton className="h-10 w-full rounded-none" /> : (
+          <Controller
+            name="computer_id"
+            control={control}
+            render={({ field }) => (
+              <Select
+                name={field.name}
+                value={field.value ?? ''}
+                onChange={(value) => {
+                  if (value !== field.value) setValue('model_provider', '');
+                  field.onChange(value);
+                }}
+                onBlur={field.onBlur}
+                options={selectableComputers.map((computer) => ({
+                  value: computer.id,
+                  label: `${computer.status === 'online' ? '●' : '○'} ${computer.name}`,
+                }))}
+                placeholder={t('agentFormSelectComputer')}
+                size="md"
+                className="w-full font-body"
+              />
+            )}
+          />
+        )}
+        {errors.computer_id && <p className="font-mono text-[11px] text-brutal-danger">{errors.computer_id.message}</p>}
+        {!computersLoading && selectableComputers.length === 0 && (
+          <p className="font-mono text-[11px] text-brutal-danger">{t('agentFormNoPairedComputer')}</p>
+        )}
+      </div>
+
       <div className="space-y-3">
         <Label>
           {t('agentFormRuntimeLabel')} <span className="text-brutal-danger">*</span>
         </Label>
 
         {/* Loading state */}
-        {detectionLoading && (
+        {selectedComputerId && detectionLoading && (
           <Skeleton className="h-10 w-full rounded-none" />
         )}
-        {detectionError && (
+        {selectedComputerId && detectionError && (
           <p className="font-mono text-[11px] text-brutal-danger">
             {t('cliCheckFailed')}
           </p>
         )}
 
         {/* Runtime dropdown — only show available runtimes */}
-        {!detectionLoading && !detectionError && (
+        {selectedComputerId && !detectionLoading && !detectionError && (
           <Controller
             name="model_provider"
             control={control}

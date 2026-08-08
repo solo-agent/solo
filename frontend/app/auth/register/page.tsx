@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
@@ -12,6 +12,7 @@ import { t } from '@/lib/i18n';
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { BrutalAlert } from "@/components/ui/brutal-alert";
+import { apiClient } from "@/lib/api-client";
 
 const registerFormSchema = z
   .object({
@@ -38,8 +39,12 @@ type RegisterFormValues = z.infer<typeof registerFormSchema>;
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { register: authRegister, isAuthenticated, isLoading, error, clearError } = useAuth();
+  const { register: authRegister, verifyRegistration, isAuthenticated, isLoading, error, clearError } = useAuth();
   const submittingRef = useRef(false);
+  const [pending, setPending] = useState<RegisterFormValues | null>(null);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [resendIn, setResendIn] = useState(0);
+  const [signupAvailable, setSignupAvailable] = useState(true);
 
   const {
     register,
@@ -62,6 +67,12 @@ export default function RegisterPage() {
     }
   }, [isAuthenticated, isLoading, router]);
 
+  useEffect(() => {
+    apiClient.get<{ signup_available: boolean }>('/api/v1/auth/config')
+      .then((config) => setSignupAvailable(config.signup_available))
+      .catch(() => undefined);
+  }, []);
+
   async function onSubmit(data: RegisterFormValues) {
     clearError();
     submittingRef.current = true;
@@ -71,10 +82,46 @@ export default function RegisterPage() {
         password: data.password,
         display_name: data.displayName || data.email.split("@")[0],
       });
-      router.push("/dashboard?lucy=1");
+      setPending(data);
+      setResendIn(60);
+      submittingRef.current = false;
     } catch {
       submittingRef.current = false;
       // Error is set in auth context, displayed below
+    }
+  }
+
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const timer = window.setTimeout(() => setResendIn((value) => value - 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [resendIn]);
+
+  async function verifyEmail(event: React.FormEvent) {
+    event.preventDefault();
+    if (!pending || verificationCode.trim().length !== 6) return;
+    clearError();
+    submittingRef.current = true;
+    try {
+      await verifyRegistration({ email: pending.email, code: verificationCode.trim() });
+      router.push('/dashboard?lucy=1');
+    } catch {
+      submittingRef.current = false;
+    }
+  }
+
+  async function resendCode() {
+    if (!pending || resendIn > 0) return;
+    clearError();
+    try {
+      await authRegister({
+        email: pending.email,
+        password: pending.password,
+        display_name: pending.displayName || pending.email.split('@')[0],
+      });
+      setResendIn(60);
+    } catch {
+      // Auth context exposes the API error.
     }
   }
 
@@ -85,6 +132,58 @@ export default function RegisterPage() {
           <Spinner size="md" />
           <p className="font-sans text-sm text-muted-foreground">{t('checkingAuth')}</p>
         </div>
+      </div>
+    );
+  }
+
+  if (pending) {
+    return (
+      <div className="card-brutal-heavy p-8 w-full relative" style={{ transform: 'rotate(1deg)' }}>
+        <div className="text-center mb-6">
+          <div className="inline-flex h-14 w-14 items-center justify-center bg-brutal-info border-brutal border-black shadow-brutal mb-4">
+            <span className="font-heading font-bold text-2xl text-black">@</span>
+          </div>
+          <h1 className="font-heading font-bold text-3xl mb-2">{t('verifyEmail')}</h1>
+          <p className="font-sans text-sm text-muted-foreground">
+            {t('verificationCodeSent')} <strong className="text-black">{pending.email}</strong>
+          </p>
+        </div>
+        <form onSubmit={verifyEmail} className="space-y-4">
+          {error && <BrutalAlert variant="error">{error}</BrutalAlert>}
+          <div className="space-y-2">
+            <label htmlFor="verification-code" className="font-heading font-bold text-sm block">{t('verificationCode')}</label>
+            <input
+              id="verification-code"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              autoFocus
+              value={verificationCode}
+              onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+              className="input-brutal text-center font-mono text-2xl tracking-[0.35em]"
+              aria-label={t('verificationCode')}
+            />
+            <p className="font-sans text-xs text-muted-foreground">{t('verificationCodeExpires')}</p>
+          </div>
+          <Button type="submit" className="w-full" disabled={verificationCode.length !== 6}>{t('verifyAndContinue')}</Button>
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <button type="button" className="font-heading font-bold underline" onClick={() => { clearError(); setPending(null); setVerificationCode(''); }}>{t('changeEmail')}</button>
+            <button type="button" className="font-heading font-bold underline disabled:opacity-50" disabled={resendIn > 0} onClick={resendCode}>
+              {resendIn > 0 ? t('resendIn').replace('{seconds}', String(resendIn)) : t('resendCode')}
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
+  if (!signupAvailable) {
+    return (
+      <div className="card-brutal-heavy p-8 w-full space-y-5">
+        <h1 className="font-heading text-3xl font-bold">{t('registrationClosed')}</h1>
+        <p className="font-sans text-sm text-muted-foreground">{t('registrationClosedHint')}</p>
+        <Link href="/auth/login" className="btn-brutal inline-flex w-full items-center justify-center">{t('backToLogin')}</Link>
       </div>
     );
   }

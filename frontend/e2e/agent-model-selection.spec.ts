@@ -2,6 +2,8 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { acquireLocalComputer, type LocalComputerLease } from './support/local-computer';
+import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
 const credentials = { email: 'agent-model-selection-e2e@solo.local', password: 'SoloE2E-2026!' };
@@ -17,6 +19,7 @@ interface Entity {
 }
 
 interface Agent extends Entity {
+  computer_id: string;
   model_name: string;
   model_provider: string;
 }
@@ -96,7 +99,7 @@ function daemonStartedWithModel(since: number, model: string): boolean {
 async function authenticate(request: APIRequestContext): Promise<AuthResponse> {
   const login = await request.post(`${apiBase}/api/v1/auth/login`, { data: credentials });
   if (login.ok()) return login.json();
-  const register = await request.post(`${apiBase}/api/v1/auth/register`, {
+  const register = await registerVerified(request, apiBase, {
     data: { ...credentials, display_name: 'Agent Model Selection E2E' },
   });
   if (!register.ok()) throw new Error(`E2E authentication failed: ${register.status()} ${await register.text()}`);
@@ -121,9 +124,11 @@ test.describe('real Agent model selection', () => {
     const suffix = Date.now().toString(36);
     let channel: Entity | null = null;
     let agent: Agent | null = null;
+    let localComputer: LocalComputerLease | null = null;
     const startedAt = Date.now();
 
     try {
+      localComputer = await acquireLocalComputer(request, apiBase, auth.access_token);
       const channelResponse = await request.post(`${apiBase}/api/v1/channels`, {
         headers,
         data: { name: `model-selection-e2e-${suffix}`, description: 'Real model selection E2E' },
@@ -138,6 +143,8 @@ test.describe('real Agent model selection', () => {
 
       const dialog = page.getByRole('dialog');
       await dialog.getByLabel('Name *').fill(`Model E2E ${suffix}`);
+      await dialog.getByRole('button', { name: 'Select where this Agent runs' }).click();
+      await page.locator('[role="option"]').filter({ hasText: localComputer.name }).click();
       await dialog.getByRole('button', { name: 'Select Runtime...' }).click();
       await page.locator('[role="option"]').filter({ hasText: 'Claude' }).click();
 
@@ -163,6 +170,7 @@ test.describe('real Agent model selection', () => {
       const agents = await agentsResponse.json() as Agent[];
       agent = agents.find((candidate) => candidate.name === `Model E2E ${suffix}`) ?? null;
       expect(agent).not.toBeNull();
+      expect(agent!.computer_id).toBe(localComputer.id);
       expect(agent!.model_name).toBe('sonnet');
       expect(agentModel(agent!.id)).toBe('sonnet');
 
@@ -227,6 +235,9 @@ test.describe('real Agent model selection', () => {
       }
       if (channel) {
         await request.delete(`${apiBase}/api/v1/channels/${channel.id}`, { headers }).catch(() => undefined);
+      }
+      if (localComputer) {
+        await localComputer.release(request).catch(() => undefined);
       }
     }
   });

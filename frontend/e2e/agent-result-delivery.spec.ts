@@ -2,9 +2,11 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { acquireLocalComputer, type LocalComputerLease } from './support/local-computer';
+import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
-const credentials = { email: 'agent-result-delivery-e2e@solo.local', password: 'SoloE2E-2026!' };
+const credentials = { email: 'agent-result-delivery-human-e2e@solo.local', password: 'SoloE2E-2026!' };
 const daemonLogPath = join(process.cwd(), '..', 'daemon.log');
 
 interface AuthResponse {
@@ -334,8 +336,8 @@ function taskRetryState(taskID: string): TaskRetryState {
 async function authenticate(request: APIRequestContext): Promise<AuthResponse> {
   const login = await request.post(`${apiBase}/api/v1/auth/login`, { data: credentials });
   if (login.ok()) return login.json();
-  const register = await request.post(`${apiBase}/api/v1/auth/register`, {
-    data: { ...credentials, display_name: 'Agent Result Delivery E2E' },
+  const register = await registerVerified(request, apiBase, {
+    data: { ...credentials, display_name: 'Human E2E Tester' },
   });
   if (!register.ok()) throw new Error(`E2E authentication failed: ${register.status()} ${await register.text()}`);
   return register.json();
@@ -368,6 +370,16 @@ async function authenticatePage(page: Page, auth: AuthResponse) {
 test.describe('real Agent result delivery contract', () => {
   test.skip(process.env.SOLO_E2E_REAL_AGENT_DELIVERY !== '1', 'requires the make-managed stack and authenticated local Claude runtime');
   test.setTimeout(240000);
+  let localComputer: LocalComputerLease;
+
+  test.beforeAll(async ({ request }) => {
+    const auth = await authenticate(request);
+    localComputer = await acquireLocalComputer(request, apiBase, auth.access_token);
+  });
+
+  test.afterAll(async ({ request }) => {
+    await localComputer?.release(request);
+  });
 
   test('persists and renders a run-linked visible result before completing', async ({ page, request }) => {
     const auth = await authenticate(request);
@@ -382,6 +394,7 @@ test.describe('real Agent result delivery contract', () => {
       });
       agent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `Delivery E2E ${suffix}`,
+        computer_id: localComputer.id,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: 'When asked to introduce yourself, use solo message send to post the introduction to the current channel. Do not merely print it.',
@@ -425,12 +438,14 @@ test.describe('real Agent result delivery contract', () => {
       });
       lead = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `RouterLead${suffix}`,
+        computer_id: localComputer.id,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: `When introducing yourself, use solo message send to send exactly LEAD_READY. For a human message beginning ROUTER_E2E_, use solo message send to send exactly ${leadAck}. Send no other visible text.`,
       });
       worker = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `RouterWorker${suffix}`,
+        computer_id: localComputer.id,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: `When introducing yourself, use solo message send to send exactly WORKER_READY. For a human message beginning ROUTER_E2E_, use solo message send to send exactly ${workerAck}. Send no other visible text.`,
@@ -521,6 +536,7 @@ test.describe('real Agent result delivery contract', () => {
       });
       agent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `Missing Delivery E2E ${suffix}`,
+        computer_id: localComputer.id,
         model_provider: 'claude',
         model_name: 'sonnet',
         custom_args: ['--tools', ''],
@@ -556,6 +572,7 @@ test.describe('real Agent result delivery contract', () => {
       });
       agent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `Daemon Recovery E2E ${suffix}`,
+        computer_id: localComputer.id,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: 'Before introducing yourself, you must run the Bash command `sleep 60` and wait for it to finish. Only then use solo message send. Do not skip the wait.',
@@ -600,6 +617,7 @@ test.describe('real Agent result delivery contract', () => {
       });
       agent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `Channel Session Resume E2E ${suffix}`,
+        computer_id: localComputer.id,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: [
@@ -673,6 +691,7 @@ test.describe('real Agent result delivery contract', () => {
       });
       agent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `Channel Idle Resume E2E ${suffix}`,
+        computer_id: localComputer.id,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: [
@@ -760,12 +779,14 @@ test.describe('real Agent result delivery contract', () => {
       });
       failingAgent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `FailingWorker${suffix}`,
+        computer_id: localComputer.id,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: 'For every Task, first run the Bash command `sleep 60` and wait for it to finish. Only then use solo message send once with the requested target. Do not skip the wait.',
       });
       succeedingAgent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `SuccessfulWorker${suffix}`,
+        computer_id: localComputer.id,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: 'For a Task, do not submit or close it. Use solo message send exactly once with the target from the request to deliver a concise completed result.',
@@ -815,13 +836,11 @@ test.describe('real Agent result delivery contract', () => {
       });
       agent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `Always Failing Worker ${suffix}`,
+        computer_id: localComputer.id,
         model_provider: 'claude',
         model_name: 'sonnet',
-        custom_env: {
-          SOLO_API_URL: 'http://127.0.0.1:1',
-          SOLO_DAEMON_URL: 'http://127.0.0.1:1',
-        },
-        system_prompt: 'For every request, run solo message send once with the requested target and append || true. Then stop without sending any other message.',
+        custom_args: ['--solo-e2e-intentionally-invalid-flag'],
+        system_prompt: 'This Task is intentionally used to verify retry exhaustion.',
       });
       task = await api<TaskEntity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/tasks`, {
         title: `Retry exhaustion ${suffix}`,

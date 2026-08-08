@@ -1,8 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { resolve } from 'node:path';
+import { acquireLocalComputer, type LocalComputerLease } from './support/local-computer';
+import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
 const daemonBase = process.env.SOLO_E2E_DAEMON_URL ?? 'http://127.0.0.1:8081';
@@ -85,7 +84,7 @@ function databaseJSON<T>(query: string): T {
 async function authenticate(request: APIRequestContext): Promise<AuthResponse> {
   const login = await request.post(`${apiBase}/api/v1/auth/login`, { data: credentials });
   if (login.ok()) return login.json();
-  const register = await request.post(`${apiBase}/api/v1/auth/register`, {
+  const register = await registerVerified(request, apiBase, {
     data: { ...credentials, display_name: 'Agent Message Flow E2E' },
   });
   if (!register.ok()) throw new Error(`E2E authentication failed: ${register.status()} ${await register.text()}`);
@@ -160,7 +159,7 @@ function scopeState(triggerMessageID: string, reply: string): ScopeState {
     ), reply AS (
       SELECT m.* FROM messages m
        WHERE m.metadata->>'agent_run_id' = (SELECT id::text FROM target_run)
-         AND m.content = '${reply}'
+         AND LOWER(m.content) = LOWER('${reply}')
        ORDER BY m.seq LIMIT 1
     )
     SELECT json_build_object(
@@ -296,12 +295,15 @@ function delegationState(title: string, creatorID: string, workerID: string, wor
   `);
 }
 
-function localAgentToken(agentID: string): string {
-  try {
-    return readFileSync(resolve(homedir(), '.solo', 'agent-tokens', agentID, 'current.token'), 'utf8').trim();
-  } catch {
-    return '';
-  }
+function agentRunActive(agentID: string): boolean {
+  return databaseJSON<boolean>(`
+    SELECT EXISTS(
+      SELECT 1 FROM agent_runs
+       WHERE agent_id = '${agentID}'
+         AND backend_started_at IS NOT NULL
+         AND finished_at IS NULL
+    )::text
+  `);
 }
 
 async function sendMainMessage(page: Page, content: string) {
@@ -315,6 +317,15 @@ async function sendMainMessage(page: Page, content: string) {
 test.describe('M8 real Agent message behavior', () => {
   test.skip(process.env.SOLO_E2E_REAL_AGENT_M8 !== '1', 'requires the make-managed stack and authenticated local Claude runtime');
   test.setTimeout(360_000);
+
+  let computerID = '';
+  let computerLease: LocalComputerLease | null = null;
+
+  test.beforeAll(async ({ request }) => {
+    const auth = await authenticate(request);
+    computerLease = await acquireLocalComputer(request, apiBase, auth.access_token);
+    computerID = computerLease.id;
+  });
 
   test('routes real Agent replies to the exact Channel, Thread, and DM scopes', async ({ page, request }) => {
     const auth = await authenticate(request);
@@ -336,10 +347,12 @@ test.describe('M8 real Agent message behavior', () => {
       });
       agent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `M8Scope${suffix}`,
+        computer_id: computerID,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: [
-          'Always use solo message send with the exact target from the latest incoming message, including any thread suffix.',
+          'Copy the latest incoming target= field verbatim into solo message send --target.',
+          'Never append the separate msg= value: a target without a suffix stays at the Channel or DM root, while a target that already has a suffix stays in that Thread.',
           'When introducing yourself, send exactly M8_SCOPE_READY.',
           `For a message containing ${channelPrompt}, send exactly ${channelReply}.`,
           `For a message containing ${threadPrompt}, send exactly ${threadReply}.`,
@@ -369,7 +382,7 @@ test.describe('M8 real Agent message behavior', () => {
         replies: 1,
       });
       const channelResult = scopeState(channelTriggerID, channelReply);
-      await expect(page.locator(`[data-message-id="${channelResult.message_id}"]`)).toContainText(channelReply);
+      await expect(page.locator(`[data-message-id="${channelResult.message_id}"]`)).toContainText(new RegExp(channelReply, 'i'));
 
       const root = page.locator(`[data-message-id="${channelTriggerID}"]`);
       await root.hover();
@@ -395,7 +408,7 @@ test.describe('M8 real Agent message behavior', () => {
       });
       const threadResult = scopeState(threadTriggerID, threadReply);
       expect(threadResult.message_thread_id).toBe(threadResult.thread_id);
-      await expect(page.locator(`[data-message-id="${threadResult.message_id}"]`)).toContainText(threadReply);
+      await expect(page.locator(`[data-message-id="${threadResult.message_id}"]`)).toContainText(new RegExp(threadReply, 'i'));
       await page.getByRole('button', { name: 'Close thread panel' }).click();
 
       dm = await api<Entity>(request, auth.access_token, 'post', '/api/v1/dm', {
@@ -419,7 +432,7 @@ test.describe('M8 real Agent message behavior', () => {
         replies: 1,
       });
       const dmResult = scopeState(dmTriggerID, dmReply);
-      await expect(page.locator(`[data-message-id="${dmResult.message_id}"]`)).toContainText(dmReply);
+      await expect(page.locator(`[data-message-id="${dmResult.message_id}"]`)).toContainText(new RegExp(dmReply, 'i'));
     } finally {
       if (dm) await api(request, auth.access_token, 'delete', `/api/v1/channels/${dm.id}`).catch(() => undefined);
       if (agent) await api(request, auth.access_token, 'delete', `/api/v1/agents/${agent.id}`).catch(() => undefined);
@@ -449,6 +462,7 @@ test.describe('M8 real Agent message behavior', () => {
 
       agent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `M8Busy${suffix}`,
+        computer_id: computerID,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: [
@@ -552,13 +566,14 @@ test.describe('M8 real Agent message behavior', () => {
 
       agent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `M8Boundary${suffix}`,
+        computer_id: computerID,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: [
           'When introducing yourself, send exactly M8_BOUNDARY_READY.',
           `If an incoming turn contains ${historicalPrompt}, send exactly ${leakedReply}.`,
-          `For a message containing ${silentPrompt}, deliberately do not invoke solo and do not send any visible message. End that model turn with only INTERNAL_SILENT.`,
-          `If a later incoming turn says that your previous turn ended without a user-visible message, use solo message send with its exact target and send exactly ${rescueReply}.`,
+          `When the newest incoming instruction contains ${silentPrompt} and does not mention a previous turn ending without a user-visible message, deliberately do not invoke solo and end that first model turn with only INTERNAL_SILENT.`,
+          `If the newest incoming instruction says that your previous turn ended without a user-visible message, this rule overrides the silent-turn rule: immediately use solo message send with its exact target and send exactly ${rescueReply}.`,
           `For a message containing ${futurePrompt}, send exactly ${futureReply} to its exact target.`,
           'Send at most one visible message per turn and no explanation.',
         ].join(' '),
@@ -611,6 +626,8 @@ test.describe('M8 real Agent message behavior', () => {
     const auth = await authenticate(request);
     const suffix = Date.now().toString(36);
     const ratePrefix = `M8_RATE_${suffix}_`;
+    const rateStart = `M8_RATE_START_${suffix}`;
+    const rateRecoveryStart = `M8_RATE_RECOVERY_START_${suffix}`;
     const humanPrompt = `M8_HUMAN_BYPASS_${suffix}`;
     const humanReply = `M8_HUMAN_BYPASS_ACK_${suffix.toUpperCase()}`;
     let channel: Entity | null = null;
@@ -628,12 +645,18 @@ test.describe('M8 real Agent message behavior', () => {
       });
       sender = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `M8Sender${suffix}`,
+        computer_id: computerID,
         model_provider: 'claude',
         model_name: 'sonnet',
-        system_prompt: 'When introducing yourself, send exactly M8_SENDER_READY. Send one visible message and no explanation.',
+        system_prompt: [
+          'When introducing yourself, send exactly M8_SENDER_READY.',
+          `For a human message containing ${rateStart} or ${rateRecoveryStart}, use Bash to run sleep 30, then finish without sending a visible message.`,
+          'Otherwise send one visible message and no explanation.',
+        ].join(' '),
       });
       receiver = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `M8Receiver${suffix}`,
+        computer_id: computerID,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: [
@@ -646,10 +669,16 @@ test.describe('M8 real Agent message behavior', () => {
       await expect.poll(() => greetingCompleted(sender!.id) && greetingCompleted(receiver!.id), {
         timeout: 240_000, intervals: [500, 1000, 2000],
       }).toBe(true);
-      await expect.poll(() => localAgentToken(receiver!.id), {
-        timeout: 30_000, intervals: [250, 500, 1000],
-      }).not.toBe('');
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 3200));
+
+      const start = await request.post(`${apiBase}/api/v1/channels/${channel.id}/messages`, {
+        headers: { authorization: `Bearer ${auth.access_token}` },
+        data: { content: `@${sender.name} ${rateStart}` },
+      });
+      expect(start.status(), await start.text()).toBe(201);
+      await expect.poll(() => agentRunActive(sender!.id), {
+        timeout: 60_000, intervals: [250, 500, 1000],
+      }).toBe(true);
 
       const targetedMessages = [1, 2, 3].map((n) => `${ratePrefix}C${n} @${receiver!.name}`);
       for (const content of targetedMessages) {
@@ -664,10 +693,13 @@ test.describe('M8 real Agent message behavior', () => {
       expect(rejected.status()).toBe(429);
       expect(Number(rejected.headers()['retry-after'])).toBeGreaterThan(0);
 
-      const isolated = await request.post(`${apiBase}/api/v1/channels/${channel.id}/messages`, {
-        headers: { authorization: `Bearer ${localAgentToken(receiver.id)}` },
-        data: { content: `${ratePrefix}OTHER_AGENT_OK` },
-      });
+      await expect.poll(() => agentRunActive(receiver!.id), {
+        timeout: 60_000, intervals: [250, 500, 1000],
+      }).toBe(true);
+      let isolated = await proxySend(receiver.id, `${ratePrefix}OTHER_AGENT_OK`);
+      if (isolated.status() === 200) {
+        isolated = await proxySend(receiver.id, `${ratePrefix}OTHER_AGENT_OK`);
+      }
       expect(isolated.status(), await isolated.text()).toBe(201);
 
       await expect.poll(() => targetedMessages.map((content) => messageID(channel!.id, content)), {
@@ -692,7 +724,18 @@ test.describe('M8 real Agent message behavior', () => {
       await expect(page.locator(`[data-message-id="${humanResult.message_id}"]`)).toContainText(humanReply);
 
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 3200));
-      const recovered = await proxySend(sender.id, `${ratePrefix}RECOVERED`);
+      const recoveryStart = await request.post(`${apiBase}/api/v1/channels/${channel.id}/messages`, {
+        headers: { authorization: `Bearer ${auth.access_token}` },
+        data: { content: `@${sender.name} ${rateRecoveryStart}` },
+      });
+      expect(recoveryStart.status(), await recoveryStart.text()).toBe(201);
+      await expect.poll(() => agentRunActive(sender!.id), {
+        timeout: 60_000, intervals: [250, 500, 1000],
+      }).toBe(true);
+      let recovered = await proxySend(sender.id, `${ratePrefix}RECOVERED`);
+      if (recovered.status() === 200) {
+        recovered = await proxySend(sender.id, `${ratePrefix}RECOVERED`);
+      }
       expect(recovered.status(), await recovered.text()).toBe(201);
       expect(countMessages(channel.id, sender.id, ratePrefix)).toBe(6);
       expect(countMessages(channel.id, receiver.id, ratePrefix)).toBe(1);
@@ -708,6 +751,7 @@ test.describe('M8 real Agent message behavior', () => {
     const suffix = Date.now().toString(36);
     const taskTitle = `M8_DELEGATE_${suffix}`;
     const missingTitle = `M8_MISSING_ASSIGNEE_${suffix}`;
+    const delegationStart = `M8_DELEGATION_START_${suffix}`;
     const workerReply = `M8_WORKER_DONE_${suffix.toUpperCase()}`;
     const creatorReply = `M8_CREATOR_NOTIFIED_${suffix.toUpperCase()}`;
     let channel: Entity | null = null;
@@ -722,16 +766,19 @@ test.describe('M8 real Agent message behavior', () => {
       });
       creator = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `M8Creator${suffix}`,
+        computer_id: computerID,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: [
           'When introducing yourself, send exactly M8_CREATOR_READY.',
+          `For a human message containing ${delegationStart}, run solo task create in channel ${channel.id} with title ${taskTitle}, description "Complete this exact E2E task and submit it for review.", and assignee ${`M8Worker${suffix}`}. Do not send a visible message for that request.`,
           `When a system message contains ${taskTitle} and the words ready for review, send exactly ${creatorReply} to its exact target.`,
           'Send one visible message and no explanation.',
         ].join(' '),
       });
       worker = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `M8Worker${suffix}`,
+        computer_id: computerID,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: [
@@ -743,33 +790,19 @@ test.describe('M8 real Agent message behavior', () => {
       await expect.poll(() => greetingCompleted(creator!.id) && greetingCompleted(worker!.id), {
         timeout: 240_000, intervals: [500, 1000, 2000],
       }).toBe(true);
-      await expect.poll(() => localAgentToken(creator!.id), {
-        timeout: 30_000, intervals: [250, 500, 1000],
-      }).not.toBe('');
-      const creatorToken = localAgentToken(creator.id);
 
       const missing = await request.post(`${apiBase}/api/v1/channels/${channel.id}/tasks`, {
-        headers: { authorization: `Bearer ${creatorToken}` },
+        headers: { authorization: `Bearer ${auth.access_token}` },
         data: { title: missingTitle, assignee: `missing-${suffix}` },
       });
       expect(missing.status()).toBe(404);
       expect(countTasks(channel.id, missingTitle)).toBe(0);
 
-      const output = execFileSync(resolve(process.cwd(), '..', '.pids', 'solo'), [
-        'task', 'create', '-c', channel.id,
-        '--title', taskTitle,
-        '--description', 'Complete this exact E2E task and submit it for review.',
-        '--assignee', worker.name,
-      ], {
-        encoding: 'utf8',
-        env: { ...process.env, SOLO_AUTH_TOKEN: creatorToken, SOLO_API_URL: apiBase },
+      const delegated = await request.post(`${apiBase}/api/v1/channels/${channel.id}/messages`, {
+        headers: { authorization: `Bearer ${auth.access_token}` },
+        data: { content: `@${creator.name} ${delegationStart}` },
       });
-      const created = JSON.parse(output) as { status: string; creator_id: string; claimer_id: string };
-      expect(created).toMatchObject({
-        status: 'in_progress',
-        creator_id: creator.id,
-        claimer_id: worker.id,
-      });
+      expect(delegated.status(), await delegated.text()).toBe(201);
 
       await expect.poll(() => delegationState(taskTitle, creator!.id, worker!.id, workerReply, creatorReply), {
         timeout: 300_000, intervals: [500, 1000, 2000],

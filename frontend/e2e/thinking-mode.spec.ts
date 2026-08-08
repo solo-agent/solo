@@ -3,6 +3,8 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { acquireLocalComputer, type LocalComputerLease } from './support/local-computer';
+import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
 const password = 'SoloE2E-2026!';
@@ -82,7 +84,7 @@ async function authenticate(request: APIRequestContext): Promise<AuthResponse> {
   const login = await request.post(`${apiBase}/api/v1/auth/login`, { data: credentials });
   if (login.ok()) return login.json();
 
-  const register = await request.post(`${apiBase}/api/v1/auth/register`, {
+  const register = await registerVerified(request, apiBase, {
     data: { ...credentials, display_name: 'Thinking E2E' },
   });
   if (!register.ok()) throw new Error(`E2E authentication failed: ${register.status()} ${await register.text()}`);
@@ -354,8 +356,10 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
   const threadAck = `THREAD_AGENT_ACK_${suffix}`;
   const agents: Entity[] = [];
   let channel: Entity | null = null;
+  let localComputer: LocalComputerLease | null = null;
 
   try {
+    localComputer = await acquireLocalComputer(request, apiBase, auth.access_token);
     channel = await api<Entity>(request, auth.access_token, 'post', '/api/v1/channels', {
       name: channelName,
       description: 'Real Thinking mode E2E data',
@@ -364,6 +368,7 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
     for (const role of ['Lead', 'FE', 'BE', 'QA']) {
       agents.push(await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `${role}-${suffix}`,
+        computer_id: localComputer.id,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: `You are the ${role} in a real Solo end-to-end test. When a user message starts with E2E:, follow it literally and immediately, including any explicitly requested Bash tool step. Never skip, simulate, background, or replace that tool step. Send the requested visible payload using solo message send to the incoming message's target. If the instruction explicitly requests a second hidden Handoff protocol message, send it separately after the visible payload. Do not add explanations, acknowledgements, punctuation, or any other visible message. When Solo asks for a final Thinking handoff, first run the foreground Bash command sleep 8, wait for it to finish, then follow the requested handoff format exactly and include the branch's concrete payloads.`,
@@ -758,6 +763,7 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
     for (const member of agents.reverse()) {
       await api(request, auth.access_token, 'delete', `/api/v1/agents/${member.id}`).catch(() => undefined);
     }
+    await localComputer?.release(request);
   }
 });
 
@@ -770,14 +776,17 @@ test('Thinking idle runtime sleeps and resumes the real provider session', async
   const resumedAck = `IDLE_RESUMED_${suffix}`;
   let channel: Entity | null = null;
   let runtimeAgent: Entity | null = null;
+  let localComputer: LocalComputerLease | null = null;
 
   try {
+    localComputer = await acquireLocalComputer(request, apiBase, auth.access_token);
     channel = await api<Entity>(request, auth.access_token, 'post', '/api/v1/channels', {
       name: `thinking-${suffix}`,
       description: 'Real short-TTL Thinking runtime E2E data',
     });
     runtimeAgent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
       name: `Runtime-${suffix}`,
+      computer_id: localComputer.id,
       model_provider: 'claude',
       model_name: 'sonnet',
       system_prompt: 'You are a real Solo idle lifecycle test Agent. When a message starts with E2E:, immediately send exactly the requested payload using solo message send to the incoming target. Do not send any other visible text.',
@@ -845,5 +854,6 @@ test('Thinking idle runtime sleeps and resumes the real provider session', async
     await page.close();
     if (channel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
     if (runtimeAgent) await api(request, auth.access_token, 'delete', `/api/v1/agents/${runtimeAgent.id}`).catch(() => undefined);
+    await localComputer?.release(request);
   }
 });

@@ -12,7 +12,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { File, Download, ImageOff, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
-import { resolveAttachmentUrl } from '@/lib/attachment-url';
+import { downloadAuthenticatedAttachment, useAuthenticatedAttachmentUrl } from '@/lib/attachment-url';
 import type { Attachment } from '@/lib/types';
 
 // ---- Helpers ----
@@ -44,7 +44,7 @@ interface ImageLightboxProps {
 
 export function ImageLightbox({ attachment, onClose }: ImageLightboxProps) {
   const [loadState, setLoadState] = useState<'loading' | 'loaded' | 'error'>('loading');
-  const imageUrl = resolveAttachmentUrl(attachment.url);
+  const imageUrl = useAuthenticatedAttachmentUrl(attachment.url);
 
   // Close on Escape
   useEffect(() => {
@@ -138,7 +138,7 @@ interface InlineImageProps {
 
 function InlineImage({ attachment, onClick }: InlineImageProps) {
   const [loadState, setLoadState] = useState<'loading' | 'loaded' | 'error'>('loading');
-  const imageUrl = resolveAttachmentUrl(attachment.thumbnail_url || attachment.url);
+  const imageUrl = useAuthenticatedAttachmentUrl(attachment.thumbnail_url || attachment.url);
 
   return (
     <div
@@ -192,7 +192,6 @@ interface FileCardProps {
 }
 
 function FileCard({ attachment }: FileCardProps) {
-  const downloadUrl = resolveAttachmentUrl(attachment.url);
   const filename = attachment.filename;
   // Truncate long filenames — show first N chars + extension
   const extIndex = filename.lastIndexOf('.');
@@ -202,10 +201,9 @@ function FileCard({ attachment }: FileCardProps) {
       : filename;
 
   return (
-    <a
-      href={downloadUrl}
-      target="_blank"
-      rel="noopener noreferrer"
+    <button
+      type="button"
+      onClick={() => void downloadAuthenticatedAttachment(attachment.url, filename)}
       className={cn(
         'flex items-center gap-3 p-3',
         'border-2 border-black bg-white',
@@ -228,7 +226,7 @@ function FileCard({ attachment }: FileCardProps) {
         </p>
       </div>
       <Download className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-    </a>
+    </button>
   );
 }
 

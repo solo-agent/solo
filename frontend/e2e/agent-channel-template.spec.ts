@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { expect, test, type APIRequestContext } from '@playwright/test';
+import { acquireLocalComputer, type LocalComputerLease } from './support/local-computer';
+import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
 const credentials = { email: 'agent-channel-template-e2e@solo.local', password: 'SoloE2E-2026!' };
@@ -13,6 +15,7 @@ interface Agent {
   id: string;
   name: string;
   home_channel_id: string;
+  computer_id: string;
   kind: string;
   avatar_url: string;
 }
@@ -40,7 +43,7 @@ interface RemovedAgentState {
 async function authenticate(request: APIRequestContext): Promise<AuthResponse> {
   const login = await request.post(`${apiBase}/api/v1/auth/login`, { data: credentials });
   if (login.ok()) return login.json();
-  const register = await request.post(`${apiBase}/api/v1/auth/register`, {
+  const register = await registerVerified(request, apiBase, {
     data: { ...credentials, display_name: 'Agent Channel Template E2E' },
   });
   if (!register.ok()) throw new Error(`E2E authentication failed: ${register.status()} ${await register.text()}`);
@@ -117,11 +120,19 @@ test('large template relationship controls select the exact edge', async ({ page
 test('official template creates a fresh Channel-scoped team through the real UI and database', async ({ page, request }) => {
   const auth = await authenticate(request);
   const headers = { authorization: `Bearer ${auth.access_token}` };
+  let localComputer: LocalComputerLease | null = null;
+  let lucyAgentID = '';
+  let channelID = '';
+  let blankChannelID = '';
+  let appliedChannelID = '';
+
+  try {
+  localComputer = await acquireLocalComputer(request, apiBase, auth.access_token);
   const existingChannelsResponse = await request.get(`${apiBase}/api/v1/channels`, { headers });
   expect(existingChannelsResponse.ok()).toBeTruthy();
   const existingChannels = await existingChannelsResponse.json() as Array<{ id: string; name: string }>;
   for (const channel of existingChannels) {
-    if (/^(blank|template|lucy)-e2e-/.test(channel.name)) {
+    if (/^(apply|blank|template|lucy)-e2e-/.test(channel.name)) {
       const cleanupResponse = await request.delete(
         `${apiBase}/api/v1/channels/${channel.id}`,
         { headers },
@@ -138,24 +149,33 @@ test('official template creates a fresh Channel-scoped team through the real UI 
   );
   expect(lucyMembersResponse.ok()).toBeTruthy();
   const lucyMembers = await lucyMembersResponse.json() as Array<{
+    member_id: string;
     member_type: string;
     display_name: string;
   }>;
-  if (!lucyMembers.some((member) => member.member_type === 'agent' && member.display_name === 'Lucy')) {
+  const existingLucy = lucyMembers.find(
+    (member) => member.member_type === 'agent' && member.display_name === 'Lucy',
+  );
+  if (existingLucy) {
+    lucyAgentID = existingLucy.member_id;
+    const updateLucyResponse = await request.patch(`${apiBase}/api/v1/agents/${lucyAgentID}`, {
+      headers,
+      data: { computer_id: localComputer.id, model_provider: 'codex' },
+    });
+    expect(updateLucyResponse.ok()).toBeTruthy();
+  } else {
     const createLucyResponse = await request.post(`${apiBase}/api/v1/onboarding/create-lucy`, {
       headers,
-      data: { runtime_type: 'codex', channel_id: lucyChannel.id },
+      data: { runtime_type: 'codex', computer_id: localComputer.id, channel_id: lucyChannel.id },
     });
     expect(createLucyResponse.ok()).toBeTruthy();
+    lucyAgentID = (await createLucyResponse.json() as { agent_id: string }).agent_id;
   }
   const channelName = `template-e2e-${Date.now().toString(36)}`;
   const blankChannelName = `blank-e2e-${Date.now().toString(36)}`;
   const appliedChannelName = `apply-e2e-${Date.now().toString(36)}`;
   const blankAgentName = `First Agent ${Date.now().toString(36)}`;
   const renamedBlankAgent = `${blankAgentName} Updated`;
-  let channelID = '';
-  let blankChannelID = '';
-  let appliedChannelID = '';
 
   await page.addInitScript(({ accessToken, refreshToken }) => {
     localStorage.setItem('access_token', accessToken);
@@ -163,7 +183,6 @@ test('official template creates a fresh Channel-scoped team through the real UI 
     localStorage.setItem('solo.locale', 'en');
   }, { accessToken: auth.access_token, refreshToken: auth.refresh_token });
 
-  try {
     await page.goto('/dashboard');
     await page.getByRole('button', { name: 'Lucy' }).click();
     await expect(page).toHaveURL(/\/dashboard\?channel=/);
@@ -204,8 +223,10 @@ test('official template creates a fresh Channel-scoped team through the real UI 
     await expect(addAgentDialog.getByRole('heading', { name: 'Create Agent' })).toBeVisible();
     await addAgentDialog.getByLabel('Name *').fill(blankAgentName);
     await addAgentDialog.getByLabel('Description').fill('Owns the first task in this Channel.');
+    await addAgentDialog.getByRole('button', { name: 'Select where this Agent runs' }).click();
+    await page.locator('[role="option"]').filter({ hasText: localComputer.name }).click();
     await addAgentDialog.getByRole('button', { name: 'Select Runtime...' }).click();
-    await page.locator('[role="option"]:not([aria-disabled="true"])').first().click();
+    await page.locator('[role="option"]').filter({ hasText: 'Codex' }).click();
     await addAgentDialog.getByLabel('System Prompt').fill('Work only inside this Channel and report progress clearly.');
     await addAgentDialog.getByRole('button', { name: 'Create Agent' }).click();
     await expect(addAgentDialog).toBeHidden();
@@ -217,6 +238,7 @@ test('official template creates a fresh Channel-scoped team through the real UI 
     const blankAgents = await blankAgentsResponse.json() as Agent[];
     expect(blankAgents).toHaveLength(1);
     expect(blankAgents[0].home_channel_id).toBe(blankChannelID);
+    expect(blankAgents[0].computer_id).toBe(localComputer.id);
     expect(blankAgents[0].avatar_url).toBe(`dicebear:pixel-art:agent-${blankAgents[0].id}`);
 
     await page.locator('.react-flow__node').click();
@@ -283,10 +305,13 @@ test('official template creates a fresh Channel-scoped team through the real UI 
     await expect(page.getByRole('button', { name: 'Create first Agent' })).toBeVisible();
     await page.getByRole('button', { name: 'Choose Team template' }).click();
     await expect(page).toHaveURL(new RegExp(`/templates\\?channel=${appliedChannelID}`));
-    await expect(page.getByText('Choose the whole team')).toBeVisible();
-    await expect(page.locator('a[href^="/templates/"] img').first()).toBeVisible();
-    await expect(page.getByRole('link', { name: /Let Lucy choose the team/ })).toHaveCount(0);
-    await page.locator('a[href^="/templates/agency-dev-tech-design-review"]').click();
+    await expect(page.getByText('Choose the whole team')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('a[href^="/templates/"] img').first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole('button', { name: 'Ask Lucy' })).toBeVisible({ timeout: 15000 });
+    await page.getByPlaceholder(/Search roles, outcomes, categories/).fill('Technical Design Review', { timeout: 15000 });
+    const applyTemplateLink = page.locator('a[href^="/templates/agency-dev-tech-design-review"]');
+    await expect(applyTemplateLink).toBeVisible({ timeout: 15000 });
+    await applyTemplateLink.click();
     await expect(page.locator('.react-flow__node')).toHaveCount(4);
     await expect(page.locator('.template-flow .relationship-edge-label svg')).toHaveCount(4);
     await page.getByLabel(/assigns to/i).first().click();
@@ -378,9 +403,12 @@ test('official template creates a fresh Channel-scoped team through the real UI 
     await createChannelButton.click();
     await page.getByRole('button', { name: /From template/ }).click();
 
-    await expect(page.getByRole('heading', { name: 'Agent team templates' })).toBeVisible();
-    await expect(page.getByRole('link', { name: /Let Lucy choose the team/ })).toBeVisible();
-    await page.locator('a[href^="/templates/agency-dev-tech-design-review"]').click();
+    await expect(page.getByRole('heading', { name: 'Agent team templates' })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole('button', { name: 'Ask Lucy' })).toBeVisible({ timeout: 15000 });
+    await page.getByPlaceholder(/Search roles, outcomes, categories/).fill('Technical Design Review', { timeout: 15000 });
+    const createTemplateLink = page.locator('a[href^="/templates/agency-dev-tech-design-review"]');
+    await expect(createTemplateLink).toBeVisible({ timeout: 15000 });
+    await createTemplateLink.click();
 
     await expect(page.getByRole('heading', { name: 'Team relationship preview' })).toBeVisible();
     await expect(page.locator('.react-flow__node')).toHaveCount(4);
@@ -400,6 +428,7 @@ test('official template creates a fresh Channel-scoped team through the real UI 
     const agents = await agentsResponse.json() as Agent[];
     expect(agents).toHaveLength(4);
     expect(agents.every((agent) => agent.home_channel_id === channelID && agent.kind === 'agent')).toBe(true);
+    expect(agents.every((agent) => agent.computer_id === localComputer.id)).toBe(true);
     expect(agents.every((agent) => agent.avatar_url.startsWith('dicebear:pixel-art:template-agency-dev-tech-design-review-'))).toBe(true);
 
     const removedGlobalCreate = await request.post(`${apiBase}/api/v1/agents`, {
@@ -580,6 +609,18 @@ test('official template creates a fresh Channel-scoped team through the real UI 
       await request.delete(`${apiBase}/api/v1/channels/${appliedChannelID}`, {
         headers: { authorization: `Bearer ${auth.access_token}` },
       });
+    }
+    if (lucyAgentID) {
+      databaseJSON<{ prepared: number }>(`
+        WITH prepared AS (
+          UPDATE agents SET kind = 'agent' WHERE id = '${lucyAgentID}' RETURNING id
+        )
+        SELECT json_build_object('prepared', COUNT(*))::text FROM prepared
+      `);
+      await request.delete(`${apiBase}/api/v1/agents/${lucyAgentID}`, { headers }).catch(() => undefined);
+    }
+    if (localComputer) {
+      await localComputer.release(request);
     }
   }
 });

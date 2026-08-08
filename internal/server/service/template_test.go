@@ -201,6 +201,7 @@ func TestTemplateProvisionAppliesAtomicallyToEmptyChannel(t *testing.T) {
 		TemplateID:      "agency-dev-tech-design-review",
 		TargetChannelID: channelID,
 		ModelProvider:   "codex",
+		RuntimeID:       "11111111-1111-4111-8111-111111111111",
 	})
 	if err != nil {
 		t.Fatalf("ApplyToChannel: %v", err)
@@ -256,6 +257,7 @@ func TestTemplateProvisionAppliesAtomicallyToEmptyChannel(t *testing.T) {
 		TemplateID:      "agency-dev-tech-design-review",
 		TargetChannelID: channelID,
 		ModelProvider:   "codex",
+		RuntimeID:       "11111111-1111-4111-8111-111111111111",
 	})
 	if !errors.Is(err, ErrChannelTeamNotEmpty) {
 		t.Fatalf("second ApplyToChannel error = %v, want %v", err, ErrChannelTeamNotEmpty)

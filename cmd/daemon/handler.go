@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -21,14 +23,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/solo-ai/solo/internal/auth"
+	serverservice "github.com/solo-ai/solo/internal/server/service"
 	"github.com/solo-ai/solo/pkg/agent"
 	"github.com/solo-ai/solo/pkg/llm"
 	"github.com/solo-ai/solo/pkg/skillloader"
 )
 
 const backendFinalResultWaitAfter = 5 * time.Second
+const maxControlRPCResponse = 900 * 1024
 
 const (
 	defaultAgentSessionIdleTTL      = 30 * time.Minute
@@ -36,17 +38,10 @@ const (
 	defaultSessionIdleSweepInterval = time.Minute
 )
 
-// agentTokenState holds a cached JWT for an agent plus its expiry.
-type agentTokenState struct {
-	accessToken string
-	expiresAt   time.Time
-}
-
 // daemonHandler holds the daemon-side HTTP handlers.
 type daemonHandler struct {
 	taskManager      *taskManager
 	providers        map[string]llm.Provider
-	pool             *pgxpool.Pool
 	serverURL        string
 	internalToken    string
 	httpClient       *http.Client
@@ -58,27 +53,21 @@ type daemonHandler struct {
 	thinkingIdleTTL  time.Duration
 	sessionIdleSweep time.Duration
 	shuttingDown     atomic.Bool
-
-	// v1.4: per-agent token store for persistent session token auto-refresh (SOLO-254-B).
-	agentTokens   map[string]*agentTokenState // agentID -> cached token + expiry
-	agentTokensMu sync.RWMutex
 }
 
 // newDaemonHandler creates a new daemon HTTP handler.
 // provider is the default LLM provider (used when no per-task override exists).
-func newDaemonHandler(pool *pgxpool.Pool, tm *taskManager, provider llm.Provider, serverURL, internalToken string) *daemonHandler {
+func newDaemonHandler(tm *taskManager, provider llm.Provider, serverURL, internalToken string) *daemonHandler {
 	return &daemonHandler{
 		taskManager: tm,
 		providers: map[string]llm.Provider{
 			"": provider, // default provider key
 		},
-		pool:             pool,
 		serverURL:        serverURL,
 		internalToken:    internalToken,
 		httpClient:       &http.Client{Timeout: 10 * time.Second},
 		workspaceManager: agent.NewWorkspaceManager(""),
 		memoryManager:    agent.NewMemoryManager(""),
-		agentTokens:      make(map[string]*agentTokenState),
 		agentIdleTTL:     durationFromEnv("AGENT_SESSION_IDLE_TTL", defaultAgentSessionIdleTTL),
 		thinkingIdleTTL:  durationFromEnv("THINKING_SESSION_IDLE_TTL", defaultThinkingSessionIdleTTL),
 		sessionIdleSweep: durationFromEnv("SESSION_IDLE_SWEEP_INTERVAL", durationFromEnv("THINKING_SESSION_SWEEP_INTERVAL", defaultSessionIdleSweepInterval)),
@@ -121,6 +110,142 @@ func (h *daemonHandler) DetectBackends(w http.ResponseWriter, _ *http.Request) {
 		results = []agent.BackendStatus{}
 	}
 	writeJSON(w, http.StatusOK, results)
+}
+
+// handleControlRPC reuses the existing local handlers while the transport is
+// reversed: Server asks through the authenticated control socket, Daemon reads
+// the local resource, and only the bounded JSON response crosses the network.
+func (h *daemonHandler) handleControlRPC(ctx context.Context, method string, raw json.RawMessage) ([]byte, error) {
+	var params map[string]any
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return nil, fmt.Errorf("invalid RPC params: %w", err)
+		}
+	}
+	query := make(url.Values)
+	for _, key := range []string{"agent_id", "path", "provider"} {
+		if value, ok := params[key].(string); ok && value != "" {
+			query.Set(key, value)
+		}
+	}
+
+	var handler http.HandlerFunc
+	switch method {
+	case "backend.detect":
+		handler = h.DetectBackends
+	case "transcript.read":
+		return h.readTranscriptRPC(raw)
+	case "workspace.list":
+		handler = h.HandleWorkspaceList
+	case "workspace.read":
+		handler = h.HandleWorkspaceRead
+	case "skills.list":
+		handler = h.HandleSkillsList
+	case "task.cancel":
+		taskID, _ := params["task_id"].(string)
+		if taskID == "" || !h.taskManager.CancelTask(taskID) {
+			return nil, errors.New("task not found")
+		}
+		return json.Marshal(map[string]bool{"cancelled": true})
+	case "agent.cleanup":
+		agentID, _ := params["agent_id"].(string)
+		if agentID == "" {
+			return nil, errors.New("agent_id is required")
+		}
+		h.cleanupAgent(agentID)
+		return json.Marshal(map[string]bool{"cleaned": true})
+	case "thinking.cleanup":
+		nodeValues, _ := params["node_ids"].([]any)
+		for _, value := range nodeValues {
+			nodeID, _ := value.(string)
+			for _, manager := range h.sessionManagers {
+				_ = manager.ForceCloseThinkingSession(nodeID)
+			}
+		}
+		return json.Marshal(map[string]bool{"cleaned": true})
+	default:
+		return nil, fmt.Errorf("unsupported RPC method %q", method)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/?"+query.Encode(), nil).WithContext(ctx)
+	recorder := httptest.NewRecorder()
+	handler(recorder, req)
+	response := recorder.Result()
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxControlRPCResponse+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxControlRPCResponse {
+		return nil, fmt.Errorf("local RPC %s response exceeds limit", method)
+	}
+	if response.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("local RPC %s returned %d: %s", method, response.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if !json.Valid(body) {
+		return nil, fmt.Errorf("local RPC %s returned invalid JSON", method)
+	}
+	return body, nil
+}
+
+func (h *daemonHandler) readTranscriptRPC(raw json.RawMessage) ([]byte, error) {
+	var req struct {
+		AgentID           string `json:"agent_id"`
+		Provider          string `json:"provider"`
+		ExternalSessionID string `json:"external_session_id"`
+		Start             string `json:"start"`
+		End               string `json:"end"`
+		Limit             int    `json:"limit"`
+	}
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, fmt.Errorf("invalid transcript request: %w", err)
+	}
+	if req.AgentID == "" || req.Provider == "" {
+		return nil, errors.New("agent_id and provider are required")
+	}
+	if req.ExternalSessionID == "" {
+		return []byte("[]"), nil
+	}
+	if req.Limit <= 0 || req.Limit > 2000 {
+		req.Limit = 2000
+	}
+	var start, end time.Time
+	var err error
+	if req.Start != "" {
+		start, err = time.Parse(time.RFC3339Nano, req.Start)
+		if err != nil {
+			return nil, errors.New("invalid transcript start")
+		}
+	}
+	if req.End != "" {
+		end, err = time.Parse(time.RFC3339Nano, req.End)
+		if err != nil {
+			return nil, errors.New("invalid transcript end")
+		}
+	}
+	var entries []serverservice.AgentTranscriptEntry
+	if req.Provider == "hermes" {
+		entries, err = serverservice.ReadHermesTranscriptWindow(req.ExternalSessionID, start, end, req.Limit)
+	} else {
+		if h.workspaceManager == nil {
+			return nil, errors.New("workspace manager unavailable")
+		}
+		path := transcriptPathForProvider(req.Provider, h.workspaceManager.WorkspaceDir(req.AgentID), req.ExternalSessionID)
+		entries, err = serverservice.ReadAgentTranscriptWindow(path, start, end, req.Limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		entries[i].Raw = nil
+	}
+	result, err := json.Marshal(entries)
+	if err != nil {
+		return nil, err
+	}
+	if len(result) > maxControlRPCResponse {
+		return nil, errors.New("transcript response exceeds limit")
+	}
+	return result, nil
 }
 
 // cachedSessionAgentIDs returns all Agent IDs with a cached persistent session,
@@ -192,141 +317,6 @@ func (h *daemonHandler) runSessionReaper(ctx context.Context) {
 	}
 }
 
-// ── Token store (SOLO-254-B: persistent session token auto-refresh) ────────────
-
-// getOrGenerateToken returns a cached valid token for the agent, or generates a
-// new one. This is the primary entry point — proxy requests and task dispatches
-// both use it so the daemon can track token expiry and refresh proactively.
-func (h *daemonHandler) getOrGenerateToken(ctx context.Context, agentID string) (string, error) {
-	h.agentTokensMu.RLock()
-	st, ok := h.agentTokens[agentID]
-	h.agentTokensMu.RUnlock()
-
-	if ok && time.Now().Before(st.expiresAt) {
-		return st.accessToken, nil
-	}
-
-	// Cache miss — try disk (survives daemon restarts).
-	if diskSt := h.loadTokenFromDisk(agentID); diskSt != nil {
-		h.agentTokensMu.Lock()
-		h.agentTokens[agentID] = diskSt
-		h.agentTokensMu.Unlock()
-		return diskSt.accessToken, nil
-	}
-
-	return h.generateAndStoreToken(ctx, agentID)
-}
-
-// generateAndStoreToken creates a fresh access token for the agent, stores it in
-// the cache, and returns it. Caller must NOT hold agentTokensMu.
-func (h *daemonHandler) generateAndStoreToken(ctx context.Context, agentID string) (string, error) {
-	var agentName string
-	_ = h.pool.QueryRow(ctx, `SELECT COALESCE(name, $1) FROM agents WHERE id = $1`, agentID).Scan(&agentName)
-	if agentName == "" {
-		agentName = agentID
-	}
-
-	token, err := auth.GenerateAgentToken(agentID, agentName)
-	if err != nil {
-		return "", err
-	}
-
-	st := &agentTokenState{
-		accessToken: token,
-		expiresAt:   time.Now().Add(auth.AgentAccessTokenDuration),
-	}
-
-	h.agentTokensMu.Lock()
-	h.agentTokens[agentID] = st
-	h.agentTokensMu.Unlock()
-
-	// Persist to disk so agent sessions survive daemon restarts.
-	h.saveTokenToDisk(agentID, token, st.expiresAt)
-
-	slog.Debug("daemon: generated new agent token", "agent_id", agentID, "expires_at", st.expiresAt.Format(time.RFC3339))
-	return token, nil
-}
-
-// tokenDir returns the directory for persistent agent token storage.
-func tokenDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".solo", "agent-tokens")
-}
-
-// saveTokenToDisk persists an agent token to disk (JWT only — expiry in claims).
-func (h *daemonHandler) saveTokenToDisk(agentID, token string, _ time.Time) {
-	dir := filepath.Join(tokenDir(), agentID)
-	os.MkdirAll(dir, 0700)
-	if err := os.WriteFile(filepath.Join(dir, "current.token"), []byte(token), 0600); err != nil {
-		slog.Warn("daemon: failed to persist agent token", "agent_id", agentID, "error", err)
-	}
-}
-
-// loadTokenFromDisk reads a persisted token. Returns nil if not found.
-func (h *daemonHandler) loadTokenFromDisk(agentID string) *agentTokenState {
-	file := filepath.Join(tokenDir(), agentID, "current.token")
-	raw, err := os.ReadFile(file)
-	if err != nil {
-		return nil
-	}
-	token := strings.TrimSpace(string(raw))
-	if token == "" {
-		return nil
-	}
-	return &agentTokenState{
-		accessToken: token,
-		expiresAt:   time.Now().Add(auth.AgentAccessTokenDuration),
-	}
-}
-
-// refreshToken regenerates the agent token unconditionally (used on 401 retry).
-func (h *daemonHandler) refreshToken(ctx context.Context, agentID string) (string, error) {
-	h.agentTokensMu.Lock()
-	delete(h.agentTokens, agentID)
-	h.agentTokensMu.Unlock()
-
-	slog.Info("daemon: token refreshed (401 retry)", "agent_id", agentID)
-	return h.generateAndStoreToken(ctx, agentID)
-}
-
-// storeTokenFromTask records a token generated during task dispatch so the
-// background goroutine knows about it. Unlike getOrGenerateToken, this doesn't
-// query the agent name from DB (we already have it).
-func (h *daemonHandler) storeTokenFromTask(agentID, token string) {
-	st := &agentTokenState{
-		accessToken: token,
-		expiresAt:   time.Now().Add(auth.AgentAccessTokenDuration),
-	}
-	h.agentTokensMu.Lock()
-	h.agentTokens[agentID] = st
-	h.agentTokensMu.Unlock()
-}
-
-// fetchChannelAgentWorkspaces returns (name, workspace) pairs for other active
-// agents in the given channel, excluding the requesting agent itself.
-func (h *daemonHandler) fetchChannelAgentWorkspaces(ctx context.Context, channelID, excludeAgentID string) ([]agent.AgentWorkspace, error) {
-	rows, err := h.pool.Query(ctx,
-		`SELECT a.name, a.workspace_path FROM agents a
-		 INNER JOIN channel_members cm ON cm.member_id = a.id AND cm.member_type = 'agent'
-		 WHERE cm.channel_id = $1 AND a.is_active = true AND a.id != $2`,
-		channelID, excludeAgentID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var result []agent.AgentWorkspace
-	for rows.Next() {
-		var aw agent.AgentWorkspace
-		if err := rows.Scan(&aw.Name, &aw.Workspace); err != nil {
-			return nil, err
-		}
-		result = append(result, aw)
-	}
-	return result, rows.Err()
-}
-
 // ProxyRequest handles POST /internal/daemon/proxy
 // Agents call this local endpoint instead of hitting the server API directly.
 // The daemon adds auth and forwards the request to the server. This keeps
@@ -371,15 +361,14 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.Action == "message_send" {
-		if runID := h.taskManager.ExecutingRunID(req.AgentID, req.ChannelID, req.NodeID); runID != "" {
+		if runID, _ := h.taskManager.ExecutingCredential(req.AgentID, req.ChannelID, req.NodeID); runID != "" {
 			req.RunID = runID
 		}
 	}
 
-	// Generate or reuse auth token for this agent (SOLO-254-B: token store).
-	token, err := h.getOrGenerateToken(r.Context(), req.AgentID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate auth token"})
+	_, token := h.taskManager.ExecutingCredential(req.AgentID, req.ChannelID, req.NodeID)
+	if token == "" {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "no executing Run credential for this Agent scope"})
 		return
 	}
 
@@ -490,22 +479,6 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// SOLO-254-B: On 401, refresh the token and retry once.
-	if resp.StatusCode == http.StatusUnauthorized {
-		slog.Info("proxy: got 401, refreshing token and retrying", "agent_id", req.AgentID, "action", req.Action)
-		newToken, refreshErr := h.refreshToken(r.Context(), req.AgentID)
-		if refreshErr != nil {
-			slog.Error("proxy: token refresh failed after 401", "agent_id", req.AgentID, "error", refreshErr)
-		} else {
-			resp, body, err = forwardRequest(newToken)
-			if err != nil {
-				slog.Error("proxy: retry request failed", "action", req.Action, "error", err)
-				writeJSON(w, http.StatusBadGateway, map[string]string{"error": "server unreachable"})
-				return
-			}
-		}
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
 		w.Header().Set("Retry-After", retryAfter)
@@ -573,6 +546,11 @@ type runTaskRequest struct {
 	ModelConfig           modelConfigPayload `json:"model_config"`
 	TaskContext           string             `json:"task_context,omitempty"`    // SOLO-221-B: summary of pending tasks in channel
 	MentionedNames        []string           `json:"mentioned_names,omitempty"` // v1.3: names of @mentioned agents
+	AgentToken            string             `json:"agent_token,omitempty"`
+	AgentName             string             `json:"agent_name,omitempty"`
+	ChannelName           string             `json:"channel_name,omitempty"`
+	CustomEnv             map[string]string  `json:"custom_env,omitempty"`
+	CustomArgs            []string           `json:"custom_args,omitempty"`
 }
 
 type llmMessage struct {
@@ -601,22 +579,26 @@ func (h *daemonHandler) Run(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
+	if req.TaskID == "" {
+		req.TaskID = uuid.NewString()
+	}
 
-	// Validate required fields
+	if err := h.startTask(req, ""); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, runTaskResponse{TaskID: req.TaskID, Status: taskStatusQueued})
+}
+
+func (h *daemonHandler) startTask(req runTaskRequest, attemptID string) error {
 	if req.TaskID == "" {
 		req.TaskID = uuid.New().String()
 	}
-	if req.AgentID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_id is required"})
-		return
+	if req.AgentID == "" || req.ChannelID == "" {
+		return errors.New("agent_id and channel_id are required")
 	}
-	if req.ChannelID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channel_id is required"})
-		return
-	}
-
 	// Register the task
-	h.taskManager.AddTask(req.TaskID, &taskState{
+	if !h.taskManager.AddTask(req.TaskID, &taskState{
 		TaskID:     req.TaskID,
 		RunID:      req.RunID,
 		AgentID:    req.AgentID,
@@ -625,7 +607,11 @@ func (h *daemonHandler) Run(w http.ResponseWriter, r *http.Request) {
 		NodeID:     req.NodeID,
 		Status:     taskStatusQueued,
 		ReceivedAt: time.Now(),
-	})
+		AttemptID:  attemptID,
+		AgentToken: req.AgentToken,
+	}) {
+		return nil
+	}
 
 	slog.Info("task received",
 		"task_id", req.TaskID,
@@ -635,12 +621,6 @@ func (h *daemonHandler) Run(w http.ResponseWriter, r *http.Request) {
 		"provider", req.ModelConfig.Provider,
 	)
 
-	// Return 202 Accepted immediately
-	writeJSON(w, http.StatusAccepted, runTaskResponse{
-		TaskID: req.TaskID,
-		Status: taskStatusQueued,
-	})
-
 	// Process the task asynchronously with streaming
 	ctx, cancel := context.WithCancel(context.Background())
 	h.taskManager.SetCancelFunc(req.TaskID, cancel)
@@ -648,6 +628,7 @@ func (h *daemonHandler) Run(w http.ResponseWriter, r *http.Request) {
 		defer h.taskManager.ClearCancelFunc(req.TaskID)
 		h.processTaskStreaming(ctx, req)
 	}()
+	return nil
 }
 
 // processTaskStreaming executes the LLM call in streaming mode and pushes events.
@@ -729,7 +710,6 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 			"error", err,
 		)
 		h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
-		h.notifyServerError(req, err.Error())
 
 		h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
 			"agent_id":  req.AgentID,
@@ -761,7 +741,6 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 				"error", chunk.Error,
 			)
 			h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
-			h.notifyServerError(req, chunk.Error.Error())
 
 			h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
 				"agent_id":  req.AgentID,
@@ -802,7 +781,6 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 			"agent_id", req.AgentID,
 		)
 		h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
-		h.notifyServerError(req, errMsg)
 		h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
 			"agent_id":  req.AgentID,
 			"error":     errMsg,
@@ -866,17 +844,12 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		"model", req.ModelConfig.Model,
 	)
 
-	// Fetch agent info from DB for name and system prompt
-	agentInfo, err := h.fetchAgentInfo(ctx, req.AgentID)
-	if err != nil {
-		slog.Error("task: failed to fetch agent info", "task_id", req.TaskID, "agent_id", req.AgentID, "error", err)
-		h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
-		h.notifyServerError(req, "failed to load agent configuration: "+err.Error())
-		h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
-			"agent_id": req.AgentID, "error": "failed to load agent configuration", "retryable": false,
-		})
-		h.taskManager.CloseAllSubscribers(req.TaskID)
-		return
+	agentInfo := &agentInfo{Name: req.AgentName, CustomEnv: req.CustomEnv, CustomArgs: req.CustomArgs}
+	if agentInfo.Name == "" {
+		agentInfo.Name = req.AgentID
+	}
+	if agentInfo.CustomEnv == nil {
+		agentInfo.CustomEnv = map[string]string{}
 	}
 
 	// Prepare workspace (idempotent — safe to call every time)
@@ -890,7 +863,6 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	if err != nil {
 		slog.Error("task: workspace preparation failed", "task_id", req.TaskID, "error", err)
 		h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
-		h.notifyServerError(req, "workspace preparation failed: "+err.Error())
 		h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
 			"agent_id": req.AgentID, "error": "workspace preparation failed", "retryable": true,
 		})
@@ -901,8 +873,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	// Load memory content
 	memoryContent, _ := h.memoryManager.Load(req.AgentID)
 
-	// Fetch channel name for context
-	channelName, _ := h.fetchChannelName(ctx, req.ChannelID)
+	channelName := req.ChannelName
 
 	// Determine trigger type.
 	triggerType := agent.TriggerChat
@@ -923,14 +894,6 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		TriggerType: triggerType,
 	}
 
-	// SOLO-254-B: Obtain a JWT via the token store so the background refresh
-	// goroutine keeps it fresh for the lifetime of the persistent session.
-	// The agent authenticates as itself — it's a channel member.
-	// Must be generated before agentCfg so it's available for persistent session creation.
-	agentToken, err := h.getOrGenerateToken(ctx, req.AgentID)
-	if err != nil {
-		slog.Warn("task: failed to generate agent token — agent cannot call APIs", "agent_id", req.AgentID, "error", err)
-	}
 	localDaemonPort := strings.TrimSpace(os.Getenv("DAEMON_PORT"))
 	if localDaemonPort == "" {
 		localDaemonPort = "8081"
@@ -944,8 +907,8 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	if req.NodeID != "" {
 		agentEnv["SOLO_NODE_ID"] = req.NodeID
 	}
-	if agentToken != "" {
-		agentEnv["SOLO_AUTH_TOKEN"] = agentToken
+	if req.AgentToken != "" {
+		agentEnv["SOLO_AUTH_TOKEN"] = req.AgentToken
 	}
 	// Merge agent-level custom_env over base agentEnv (agent wins).
 	for k, v := range agentInfo.CustomEnv {
@@ -996,8 +959,8 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		slog.Warn("task: sync solo skills failed (non-fatal)", "task_id", req.TaskID, "error", err)
 	}
 
-	materializedMessages := h.materializeMessageAttachments(ctx, req.Messages, ws.WorkDir)
-	materializedColdStartMessages := h.materializeMessageAttachments(ctx, req.ColdStartMessages, ws.WorkDir)
+	materializedMessages := h.materializeMessageAttachments(ctx, req.AgentToken, req.Messages, ws.WorkDir)
+	materializedColdStartMessages := h.materializeMessageAttachments(ctx, req.AgentToken, req.ColdStartMessages, ws.WorkDir)
 
 	// Convert messages to agent.Message format
 	msgs := make([]agent.Message, len(materializedMessages))
@@ -1060,7 +1023,6 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		if req.NodeID != "" {
 			sessionKey = agent.ThinkingSessionKey(req.NodeID)
 		}
-		_, _ = h.refreshToken(ctx, req.AgentID)
 		slog.Info("task: getting persistent session", "agent_id", req.AgentID, "session_key", sessionKey, "resume", req.ResumeSessionID)
 		ps, psErr := sm.GetOrCreateScopedSession(ctx, sessionKey, req.AgentID, agentCfg, channelCtx, msgs, coldStartMsgs, req.ResumeSessionID, req.MentionedNames)
 		if psErr == nil {
@@ -1093,7 +1055,6 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 			}
 			slog.Error("task: Backend.Execute failed", "task_id", req.TaskID, "error", execErr)
 			h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
-			h.notifyServerError(req, execErr.Error())
 			h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
 				"agent_id": req.AgentID, "error": execErr.Error(), "retryable": true,
 			})
@@ -1192,7 +1153,6 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 			}
 			slog.Error("task: backend stream error", "task_id", req.TaskID, "error", chunk.Content)
 			h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
-			h.notifyServerError(req, chunk.Content)
 			h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
 				"agent_id": req.AgentID, "error": chunk.Content, "retryable": true,
 			})
@@ -1277,7 +1237,6 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	if finalStatus != "completed" {
 		errMsg := backendErrorMessage(result)
 		h.taskManager.UpdateStatus(req.TaskID, backendTaskStatus(finalStatus))
-		h.notifyServerError(req, errMsg)
 		h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
 			"agent_id":  req.AgentID,
 			"error":     errMsg,
@@ -1311,7 +1270,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	h.taskManager.CloseAllSubscribers(req.TaskID)
 }
 
-func (h *daemonHandler) materializeMessageAttachments(ctx context.Context, messages []llmMessage, workDir string) []llmMessage {
+func (h *daemonHandler) materializeMessageAttachments(ctx context.Context, token string, messages []llmMessage, workDir string) []llmMessage {
 	if len(messages) == 0 || workDir == "" {
 		return messages
 	}
@@ -1326,7 +1285,7 @@ func (h *daemonHandler) materializeMessageAttachments(ctx context.Context, messa
 		attachments := make([]agent.Attachment, len(msg.Attachments))
 		copy(attachments, msg.Attachments)
 		for j := range attachments {
-			localPath, err := h.materializeAttachment(ctx, workDir, &attachments[j])
+			localPath, err := h.materializeAttachment(ctx, workDir, token, &attachments[j])
 			if err != nil {
 				slog.Warn("task: failed to materialize attachment", "attachment_id", attachments[j].ID, "filename", attachments[j].Filename, "error", err)
 				continue
@@ -1339,7 +1298,7 @@ func (h *daemonHandler) materializeMessageAttachments(ctx context.Context, messa
 	return out
 }
 
-func (h *daemonHandler) materializeAttachment(ctx context.Context, workDir string, attachment *agent.Attachment) (string, error) {
+func (h *daemonHandler) materializeAttachment(ctx context.Context, workDir, token string, attachment *agent.Attachment) (string, error) {
 	localPath := attachment.LocalPath
 	if localPath == "" {
 		localPath = agent.AttachmentLocalPath(attachment.ID, attachment.Filename)
@@ -1371,7 +1330,7 @@ func (h *daemonHandler) materializeAttachment(ctx context.Context, workDir strin
 	if attachment.URL == "" {
 		return "", fmt.Errorf("attachment has neither storage_path nor url")
 	}
-	if err := h.downloadAttachment(ctx, attachment.URL, dst); err != nil {
+	if err := h.downloadAttachment(ctx, attachment.URL, dst, token); err != nil {
 		return "", err
 	}
 	return filepath.ToSlash(localPath), nil
@@ -1425,7 +1384,7 @@ func daemonAttachmentsRoot() string {
 	return filepath.Join(".", "attachments")
 }
 
-func (h *daemonHandler) downloadAttachment(ctx context.Context, rawURL, dst string) error {
+func (h *daemonHandler) downloadAttachment(ctx context.Context, rawURL, dst, token string) error {
 	downloadURL, err := h.resolveAttachmentURL(rawURL)
 	if err != nil {
 		return err
@@ -1434,8 +1393,8 @@ func (h *daemonHandler) downloadAttachment(ctx context.Context, rawURL, dst stri
 	if err != nil {
 		return err
 	}
-	if h.internalToken != "" {
-		req.Header.Set("X-Internal-Token", h.internalToken)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
@@ -1563,43 +1522,6 @@ type agentInfo struct {
 	Name       string
 	CustomEnv  map[string]string // agent-level env overrides (from custom_env JSONB)
 	CustomArgs []string          // agent-level CLI args (from custom_args JSONB)
-}
-
-// fetchAgentInfo queries agent metadata by ID.
-func (h *daemonHandler) fetchAgentInfo(ctx context.Context, agentID string) (*agentInfo, error) {
-	var info agentInfo
-	var customEnvBytes, customArgsBytes []byte
-	err := h.pool.QueryRow(ctx,
-		`SELECT name, custom_env, custom_args FROM agents WHERE id = $1 AND is_active = true`, agentID,
-	).Scan(&info.Name, &customEnvBytes, &customArgsBytes)
-	if err != nil {
-		return nil, fmt.Errorf("fetch agent %s: %w", agentID, err)
-	}
-	if len(customEnvBytes) > 0 {
-		json.Unmarshal(customEnvBytes, &info.CustomEnv)
-	}
-	if info.CustomEnv == nil {
-		info.CustomEnv = make(map[string]string)
-	}
-	if len(customArgsBytes) > 0 {
-		json.Unmarshal(customArgsBytes, &info.CustomArgs)
-	}
-	if info.CustomArgs == nil {
-		info.CustomArgs = make([]string, 0)
-	}
-	return &info, nil
-}
-
-// fetchChannelName queries a channel's name by ID.
-func (h *daemonHandler) fetchChannelName(ctx context.Context, channelID string) (string, error) {
-	var name string
-	err := h.pool.QueryRow(ctx,
-		`SELECT name FROM channels WHERE id = $1`, channelID,
-	).Scan(&name)
-	if err != nil {
-		return "", fmt.Errorf("fetch channel %s: %w", channelID, err)
-	}
-	return name, nil
 }
 
 // pushEventJSON marshals data as JSON and pushes an SSE event to all subscribers.
@@ -1754,124 +1676,6 @@ func (h *daemonHandler) CancelTask(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// --- Callbacks ---
-
-// notifyServerComplete sends a task completion callback to the server.
-// NOTE: This is only used for non-streaming (callback-based) task paths.
-// The SSE streaming path handles completion via the "complete" SSE event.
-func (h *daemonHandler) notifyServerComplete(req runTaskRequest, content, messageID string, usage llm.Usage) {
-	if h.serverURL == "" {
-		slog.Warn("no server URL configured, skipping task complete notification",
-			"task_id", req.TaskID,
-		)
-		return
-	}
-
-	cbReq := taskCompleteCallback{
-		TaskID:    req.TaskID,
-		AgentID:   req.AgentID,
-		ChannelID: req.ChannelID,
-		ThreadID:  req.ThreadID,
-		Content:   content,
-		MessageID: messageID,
-	}
-	cbReq.Usage.InputTokens = usage.InputTokens
-	cbReq.Usage.OutputTokens = usage.OutputTokens
-
-	payload, err := json.Marshal(cbReq)
-	if err != nil {
-		slog.Error("failed to marshal task complete callback", "error", err)
-		return
-	}
-
-	url := h.serverURL + "/internal/daemon/tasks/" + req.TaskID + "/complete"
-	if err := h.sendInternalRequest(url, payload); err != nil {
-		slog.Error("failed to notify server of task completion",
-			"task_id", req.TaskID, "error", err,
-		)
-		return
-	}
-
-	slog.Info("task completion notified to server",
-		"task_id", req.TaskID,
-	)
-}
-
-// notifyServerError sends a task error callback to the server.
-func (h *daemonHandler) notifyServerError(req runTaskRequest, errMsg string) {
-	if h.serverURL == "" {
-		return
-	}
-
-	cbReq := taskErrorCallback{
-		TaskID:    req.TaskID,
-		AgentID:   req.AgentID,
-		ChannelID: req.ChannelID,
-		Error:     errMsg,
-	}
-
-	payload, err := json.Marshal(cbReq)
-	if err != nil {
-		slog.Error("failed to marshal task error callback", "error", err)
-		return
-	}
-
-	url := h.serverURL + "/internal/daemon/tasks/" + req.TaskID + "/error"
-	if err := h.sendInternalRequest(url, payload); err != nil {
-		slog.Error("failed to notify server of task error",
-			"task_id", req.TaskID, "error", err,
-		)
-	}
-}
-
-// sendInternalRequest sends a POST request to the server with the internal auth header.
-func (h *daemonHandler) sendInternalRequest(url string, payload []byte) error {
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if h.internalToken != "" {
-		req.Header.Set("Authorization", "Internal-Token "+h.internalToken)
-	}
-
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("server returned status %d", resp.StatusCode)
-	}
-
-	return nil
-}
-
-// --- Callback types ---
-
-// taskCompleteCallback is sent to the server when a task completes.
-type taskCompleteCallback struct {
-	TaskID    string `json:"task_id"`
-	AgentID   string `json:"agent_id"`
-	ChannelID string `json:"channel_id"`
-	ThreadID  string `json:"thread_id,omitempty"`
-	Content   string `json:"content"`
-	MessageID string `json:"message_id"`
-	Usage     struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-	} `json:"usage,omitempty"`
-}
-
-// taskErrorCallback is sent to the server when a task encounters an error.
-type taskErrorCallback struct {
-	TaskID    string `json:"task_id"`
-	AgentID   string `json:"agent_id"`
-	ChannelID string `json:"channel_id"`
-	Error     string `json:"error"`
-}
-
 // copyFile copies a file from src to dst with the given permissions mode.
 func copyFile(src, dst string, mode os.FileMode) error {
 	s, err := os.Open(src)
@@ -1942,14 +1746,7 @@ func (h *daemonHandler) HandleSkillsList(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var provider string
-	err := h.pool.QueryRow(r.Context(),
-		`SELECT COALESCE(model_provider, '') FROM agents WHERE id = $1 AND is_active = true`,
-		agentID,
-	).Scan(&provider)
-	if err != nil {
-		slog.Warn("skills list: db query failed", "agent_id", agentID, "error", err)
-	}
+	provider := strings.TrimSpace(r.URL.Query().Get("provider"))
 	if provider == "" {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"skills": []skillListItem{}})
 		return
@@ -2280,9 +2077,12 @@ func (h *daemonHandler) CleanupAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("daemon: cleanup agent requested", "agent_id", agentID)
+	h.cleanupAgent(agentID)
+	w.WriteHeader(http.StatusNoContent)
+}
 
-	// 1. Force-close any active session across all provider session managers.
+func (h *daemonHandler) cleanupAgent(agentID string) {
+	slog.Info("daemon: cleanup agent requested", "agent_id", agentID)
 	for provider, sm := range h.sessionManagers {
 		if err := sm.ForceCloseSession(agentID); err != nil {
 			slog.Warn("daemon: force-close session failed",
@@ -2290,7 +2090,6 @@ func (h *daemonHandler) CleanupAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 2. Delete workspace directory (idempotent — missing dir is not error).
 	if h.workspaceManager != nil {
 		if err := h.workspaceManager.Cleanup(agentID); err != nil {
 			slog.Warn("daemon: workspace cleanup failed",
@@ -2298,7 +2097,6 @@ func (h *daemonHandler) CleanupAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 3. Delete memory file (idempotent).
 	if h.memoryManager != nil {
 		if err := h.memoryManager.Delete(agentID); err != nil {
 			slog.Warn("daemon: memory delete failed",
@@ -2306,7 +2104,6 @@ func (h *daemonHandler) CleanupAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.WriteHeader(http.StatusNoContent)
 }
 
 type cleanupThinkingSessionsRequest struct {

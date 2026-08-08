@@ -1,4 +1,4 @@
-.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-e2e-agent-delivery test-e2e-agent-session-resume test-e2e-agent-idle-resume test-e2e-agent-scope-router test-e2e-send-freshness test-e2e-websocket-recovery test-e2e-m8 test-e2e-m9
+.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-release-install test-e2e-agent-delivery test-e2e-agent-session-resume test-e2e-agent-idle-resume test-e2e-agent-scope-router test-e2e-send-freshness test-e2e-websocket-recovery test-e2e-m8 test-e2e-m9 test-e2e-remote-server test-e2e-public-remote
 .DEFAULT_GOAL := help
 
 ENV_FILE ?= .env
@@ -70,6 +70,12 @@ test-e2e-m8: rebuild ## Rebuild and verify real M8 Agent behavior
 test-e2e-m9: rebuild ## Rebuild and verify runtime metadata and daemon-owned CLI detection
 	@cd frontend && CI=1 SOLO_E2E_RUNTIME_DETECTION=1 npx playwright test e2e/runtime-detection.spec.ts --workers=1
 
+test-e2e-remote-server: rebuild ## Verify pairing, reverse runtime RPC, durable offline delivery, restart recovery, UI, and DB truth
+	@cd frontend && CI=1 SOLO_E2E_REMOTE_SERVER=1 npx playwright test e2e/remote-server.spec.ts --workers=1
+
+test-e2e-public-remote: ## Verify real SMTP, registration, recovery, DB state, and clean-machine setup UX
+	@bash scripts/test-public-remote-e2e.sh
+
 stop: ## Shut down all services
 	@bash scripts/stop-services.sh
 
@@ -85,6 +91,9 @@ build: ## Build server, daemon, solo CLI, and migrate binaries
 	@go build -o .pids/daemon ./cmd/daemon/
 	@go build -o .pids/solo ./cmd/solo/
 	@go build -o .pids/migrate ./cmd/migrate/
+
+test-release-install: ## Build a release archive and verify checksum-based clean installation
+	@bash scripts/test-release-install.sh
 
 migrate: ## Apply database migrations (idempotent)
 	@bash scripts/ensure-postgres.sh

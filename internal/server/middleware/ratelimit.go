@@ -2,7 +2,10 @@ package middleware
 
 import (
 	"log/slog"
+	"math"
+	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -48,8 +51,13 @@ func (tb *TokenBucket) Allow() bool {
 	return false
 }
 
-// RateLimiter returns a middleware that limits requests using a token bucket
-// algorithm. When the limit is exceeded, it responds with 429 Too Many Requests.
+type clientBucket struct {
+	bucket   *TokenBucket
+	lastSeen time.Time
+}
+
+// RateLimiter returns a middleware that limits each client IP using a token
+// bucket. Idle client buckets are discarded periodically.
 // The default rate is 100 requests per second with a burst capacity of 100.
 func RateLimiter(rate, capacity float64) func(http.Handler) http.Handler {
 	if rate <= 0 {
@@ -59,17 +67,42 @@ func RateLimiter(rate, capacity float64) func(http.Handler) http.Handler {
 		capacity = 100
 	}
 
-	bucket := NewTokenBucket(rate, capacity)
+	var mu sync.Mutex
+	buckets := make(map[string]*clientBucket)
+	lastCleanup := time.Now()
+	retryAfter := strconv.Itoa(max(1, int(math.Ceil(1/rate))))
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !bucket.Allow() {
+			now := time.Now()
+			clientIP := r.RemoteAddr
+			if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+				clientIP = host
+			}
+			mu.Lock()
+			if now.Sub(lastCleanup) >= 5*time.Minute {
+				for key, entry := range buckets {
+					if now.Sub(entry.lastSeen) >= 10*time.Minute {
+						delete(buckets, key)
+					}
+				}
+				lastCleanup = now
+			}
+			entry := buckets[clientIP]
+			if entry == nil {
+				entry = &clientBucket{bucket: NewTokenBucket(rate, capacity)}
+				buckets[clientIP] = entry
+			}
+			entry.lastSeen = now
+			mu.Unlock()
+
+			if !entry.bucket.Allow() {
 				slog.Warn("rate limit exceeded",
 					"method", r.Method,
 					"path", r.URL.Path,
-					"remote_addr", r.RemoteAddr,
+					"client_ip", clientIP,
 				)
-				w.Header().Set("Retry-After", "1")
+				w.Header().Set("Retry-After", retryAfter)
 				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 				w.WriteHeader(http.StatusTooManyRequests)
 				w.Write([]byte("Too Many Requests"))

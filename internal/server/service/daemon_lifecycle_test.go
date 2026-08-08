@@ -60,6 +60,39 @@ func TestPendingTaskTimeoutsUseCurrentLifecyclePhase(t *testing.T) {
 	}
 }
 
+func TestHealthCheckDoesNotRepeatOfflineTransition(t *testing.T) {
+	dm := NewDaemonManager(nil, nil)
+	dm.Register(&DaemonInfo{ID: "daemon-a"})
+
+	dm.mu.Lock()
+	dm.daemons["daemon-a"].LastHeartbeat = time.Now().Add(-dm.heartbeatInterval - time.Second)
+	dm.daemons["daemon-a"].MissedHeartbeats = dm.maxMissedHB - 1
+	dm.mu.Unlock()
+
+	dm.checkHealth()
+	dm.checkHealth()
+
+	dm.mu.RLock()
+	info := *dm.daemons["daemon-a"]
+	dm.mu.RUnlock()
+	if info.Status != DaemonStatusOffline {
+		t.Fatalf("status = %q, want offline", info.Status)
+	}
+	if info.MissedHeartbeats != dm.maxMissedHB {
+		t.Fatalf("missed heartbeats = %d, want %d", info.MissedHeartbeats, dm.maxMissedHB)
+	}
+
+	if !dm.Heartbeat("daemon-a", 0) {
+		t.Fatal("heartbeat rejected after offline transition")
+	}
+	dm.mu.RLock()
+	info = *dm.daemons["daemon-a"]
+	dm.mu.RUnlock()
+	if info.Status != DaemonStatusOnline || info.MissedHeartbeats != 0 {
+		t.Fatalf("heartbeat recovery = status %q, missed %d", info.Status, info.MissedHeartbeats)
+	}
+}
+
 func TestResolveDaemonForAgentUsesComputerBinding(t *testing.T) {
 	pool := agentRunTestPool(t)
 	ctx := context.Background()
@@ -117,5 +150,23 @@ func TestResolveDaemonForAgentUsesComputerBinding(t *testing.T) {
 	}
 	if runtimeID != computerA {
 		t.Fatalf("persisted runtime_id = %q, want %q", runtimeID, computerA)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE agents SET runtime_id = NULL WHERE id = $1`, agentID); err != nil {
+		t.Fatal(err)
+	}
+	dm.Unregister("daemon-a")
+	if _, err := pool.Exec(ctx, `UPDATE computers SET credential_hash = 'test-hash' WHERE id = $1`, computerA); err != nil {
+		t.Fatal(err)
+	}
+	dm.Register(&DaemonInfo{ID: computerA, ComputerID: computerA, Capabilities: []string{"llm"}, MaxConcurrent: 1})
+	if _, err := dm.ResolveDaemonForAgent(ctx, agentID, "llm"); err != nil {
+		t.Fatalf("single remote Computer fallback: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(runtime_id, '') FROM agents WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	if runtimeID != computerA {
+		t.Fatalf("remote persisted runtime_id = %q, want %q", runtimeID, computerA)
 	}
 }

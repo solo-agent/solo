@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/mail"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,6 +24,10 @@ import (
 func main() {
 	_ = config.LoadDotenv()
 	cfg := config.Load()
+	if err := validateProductionConfig(cfg); err != nil {
+		slog.Error("invalid production configuration", "error", err)
+		os.Exit(1)
+	}
 
 	// Initialize structured JSON logger
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
@@ -49,6 +57,7 @@ func main() {
 	// Create AgentService (triggers agent auto-response, manages agent status)
 	mentionSvc := service.NewMentionService(pool)
 	agentSvc := service.NewAgentService(pool, dm, hub, mentionSvc)
+	dm.SetAgentService(agentSvc)
 
 	// Set agent service on hub (was nil during creation due to circular dependency)
 	hub.SetAgentService(agentSvc)
@@ -66,8 +75,13 @@ func main() {
 	router := server.NewRouter(pool, hub, dm, agentSvc)
 
 	srv := &http.Server{
-		Addr:    ":" + cfg.Port,
-		Handler: router,
+		Addr:              ":" + cfg.Port,
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       2 * time.Minute,
+		WriteTimeout:      2 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	// Start server in goroutine
@@ -97,6 +111,59 @@ func main() {
 	slog.Info("server stopped")
 }
 
+func validateProductionConfig(cfg *config.Config) error {
+	if os.Getenv("APP_ENV") != "production" {
+		return nil
+	}
+	secret := strings.TrimSpace(cfg.JWTSecret)
+	if len(secret) < 32 || strings.Contains(strings.ToLower(secret), "change") || strings.Contains(strings.ToLower(secret), "replace") {
+		return fmt.Errorf("JWT_SECRET must be a non-default secret of at least 32 characters")
+	}
+	databaseURL, configured := os.LookupEnv("DATABASE_URL")
+	if !configured || strings.TrimSpace(databaseURL) == "" || strings.TrimSpace(cfg.DBURL) == "" {
+		return fmt.Errorf("DATABASE_URL is required")
+	}
+	origins := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS"))
+	if origins == "" || strings.Contains(origins, "*") {
+		return fmt.Errorf("CORS_ALLOWED_ORIGINS must list explicit origins")
+	}
+	if strings.TrimSpace(cfg.PublicURL) == "" || !strings.HasPrefix(cfg.PublicURL, "https://") {
+		return fmt.Errorf("PUBLIC_URL must be an https URL")
+	}
+	switch cfg.AuthMailTransport {
+	case "smtp":
+		if cfg.SMTPHost == "" || cfg.SMTPFrom == "" {
+			return fmt.Errorf("SMTP_HOST and SMTP_FROM are required")
+		}
+		if _, err := mail.ParseAddress(cfg.SMTPFrom); err != nil {
+			return fmt.Errorf("SMTP_FROM must be a valid email address")
+		}
+		port, err := strconv.Atoi(cfg.SMTPPort)
+		if err != nil || port < 1 || port > 65535 {
+			return fmt.Errorf("SMTP_PORT must be a valid port")
+		}
+		if cfg.SMTPTLS != "starttls" && cfg.SMTPTLS != "implicit" {
+			return fmt.Errorf("SMTP_TLS must be starttls or implicit")
+		}
+	case "tencent_ses":
+		if cfg.TencentCloudSecretID == "" || cfg.TencentCloudSecretKey == "" {
+			return fmt.Errorf("TENCENTCLOUD_SECRET_ID and TENCENTCLOUD_SECRET_KEY are required")
+		}
+		if cfg.TencentSESRegion != "ap-guangzhou" && cfg.TencentSESRegion != "ap-hongkong" {
+			return fmt.Errorf("TENCENT_SES_REGION must be ap-guangzhou or ap-hongkong")
+		}
+		if _, err := mail.ParseAddress(cfg.TencentSESFrom); err != nil {
+			return fmt.Errorf("TENCENT_SES_FROM must be a valid email address")
+		}
+		if cfg.TencentSESTemplateID < 1 {
+			return fmt.Errorf("TENCENT_SES_TEMPLATE_ID is required")
+		}
+	default:
+		return fmt.Errorf("AUTH_MAIL_TRANSPORT must be smtp or tencent_ses")
+	}
+	return nil
+}
+
 // sessionCleanupLoop periodically removes expired sessions from the database.
 // Runs every 5 minutes to prevent the sessions table from accumulating stale rows.
 func sessionCleanupLoop(pool *pgxpool.Pool) {
@@ -112,6 +179,9 @@ func sessionCleanupLoop(pool *pgxpool.Pool) {
 		}
 		if n := result.RowsAffected(); n > 0 {
 			slog.Info("expired sessions cleaned up", "count", n)
+		}
+		if _, err := pool.Exec(context.Background(), `DELETE FROM auth_email_challenges WHERE expires_at < NOW() - interval '1 day'`); err != nil {
+			slog.Error("email challenge cleanup failed", "error", err)
 		}
 	}
 }

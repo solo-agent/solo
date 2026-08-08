@@ -1,0 +1,35 @@
+services:
+  migrate:
+    build:
+      args:
+        GOPROXY: https://goproxy.cn,direct
+
+  server:
+    build:
+      args:
+        GOPROXY: https://goproxy.cn,direct
+    environment:
+      APP_ENV: staging
+      CORS_ALLOWED_ORIGINS: http://127.0.0.1:13000
+      PUBLIC_URL: http://127.0.0.1:13000
+      AUTH_MAIL_TRANSPORT: smtp
+      SMTP_HOST: ""
+      SMTP_FROM: ""
+      SOLO_DEV_AUTH_CODE: ${SOLO_DEV_AUTH_CODE:-123456}
+
+  frontend:
+    build:
+      args:
+        NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
+        NEXT_PUBLIC_API_URL: http://127.0.0.1:13000
+
+  private-proxy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:13000:80"
+    volumes:
+      - ./Caddyfile.private:/etc/caddy/Caddyfile:ro
+    depends_on:
+      frontend:
+        condition: service_started

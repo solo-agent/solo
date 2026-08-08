@@ -18,6 +18,12 @@ type Metrics struct {
 	activeRequests   atomic.Int64
 	errorsTotal      atomic.Int64
 	wsConnections    atomic.Int64
+	daemonControls   atomic.Int64
+	daemonConnects   atomic.Int64
+	remoteRunsQueued atomic.Int64
+	remoteRunAccepts atomic.Int64
+	remoteEventDupes atomic.Int64
+	remoteRPCTimeout atomic.Int64
 	requestDurationN atomic.Int64 // total nanoseconds of all completed requests
 	startTime        time.Time
 }
@@ -47,6 +53,13 @@ func (m *Metrics) IncErrors() {
 func (m *Metrics) SetWSConnections(n int64) {
 	m.wsConnections.Store(n)
 }
+
+func (m *Metrics) SetDaemonControls(n int64) { m.daemonControls.Store(n) }
+func (m *Metrics) IncDaemonConnects()        { m.daemonConnects.Add(1) }
+func (m *Metrics) IncRemoteRunsQueued()      { m.remoteRunsQueued.Add(1) }
+func (m *Metrics) IncRemoteRunAccepts()      { m.remoteRunAccepts.Add(1) }
+func (m *Metrics) IncRemoteEventDupes()      { m.remoteEventDupes.Add(1) }
+func (m *Metrics) IncRemoteRPCTimeout()      { m.remoteRPCTimeout.Add(1) }
 
 // Handler returns an HTTP handler that serves metrics in Prometheus text format.
 // It can be registered as GET /metrics with no authentication required.
@@ -81,6 +94,25 @@ func (m *Metrics) Handler() http.HandlerFunc {
 		fmt.Fprintf(w, "# HELP solo_ws_connections Current number of active WebSocket connections\n")
 		fmt.Fprintf(w, "# TYPE solo_ws_connections gauge\n")
 		fmt.Fprintf(w, "solo_ws_connections %d\n", m.wsConnections.Load())
+
+		fmt.Fprintf(w, "# HELP solo_daemon_control_connections Current authenticated Daemon control connections\n")
+		fmt.Fprintf(w, "# TYPE solo_daemon_control_connections gauge\n")
+		fmt.Fprintf(w, "solo_daemon_control_connections %d\n", m.daemonControls.Load())
+		fmt.Fprintf(w, "# HELP solo_daemon_connects_total Successful Daemon control handshakes\n")
+		fmt.Fprintf(w, "# TYPE solo_daemon_connects_total counter\n")
+		fmt.Fprintf(w, "solo_daemon_connects_total %d\n", m.daemonConnects.Load())
+		fmt.Fprintf(w, "# HELP solo_remote_runs_queued_total Durable remote Runs queued\n")
+		fmt.Fprintf(w, "# TYPE solo_remote_runs_queued_total counter\n")
+		fmt.Fprintf(w, "solo_remote_runs_queued_total %d\n", m.remoteRunsQueued.Load())
+		fmt.Fprintf(w, "# HELP solo_remote_run_accepts_total Remote Run accepts\n")
+		fmt.Fprintf(w, "# TYPE solo_remote_run_accepts_total counter\n")
+		fmt.Fprintf(w, "solo_remote_run_accepts_total %d\n", m.remoteRunAccepts.Load())
+		fmt.Fprintf(w, "# HELP solo_remote_event_duplicates_total Idempotently ignored remote Run event replays\n")
+		fmt.Fprintf(w, "# TYPE solo_remote_event_duplicates_total counter\n")
+		fmt.Fprintf(w, "solo_remote_event_duplicates_total %d\n", m.remoteEventDupes.Load())
+		fmt.Fprintf(w, "# HELP solo_remote_rpc_timeouts_total Timed out Daemon reverse RPC calls\n")
+		fmt.Fprintf(w, "# TYPE solo_remote_rpc_timeouts_total counter\n")
+		fmt.Fprintf(w, "solo_remote_rpc_timeouts_total %d\n", m.remoteRPCTimeout.Load())
 
 		fmt.Fprintf(w, "# HELP solo_request_duration_avg_ms Average request duration in milliseconds\n")
 		fmt.Fprintf(w, "# TYPE solo_request_duration_avg_ms gauge\n")

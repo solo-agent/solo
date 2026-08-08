@@ -44,6 +44,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/solo-ai/solo/pkg/version"
 )
 
 // Exit codes matching the v1.3 CLI spec.
@@ -73,6 +74,13 @@ func runCLI(args []string) int {
 	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
 		printUsage()
 		return exitOK
+	}
+	if args[0] == "version" || args[0] == "--version" || args[0] == "-v" {
+		fmt.Printf("solo %s (%s, %s)\n", version.Version, version.Commit, version.Date)
+		return exitOK
+	}
+	if args[0] == "daemon" {
+		return handleDaemonCommand(args[1:])
 	}
 
 	// SOLO_AUTH_TOKEN takes precedence; SOLO_TOKEN is a legacy fallback.
@@ -297,7 +305,7 @@ func handleTeamForm(args []string, baseURL, token string) {
 
 func requestTeamFormation(baseURL, token, channelID string, reqBody []byte) (int, []byte, error) {
 	statusCode, body, err := proxyRequest("team_form", channelID, string(reqBody), "", token, 0, "", "")
-	if err != nil || statusCode == http.StatusBadGateway || statusCode == http.StatusGatewayTimeout {
+	if (err != nil || statusCode == http.StatusBadGateway || statusCode == http.StatusGatewayTimeout) && allowDirectFallback() {
 		statusCode, body, err = doHTTPWithTimeout(http.MethodPost, baseURL+"/api/v1/team-formations", token, reqBody, teamFormationRequestTimeout)
 	}
 	if err != nil {
@@ -444,6 +452,10 @@ func proxyRequest(action, channelID, content, threadID, token string, taskNumber
 	return resp.StatusCode, respBody, nil
 }
 
+func allowDirectFallback() bool {
+	return strings.TrimSpace(os.Getenv("SOLO_DAEMON_URL")) == ""
+}
+
 func handleTask(args []string, baseURL, token string) {
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "solo: error: task subcommand required (list, claim, update, create, unclaim, submit, accept, reject, close, reopen)")
@@ -572,7 +584,7 @@ func handleTaskClaim(args []string, baseURL, token string) {
 	// Try daemon proxy first (uses fresh JWT).
 	// Pass messageID via taskID parameter so the proxy uses it in the URL path.
 	statusCode, body, err := proxyRequest("task_claim", channelID, taskID, "", token, number, "", "")
-	if err != nil {
+	if err != nil && allowDirectFallback() {
 		// Fallback to direct API
 		apiURL := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%s/claim", baseURL, channelID, taskID)
 		statusCode, body, err = doHTTP(http.MethodPost, apiURL, token, nil)
@@ -740,7 +752,7 @@ func handleTaskUnclaim(args []string, baseURL, token string) {
 
 	// Try daemon proxy first (uses fresh JWT)
 	statusCode, body, err := proxyRequest("task_unclaim", channelID, "", "", token, number, "", "")
-	if err != nil {
+	if err != nil && allowDirectFallback() {
 		// Fallback to direct API
 		url := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%d/claim", baseURL, channelID, number)
 		statusCode, body, err = doHTTP(http.MethodDelete, url, token, nil)
@@ -876,7 +888,7 @@ func handleMessageSend(args []string, baseURL, token string) {
 	body, _ := json.Marshal(reqBody)
 	// Try daemon proxy first
 	statusCode, respBody, err := proxyRequest("message_send", channelID, content, threadID, token, 0, "", clientMsgID)
-	if err != nil || statusCode == http.StatusBadGateway || statusCode == http.StatusGatewayTimeout {
+	if (err != nil || statusCode == http.StatusBadGateway || statusCode == http.StatusGatewayTimeout) && allowDirectFallback() {
 		// Fallback to direct API
 		url := fmt.Sprintf("%s/api/v1/channels/%s/messages", baseURL, channelID)
 		statusCode, respBody, err = doHTTP(http.MethodPost, url, token, body)
@@ -1012,7 +1024,7 @@ func handleMessageCheck(args []string, baseURL, token string) {
 	}
 
 	statusCode, body, err := proxyRequest("message_check", channelID, "", "", token, 0, "", "")
-	if err != nil {
+	if err != nil && allowDirectFallback() {
 		statusCode, body, err = doHTTP(http.MethodGet, requestURL, token, nil)
 	}
 	if err != nil {
@@ -1056,7 +1068,7 @@ func handleServerInfo(args []string, baseURL, token string) {
 	fs.Parse(args)
 
 	statusCode, body, err := proxyOrDirect("server_info", "", "", token)
-	if err != nil {
+	if err != nil && allowDirectFallback() {
 		url := fmt.Sprintf("%s/api/v1/server/info", baseURL)
 		statusCode, body, err = doHTTP(http.MethodGet, url, token, nil)
 	}
@@ -1561,6 +1573,9 @@ func printUsage() {
   solo template list --json
   solo team form     -c <channel_id> -m <message_id> [--plan <file>] [--output json]
   solo thread unfollow --target <#channel:shortid>
+  solo daemon connect --server <url> --computer-id <id> --token <token>
+  solo daemon start|stop|restart|status|logs
+  solo version
 
   --target formats: '#channel' | 'dm:@peer' | '#channel:shortid' | 'dm:@peer:shortid'
 

@@ -13,13 +13,13 @@ func TestTaskManagerReplaysBackendStartSessionAndTerminalEvents(t *testing.T) {
 
 	tm.PushSSEEvent(taskID, sseEvent{Event: "backend_started", Data: `{"run_id":"run-1"}`})
 	tm.PushSSEEvent(taskID, sseEvent{Event: "session", Data: `{"external_session_id":"s1"}`})
-	tm.PushSSEEvent(taskID, sseEvent{Event: "text", Data: `{"content":"not replayed"}`})
+	tm.PushSSEEvent(taskID, sseEvent{Event: "text", Data: `{"content":"replayed"}`})
 	tm.PushSSEEvent(taskID, sseEvent{Event: "complete", Data: `{"status":"ok"}`})
 	tm.PushSSEEvent(taskID, sseEvent{Event: "done", Data: `{}`})
 
 	sub := tm.SubscribeSSE(taskID)
 	got := drainEvents(sub.events)
-	want := []string{"backend_started", "session", "complete", "done"}
+	want := []string{"backend_started", "session", "text", "complete", "done"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
@@ -50,7 +50,7 @@ func TestTaskManagerExecutingRunIDUsesRuntimeScope(t *testing.T) {
 		AgentID: "agent-1", ChannelID: "channel-1", Status: taskStatusCompleted,
 	})
 	tm.AddTask("current", &taskState{
-		RunID: "run-current", AgentID: "agent-1", ChannelID: "channel-1", Status: taskStatusThinking,
+		RunID: "run-current", AgentID: "agent-1", ChannelID: "channel-1", Status: taskStatusThinking, AgentToken: "run-token",
 	})
 	tm.AddTask("other-channel", &taskState{
 		AgentID: "agent-1", ChannelID: "channel-2", Status: taskStatusThinking,
@@ -58,6 +58,26 @@ func TestTaskManagerExecutingRunIDUsesRuntimeScope(t *testing.T) {
 
 	if got := tm.ExecutingRunID("agent-1", "channel-1", ""); got != "run-current" {
 		t.Fatalf("ExecutingRunID = %q, want run-current", got)
+	}
+	if runID, token := tm.ExecutingCredential("agent-1", "channel-1", ""); runID != "run-current" || token != "run-token" {
+		t.Fatalf("ExecutingCredential = %q, %q", runID, token)
+	}
+}
+
+func TestTaskManagerExecutingCredentialAllowsUnambiguousChannelResolution(t *testing.T) {
+	tm := newTaskManager()
+	tm.AddTask("current", &taskState{
+		RunID: "run-current", AgentID: "agent-1", ChannelID: "channel-1", Status: taskStatusThinking, AgentToken: "run-token",
+	})
+
+	if runID, token := tm.ExecutingCredential("agent-1", "", ""); runID != "run-current" || token != "run-token" {
+		t.Fatalf("ExecutingCredential = %q, %q", runID, token)
+	}
+	tm.AddTask("ambiguous", &taskState{
+		RunID: "run-other", AgentID: "agent-1", ChannelID: "channel-2", Status: taskStatusThinking, AgentToken: "other-token",
+	})
+	if runID, token := tm.ExecutingCredential("agent-1", "", ""); runID != "" || token != "" {
+		t.Fatalf("ambiguous ExecutingCredential = %q, %q", runID, token)
 	}
 }
 
@@ -158,6 +178,50 @@ func TestTaskManagerCloseDrainsQueuedEvents(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("got %v, want %v", got, want)
 		}
+	}
+}
+
+func TestTaskManagerDeduplicatesDeliveryAttempt(t *testing.T) {
+	tm := newTaskManager()
+	if !tm.AddTask("task-1", &taskState{TaskID: "task-1", AttemptID: "attempt-1"}) {
+		t.Fatal("first delivery was rejected")
+	}
+	if tm.AddTask("task-1", &taskState{TaskID: "task-1", AttemptID: "attempt-1"}) {
+		t.Fatal("duplicate delivery attempt was accepted")
+	}
+	if !tm.AddTask("task-1", &taskState{TaskID: "task-1", AttemptID: "attempt-2"}) {
+		t.Fatal("new delivery attempt was rejected")
+	}
+}
+
+func TestTaskManagerRemoteHistorySurvivesSubscriberCapacityAndCleansUp(t *testing.T) {
+	tm := newTaskManager()
+	tm.AddTask("task-1", &taskState{TaskID: "task-1", AttemptID: "attempt-1", Forwarding: true})
+	for i := 0; i < 100; i++ {
+		tm.PushSSEEvent("task-1", sseEvent{Event: "text", Data: `{"content":"chunk"}`})
+	}
+	tm.PushSSEEvent("task-1", sseEvent{Event: "done", Data: `{}`})
+	events := tm.EventsAfter("task-1", 0)
+	if len(events) != 101 || events[len(events)-1].Event != "done" {
+		t.Fatalf("remote history = %d events, last = %q", len(events), events[len(events)-1].Event)
+	}
+	tm.EndForward("task-1", "attempt-1", true)
+	if _, ok := tm.GetTask("task-1"); ok || len(tm.EventsAfter("task-1", 0)) != 0 {
+		t.Fatal("delivered remote task history was retained")
+	}
+}
+
+func TestTaskManagerBoundsRemoteHistory(t *testing.T) {
+	tm := newTaskManager()
+	tm.AddTask("task-1", &taskState{TaskID: "task-1", AttemptID: "attempt-1"})
+	payload := string(make([]byte, 512<<10))
+	for i := 0; i < 40; i++ {
+		tm.PushSSEEvent("task-1", sseEvent{Event: "text", Data: payload})
+	}
+	tm.PushSSEEvent("task-1", sseEvent{Event: "done", Data: `{}`})
+	events := tm.eventHistory["task-1"]
+	if tm.historyBytes["task-1"] > maxTaskEventHistoryBytes || events[len(events)-1].Event != "done" {
+		t.Fatalf("history bytes = %d, events = %d", tm.historyBytes["task-1"], len(events))
 	}
 }
 

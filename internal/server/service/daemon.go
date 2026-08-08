@@ -42,6 +42,7 @@ type PendingTaskInfo struct {
 // DaemonInfo holds runtime state for a registered daemon instance.
 type DaemonInfo struct {
 	ID               string       `json:"daemon_id"`
+	ComputerID       string       `json:"computer_id,omitempty"`
 	Host             string       `json:"host"`
 	Port             int          `json:"port"`
 	Version          string       `json:"version"`
@@ -77,22 +78,39 @@ type DaemonManager struct {
 	executionTimeout time.Duration
 
 	stopCh chan struct{}
+
+	controlMu          sync.RWMutex
+	controlConnections map[string]*DaemonControlConnection
+	controlGrace       map[string]controlLeaseGrace
+	rpcWaiters         map[string]chan ControlEnvelope
+
+	remoteMu      sync.Mutex
+	remoteStreams map[string]*remoteRunStream
+	agentService  *AgentService
 }
 
 // NewDaemonManager creates a new DaemonManager.
 func NewDaemonManager(pool *pgxpool.Pool, hub realtime.Broadcaster) *DaemonManager {
 	return &DaemonManager{
-		daemons:           make(map[string]*DaemonInfo),
-		pendingTasks:      make(map[string]PendingTaskInfo),
-		pool:              pool,
-		hub:               hub,
-		httpClient:        &http.Client{Timeout: 10 * time.Second},
-		heartbeatInterval: 30 * time.Second,
-		maxMissedHB:       3,
-		queueTimeout:      agentRunQueueTimeout,
-		executionTimeout:  agentRunExecutionTimeout,
-		stopCh:            make(chan struct{}),
+		daemons:            make(map[string]*DaemonInfo),
+		pendingTasks:       make(map[string]PendingTaskInfo),
+		pool:               pool,
+		hub:                hub,
+		httpClient:         &http.Client{Timeout: 10 * time.Second},
+		heartbeatInterval:  30 * time.Second,
+		maxMissedHB:        3,
+		queueTimeout:       agentRunQueueTimeout,
+		executionTimeout:   agentRunExecutionTimeout,
+		stopCh:             make(chan struct{}),
+		controlConnections: make(map[string]*DaemonControlConnection),
+		controlGrace:       make(map[string]controlLeaseGrace),
+		rpcWaiters:         make(map[string]chan ControlEnvelope),
+		remoteStreams:      make(map[string]*remoteRunStream),
 	}
+}
+
+func (dm *DaemonManager) SetAgentService(agentService *AgentService) {
+	dm.agentService = agentService
 }
 
 // Start begins the heartbeat monitoring goroutine.
@@ -104,6 +122,7 @@ func (dm *DaemonManager) Start() {
 // Stop stops the heartbeat monitoring goroutine.
 func (dm *DaemonManager) Stop() {
 	close(dm.stopCh)
+	dm.closeControlConnections()
 }
 
 // Register registers a new daemon instance or updates an existing one.
@@ -323,16 +342,24 @@ func (dm *DaemonManager) ResolveDaemonForAgent(ctx context.Context, agentID, cap
 	}
 
 	var runtimeID, daemonID string
+	var paired bool
 	err := dm.pool.QueryRow(ctx, `
-		SELECT COALESCE(a.runtime_id, ''), COALESCE(c.daemon_id, '')
+		SELECT COALESCE(a.runtime_id, ''), COALESCE(c.daemon_id, ''),
+		       COALESCE(c.credential_hash IS NOT NULL AND c.credential_revoked_at IS NULL, false)
 		  FROM agents a
 		  LEFT JOIN computers c ON c.id::text = a.runtime_id
 		 WHERE a.id = $1`, agentID,
-	).Scan(&runtimeID, &daemonID)
+	).Scan(&runtimeID, &daemonID, &paired)
 	if err != nil {
 		return nil, fmt.Errorf("resolve agent computer: %w", err)
 	}
 	if runtimeID != "" {
+		if daemon, ok := dm.GetDaemon(runtimeID); ok && daemon.ComputerID != "" {
+			return daemon, nil
+		}
+		if paired {
+			return &DaemonInfo{ID: runtimeID, ComputerID: runtimeID, Status: DaemonStatusOffline, Capabilities: []string{"llm"}, MaxConcurrent: 10}, nil
+		}
 		if daemonID == "" {
 			return nil, fmt.Errorf("agent %s is bound to computer %s without a daemon", agentID, runtimeID)
 		}
@@ -362,7 +389,7 @@ func (dm *DaemonManager) ResolveDaemonForAgent(ctx context.Context, agentID, cap
 		  FROM computers c
 		 WHERE a.id = $1
 		   AND a.runtime_id IS NULL
-		   AND c.daemon_id = $2`, agentID, only.ID); err != nil {
+		   AND (c.id::text = $2 OR c.daemon_id = $2)`, agentID, only.ID); err != nil {
 		return nil, fmt.Errorf("persist agent computer binding: %w", err)
 	}
 	return only, nil
@@ -427,6 +454,13 @@ func (dm *DaemonManager) ProxyBackendDetect(ctx context.Context) ([]byte, error)
 	if selected == nil {
 		return nil, fmt.Errorf("no online daemon")
 	}
+	return dm.proxyBackendDetect(ctx, selected)
+}
+
+func (dm *DaemonManager) proxyBackendDetect(ctx context.Context, selected *DaemonInfo) ([]byte, error) {
+	if selected.ComputerID != "" {
+		return dm.CallControlRPC(ctx, selected.ComputerID, "backend.detect", map[string]any{})
+	}
 
 	url := fmt.Sprintf("http://%s:%d/internal/daemon/backends/detect", selected.Host, selected.Port)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -449,6 +483,22 @@ func (dm *DaemonManager) ProxyBackendDetect(ctx context.Context) ([]byte, error)
 	return body, nil
 }
 
+func (dm *DaemonManager) ProxyBackendDetectForComputer(ctx context.Context, computerID string) ([]byte, error) {
+	daemon, ok := dm.GetDaemon(computerID)
+	if !ok && dm.pool != nil {
+		var daemonID string
+		if err := dm.pool.QueryRow(ctx, `
+			SELECT COALESCE(daemon_id, '') FROM computers
+			 WHERE id = $1 AND status = 'online'`, computerID).Scan(&daemonID); err == nil && daemonID != "" {
+			daemon, ok = dm.GetDaemon(daemonID)
+		}
+	}
+	if !ok || daemon.Status != DaemonStatusOnline {
+		return nil, ErrComputerOffline
+	}
+	return dm.proxyBackendDetect(ctx, daemon)
+}
+
 // CleanupThinkingSessions broadcasts node process cleanup to every online
 // daemon. Runtime affinity is not durable, so the operation is intentionally
 // idempotent and fan-out based.
@@ -463,6 +513,12 @@ func (dm *DaemonManager) CleanupThinkingSessions(ctx context.Context, nodeIDs []
 	var firstErr error
 	for _, daemon := range dm.ListDaemons() {
 		if daemon.Status != DaemonStatusOnline {
+			continue
+		}
+		if daemon.ComputerID != "" {
+			if _, err := dm.CallControlRPC(ctx, daemon.ComputerID, "thinking.cleanup", map[string]any{"node_ids": nodeIDs}); err != nil && firstErr == nil {
+				firstErr = err
+			}
 			continue
 		}
 		url := fmt.Sprintf("http://%s:%d/internal/daemon/thinking/cleanup", daemon.Host, daemon.Port)
@@ -498,6 +554,12 @@ func (dm *DaemonManager) CleanupAgents(ctx context.Context, agentIDs []string) e
 		daemon, err := dm.ResolveDaemonForAgent(ctx, agentID, "")
 		if err != nil {
 			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if daemon.ComputerID != "" {
+			if _, err := dm.CallControlRPC(ctx, daemon.ComputerID, "agent.cleanup", map[string]string{"agent_id": agentID}); err != nil && firstErr == nil {
 				firstErr = err
 			}
 			continue
@@ -540,6 +602,23 @@ type SSEDaemonEvent struct {
 //
 // The caller should cancel ctx to stop reading the stream early.
 func (dm *DaemonManager) StreamTask(ctx context.Context, daemon *DaemonInfo, req interface{}) (<-chan SSEDaemonEvent, error) {
+	if daemon.ComputerID != "" {
+		taskID, err := dm.QueueRemoteRun(ctx, daemon, req)
+		if err != nil {
+			return nil, fmt.Errorf("queue remote Run: %w", err)
+		}
+		events, err := dm.SubscribeRemoteTask(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		var identity struct {
+			RunID string `json:"run_id"`
+		}
+		raw, _ := json.Marshal(req)
+		_ = json.Unmarshal(raw, &identity)
+		dm.NotifyRun(daemon.ComputerID, identity.RunID)
+		return events, nil
+	}
 	// Send the task first
 	taskResp, err := dm.SendTask(ctx, daemon, req)
 	if err != nil {
@@ -566,6 +645,9 @@ func (dm *DaemonManager) StreamTask(ctx context.Context, daemon *DaemonInfo, req
 // SubscribeTask reconnects to an already-dispatched daemon task. The daemon
 // replays lifecycle events, so a restarted server can converge the same Run.
 func (dm *DaemonManager) SubscribeTask(ctx context.Context, daemon *DaemonInfo, taskID string) (<-chan SSEDaemonEvent, error) {
+	if daemon.ComputerID != "" {
+		return dm.SubscribeRemoteTask(ctx, taskID)
+	}
 	// Connect to SSE endpoint
 	eventsURL := fmt.Sprintf("http://%s:%d/internal/daemon/tasks/%s/events", daemon.Host, daemon.Port, taskID)
 
@@ -640,6 +722,10 @@ func (dm *DaemonManager) SubscribeTask(ctx context.Context, daemon *DaemonInfo, 
 
 // CancelTask sends a cancel request to the daemon for a specific task.
 func (dm *DaemonManager) CancelTask(ctx context.Context, daemon *DaemonInfo, taskID string) error {
+	if daemon.ComputerID != "" {
+		_, err := dm.CallControlRPC(ctx, daemon.ComputerID, "task.cancel", map[string]string{"task_id": taskID})
+		return err
+	}
 	url := fmt.Sprintf("http://%s:%d/internal/daemon/tasks/%s/cancel", daemon.Host, daemon.Port, taskID)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
@@ -668,11 +754,14 @@ func (dm *DaemonManager) FindDaemonForAgent(ctx context.Context, agentID string)
 	if err != nil {
 		return nil, false
 	}
-	return &workspace.Daemon{Host: daemon.Host, Port: daemon.Port}, true
+	return &workspace.Daemon{Host: daemon.Host, Port: daemon.Port, ComputerID: daemon.ComputerID}, true
 }
 
 // ProxyWorkspaceList sends a workspace list request to a daemon.
 func (dm *DaemonManager) ProxyWorkspaceList(ctx context.Context, daemon *workspace.Daemon, agentID, path string) ([]byte, error) {
+	if daemon.ComputerID != "" {
+		return dm.CallControlRPC(ctx, daemon.ComputerID, "workspace.list", map[string]string{"agent_id": agentID, "path": path})
+	}
 	params := url.Values{}
 	params.Set("agent_id", agentID)
 	params.Set("path", path)
@@ -699,6 +788,9 @@ func (dm *DaemonManager) ProxyWorkspaceList(ctx context.Context, daemon *workspa
 
 // ProxyWorkspaceRead sends a workspace read request to a daemon.
 func (dm *DaemonManager) ProxyWorkspaceRead(ctx context.Context, daemon *workspace.Daemon, agentID, path string) ([]byte, error) {
+	if daemon.ComputerID != "" {
+		return dm.CallControlRPC(ctx, daemon.ComputerID, "workspace.read", map[string]string{"agent_id": agentID, "path": path})
+	}
 	params := url.Values{}
 	params.Set("agent_id", agentID)
 	params.Set("path", path)
@@ -725,6 +817,13 @@ func (dm *DaemonManager) ProxyWorkspaceRead(ctx context.Context, daemon *workspa
 
 // ProxySkillList sends a skill list request to a daemon.
 func (dm *DaemonManager) ProxySkillList(ctx context.Context, daemon *workspace.Daemon, agentID string) ([]byte, error) {
+	if daemon.ComputerID != "" {
+		var provider string
+		if err := dm.pool.QueryRow(ctx, `SELECT COALESCE(model_provider, '') FROM agents WHERE id = $1 AND is_active = true`, agentID).Scan(&provider); err != nil {
+			return nil, err
+		}
+		return dm.CallControlRPC(ctx, daemon.ComputerID, "skills.list", map[string]string{"agent_id": agentID, "provider": provider})
+	}
 	params := url.Values{}
 	params.Set("agent_id", agentID)
 	urlStr := fmt.Sprintf("http://%s:%d/internal/daemon/skills?%s",
@@ -771,6 +870,9 @@ func (dm *DaemonManager) checkHealth() {
 	dm.mu.Lock()
 	now := time.Now()
 	for id, info := range dm.daemons {
+		if info.Status == DaemonStatusOffline {
+			continue
+		}
 		sinceHB := now.Sub(info.LastHeartbeat)
 		if sinceHB <= dm.heartbeatInterval {
 			continue
@@ -795,7 +897,13 @@ func (dm *DaemonManager) checkHealth() {
 			"missed_heartbeats", info.MissedHeartbeats,
 		)
 
-		// Clean up pending tasks for this daemon
+		// Remote tasks are durable in PostgreSQL and survive control-socket
+		// disconnects. Legacy inbound daemons still fail their in-memory tasks.
+		if info.ComputerID != "" {
+			continue
+		}
+
+		// Clean up pending tasks for this legacy daemon.
 		cleanedCount := 0
 		for taskID, task := range dm.pendingTasks {
 			if task.DaemonID == id {
@@ -837,6 +945,9 @@ func (dm *DaemonManager) removeStaleTasks(now time.Time) []PendingTaskInfo {
 			deadlineBase = *task.BackendStartedAt
 			timeout = dm.executionTimeout
 			phase = "execution"
+		}
+		if daemon := dm.daemons[task.DaemonID]; daemon != nil && daemon.ComputerID != "" && task.BackendStartedAt == nil {
+			timeout = remoteRunDeliveryTTL
 		}
 		if now.Sub(deadlineBase) > timeout {
 			task.TimeoutPhase = phase

@@ -41,6 +41,20 @@ func TestValidateToken(t *testing.T) {
 	}
 }
 
+func TestGenerateAgentRunTokenCarriesRuntimeScope(t *testing.T) {
+	token, err := GenerateAgentRunToken("550e8400-e29b-41d4-a716-446655440000", "Agent", "650e8400-e29b-41d4-a716-446655440000", "750e8400-e29b-41d4-a716-446655440000")
+	if err != nil {
+		t.Fatalf("GenerateAgentRunToken failed: %v", err)
+	}
+	claims, err := ValidateToken(token)
+	if err != nil {
+		t.Fatalf("ValidateToken failed: %v", err)
+	}
+	if claims.ActorType != "agent_run" || claims.RunID != "650e8400-e29b-41d4-a716-446655440000" || claims.ComputerID != "750e8400-e29b-41d4-a716-446655440000" {
+		t.Fatalf("unexpected Agent Run claims: %+v", claims)
+	}
+}
+
 func TestValidateInvalidToken(t *testing.T) {
 	_, err := ValidateToken("invalid-token-string")
 	if err == nil {

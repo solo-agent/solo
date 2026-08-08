@@ -55,6 +55,7 @@ SERVER_PORT="${SERVER_PORT:-8080}"
 DAEMON_PORT="${DAEMON_PORT:-8081}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 SERVER_URL="http://127.0.0.1:$SERVER_PORT"
+DAEMON_SERVER="${DAEMON_SERVER_URL:-$SERVER_URL}"
 FRONTEND_URL="http://127.0.0.1:$FRONTEND_PORT"
 
 is_running() {
@@ -80,7 +81,7 @@ else
     echo "Building server..."
     go build -o "$PID_DIR/server" ./cmd/server/
   fi
-  nohup env PORT="$SERVER_PORT" "$PID_DIR/server" > server.log 2>&1 &
+  nohup env PORT="$SERVER_PORT" SOLO_DEV_AUTH_CODE="${SOLO_DEV_AUTH_CODE:-123456}" "$PID_DIR/server" > server.log 2>&1 &
   echo $! > "$PID_DIR/server.pid"
   STARTED_PIDS+=("$(cat "$PID_DIR/server.pid")")
   STARTED_PIDFILES+=("$PID_DIR/server.pid")
@@ -110,7 +111,7 @@ else
     echo "Building solo CLI..."
     go build -o "$PID_DIR/solo" ./cmd/solo/
   fi
-  nohup env DAEMON_PORT="$DAEMON_PORT" DAEMON_SERVER_URL="$SERVER_URL" "$PID_DIR/daemon" > daemon.log 2>&1 &
+  nohup env DAEMON_PORT="$DAEMON_PORT" DAEMON_SERVER_URL="$DAEMON_SERVER" "$PID_DIR/daemon" > daemon.log 2>&1 &
   echo $! > "$PID_DIR/daemon.pid"
   STARTED_PIDS+=("$(cat "$PID_DIR/daemon.pid")")
   STARTED_PIDFILES+=("$PID_DIR/daemon.pid")

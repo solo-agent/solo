@@ -45,6 +45,11 @@ export interface RegisterRequest {
   display_name?: string;
 }
 
+export interface VerifyRegistrationRequest {
+  email: string;
+  code: string;
+}
+
 export interface AuthResponse {
   access_token: string;
   refresh_token: string;
@@ -69,6 +74,7 @@ type AuthAction =
   | { type: 'AUTH_START' }
   | { type: 'AUTH_SUCCESS'; user: User }
   | { type: 'AUTH_FAILURE'; error: string }
+  | { type: 'AUTH_IDLE' }
   | { type: 'CLEAR_ERROR' }
   | { type: 'LOGOUT' }
   | { type: 'SET_USER'; user: User };
@@ -87,6 +93,8 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
       return { user: action.user, isLoading: false, error: null };
     case 'AUTH_FAILURE':
       return { user: null, isLoading: false, error: action.error };
+    case 'AUTH_IDLE':
+      return { ...state, isLoading: false, error: null };
     case 'CLEAR_ERROR':
       return { ...state, error: null };
     case 'LOGOUT':
@@ -106,7 +114,8 @@ export interface AuthContextValue {
   isLoading: boolean;
   error: string | null;
   login: (req: LoginRequest) => Promise<void>;
-  register: (req: RegisterRequest) => Promise<string | undefined>;
+  register: (req: RegisterRequest) => Promise<void>;
+  verifyRegistration: (req: VerifyRegistrationRequest) => Promise<string | undefined>;
   updateProfile: (req: UpdateProfileRequest) => Promise<User>;
   logout: () => Promise<void>;
   clearError: () => void;
@@ -176,10 +185,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // ---- Register ----
 
-  const register = useCallback(async (req: RegisterRequest): Promise<string | undefined> => {
+  const register = useCallback(async (req: RegisterRequest): Promise<void> => {
     dispatch({ type: 'AUTH_START' });
     try {
-      const data = await apiClient.post<AuthResponse>('/api/v1/auth/register', req);
+      await apiClient.post('/api/v1/auth/register', req);
+      dispatch({ type: 'AUTH_IDLE' });
+    } catch (err: unknown) {
+      const message =
+        err instanceof ApiError ? err.message : t('authRegisterError');
+      dispatch({ type: 'AUTH_FAILURE', error: message });
+      throw err;
+    }
+  }, []);
+
+  const verifyRegistration = useCallback(async (req: VerifyRegistrationRequest): Promise<string | undefined> => {
+    dispatch({ type: 'AUTH_START' });
+    try {
+      const data = await apiClient.post<AuthResponse>('/api/v1/auth/register/verify', req);
       setAuthTokens(data.access_token, data.refresh_token);
       dispatch({ type: 'AUTH_SUCCESS', user: data.user });
       return data.onboarding_channel_id;
@@ -230,11 +252,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       error: state.error,
       login,
       register,
+      verifyRegistration,
       updateProfile,
       logout,
       clearError,
     }),
-    [state, login, register, updateProfile, logout, clearError],
+    [state, login, register, verifyRegistration, updateProfile, logout, clearError],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

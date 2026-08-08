@@ -4,9 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type AgentTimeline struct {
@@ -65,12 +68,23 @@ func (s *AgentRunService) GetSessionTimeline(ctx context.Context, sessionID stri
 			break
 		}
 	}
-	if livePath := liveTranscriptPath(session.Provider, session.AgentID, session.ExternalSessionID); livePath != "" {
-		transcriptPath = livePath
+	computerID := ""
+	if s.dm != nil {
+		err = s.pool.QueryRow(ctx, `SELECT COALESCE(computer_id::text, '') FROM agent_runs WHERE session_id = $1 AND computer_id IS NOT NULL ORDER BY started_at LIMIT 1`, sessionID).Scan(&computerID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
+	if computerID == "" {
+		if livePath := liveTranscriptPath(session.Provider, session.AgentID, session.ExternalSessionID); livePath != "" {
+			transcriptPath = livePath
+		}
 	}
 	session.TranscriptPath = transcriptPath
 	var entries []AgentTranscriptEntry
-	if session.Provider == "hermes" && session.ExternalSessionID != "" {
+	if computerID != "" {
+		entries, err = s.readRemoteTranscript(ctx, computerID, session.AgentID, session.Provider, session.ExternalSessionID, time.Time{}, time.Time{}, limit)
+	} else if session.Provider == "hermes" && session.ExternalSessionID != "" {
 		entries, err = ReadHermesTranscript(session.ExternalSessionID, limit)
 	} else {
 		entries, err = ReadAgentTranscript(transcriptPath, limit)
@@ -113,8 +127,10 @@ func (s *AgentRunService) GetTaskTimeline(ctx context.Context, taskID, agentID s
 	timelineRuns := make([]AgentTimelineRun, 0, len(runRows))
 	for _, row := range runRows {
 		transcriptPath := row.transcriptPath
-		if livePath := liveTranscriptPath(row.provider, row.run.AgentID, row.externalSessionID); livePath != "" {
-			transcriptPath = livePath
+		if row.computerID == "" {
+			if livePath := liveTranscriptPath(row.provider, row.run.AgentID, row.externalSessionID); livePath != "" {
+				transcriptPath = livePath
+			}
 		}
 		item := timelineRunFromAgentRun(row.run, transcriptPath)
 		windowStart := row.windowStart
@@ -122,7 +138,9 @@ func (s *AgentRunService) GetTaskTimeline(ctx context.Context, taskID, agentID s
 			windowStart = row.run.StartedAt
 		}
 		var windowEntries []AgentTranscriptEntry
-		if row.provider == "hermes" && row.externalSessionID != "" {
+		if row.computerID != "" {
+			windowEntries, err = s.readRemoteTranscript(ctx, row.computerID, row.run.AgentID, row.provider, row.externalSessionID, windowStart, runWindowEnd(row.run).Add(2*time.Second), limit)
+		} else if row.provider == "hermes" && row.externalSessionID != "" {
 			windowEntries, err = ReadHermesTranscriptWindow(row.externalSessionID, windowStart, runWindowEnd(row.run).Add(2*time.Second), limit)
 		} else {
 			var resolvedPath string
@@ -166,6 +184,7 @@ type timelineTaskRunRow struct {
 	provider          string
 	externalSessionID string
 	windowStart       time.Time
+	computerID        string
 }
 
 func (s *AgentRunService) listTimelineTaskRuns(ctx context.Context, taskID, agentID string) ([]timelineTaskRunRow, error) {
@@ -176,7 +195,7 @@ func (s *AgentRunService) listTimelineTaskRuns(ctx context.Context, taskID, agen
 		        COALESCE(r.tool_input_summary, ''), COALESCE(r.source, ''),
 		        COALESCE(r.transcript_path, ''), r.usage_json, r.started_at, r.updated_at, r.finished_at,
 		        COALESCE(r.transcript_path, s.transcript_path, ''), COALESCE(s.provider, r.source, ''),
-		        COALESCE(s.external_session_id, ''), COALESCE(m.created_at, r.started_at)
+		        COALESCE(s.external_session_id, ''), COALESCE(m.created_at, r.started_at), COALESCE(r.computer_id::text, '')
 		   FROM agent_runs r
 		   JOIN agent_run_task_links l ON l.run_id = r.id
 		   LEFT JOIN agent_sessions s ON s.id = r.session_id
@@ -200,7 +219,7 @@ func (s *AgentRunService) listTimelineTaskRuns(ctx context.Context, taskID, agen
 			&item.run.ActivityText, &item.run.ToolName, &item.run.ToolInputSummary,
 			&item.run.Source, &item.run.TranscriptPath, &item.run.UsageJSON,
 			&item.run.StartedAt, &item.run.UpdatedAt, &finished, &item.transcriptPath,
-			&item.provider, &item.externalSessionID, &item.windowStart,
+			&item.provider, &item.externalSessionID, &item.windowStart, &item.computerID,
 		); err != nil {
 			return nil, err
 		}
