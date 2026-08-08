@@ -3,7 +3,10 @@ package service
 import (
 	"context"
 	"regexp"
+	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -16,6 +19,8 @@ var mentionPattern = regexp.MustCompile(`@([\p{L}\p{N}_\-\.]+)`)
 type MentionService struct {
 	pool *pgxpool.Pool
 }
+
+type mentionCandidate struct{ id, name string }
 
 // NewMentionService creates a new MentionService.
 func NewMentionService(pool *pgxpool.Pool) *MentionService {
@@ -33,68 +38,75 @@ func NewMentionService(pool *pgxpool.Pool) *MentionService {
 // Only resolves Agent mentions (not user mentions). Only returns IDs of
 // agents that are active members of the channel.
 func (s *MentionService) ResolveMentions(ctx context.Context, content, channelID string) (mentionedIDs []string, hasMentions bool, err error) {
-	// Parse @names from content
-	matches := mentionPattern.FindAllStringSubmatch(content, -1)
-	if len(matches) == 0 {
+	if !mentionPattern.MatchString(content) {
 		return nil, false, nil
 	}
 
 	hasMentions = true
 
-	// Deduplicate mention names
-	nameSet := make(map[string]bool, len(matches))
-	for _, m := range matches {
-		name := strings.TrimSpace(m[1])
-		if name != "" {
-			nameSet[name] = true
-		}
-	}
-
-	if len(nameSet) == 0 {
-		return []string{}, true, nil
-	}
-
-	// Build query arguments
-	names := make([]string, 0, len(nameSet))
-	for n := range nameSet {
-		names = append(names, n)
-	}
-
-	// Resolve @names to agent IDs by joining agents with channel_members
+	// Load the channel's small Agent set so an exact display name such as
+	// "@Code Reviewer" can be resolved even though it contains spaces.
 	query := `SELECT a.id, a.name
 	           FROM agents a
 	           JOIN channel_members cm ON cm.member_id = a.id AND cm.member_type = 'agent'
 	           WHERE cm.channel_id = $1
-	             AND a.is_active = true
-	             AND a.name = ANY($2)`
+	             AND a.is_active = true`
 
-	rows, err := s.pool.Query(ctx, query, channelID, names)
+	rows, err := s.pool.Query(ctx, query, channelID)
 	if err != nil {
 		return nil, true, err
 	}
 	defer rows.Close()
 
-	var agentIDs []string
-	seen := make(map[string]bool)
+	var agents []mentionCandidate
 	for rows.Next() {
 		var id, name string
 		if err := rows.Scan(&id, &name); err != nil {
 			return nil, true, err
 		}
-		if !seen[id] {
-			agentIDs = append(agentIDs, id)
-			seen[id] = true
-		}
+		agents = append(agents, mentionCandidate{id: id, name: name})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, true, err
 	}
-
-	if agentIDs == nil {
+	mentionedIDs = findMentionedAgentIDs(content, agents)
+	if mentionedIDs == nil {
 		return []string{}, true, nil
 	}
 
-	return agentIDs, true, nil
+	return mentionedIDs, true, nil
+}
+
+func findMentionedAgentIDs(content string, agents []mentionCandidate) []string {
+	sort.Slice(agents, func(i, j int) bool { return len(agents[i].name) > len(agents[j].name) })
+	var mentionedIDs []string
+	seen := make(map[string]bool)
+	for offset := 0; offset < len(content); {
+		relative := strings.IndexByte(content[offset:], '@')
+		if relative < 0 {
+			break
+		}
+		start := offset + relative + 1
+		for _, agent := range agents {
+			if !strings.HasPrefix(content[start:], agent.name) {
+				continue
+			}
+			end := start + len(agent.name)
+			if end < len(content) {
+				r, _ := utf8.DecodeRuneInString(content[end:])
+				if unicode.IsLetter(r) || unicode.IsNumber(r) || r == '_' || r == '-' || r == '.' {
+					continue
+				}
+			}
+			if !seen[agent.id] {
+				mentionedIDs = append(mentionedIDs, agent.id)
+				seen[agent.id] = true
+			}
+			break
+		}
+		offset = start
+	}
+	return mentionedIDs
 }
 
 // ResolveUserMentions parses @mention patterns in content, resolves them to

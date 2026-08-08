@@ -117,6 +117,19 @@ export class ApiClient {
     return this.requestText(url, { method: 'GET' });
   }
 
+  async getBlob(path: string): Promise<Blob> {
+    const response = await this.requestRaw(path, { method: 'GET' });
+    if (!response.ok) {
+      const body = await this.safeParseJson(response);
+      throw new ApiError(
+        body?.message || this.defaultErrorMessage(response.status),
+        response.status,
+        body?.code || this.defaultErrorCode(response.status),
+      );
+    }
+    return response.blob();
+  }
+
   async post<T>(path: string, body?: unknown, options?: Pick<RequestInit, 'signal'>): Promise<T> {
     return this.request<T>(path, {
       method: 'POST',

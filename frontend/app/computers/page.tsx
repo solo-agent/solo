@@ -22,6 +22,8 @@ import {
   MonitorDot,
   Server,
   ChevronDown,
+  Plus,
+  Copy,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { t } from '@/lib/i18n';
@@ -45,6 +47,7 @@ import { ComputersLeftColumn } from '@/components/computers/computers-left-colum
 import { relativeTime, formatDateTime } from '@/lib/utils/time';
 import { cn } from '@/lib/utils';
 import type { Computer } from '@/lib/types';
+import { Dialog, DialogCloseButton, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 // ---- OS icon helper ----
 
@@ -90,15 +93,23 @@ function AgentStatusDot({ status }: { status: string }) {
   );
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
 export default function ComputersPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { computers, isLoading, error, updateComputer, refetch } = useComputers();
+  const { computers, isLoading, error, addComputer, updateComputer, createEnrollment, revokeCredential, refetch } = useComputers();
   const { showToast } = useToast();
 
   // Inline edit state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [pairDialogOpen, setPairDialogOpen] = useState(false);
+  const [newComputerName, setNewComputerName] = useState('');
+  const [pairingComputer, setPairingComputer] = useState<Computer | null>(null);
+  const [isPairing, setIsPairing] = useState(false);
   const editInputRef = useRef<HTMLInputElement>(null);
 
   // Selected computer (driven by ComputersLeftColumn)
@@ -168,6 +179,52 @@ export default function ComputersPage() {
     [handleSaveName, handleCancelEdit],
   );
 
+  const openPairDialog = useCallback(() => {
+    setNewComputerName('');
+    setPairingComputer(null);
+    setPairDialogOpen(true);
+  }, []);
+
+  const createPairing = useCallback(async () => {
+    if (!newComputerName.trim()) return;
+    setIsPairing(true);
+    try {
+      const computer = await addComputer(newComputerName.trim());
+      setPairingComputer(computer);
+      setSelectedComputerId(computer.id);
+    } finally {
+      setIsPairing(false);
+    }
+  }, [addComputer, newComputerName]);
+
+  const showEnrollment = useCallback(async (computer: Computer) => {
+    setIsPairing(true);
+    try {
+      setPairingComputer(await createEnrollment(computer.id));
+      setPairDialogOpen(true);
+    } finally {
+      setIsPairing(false);
+    }
+  }, [createEnrollment]);
+
+  const copyPairingCommand = useCallback(async (command: string) => {
+    try {
+      await navigator.clipboard.writeText(command);
+      showToast(t('computersCommandCopied'), 'success');
+    } catch {
+      showToast(t('computersCommandCopyError'), 'error');
+    }
+  }, [showToast]);
+
+  const daemonServerURL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
+  const installScriptURL = process.env.NEXT_PUBLIC_INSTALL_URL ?? 'https://raw.githubusercontent.com/solo-agent/solo/master/scripts/install.sh';
+  const installedPairCommand = pairingComputer?.enrollment_token
+    ? `solo daemon connect --server ${shellQuote(daemonServerURL)} --computer-id ${shellQuote(pairingComputer.id)} --token ${shellQuote(pairingComputer.enrollment_token)}`
+    : '';
+  const pairCommand = pairingComputer?.enrollment_token
+    ? `curl -fsSL ${shellQuote(installScriptURL)} | bash -s -- connect --server ${shellQuote(daemonServerURL)} --computer-id ${shellQuote(pairingComputer.id)} --token ${shellQuote(pairingComputer.enrollment_token)}`
+    : '';
+
   // Auth loading state
   if (authLoading || !isAuthenticated) {
     return (
@@ -196,7 +253,9 @@ export default function ComputersPage() {
 
       <main className="flex flex-1 flex-col overflow-hidden bg-white">
         {/* Top bar (page label lives in the left column) */}
-        <div className="flex flex-shrink-0 items-center h-14 border-b-2 border-black bg-brutal-cream px-4" />
+        <div className="flex flex-shrink-0 items-center justify-end h-14 border-b-2 border-black bg-brutal-cream px-4">
+          <Button type="button" size="sm" onClick={openPairDialog}><Plus className="mr-1.5 h-4 w-4" />{t('computersAddComputer')}</Button>
+        </div>
         <div className="flex-1 overflow-y-auto bg-white">
           <div className={cn('w-full', selectedComputer ? '' : 'px-6 py-6')}>
             {/* Error state */}
@@ -273,6 +332,8 @@ export default function ComputersPage() {
                 onSaveName={handleSaveName}
                 onEditKeyDown={handleEditKeyDown}
                 onEditNameChange={setEditName}
+                onCreateEnrollment={showEnrollment}
+                onRevokeCredential={async (computer) => { await revokeCredential(computer.id); }}
               />
             )}
           </div>
@@ -280,6 +341,38 @@ export default function ComputersPage() {
       </main>
 
       </div>
+
+      <Dialog open={pairDialogOpen} onOpenChange={setPairDialogOpen} width="lg">
+        <DialogHeader>
+          <DialogTitle>{t('computersPairTitle')}</DialogTitle>
+          <DialogCloseButton onClick={() => setPairDialogOpen(false)} />
+        </DialogHeader>
+        {!pairingComputer?.enrollment_token ? (
+          <div className="space-y-3">
+            <label className="font-heading text-sm font-bold" htmlFor="new-computer-name">{t('computersName')}</label>
+            <input id="new-computer-name" className="input-brutal w-full" value={newComputerName} onChange={(event) => setNewComputerName(event.target.value)} autoFocus />
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="font-body text-sm">{t('computersPairInstructions')}</p>
+            <p className="font-heading text-xs font-bold uppercase">{t('computersFreshInstall')}</p>
+            <pre className="overflow-x-auto border-2 border-black bg-black p-3 font-mono text-xs text-white">{pairCommand}</pre>
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-heading text-xs font-bold uppercase">{t('computersAlreadyInstalled')}</p>
+              <Button type="button" size="sm" variant="outline" onClick={() => void copyPairingCommand(installedPairCommand)}><Copy className="mr-1.5 h-4 w-4" />{t('copy')}</Button>
+            </div>
+            <pre className="overflow-x-auto border-2 border-black bg-black p-3 font-mono text-xs text-white">{installedPairCommand}</pre>
+            <p className="font-mono text-[11px] text-brutal-danger">{t('computersPairOnce')}</p>
+          </div>
+        )}
+        <DialogFooter>
+          {!pairingComputer?.enrollment_token ? (
+            <Button type="button" onClick={createPairing} disabled={isPairing || !newComputerName.trim()}>{isPairing ? t('saving') : t('computersCreatePairing')}</Button>
+          ) : (
+            <Button type="button" onClick={() => void copyPairingCommand(pairCommand)}><Copy className="mr-1.5 h-4 w-4" />{t('copy')}</Button>
+          )}
+        </DialogFooter>
+      </Dialog>
     </AppFrame>
   );
 }
@@ -297,6 +390,8 @@ interface ComputerCardProps {
   onSaveName: (id: string) => void;
   onEditKeyDown: (e: React.KeyboardEvent<HTMLInputElement>, id: string) => void;
   onEditNameChange: (name: string) => void;
+  onCreateEnrollment: (computer: Computer) => void;
+  onRevokeCredential: (computer: Computer) => void;
 }
 
 function ComputerCard({
@@ -310,6 +405,8 @@ function ComputerCard({
   onSaveName,
   onEditKeyDown,
   onEditNameChange,
+  onCreateEnrollment,
+  onRevokeCredential,
 }: ComputerCardProps) {
   const isOnline = computer.status === 'online';
   const osInfo = getOsIcon(computer.os);
@@ -463,6 +560,17 @@ function ComputerCard({
                   <span>{isOnline ? t('online') : t('offline')}</span>
                 </div>
               </InfoRow>
+              <InfoRow label={t('computersPairingStatus')}>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs">{computer.pairing_status}</span>
+                  {computer.my_role === 'owner' && (
+                    <Button type="button" size="sm" variant="outline" onClick={() => onCreateEnrollment(computer)}>{t('computersGeneratePairing')}</Button>
+                  )}
+                  {computer.my_role === 'owner' && computer.pairing_status === 'paired' && (
+                    <Button type="button" size="sm" variant="danger" onClick={() => onRevokeCredential(computer)}>{t('computersRevoke')}</Button>
+                  )}
+                </div>
+              </InfoRow>
               <InfoRow label={t('computersLastHeartbeat')}>
                 <span>
                   {computer.last_heartbeat
@@ -470,6 +578,21 @@ function ComputerCard({
                     : t('never')}
                 </span>
               </InfoRow>
+              {computer.daemon_version && (
+                <InfoRow label={t('computersDaemonVersion')}>
+                  <span className="font-mono text-xs">{computer.daemon_version}</span>
+                </InfoRow>
+              )}
+              {!!computer.protocol_version && (
+                <InfoRow label={t('computersProtocolVersion')}>
+                  <span className="font-mono text-xs">v{computer.protocol_version}</span>
+                </InfoRow>
+              )}
+              {computer.last_connected_at && (
+                <InfoRow label={t('computersLastConnected')}>
+                  <span>{formatDateTime(computer.last_connected_at)}</span>
+                </InfoRow>
+              )}
               <InfoRow label={t('computersRegistered')}>
                 <span>{formatDateTime(computer.created_at)}</span>
               </InfoRow>

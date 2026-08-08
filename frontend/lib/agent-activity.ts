@@ -39,6 +39,7 @@ export function agentRunShowsHalo(status?: AgentRunStatus) {
 
 const ACTIVITY_TEXT_KEYS: Record<string, TranslationKey> = {
   'agent.activity.accepted': 'agentActivityAccepted',
+  'agent.activity.waiting_computer': 'agentActivityWaitingComputer',
   'agent.activity.no_visible_reply': 'agentActivityNoVisibleReply',
   'agent.activity.no_progress': 'agentActivityNoProgress',
   'agent.activity.completed': 'agentActivityCompleted',

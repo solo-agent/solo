@@ -285,7 +285,8 @@ func (s *AgentRunService) GetDashboardInsight(ctx context.Context, ownerID strin
 
 func (s *AgentRunService) dashboardTokenUsage(ctx context.Context, ownerID string, since time.Time) (DashboardTokenUsage, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT r.usage_json, COALESCE(r.transcript_path, sess.transcript_path, ''), r.started_at, r.finished_at
+		`SELECT r.usage_json, COALESCE(r.transcript_path, sess.transcript_path, ''), r.started_at, r.finished_at,
+		        COALESCE(r.computer_id::text, '')
 		   FROM agent_runs r
 		   JOIN agents a ON a.id = r.agent_id
 		   LEFT JOIN agent_sessions sess ON sess.id = r.session_id
@@ -300,10 +301,14 @@ func (s *AgentRunService) dashboardTokenUsage(ctx context.Context, ownerID strin
 	for rows.Next() {
 		var usageJSON json.RawMessage
 		var transcriptPath string
+		var computerID string
 		var startedAt time.Time
 		var finished sql.NullTime
-		if err := rows.Scan(&usageJSON, &transcriptPath, &startedAt, &finished); err != nil {
+		if err := rows.Scan(&usageJSON, &transcriptPath, &startedAt, &finished, &computerID); err != nil {
 			return DashboardTokenUsage{}, err
+		}
+		if computerID != "" {
+			transcriptPath = ""
 		}
 		usage, err := dashboardRunUsage(usageJSON, transcriptPath, startedAt, finished)
 		if err != nil {
@@ -429,7 +434,8 @@ func (s *AgentRunService) dashboardSeries(ctx context.Context, ownerID string, s
 	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT date_trunc('day', r.updated_at)::date::text,
-		        r.usage_json, COALESCE(r.transcript_path, sess.transcript_path, ''), r.started_at, r.finished_at
+		        r.usage_json, COALESCE(r.transcript_path, sess.transcript_path, ''), r.started_at, r.finished_at,
+		        COALESCE(r.computer_id::text, '')
 		   FROM agent_runs r
 		   JOIN agents a ON a.id = r.agent_id
 		   LEFT JOIN agent_sessions sess ON sess.id = r.session_id
@@ -443,10 +449,14 @@ func (s *AgentRunService) dashboardSeries(ctx context.Context, ownerID string, s
 		var key string
 		var usageJSON json.RawMessage
 		var transcriptPath string
+		var computerID string
 		var startedAt time.Time
 		var finished sql.NullTime
-		if err := rows.Scan(&key, &usageJSON, &transcriptPath, &startedAt, &finished); err != nil {
+		if err := rows.Scan(&key, &usageJSON, &transcriptPath, &startedAt, &finished, &computerID); err != nil {
 			return nil, err
+		}
+		if computerID != "" {
+			transcriptPath = ""
 		}
 		point := byDate[key]
 		if point == nil {

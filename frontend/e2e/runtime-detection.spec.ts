@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { acquireLocalComputer, type LocalComputerLease } from './support/local-computer';
+import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
 const daemonBase = process.env.SOLO_E2E_DAEMON_URL ?? 'http://127.0.0.1:8081';
@@ -29,7 +31,7 @@ interface BackendStatus {
 async function authenticate(request: APIRequestContext): Promise<AuthResponse> {
   const login = await request.post(`${apiBase}/api/v1/auth/login`, { data: credentials });
   if (login.ok()) return login.json();
-  const register = await request.post(`${apiBase}/api/v1/auth/register`, {
+  const register = await registerVerified(request, apiBase, {
     data: { ...credentials, display_name: 'Runtime Detection E2E' },
   });
   if (!register.ok()) {
@@ -69,6 +71,7 @@ test.describe('M9 runtime boundaries', () => {
     const auth = await authenticate(request);
     const headers = { authorization: `Bearer ${auth.access_token}` };
     const suffix = Date.now().toString(36);
+    let computerLease: LocalComputerLease | null = null;
 
     const metadataResponse = await request.get(`${apiBase}/api/v1/agent-backends`, { headers });
     expect(metadataResponse.ok()).toBeTruthy();
@@ -97,12 +100,15 @@ test.describe('M9 runtime boundaries', () => {
     const channel = await channelResponse.json() as { id: string };
 
     try {
+      computerLease = await acquireLocalComputer(request, apiBase, auth.access_token);
       await authenticatePage(page, auth);
       await page.goto(`/dashboard?channel=${channel.id}`);
       await page.getByRole('button', { name: 'Teams', exact: true }).click();
       await page.getByRole('button', { name: 'Create first Agent' }).click();
 
       const dialog = page.getByRole('dialog');
+      await dialog.getByRole('button', { name: 'Select where this Agent runs' }).click();
+      await page.getByRole('option').filter({ hasText: computerLease.name }).click();
       await dialog.getByRole('button', { name: 'Select Runtime...' }).click();
       const visibleRuntime = serverResults.find((item) =>
         ['openclaw', 'hermes', 'claude', 'opencode', 'codex'].includes(item.type),
@@ -116,6 +122,7 @@ test.describe('M9 runtime boundaries', () => {
     } finally {
       const cleanup = await request.delete(`${apiBase}/api/v1/channels/${channel.id}`, { headers });
       expect(cleanup.ok()).toBeTruthy();
+      if (computerLease) await computerLease.release(request);
     }
   });
 });

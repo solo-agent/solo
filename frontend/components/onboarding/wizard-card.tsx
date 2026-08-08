@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import Link from 'next/link';
 import { Check, Monitor, Cpu, Sparkles, AlertCircle, RefreshCw } from 'lucide-react';
 import { useCliDetection } from '@/lib/hooks/use-cli-detection';
 import { useComputers } from '@/lib/hooks/use-computers';
@@ -15,20 +16,20 @@ interface WizardCardProps {
 }
 
 export function WizardCard({ channelId, onComplete }: WizardCardProps) {
+  const { computers, isLoading: computersLoading, claimComputer, refetch } = useComputers();
+  const isMember = (c: { my_role?: string | null }) => c.my_role === 'owner' || c.my_role === 'member';
+  const myComputer = computers.find((c) => c.status === 'online' && isMember(c));
   const {
     results: cliResults,
     isLoaded: cliLoaded,
     error: cliError,
-  } = useCliDetection();
-  const { computers, isLoading: computersLoading, claimComputer, refetch } = useComputers();
+  } = useCliDetection(myComputer?.id, myComputer?.runtime_inventory ?? []);
   const { createLucy, isCreating, error: createError } = useOnboarding();
 
   const [selectedRuntime, setSelectedRuntime] = useState<string>('');
   const [done, setDone] = useState(false);
   const [claimingId, setClaimingId] = useState<string | null>(null);
 
-  const isMember = (c: { my_role?: string | null }) => c.my_role === 'owner' || c.my_role === 'member';
-  const myComputer = computers.find((c) => c.status === 'online' && isMember(c));
   const joinableComputers = computers.filter((c) => c.status === 'online' && !isMember(c));
 
   const runtimeOptions: SelectOption[] = useMemo(() => {
@@ -58,12 +59,12 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
   };
 
   const handleCreateLucy = async () => {
-    if (!selectedRuntime || isCreating || done) return;
+    if (!selectedRuntime || !myComputer || isCreating || done) return;
     try {
       await createLucy({
         runtime_type: selectedRuntime,
         channel_id: channelId,
-        computer_id: myComputer?.id,
+        computer_id: myComputer.id,
       });
       setDone(true);
       onComplete?.();
@@ -141,6 +142,10 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
                     <RefreshCw className="h-3 w-3" />
                     Retry
                   </button>
+                  {' · '}
+                  <Link href="/computers" className="font-bold underline hover:text-brutal-primary">
+                    Add Computer
+                  </Link>
                 </span>
               )}
             </div>

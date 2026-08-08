@@ -1,8 +1,10 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { acquireLocalComputer, type LocalComputerLease } from './support/local-computer';
+import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
-const credentials = { email: 'send-freshness-e2e@solo.local', password: 'SoloE2E-2026!' };
+const credentials = { email: 'agent-message-flow-e2e@solo.local', password: 'SoloE2E-2026!' };
 
 interface AuthResponse {
   access_token: string;
@@ -47,7 +49,7 @@ function databaseJSON<T>(query: string): T {
 async function authenticate(request: APIRequestContext): Promise<AuthResponse> {
   const login = await request.post(`${apiBase}/api/v1/auth/login`, { data: credentials });
   if (login.ok()) return login.json();
-  const register = await request.post(`${apiBase}/api/v1/auth/register`, {
+  const register = await registerVerified(request, apiBase, {
     data: { ...credentials, display_name: 'Send Freshness E2E' },
   });
   if (!register.ok()) throw new Error(`E2E authentication failed: ${register.status()} ${await register.text()}`);
@@ -133,9 +135,11 @@ test('three explicitly mentioned real Agents relay exactly 1, 2, 3 through fresh
   const auth = await authenticate(request);
   const suffix = Date.now().toString(36);
   let channel: Entity | null = null;
+  let computerLease: LocalComputerLease | null = null;
   const agents: Entity[] = [];
 
   try {
+    computerLease = await acquireLocalComputer(request, apiBase, auth.access_token);
     channel = await api<Entity>(request, auth.access_token, 'post', '/api/v1/channels', {
       name: `freshness-relay-${suffix}`,
       description: 'Three real Agent Send Freshness relay E2E',
@@ -145,6 +149,7 @@ test('three explicitly mentioned real Agents relay exactly 1, 2, 3 through fresh
       const ready = `RELAY_${label}_READY_${suffix.toUpperCase()}`;
       agents.push(await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `Relay${label}${suffix}`,
+        computer_id: computerLease.id,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: [
@@ -225,5 +230,6 @@ test('three explicitly mentioned real Agents relay exactly 1, 2, 3 through fresh
       await api(request, auth.access_token, 'delete', `/api/v1/agents/${agent.id}`).catch(() => undefined);
     }
     if (channel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
+    if (computerLease) await computerLease.release(request);
   }
 });

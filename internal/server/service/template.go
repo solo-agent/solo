@@ -465,17 +465,7 @@ func (s *TemplateService) provisionChannelTx(ctx context.Context, tx pgx.Tx, req
 		return nil, ErrTemplateRuntimeUnavailable
 	}
 	if req.RuntimeID == "" {
-		_ = tx.QueryRow(ctx, `
-			SELECT c.id
-			  FROM computers c
-			 WHERE c.status = 'online'
-			   AND (c.owner_id = $1 OR EXISTS (
-			       SELECT 1 FROM computer_members cm
-			        WHERE cm.computer_id = c.id AND cm.user_id = $1
-			   ))
-			 ORDER BY c.created_at ASC
-			 LIMIT 1
-		`, req.OwnerID).Scan(&req.RuntimeID)
+		return nil, ErrTemplateRuntimeUnavailable
 	}
 
 	if targetChannelID == "" {

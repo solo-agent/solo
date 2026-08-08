@@ -36,7 +36,7 @@ import { MentionDropdown, type DropdownAnchor } from './mention-dropdown';
 import { useToast } from '@/components/ui/toast';
 import { Spinner } from '@/components/ui/spinner';
 import { t } from '@/lib/i18n';
-import { resolveAttachmentUrl } from '@/lib/attachment-url';
+import { useAuthenticatedAttachmentUrl } from '@/lib/attachment-url';
 import type { ChannelMember } from '@/lib/types';
 
 // ---- Types ----
@@ -49,6 +49,19 @@ export interface UploadItem {
   mimeType: string;
   size: number;
   status: 'uploading' | 'done' | 'error';
+}
+
+function UploadPreviewImage({ upload }: { upload: UploadItem }) {
+  const src = useAuthenticatedAttachmentUrl(upload.url);
+  if (!src) return <Spinner size="sm" label={t('uploading')} />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={upload.filename}
+      className="h-10 w-10 flex-shrink-0 border border-black object-cover bg-brutal-cream"
+    />
+  );
 }
 
 interface MessageInputProps {
@@ -97,7 +110,7 @@ async function uploadSingleFile(file: File): Promise<UploadItem> {
   return {
     id: res.id,
     filename: file.name,
-    url: resolveAttachmentUrl(res.url),
+    url: res.url,
     mimeType: res.mime_type,
     size: file.size,
     status: 'done' as const,
@@ -563,11 +576,7 @@ export function MessageInput({
 
                 {/* Image thumbnail for done image uploads */}
                 {upload.status === 'done' && isImageMime(upload.mimeType) ? (
-                  <img
-                    src={upload.url}
-                    alt={upload.filename}
-                    className="h-10 w-10 flex-shrink-0 border border-black object-cover bg-brutal-cream"
-                  />
+                  <UploadPreviewImage upload={upload} />
                 ) : (
                   /* Status icon for non-image files */
                   <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center">

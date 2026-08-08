@@ -12,8 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/solo-ai/solo/internal/auth"
 	"github.com/solo-ai/solo/internal/server/service"
 )
 
@@ -228,11 +230,15 @@ func (h *AttachmentHandler) Upload(w http.ResponseWriter, r *http.Request) {
 
 // Serve handles GET /api/v1/attachments/{attachmentID}
 func (h *AttachmentHandler) Serve(w http.ResponseWriter, r *http.Request) {
+	if !h.authorize(r) {
+		writeError(w, http.StatusUnauthorized, "attachment authentication required")
+		return
+	}
 	// Read the attachment metadata from DB
 	var storagePath, mimeType, filename string
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT storage_path, mime_type, filename FROM attachments WHERE id = $1`,
-		r.PathValue("attachmentID"),
+		chi.URLParam(r, "attachmentID"),
 	).Scan(&storagePath, &mimeType, &filename)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "attachment not found")
@@ -241,16 +247,22 @@ func (h *AttachmentHandler) Serve(w http.ResponseWriter, r *http.Request) {
 
 	fullPath := filepath.Join(h.uploadDir, storagePath)
 	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, filename))
 	http.ServeFile(w, r, fullPath)
 }
 
 // ServeThumbnail handles GET /api/v1/attachments/{attachmentID}/thumbnail
 func (h *AttachmentHandler) ServeThumbnail(w http.ResponseWriter, r *http.Request) {
+	if !h.authorize(r) {
+		writeError(w, http.StatusUnauthorized, "attachment authentication required")
+		return
+	}
 	var thumbnailPath, mimeType string
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT thumbnail_path, mime_type FROM attachments WHERE id = $1`,
-		r.PathValue("attachmentID"),
+		chi.URLParam(r, "attachmentID"),
 	).Scan(&thumbnailPath, &mimeType)
 	if err != nil || thumbnailPath == "" {
 		writeError(w, http.StatusNotFound, "thumbnail not found")
@@ -259,8 +271,57 @@ func (h *AttachmentHandler) ServeThumbnail(w http.ResponseWriter, r *http.Reques
 
 	fullPath := filepath.Join(h.uploadDir, thumbnailPath)
 	w.Header().Set("Content-Type", mimeType)
-	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.Header().Set("Referrer-Policy", "no-referrer")
 	http.ServeFile(w, r, fullPath)
+}
+
+func (h *AttachmentHandler) authorize(r *http.Request) bool {
+	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	if token == "" || token == r.Header.Get("Authorization") {
+		return false
+	}
+	claims, err := auth.ValidateToken(token)
+	if err != nil || claims.Subject == "" {
+		return false
+	}
+	var allowed bool
+	err = h.pool.QueryRow(r.Context(), `
+		SELECT EXISTS (
+		  SELECT 1 FROM attachments a
+		   WHERE a.id = $1
+		     AND (
+		       ($3 = 'agent_run' AND EXISTS (
+		         SELECT 1 FROM agent_runs r
+		         JOIN messages m ON m.channel_id = r.channel_id
+		          AND $1::uuid = ANY(m.attachment_ids)
+		          WHERE r.id = $4 AND r.agent_id = $2 AND r.computer_id = $5 AND r.finished_at IS NULL
+		       ))
+		       OR ($3 <> 'agent_run' AND (
+		         a.user_id = $2
+		         OR EXISTS (
+		           SELECT 1 FROM messages m
+		           JOIN channel_members cm ON cm.channel_id = m.channel_id
+		            AND cm.member_id = $2
+		          WHERE $1::uuid = ANY(m.attachment_ids)
+		         )
+		         OR EXISTS (
+		           SELECT 1 FROM messages m
+		           JOIN dm_members dm ON dm.channel_id = m.channel_id
+		            AND dm.member_id = $2
+		          WHERE $1::uuid = ANY(m.attachment_ids)
+		         )
+		       ))
+		     )
+		)`, chi.URLParam(r, "attachmentID"), claims.Subject, claims.ActorType, nullableClaim(claims.RunID), nullableClaim(claims.ComputerID)).Scan(&allowed)
+	return err == nil && allowed
+}
+
+func nullableClaim(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 // isRasterImage returns true for raster image MIME types that support

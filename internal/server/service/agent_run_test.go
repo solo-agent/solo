@@ -20,6 +20,7 @@ func TestAgentRunServiceLifecycle(t *testing.T) {
 	pool := agentRunTestPool(t)
 	ctx := context.Background()
 	ownerID := agentRunUser(t, pool)
+	outsiderID := agentRunUser(t, pool)
 	agentID := agentRunAgent(t, pool, ownerID)
 	var agentName string
 	if err := pool.QueryRow(ctx, `SELECT name FROM agents WHERE id = $1`, agentID).Scan(&agentName); err != nil {
@@ -38,6 +39,7 @@ func TestAgentRunServiceLifecycle(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM messages WHERE channel_id = $1`, channelID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE id = $1`, channelID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, outsiderID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
 	})
 
@@ -99,6 +101,18 @@ func TestAgentRunServiceLifecycle(t *testing.T) {
 	}
 	if run.Status != AgentRunStatusQueued || run.BackendStartedAt != nil {
 		t.Fatalf("bound run = status %q backend_started_at %v, want queued without backend start", run.Status, run.BackendStartedAt)
+	}
+	for scope, check := range map[string]func(string) (bool, error){
+		"run":     func(userID string) (bool, error) { return svc.UserCanAccessRun(ctx, userID, run.ID) },
+		"session": func(userID string) (bool, error) { return svc.UserCanAccessSession(ctx, userID, session.ID) },
+		"task":    func(userID string) (bool, error) { return svc.UserCanAccessTask(ctx, userID, taskID) },
+	} {
+		if allowed, err := check(ownerID); err != nil || !allowed {
+			t.Fatalf("owner access to %s = %v, %v", scope, allowed, err)
+		}
+		if allowed, err := check(outsiderID); err != nil || allowed {
+			t.Fatalf("outsider access to %s = %v, %v", scope, allowed, err)
+		}
 	}
 	run, err = svc.MarkBackendStarted(ctx, run.ID)
 	if err != nil {

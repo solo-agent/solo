@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -13,8 +14,8 @@ type AgentRunHandler struct {
 	svc *service.AgentRunService
 }
 
-func NewAgentRunHandler(pool *pgxpool.Pool) *AgentRunHandler {
-	return &AgentRunHandler{svc: service.NewAgentRunService(pool)}
+func NewAgentRunHandler(pool *pgxpool.Pool, daemonManagers ...*service.DaemonManager) *AgentRunHandler {
+	return &AgentRunHandler{svc: service.NewAgentRunService(pool, daemonManagers...)}
 }
 
 func (h *AgentRunHandler) Active(w http.ResponseWriter, r *http.Request) {
@@ -63,14 +64,33 @@ func (h *AgentRunHandler) Events(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AgentRunHandler) Transcript(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	runID := chi.URLParam(r, "runID")
+	allowed, err := h.svc.UserCanAccessRun(r.Context(), userID, runID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to authorize run transcript")
+		return
+	}
+	if !allowed {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
 	limit := 1000
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
 			limit = parsed
 		}
 	}
-	entries, err := h.svc.GetRunTranscript(r.Context(), chi.URLParam(r, "runID"), limit)
+	entries, err := h.svc.GetRunTranscript(r.Context(), runID, limit)
 	if err != nil {
+		if errors.Is(err, service.ErrComputerOffline) || errors.Is(err, service.ErrControlRPCUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, "computer is offline")
+			return
+		}
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "run not found")
 			return
@@ -100,8 +120,23 @@ func (h *AgentRunHandler) AgentSessions(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *AgentRunHandler) SessionTimeline(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	sessionID := chi.URLParam(r, "sessionID")
+	allowed, err := h.svc.UserCanAccessSession(r.Context(), userID, sessionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to authorize session timeline")
+		return
+	}
+	if !allowed {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
 	limit := timelineLimit(r)
-	timeline, err := h.svc.GetSessionTimeline(r.Context(), chi.URLParam(r, "sessionID"), limit)
+	timeline, err := h.svc.GetSessionTimeline(r.Context(), sessionID, limit)
 	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "session not found")
@@ -132,8 +167,23 @@ func (h *AgentRunHandler) TaskRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AgentRunHandler) TaskTimeline(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	taskID := chi.URLParam(r, "taskID")
+	allowed, err := h.svc.UserCanAccessTask(r.Context(), userID, taskID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to authorize task timeline")
+		return
+	}
+	if !allowed {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
 	limit := timelineLimit(r)
-	timeline, err := h.svc.GetTaskTimeline(r.Context(), chi.URLParam(r, "taskID"), r.URL.Query().Get("agent_id"), limit)
+	timeline, err := h.svc.GetTaskTimeline(r.Context(), taskID, r.URL.Query().Get("agent_id"), limit)
 	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "task not found")

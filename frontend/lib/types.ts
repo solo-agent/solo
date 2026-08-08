@@ -122,6 +122,7 @@ export interface Agent {
   custom_args: string[];
   created_at: string;
   updated_at: string;
+  computer_id?: string;
 }
 
 export interface AgentDetailTarget {
@@ -161,6 +162,7 @@ export interface CreateAgentInput {
   system_prompt?: string;
   custom_env?: Record<string, string>;
   custom_args?: string[];
+  computer_id: string;
 }
 
 export interface UpdateAgentInput extends Partial<CreateAgentInput> {
@@ -344,6 +346,13 @@ export interface Computer {
   os?: string;
   hostname?: string;
   ip?: string;
+  pairing_status: 'pending' | 'paired' | 'revoked' | 'unpaired';
+  enrollment_token?: string;
+  enrollment_expires_at?: string;
+  protocol_version?: number;
+  daemon_version?: string;
+  runtime_inventory?: Array<{ type: string; display_name: string; binary: string; available: boolean; version?: string; error?: string }>;
+  last_connected_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -469,7 +478,7 @@ export interface ComputerAgent {
 
 export interface CreateLucyRequest {
   runtime_type: string;
-  computer_id?: string;
+  computer_id: string;
   channel_id: string;
 }
 

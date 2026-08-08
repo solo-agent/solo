@@ -5,11 +5,9 @@ import (
 	"log/slog"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/solo-ai/solo/pkg/llm"
 )
+
+const maxTaskEventHistoryBytes = 16 << 20
 
 // Task status constants.
 const (
@@ -34,12 +32,60 @@ type taskState struct {
 	Error       string
 	ReceivedAt  time.Time
 	CompletedAt time.Time
+	AttemptID   string
+	AgentToken  string
+	Forwarding  bool
+}
+
+type activeRunAttempt struct {
+	RunID     string `json:"run_id"`
+	AttemptID string `json:"execution_attempt_id"`
+}
+
+func (tm *taskManager) ActiveAttempts() []activeRunAttempt {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	attempts := make([]activeRunAttempt, 0)
+	for _, task := range tm.tasks {
+		if task.AttemptID != "" {
+			attempts = append(attempts, activeRunAttempt{RunID: task.RunID, AttemptID: task.AttemptID})
+		}
+	}
+	return attempts
+}
+
+func (tm *taskManager) BeginForward(taskID, attemptID string) bool {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	task := tm.tasks[taskID]
+	if task == nil || task.AttemptID != attemptID || task.Forwarding {
+		return false
+	}
+	task.Forwarding = true
+	return true
+}
+
+func (tm *taskManager) EndForward(taskID, attemptID string, delivered bool) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	task := tm.tasks[taskID]
+	if task == nil || task.AttemptID != attemptID {
+		return
+	}
+	task.Forwarding = false
+	if delivered {
+		delete(tm.tasks, taskID)
+		delete(tm.eventHistory, taskID)
+		delete(tm.historyBytes, taskID)
+		delete(tm.nextEventSeq, taskID)
+	}
 }
 
 // sseEvent represents an SSE event to be streamed to subscribers.
 type sseEvent struct {
 	Event string
 	Data  string
+	Seq   int64
 }
 
 // sseSubscriber receives SSE events for a task.
@@ -52,8 +98,10 @@ type sseSubscriber struct {
 type taskManager struct {
 	mu           sync.RWMutex
 	tasks        map[string]*taskState
-	subscribers  map[string][]*sseSubscriber   // taskID -> subscribers
-	eventHistory map[string][]sseEvent         // taskID -> replayable SSE control events
+	subscribers  map[string][]*sseSubscriber // taskID -> subscribers
+	eventHistory map[string][]sseEvent       // taskID -> replayable SSE control events
+	historyBytes map[string]int
+	nextEventSeq map[string]int64
 	cancelFuncs  map[string]context.CancelFunc // taskID -> cancel func
 	agentTurns   map[string]chan struct{}      // agentID -> one executing Run
 }
@@ -64,6 +112,8 @@ func newTaskManager() *taskManager {
 		tasks:        make(map[string]*taskState),
 		subscribers:  make(map[string][]*sseSubscriber),
 		eventHistory: make(map[string][]sseEvent),
+		historyBytes: make(map[string]int),
+		nextEventSeq: make(map[string]int64),
 		cancelFuncs:  make(map[string]context.CancelFunc),
 		agentTurns:   make(map[string]chan struct{}),
 	}
@@ -88,11 +138,16 @@ func (tm *taskManager) acquireAgentTurn(ctx context.Context, agentID string) (fu
 	}
 }
 
-// AddTask registers a new task.
-func (tm *taskManager) AddTask(taskID string, state *taskState) {
+// AddTask registers a new task. It returns false when the same delivery
+// attempt is already known, so duplicate wakeups cannot start the model twice.
+func (tm *taskManager) AddTask(taskID string, state *taskState) bool {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+	if existing := tm.tasks[taskID]; existing != nil && existing.AttemptID == state.AttemptID {
+		return false
+	}
 	tm.tasks[taskID] = state
+	return true
 }
 
 // GetTask returns a task by ID.
@@ -169,24 +224,34 @@ func (tm *taskManager) ActiveAgentIDs() []string {
 
 // ExecutingRunID returns the database Run currently owning an agent's runtime scope.
 func (tm *taskManager) ExecutingRunID(agentID, channelID, nodeID string) string {
+	runID, _ := tm.ExecutingCredential(agentID, channelID, nodeID)
+	return runID
+}
+
+// ExecutingCredential resolves both identity and credential from the task
+// that currently owns this runtime scope. An empty channel is allowed only
+// when one active Run is unambiguous, which lets the CLI resolve a channel
+// name before it knows the target channel ID.
+func (tm *taskManager) ExecutingCredential(agentID, channelID, nodeID string) (string, string) {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
-	var taskID string
+	var runID, token string
 	for id, t := range tm.tasks {
-		if t.AgentID != agentID || t.ChannelID != channelID || t.NodeID != nodeID ||
+		if t.AgentID != agentID || (channelID != "" && t.ChannelID != channelID) || t.NodeID != nodeID ||
 			(t.Status != taskStatusRunning && t.Status != taskStatusThinking) {
 			continue
 		}
-		if taskID != "" {
-			return ""
+		if runID != "" {
+			return "", ""
 		}
-		taskID = t.RunID
-		if taskID == "" {
-			taskID = id
+		runID = t.RunID
+		if runID == "" {
+			runID = id
 		}
+		token = t.AgentToken
 	}
-	return taskID
+	return runID, token
 }
 
 // --- SSE subscriber management ---
@@ -194,8 +259,11 @@ func (tm *taskManager) ExecutingRunID(agentID, channelID, nodeID string) string 
 // SubscribeSSE adds a subscriber for a task's SSE events.
 // The subscriber's events channel will receive events until unsubscribed or the task completes.
 func (tm *taskManager) SubscribeSSE(taskID string) *sseSubscriber {
+	tm.mu.RLock()
+	capacity := len(tm.eventHistory[taskID]) + 64
+	tm.mu.RUnlock()
 	sub := &sseSubscriber{
-		events: make(chan sseEvent, 64),
+		events: make(chan sseEvent, capacity),
 		done:   make(chan struct{}),
 	}
 
@@ -228,8 +296,16 @@ func (tm *taskManager) UnsubscribeSSE(taskID string, sub *sseSubscriber) {
 // This is non-blocking: if a subscriber's buffer is full, the event is dropped.
 func (tm *taskManager) PushSSEEvent(taskID string, evt sseEvent) {
 	tm.mu.Lock()
-	if isReplayableSSEEvent(evt.Event) {
-		tm.eventHistory[taskID] = append(tm.eventHistory[taskID], evt)
+	if evt.Seq == 0 {
+		tm.nextEventSeq[taskID]++
+		evt.Seq = tm.nextEventSeq[taskID]
+	}
+	tm.eventHistory[taskID] = append(tm.eventHistory[taskID], evt)
+	tm.historyBytes[taskID] += len(evt.Event) + len(evt.Data) + 16
+	for tm.historyBytes[taskID] > maxTaskEventHistoryBytes && len(tm.eventHistory[taskID]) > 1 {
+		dropped := tm.eventHistory[taskID][0]
+		tm.eventHistory[taskID] = tm.eventHistory[taskID][1:]
+		tm.historyBytes[taskID] -= len(dropped.Event) + len(dropped.Data) + 16
 	}
 	subs := tm.subscribers[taskID]
 
@@ -243,6 +319,22 @@ func (tm *taskManager) PushSSEEvent(taskID string, evt sseEvent) {
 	tm.mu.Unlock()
 }
 
+// EventsAfter returns a stable copy for the authenticated remote forwarder.
+// Polling the bounded history avoids losing terminal events when the Server is
+// temporarily unavailable and the legacy live subscriber buffer fills.
+func (tm *taskManager) EventsAfter(taskID string, sourceSeq int64) []sseEvent {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	events := tm.eventHistory[taskID]
+	result := make([]sseEvent, 0, len(events))
+	for _, event := range events {
+		if event.Seq > sourceSeq {
+			result = append(result, event)
+		}
+	}
+	return result
+}
+
 // CloseAllSubscribers closes all subscribers for a task and cleans up.
 func (tm *taskManager) CloseAllSubscribers(taskID string) {
 	tm.mu.Lock()
@@ -252,15 +344,6 @@ func (tm *taskManager) CloseAllSubscribers(taskID string) {
 		close(sub.events)
 	}
 	tm.mu.Unlock()
-}
-
-func isReplayableSSEEvent(event string) bool {
-	switch event {
-	case "backend_started", "session", "complete", "error", "done":
-		return true
-	default:
-		return false
-	}
 }
 
 // --- Cancel support ---
@@ -300,48 +383,4 @@ func (tm *taskManager) CancelTask(taskID string) bool {
 
 	slog.Info("task cancelled", "task_id", taskID)
 	return true
-}
-
-// persistAgentMessage saves an agent's response message to the database.
-// The daemon writes directly to the messages table since it has DB access.
-func persistAgentMessage(ctx context.Context, pool *pgxpool.Pool, req runTaskRequest, content string, usage llm.Usage) (string, error) {
-	messageID := uuid.New().String()
-	now := time.Now()
-
-	// Get agent's display name
-	var agentName string
-	err := pool.QueryRow(ctx,
-		`SELECT name FROM agents WHERE id = $1`, req.AgentID,
-	).Scan(&agentName)
-	if err != nil {
-		agentName = "Agent"
-		slog.Warn("failed to get agent name for message", "agent_id", req.AgentID, "error", err)
-	}
-
-	// Insert the agent's response message
-	_, err = pool.Exec(ctx,
-		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, thread_id, created_at, updated_at)
-		 VALUES ($1, $2, 'agent', $3, $4, $5, $6, $6)`,
-		messageID, req.ChannelID, req.AgentID, content, nullableStr(req.ThreadID), now,
-	)
-	if err != nil {
-		return "", err
-	}
-
-	slog.Info("agent message persisted",
-		"message_id", messageID,
-		"channel_id", req.ChannelID,
-		"agent_id", req.AgentID,
-		"thread_id", req.ThreadID,
-	)
-
-	return messageID, nil
-}
-
-// nullableStr returns a *string for nullable DB columns.
-func nullableStr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
 }

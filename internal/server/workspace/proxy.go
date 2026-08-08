@@ -6,8 +6,9 @@ import "context"
 
 // Daemon holds the connection info for proxying workspace requests to a daemon.
 type Daemon struct {
-	Host string
-	Port int
+	Host       string
+	Port       int
+	ComputerID string
 }
 
 // Proxy is the interface for proxying workspace requests to daemons.

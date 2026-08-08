@@ -14,25 +14,25 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/solo-ai/solo/internal/db"
 	"github.com/solo-ai/solo/internal/server/middleware"
 	"github.com/solo-ai/solo/pkg/agent"
 	"github.com/solo-ai/solo/pkg/config"
 	"github.com/solo-ai/solo/pkg/llm"
 	"github.com/solo-ai/solo/pkg/skillloader"
+	"github.com/solo-ai/solo/pkg/version"
 )
 
 type healthResponse struct {
-	Status    string `json:"status"`
-	Timestamp string `json:"timestamp"`
-	Version   string `json:"version"`
+	Status           string `json:"status"`
+	Timestamp        string `json:"timestamp"`
+	Version          string `json:"version"`
+	ControlConnected bool   `json:"control_connected"`
 }
 
 var (
@@ -41,11 +41,11 @@ var (
 	serverURL     string
 	internalToken string
 	llmProvider   llm.Provider
-	dbPool        *pgxpool.Pool
 	machineLock   *agent.MachineLock
 	taskMgr       *taskManager
 	daemonH       *daemonHandler
 	workspaceMgr  *agent.WorkspaceManager
+	controlReady  atomic.Bool
 )
 
 func main() {
@@ -64,15 +64,8 @@ func main() {
 		port = "8081"
 	}
 
-	// Connect to database (for persisting agent responses)
 	ctx := context.Background()
 	var err error
-	dbPool, err = db.NewPool(ctx, cfg.DBURL)
-	if err != nil {
-		slog.Error("failed to connect to database", "error", err)
-		os.Exit(1)
-	}
-	defer dbPool.Close()
 
 	// Initialize LLM provider
 	apiKey := cfg.LLMAPIKey
@@ -98,13 +91,13 @@ func main() {
 		slog.Error("failed to acquire machine lock — another daemon may be running", "error", err)
 		os.Exit(1)
 	}
-	slog.Info("machine lock acquired", "pid", machineLock.PID, "token", machineLock.Token)
+	slog.Info("machine lock acquired", "pid", machineLock.PID)
 
 	// Create task manager
 	taskMgr = newTaskManager()
 
 	// Create handler
-	h := newDaemonHandler(dbPool, taskMgr, llmProvider, serverURL, internalToken)
+	h := newDaemonHandler(taskMgr, llmProvider, serverURL, internalToken)
 	daemonH = h
 
 	// v1.4: Initialize persistent agent session managers for all registered types.
@@ -135,9 +128,10 @@ func main() {
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(healthResponse{
-			Status:    "ok",
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
-			Version:   "0.3.0",
+			Status:           "ok",
+			Timestamp:        time.Now().UTC().Format(time.RFC3339),
+			Version:          version.Version,
+			ControlConnected: controlReady.Load(),
 		})
 	})
 
@@ -181,13 +175,30 @@ func main() {
 		}
 	}()
 
-	// Register with server on startup
-	if err := registerWithServer(ctx); err != nil {
-		slog.Error("failed to register with server", "error", err)
-		// Non-fatal: daemon can still operate standalone
+	controlClient, controlErr := newDaemonControlClient(cfg, h, taskMgr)
+	_ = os.Unsetenv("SOLO_ENROLLMENT_TOKEN")
+	legacyConnection := false
+	if controlErr == nil {
+		serverURL = controlClient.serverURL
+		h.serverURL = controlClient.serverURL
+		go func() {
+			if err := controlClient.Run(ctx); err != nil {
+				slog.Error("daemon control stopped; shutting down stale Daemon", "error", err)
+				stop()
+			}
+		}()
+	} else if strings.Contains(serverURL, "127.0.0.1") || strings.Contains(serverURL, "localhost") {
+		slog.Warn("Computer is not paired; using local compatibility transport", "error", controlErr)
+		if err := registerWithServer(ctx); err != nil {
+			slog.Error("failed to register with local server", "error", err)
+		} else {
+			legacyConnection = true
+			controlReady.Store(true)
+			go heartbeatLoop(ctx)
+		}
 	} else {
-		// Start heartbeat after successful registration
-		go heartbeatLoop(ctx)
+		slog.Error("remote Server requires a paired Computer", "error", controlErr)
+		os.Exit(1)
 	}
 
 	<-ctx.Done()
@@ -202,7 +213,10 @@ func main() {
 	}
 
 	// Unregister on shutdown
-	unregisterFromServer()
+	if legacyConnection {
+		controlReady.Store(false)
+		unregisterFromServer()
+	}
 	for _, taskID := range taskMgr.ListTaskIDs() {
 		taskMgr.CloseAllSubscribers(taskID)
 	}
@@ -256,7 +270,7 @@ func registerWithServer(ctx context.Context) error {
 		DaemonID:      daemonID,
 		Host:          host,
 		Port:          port,
-		Version:       "0.3.0",
+		Version:       version.Version,
 		Capabilities:  []string{"llm"},
 		MaxConcurrent: 10,
 		CurrentLoad:   0,

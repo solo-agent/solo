@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -17,20 +18,25 @@ type ComputerService struct {
 
 // Computer represents a registered daemon/computer.
 type Computer struct {
-	ID            string     `json:"id"`
-	Name          string     `json:"name"`
-	OwnerID       string     `json:"owner_id"`
-	DaemonID      string     `json:"daemon_id,omitempty"`
-	DaemonURL     string     `json:"daemon_url,omitempty"`
-	Status        string     `json:"status"`
-	LastHeartbeat *time.Time `json:"last_heartbeat,omitempty"`
-	AgentIDs      []string   `json:"agent_ids,omitempty"`
-	OS            string     `json:"os"`
-	Hostname      string     `json:"hostname"`
-	IP            string     `json:"ip"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
-	MyRole        *string    `json:"my_role,omitempty"`
+	ID               string          `json:"id"`
+	Name             string          `json:"name"`
+	OwnerID          string          `json:"owner_id"`
+	DaemonID         string          `json:"daemon_id,omitempty"`
+	DaemonURL        string          `json:"daemon_url,omitempty"`
+	Status           string          `json:"status"`
+	LastHeartbeat    *time.Time      `json:"last_heartbeat,omitempty"`
+	AgentIDs         []string        `json:"agent_ids,omitempty"`
+	OS               string          `json:"os"`
+	Hostname         string          `json:"hostname"`
+	IP               string          `json:"ip"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+	MyRole           *string         `json:"my_role,omitempty"`
+	PairingStatus    string          `json:"pairing_status"`
+	ProtocolVersion  int             `json:"protocol_version,omitempty"`
+	DaemonVersion    string          `json:"daemon_version,omitempty"`
+	RuntimeInventory json.RawMessage `json:"runtime_inventory,omitempty"`
+	LastConnectedAt  *time.Time      `json:"last_connected_at,omitempty"`
 }
 
 // ComputerSystemInfo carries OS, hostname and IP reported by a daemon.
@@ -47,17 +53,7 @@ func NewComputerService(pool *pgxpool.Pool) *ComputerService {
 
 // CreateComputer creates a new computer for the given owner.
 func (s *ComputerService) CreateComputer(ctx context.Context, ownerID, name string) (*Computer, error) {
-	var c Computer
-	err := s.pool.QueryRow(ctx,
-		`INSERT INTO computers (name, owner_id)
-		 VALUES ($1, NULLIF($2, '')::uuid)
-		 RETURNING id, name, COALESCE(owner_id::text, ''), status, agent_ids, created_at, updated_at`,
-		name, ownerID,
-	).Scan(&c.ID, &c.Name, &c.OwnerID, &c.Status, &c.AgentIDs, &c.CreatedAt, &c.UpdatedAt)
-	if err != nil {
-		return nil, fmt.Errorf("create computer: %w", err)
-	}
-	return &c, nil
+	return s.createComputer(ctx, ownerID, name, "", time.Time{})
 }
 
 // GetComputer retrieves a computer by ID. Only the owner can view it.
@@ -67,12 +63,23 @@ func (s *ComputerService) GetComputer(ctx context.Context, id, userID string) (*
 	var lastHeartbeat *time.Time
 
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, owner_id, daemon_id, daemon_url, status, last_heartbeat, agent_ids, os, hostname, ip, created_at, updated_at
-		 FROM computers
-		 WHERE id = $1`,
-		id,
+		`SELECT c.id, c.name, c.owner_id, c.daemon_id, c.daemon_url, c.status, c.last_heartbeat, c.agent_ids, c.os, c.hostname, c.ip, c.created_at, c.updated_at,
+		        COALESCE(cm.role, CASE WHEN c.owner_id = $2 THEN 'owner' END),
+		        CASE
+		          WHEN c.credential_revoked_at IS NOT NULL THEN 'revoked'
+		          WHEN c.credential_hash IS NOT NULL THEN 'paired'
+		          WHEN c.enrollment_token_hash IS NOT NULL AND c.enrollment_expires_at > now() THEN 'pending'
+		          ELSE 'unpaired'
+		        END,
+		        COALESCE(c.protocol_version, 0), COALESCE(c.daemon_version, ''), c.runtime_inventory, c.last_connected_at
+		 FROM computers c
+		 LEFT JOIN computer_members cm ON cm.computer_id = c.id AND cm.user_id = $2
+		 WHERE c.id = $1
+		   AND (c.owner_id = $2 OR cm.user_id IS NOT NULL)`,
+		id, userID,
 	).Scan(&c.ID, &c.Name, &ownerID, &daemonID, &daemonURL, &c.Status,
-		&lastHeartbeat, &c.AgentIDs, &c.OS, &c.Hostname, &c.IP, &c.CreatedAt, &c.UpdatedAt)
+		&lastHeartbeat, &c.AgentIDs, &c.OS, &c.Hostname, &c.IP, &c.CreatedAt, &c.UpdatedAt,
+		&c.MyRole, &c.PairingStatus, &c.ProtocolVersion, &c.DaemonVersion, &c.RuntimeInventory, &c.LastConnectedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ErrNotFound
@@ -98,15 +105,25 @@ func (s *ComputerService) GetComputer(ctx context.Context, id, userID string) (*
 	return &c, nil
 }
 
-// ListComputers lists online computers and annotates the caller's membership.
+// ListComputers lists every computer accessible to the caller, including
+// offline and pending-pairing computers.
 func (s *ComputerService) ListComputers(ctx context.Context, userID string) ([]Computer, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT c.id, c.name, COALESCE(c.owner_id::text, ''), COALESCE(c.daemon_id, ''), COALESCE(c.daemon_url, ''),
 		        c.status, c.last_heartbeat, c.agent_ids, COALESCE(c.os, ''), COALESCE(c.hostname, ''), COALESCE(c.ip, ''), c.created_at, c.updated_at,
-		        cm.role
+		        COALESCE(cm.role, CASE WHEN c.owner_id = $1 THEN 'owner' END),
+		        CASE
+		          WHEN c.credential_revoked_at IS NOT NULL THEN 'revoked'
+		          WHEN c.credential_hash IS NOT NULL THEN 'paired'
+		          WHEN c.enrollment_token_hash IS NOT NULL AND c.enrollment_expires_at > now() THEN 'pending'
+		          ELSE 'unpaired'
+		        END,
+		        COALESCE(c.protocol_version, 0), COALESCE(c.daemon_version, ''), c.runtime_inventory, c.last_connected_at
 		 FROM computers c
 		 LEFT JOIN computer_members cm ON cm.computer_id = c.id AND cm.user_id = $1
-		 WHERE c.status = 'online'
+		 WHERE c.owner_id = $1
+		    OR cm.user_id IS NOT NULL
+		    OR (c.owner_id IS NULL AND c.credential_hash IS NULL AND c.status = 'online')
 		 ORDER BY c.created_at DESC`,
 		userID,
 	)
@@ -122,7 +139,8 @@ func (s *ComputerService) ListComputers(ctx context.Context, userID string) ([]C
 		var lastHeartbeat *time.Time
 		var role *string
 		if err := rows.Scan(&c.ID, &c.Name, &c.OwnerID, &daemonID, &daemonURL,
-			&c.Status, &lastHeartbeat, &c.AgentIDs, &c.OS, &c.Hostname, &c.IP, &c.CreatedAt, &c.UpdatedAt, &role); err != nil {
+			&c.Status, &lastHeartbeat, &c.AgentIDs, &c.OS, &c.Hostname, &c.IP, &c.CreatedAt, &c.UpdatedAt, &role,
+			&c.PairingStatus, &c.ProtocolVersion, &c.DaemonVersion, &c.RuntimeInventory, &c.LastConnectedAt); err != nil {
 			return nil, fmt.Errorf("scan computer row: %w", err)
 		}
 		c.DaemonID = daemonID
@@ -153,9 +171,9 @@ func (s *ComputerService) UpdateComputer(ctx context.Context, id, userID, name s
 
 	err := s.pool.QueryRow(ctx,
 		`UPDATE computers SET name = $1, updated_at = now()
-		 WHERE id = $2
+		 WHERE id = $2 AND owner_id = $3
 		 RETURNING id, name, owner_id, daemon_id, daemon_url, status, last_heartbeat, agent_ids, os, hostname, ip, created_at, updated_at`,
-		name, id,
+		name, id, userID,
 	).Scan(&c.ID, &c.Name, &ownerID, &daemonID, &daemonURL, &c.Status,
 		&lastHeartbeat, &c.AgentIDs, &c.OS, &c.Hostname, &c.IP, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
@@ -180,13 +198,23 @@ func (s *ComputerService) UpdateComputer(ctx context.Context, id, userID, name s
 		return nil, fmt.Errorf("update computer active agents: %w", err)
 	}
 
-	return &c, nil
+	return s.GetComputer(ctx, id, userID)
 }
 
 // DeleteComputer deletes a computer by ID. Only the owner can delete it.
 func (s *ComputerService) DeleteComputer(ctx context.Context, id, userID string) error {
 	result, err := s.pool.Exec(ctx,
-		`DELETE FROM computers WHERE id = $1 AND owner_id = $2`,
+		`DELETE FROM computers c
+		 WHERE c.id = $1 AND c.owner_id = $2
+		   AND NOT EXISTS (
+		       SELECT 1 FROM agents a
+		        WHERE a.runtime_id = c.id::text AND a.is_active = true
+		   )
+		   AND NOT EXISTS (
+		       SELECT 1 FROM agent_runs r
+		        WHERE r.computer_id = c.id AND r.finished_at IS NULL
+		   )`,
+		id, userID,
 	)
 	if err != nil {
 		return fmt.Errorf("delete computer: %w", err)
@@ -299,8 +327,8 @@ func (s *ComputerService) MarkOffline(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
-// ClaimComputer joins the user to a computer. If nobody owns it yet, this user
-// becomes the first owner.
+// ClaimComputer claims an unpaired legacy computer. Paired computers are only
+// accessible through their existing owner/member records.
 func (s *ComputerService) ClaimComputer(ctx context.Context, computerID, userID string) (*Computer, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -308,37 +336,48 @@ func (s *ComputerService) ClaimComputer(ctx context.Context, computerID, userID 
 	}
 	defer tx.Rollback(ctx)
 
-	var hasOwner bool
+	var ownerID *string
+	var hasCredential, hasAccess bool
+	var status string
 	if err := tx.QueryRow(ctx,
-		`SELECT owner_id IS NOT NULL FROM computers WHERE id = $1 FOR UPDATE`,
-		computerID,
-	).Scan(&hasOwner); err != nil {
+		`SELECT c.owner_id::text, c.credential_hash IS NOT NULL, c.status,
+		        COALESCE(c.owner_id = $2, false) OR EXISTS (
+		            SELECT 1 FROM computer_members cm
+		             WHERE cm.computer_id = c.id AND cm.user_id = $2
+		        )
+		   FROM computers c WHERE c.id = $1 FOR UPDATE OF c`,
+		computerID, userID,
+	).Scan(&ownerID, &hasCredential, &status, &hasAccess); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("claim computer: get computer: %w", err)
 	}
 
-	role := "member"
-	if !hasOwner {
-		role = "owner"
+	if hasAccess {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("claim computer: commit: %w", err)
+		}
+		return s.GetComputer(ctx, computerID, userID)
 	}
+	if ownerID != nil || hasCredential || status != "online" {
+		return nil, ErrComputerForbidden
+	}
+
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO computer_members (computer_id, user_id, role)
-		 VALUES ($1, $2, $3)
+		 VALUES ($1, $2, 'owner')
 		 ON CONFLICT (computer_id, user_id) DO NOTHING`,
-		computerID, userID, role,
+		computerID, userID,
 	); err != nil {
 		return nil, fmt.Errorf("claim computer: insert member: %w", err)
 	}
 
-	if !hasOwner {
-		if _, err := tx.Exec(ctx,
-			`UPDATE computers SET owner_id = $1, updated_at = now() WHERE id = $2`,
-			userID, computerID,
-		); err != nil {
-			return nil, fmt.Errorf("claim computer: set owner: %w", err)
-		}
+	if _, err := tx.Exec(ctx,
+		`UPDATE computers SET owner_id = $1, updated_at = now() WHERE id = $2`,
+		userID, computerID,
+	); err != nil {
+		return nil, fmt.Errorf("claim computer: set owner: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

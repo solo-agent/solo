@@ -219,10 +219,15 @@ type FinishRunInput struct {
 
 type AgentRunService struct {
 	pool *pgxpool.Pool
+	dm   *DaemonManager
 }
 
-func NewAgentRunService(pool *pgxpool.Pool) *AgentRunService {
-	return &AgentRunService{pool: pool}
+func NewAgentRunService(pool *pgxpool.Pool, daemonManagers ...*DaemonManager) *AgentRunService {
+	svc := &AgentRunService{pool: pool}
+	if len(daemonManagers) > 0 {
+		svc.dm = daemonManagers[0]
+	}
+	return svc
 }
 
 func (s *AgentRunService) UpsertSession(ctx context.Context, input UpsertSessionInput) (*AgentSession, error) {
@@ -635,6 +640,68 @@ func (s *AgentRunService) ListActiveRunsForUser(ctx context.Context, userID stri
 	))
 }
 
+func (s *AgentRunService) UserCanAccessRun(ctx context.Context, userID, runID string) (bool, error) {
+	var allowed bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+		  SELECT 1
+		    FROM agent_runs r
+		    JOIN agents a ON a.id = r.agent_id
+		   WHERE r.id = $1
+		     AND (
+		       a.owner_id = $2
+		       OR EXISTS (
+		         SELECT 1 FROM channel_members cm
+		          WHERE cm.channel_id = r.channel_id
+		            AND cm.member_type = 'user'
+		            AND cm.member_id = $2
+		       )
+		     )
+		)`, runID, userID).Scan(&allowed)
+	return allowed, err
+}
+
+func (s *AgentRunService) UserCanAccessSession(ctx context.Context, userID, sessionID string) (bool, error) {
+	var allowed bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+		  SELECT 1
+		    FROM agent_sessions sess
+		    JOIN agents a ON a.id = sess.agent_id
+		   WHERE sess.id = $1
+		     AND (
+		       a.owner_id = $2
+		       OR EXISTS (
+		         SELECT 1 FROM channel_members cm
+		          WHERE cm.channel_id = a.home_channel_id
+		            AND cm.member_type = 'user'
+		            AND cm.member_id = $2
+		       )
+		     )
+		)`, sessionID, userID).Scan(&allowed)
+	return allowed, err
+}
+
+func (s *AgentRunService) UserCanAccessTask(ctx context.Context, userID, taskID string) (bool, error) {
+	var allowed bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+		  SELECT 1
+		    FROM tasks t
+		   WHERE t.id = $1
+		     AND (
+		       t.creator_id = $2
+		       OR EXISTS (
+		         SELECT 1 FROM channel_members cm
+		          WHERE cm.channel_id = t.channel_id
+		            AND cm.member_type = 'user'
+		            AND cm.member_id = $2
+		       )
+		     )
+		)`, taskID, userID).Scan(&allowed)
+	return allowed, err
+}
+
 func (s *AgentRunService) ListRecentRuns(ctx context.Context) ([]AgentRun, error) {
 	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
 		 ORDER BY r.updated_at DESC
@@ -765,32 +832,57 @@ func (s *AgentRunService) GetRunTranscript(ctx context.Context, runID string, li
 	var agentID string
 	var provider string
 	var externalSessionID string
+	var computerID string
 	var startedAt time.Time
 	var finished sql.NullTime
 	err := s.pool.QueryRow(ctx,
 		`SELECT COALESCE(r.transcript_path, sess.transcript_path, ''),
 		        r.agent_id::text, COALESCE(sess.provider, r.source, ''),
-		        COALESCE(sess.external_session_id, ''),
+		        COALESCE(sess.external_session_id, ''), COALESCE(r.computer_id::text, ''),
 		        r.started_at, r.finished_at
 		   FROM agent_runs r
 		   LEFT JOIN agent_sessions sess ON sess.id = r.session_id
 		  WHERE r.id = $1`,
 		runID,
-	).Scan(&path, &agentID, &provider, &externalSessionID, &startedAt, &finished)
+	).Scan(&path, &agentID, &provider, &externalSessionID, &computerID, &startedAt, &finished)
 	if err != nil {
 		return nil, err
-	}
-	if livePath := liveTranscriptPath(provider, agentID, externalSessionID); livePath != "" {
-		path = livePath
 	}
 	end := time.Now().UTC()
 	if finished.Valid {
 		end = finished.Time
 	}
+	if s.dm != nil && computerID != "" {
+		return s.readRemoteTranscript(ctx, computerID, agentID, provider, externalSessionID, startedAt.Add(-2*time.Second), end.Add(2*time.Second), limit)
+	}
+	if livePath := liveTranscriptPath(provider, agentID, externalSessionID); livePath != "" {
+		path = livePath
+	}
 	if provider == "hermes" && externalSessionID != "" {
 		return ReadHermesTranscriptWindow(externalSessionID, startedAt.Add(-2*time.Second), end.Add(2*time.Second), limit)
 	}
 	return ReadAgentTranscriptWindow(path, startedAt.Add(-2*time.Second), end.Add(2*time.Second), limit)
+}
+
+func (s *AgentRunService) readRemoteTranscript(ctx context.Context, computerID, agentID, provider, externalSessionID string, start, end time.Time, limit int) ([]AgentTranscriptEntry, error) {
+	payload := map[string]any{
+		"agent_id": agentID, "provider": provider, "external_session_id": externalSessionID, "limit": limit,
+	}
+	if !start.IsZero() {
+		payload["start"] = start.UTC().Format(time.RFC3339Nano)
+	}
+	if !end.IsZero() {
+		payload["end"] = end.UTC().Format(time.RFC3339Nano)
+	}
+	raw, err := s.dm.CallControlRPC(ctx, computerID, "transcript.read", payload)
+	if err != nil {
+		return nil, err
+	}
+	entries := []AgentTranscriptEntry{}
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
 }
 
 func liveTranscriptPath(provider, agentID, externalSessionID string) string {

@@ -32,21 +32,28 @@ type CreateComputerRequest struct {
 
 // ComputerResponse is the API response for a computer.
 type ComputerResponse struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	OwnerID       string   `json:"owner_id"`
-	MyRole        *string  `json:"my_role,omitempty"`
-	DaemonID      string   `json:"daemon_id,omitempty"`
-	DaemonURL     string   `json:"daemon_url,omitempty"`
-	Status        string   `json:"status"`
-	LastHeartbeat string   `json:"last_heartbeat,omitempty"`
-	AgentIDs      []string `json:"agent_ids,omitempty"`
-	AgentNames    []string `json:"agent_names,omitempty"`
-	OS            string   `json:"os,omitempty"`
-	Hostname      string   `json:"hostname,omitempty"`
-	IP            string   `json:"ip,omitempty"`
-	CreatedAt     string   `json:"created_at"`
-	UpdatedAt     string   `json:"updated_at"`
+	ID                  string          `json:"id"`
+	Name                string          `json:"name"`
+	OwnerID             string          `json:"owner_id"`
+	MyRole              *string         `json:"my_role,omitempty"`
+	DaemonID            string          `json:"daemon_id,omitempty"`
+	DaemonURL           string          `json:"daemon_url,omitempty"`
+	Status              string          `json:"status"`
+	LastHeartbeat       string          `json:"last_heartbeat,omitempty"`
+	AgentIDs            []string        `json:"agent_ids,omitempty"`
+	AgentNames          []string        `json:"agent_names,omitempty"`
+	OS                  string          `json:"os,omitempty"`
+	Hostname            string          `json:"hostname,omitempty"`
+	IP                  string          `json:"ip,omitempty"`
+	CreatedAt           string          `json:"created_at"`
+	UpdatedAt           string          `json:"updated_at"`
+	PairingStatus       string          `json:"pairing_status"`
+	EnrollmentToken     string          `json:"enrollment_token,omitempty"`
+	EnrollmentExpiresAt string          `json:"enrollment_expires_at,omitempty"`
+	ProtocolVersion     int             `json:"protocol_version,omitempty"`
+	DaemonVersion       string          `json:"daemon_version,omitempty"`
+	RuntimeInventory    json.RawMessage `json:"runtime_inventory,omitempty"`
+	LastConnectedAt     string          `json:"last_connected_at,omitempty"`
 }
 
 // UpdateComputerRequest is the request body for updating a computer.
@@ -57,22 +64,29 @@ type UpdateComputerRequest struct {
 // toResponse converts a service.Computer to a ComputerResponse.
 func toResponse(c *service.Computer) ComputerResponse {
 	resp := ComputerResponse{
-		ID:        c.ID,
-		Name:      c.Name,
-		OwnerID:   c.OwnerID,
-		MyRole:    c.MyRole,
-		DaemonID:  c.DaemonID,
-		DaemonURL: c.DaemonURL,
-		Status:    c.Status,
-		AgentIDs:  c.AgentIDs,
-		OS:        c.OS,
-		Hostname:  c.Hostname,
-		IP:        c.IP,
-		CreatedAt: c.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: c.UpdatedAt.Format(time.RFC3339),
+		ID:               c.ID,
+		Name:             c.Name,
+		OwnerID:          c.OwnerID,
+		MyRole:           c.MyRole,
+		DaemonID:         c.DaemonID,
+		DaemonURL:        c.DaemonURL,
+		Status:           c.Status,
+		AgentIDs:         c.AgentIDs,
+		OS:               c.OS,
+		Hostname:         c.Hostname,
+		IP:               c.IP,
+		CreatedAt:        c.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:        c.UpdatedAt.Format(time.RFC3339),
+		PairingStatus:    c.PairingStatus,
+		ProtocolVersion:  c.ProtocolVersion,
+		DaemonVersion:    c.DaemonVersion,
+		RuntimeInventory: c.RuntimeInventory,
 	}
 	if c.LastHeartbeat != nil {
 		resp.LastHeartbeat = c.LastHeartbeat.Format(time.RFC3339)
+	}
+	if c.LastConnectedAt != nil {
+		resp.LastConnectedAt = c.LastConnectedAt.Format(time.RFC3339)
 	}
 	if resp.AgentIDs == nil {
 		resp.AgentIDs = []string{}
@@ -107,15 +121,65 @@ func (h *ComputerHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c, err := h.svc.CreateComputer(r.Context(), userID, name)
+	enrollment, err := h.svc.CreateComputerWithEnrollment(r.Context(), userID, name)
 	if err != nil {
 		slog.Error("failed to create computer", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to create computer")
 		return
 	}
 
-	slog.Info("computer created", "computer_id", c.ID, "name", name, "owner_id", userID)
-	writeJSON(w, http.StatusCreated, toResponse(c))
+	slog.Info("computer created", "computer_id", enrollment.Computer.ID, "name", name, "owner_id", userID)
+	resp := toResponse(enrollment.Computer)
+	resp.EnrollmentToken = enrollment.Token
+	resp.EnrollmentExpiresAt = enrollment.ExpiresAt.Format(time.RFC3339)
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// CreateEnrollment handles POST /api/v1/computers/{computerID}/enrollment.
+func (h *ComputerHandler) CreateEnrollment(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	computerID := chi.URLParam(r, "computerID")
+	enrollment, err := h.svc.CreateEnrollment(r.Context(), computerID, userID)
+	if err != nil {
+		if err == service.ErrNotFound {
+			writeError(w, http.StatusNotFound, "computer not found")
+			return
+		}
+		slog.Error("create computer enrollment failed", "computer_id", computerID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create enrollment")
+		return
+	}
+	resp := toResponse(enrollment.Computer)
+	resp.EnrollmentToken = enrollment.Token
+	resp.EnrollmentExpiresAt = enrollment.ExpiresAt.Format(time.RFC3339)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// RevokeCredential handles POST /api/v1/computers/{computerID}/credential/revoke.
+func (h *ComputerHandler) RevokeCredential(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	computerID := chi.URLParam(r, "computerID")
+	if err := h.svc.RevokeCredential(r.Context(), computerID, userID); err != nil {
+		if err == service.ErrNotFound {
+			writeError(w, http.StatusNotFound, "computer not found")
+			return
+		}
+		slog.Error("revoke computer credential failed", "computer_id", computerID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to revoke credential")
+		return
+	}
+	if h.dm != nil {
+		h.dm.DisconnectComputer(computerID)
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
 // List handles GET /api/v1/computers
@@ -266,6 +330,10 @@ func (h *ComputerHandler) Claim(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if err == service.ErrNotFound {
 			writeError(w, http.StatusNotFound, "computer not found")
+			return
+		}
+		if err == service.ErrComputerForbidden {
+			writeError(w, http.StatusForbidden, "computer cannot be claimed")
 			return
 		}
 		slog.Error("claim computer failed", "computer_id", computerID, "user_id", userID, "error", err)

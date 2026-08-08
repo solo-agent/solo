@@ -118,4 +118,22 @@ func TestResolveDaemonForAgentUsesComputerBinding(t *testing.T) {
 	if runtimeID != computerA {
 		t.Fatalf("persisted runtime_id = %q, want %q", runtimeID, computerA)
 	}
+
+	if _, err := pool.Exec(ctx, `UPDATE agents SET runtime_id = NULL WHERE id = $1`, agentID); err != nil {
+		t.Fatal(err)
+	}
+	dm.Unregister("daemon-a")
+	if _, err := pool.Exec(ctx, `UPDATE computers SET credential_hash = 'test-hash' WHERE id = $1`, computerA); err != nil {
+		t.Fatal(err)
+	}
+	dm.Register(&DaemonInfo{ID: computerA, ComputerID: computerA, Capabilities: []string{"llm"}, MaxConcurrent: 1})
+	if _, err := dm.ResolveDaemonForAgent(ctx, agentID, "llm"); err != nil {
+		t.Fatalf("single remote Computer fallback: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(runtime_id, '') FROM agents WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	if runtimeID != computerA {
+		t.Fatalf("remote persisted runtime_id = %q, want %q", runtimeID, computerA)
+	}
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
@@ -12,6 +12,7 @@ import { t } from '@/lib/i18n';
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { BrutalAlert } from "@/components/ui/brutal-alert";
+import { apiClient } from "@/lib/api-client";
 
 const loginFormSchema = z.object({
   email: z
@@ -29,6 +30,7 @@ type LoginFormValues = z.infer<typeof loginFormSchema>;
 export default function LoginPage() {
   const router = useRouter();
   const { login, isAuthenticated, isLoading, error, clearError } = useAuth();
+  const [signupAvailable, setSignupAvailable] = useState(true);
 
   const {
     register,
@@ -48,6 +50,12 @@ export default function LoginPage() {
       router.push("/dashboard");
     }
   }, [isAuthenticated, isLoading, router]);
+
+  useEffect(() => {
+    apiClient.get<{ signup_available: boolean }>('/api/v1/auth/config')
+      .then((config) => setSignupAvailable(config.signup_available))
+      .catch(() => undefined);
+  }, []);
 
   async function onSubmit(data: LoginFormValues) {
     clearError();
@@ -153,6 +161,11 @@ export default function LoginPage() {
               {errors.password.message}
             </p>
           )}
+          <div className="text-right">
+            <Link href="/auth/forgot-password" className="font-heading text-xs font-bold underline hover:text-brutal-primary">
+              {t('forgotPassword')}
+            </Link>
+          </div>
         </div>
 
         {/* Submit button */}
@@ -168,6 +181,7 @@ export default function LoginPage() {
 
       {/* Register link */}
       <div className="text-center mt-6 pt-4 border-t-2 border-black">
+        {signupAvailable ? (
         <p className="font-sans text-sm text-muted-foreground">
           {t('noAccount')}{" "}
           <Link
@@ -177,6 +191,9 @@ export default function LoginPage() {
             {t('register')}
           </Link>
         </p>
+        ) : (
+          <p className="font-sans text-sm text-muted-foreground">{t('registrationClosed')}</p>
+        )}
       </div>
     </div>
   );

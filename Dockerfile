@@ -10,7 +10,8 @@ WORKDIR /app
 
 # Cache module downloads
 COPY go.mod go.sum ./
-RUN go mod download
+ARG GOPROXY=https://proxy.golang.org,direct
+RUN GOPROXY="$GOPROXY" go mod download
 
 # Copy full source
 COPY . .
@@ -19,6 +20,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/server ./cmd/server/
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/daemon ./cmd/daemon/
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/solo ./cmd/solo/
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/migrate ./cmd/migrate/
 
 # =============================================================================
 # Stage 2: Runtime image — reuse golang:alpine (already cached)
@@ -30,13 +32,15 @@ RUN addgroup -S solo && adduser -S -G solo solo
 COPY --from=builder /app/server /usr/local/bin/server
 COPY --from=builder /app/daemon /usr/local/bin/daemon
 COPY --from=builder /app/solo /usr/local/bin/solo
+COPY --from=builder /app/migrate /usr/local/bin/migrate
+COPY --from=builder /app/migrations /app/migrations
 
-RUN chown solo:solo /usr/local/bin/server /usr/local/bin/daemon /usr/local/bin/solo
+RUN chown solo:solo /usr/local/bin/server /usr/local/bin/daemon /usr/local/bin/solo /usr/local/bin/migrate
 
 USER solo
+WORKDIR /app
 
 EXPOSE 8080 8081
 
 # Default to running the server. Use "daemon" as the command to run the daemon.
-ENTRYPOINT ["server"]
-CMD []
+CMD ["server"]

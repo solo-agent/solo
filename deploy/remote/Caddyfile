@@ -1,0 +1,8 @@
+{$SOLO_DOMAIN} {
+	encode zstd gzip
+
+	@server path /api/* /internal/* /healthz /readyz
+	reverse_proxy @server server:8080
+
+	reverse_proxy frontend:3000
+}

@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/solo-ai/solo/internal/realtime"
@@ -34,7 +32,6 @@ type AgentHandler struct {
 	pool          *pgxpool.Pool
 	workspaceRoot string          // base path for agent workspaces, defaults to ~/.solo/agents
 	proxy         workspace.Proxy // optional proxy for workspace requests (nil = local FS only)
-	httpClient    *http.Client    // for daemon cleanup callbacks
 	hub           realtime.Broadcaster
 	agentSvc      *service.AgentService
 	dm            *service.DaemonManager
@@ -57,7 +54,6 @@ func NewAgentHandler(pool *pgxpool.Pool, dm *service.DaemonManager, hub realtime
 		pool:          pool,
 		workspaceRoot: workspaceRoot,
 		proxy:         proxy,
-		httpClient:    &http.Client{Timeout: 10 * time.Second},
 		hub:           hub,
 		agentSvc:      agentSvc,
 		dm:            dm,
@@ -74,6 +70,7 @@ type CreateAgentRequest struct {
 	ModelName     string            `json:"model_name,omitempty"`
 	CustomEnv     map[string]string `json:"custom_env,omitempty"`
 	CustomArgs    []string          `json:"custom_args,omitempty"`
+	ComputerID    string            `json:"computer_id"`
 }
 
 type UpdateAgentRequest struct {
@@ -84,6 +81,7 @@ type UpdateAgentRequest struct {
 	ModelName     *string            `json:"model_name,omitempty"`
 	CustomEnv     *map[string]string `json:"custom_env,omitempty"`
 	CustomArgs    *[]string          `json:"custom_args,omitempty"`
+	ComputerID    *string            `json:"computer_id,omitempty"`
 }
 
 type AgentResponse struct {
@@ -100,6 +98,7 @@ type AgentResponse struct {
 	AvatarURL     string            `json:"avatar_url,omitempty"`
 	CustomEnv     map[string]string `json:"custom_env,omitempty"`
 	CustomArgs    []string          `json:"custom_args,omitempty"`
+	ComputerID    string            `json:"computer_id,omitempty"`
 	CreatedAt     string            `json:"created_at"`
 	UpdatedAt     string            `json:"updated_at"`
 }
@@ -196,23 +195,25 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auto-bind to the first online computer if available.
-	var computerID *string
-	var cid string
-	compErr := tx.QueryRow(r.Context(),
-		`SELECT c.id
-		   FROM computers c
-		  WHERE c.status = 'online'
-		    AND (c.owner_id = $1 OR EXISTS (
-		        SELECT 1 FROM computer_members cm
-		         WHERE cm.computer_id = c.id AND cm.user_id = $1
-		    ))
-		  ORDER BY c.created_at ASC
-		  LIMIT 1`,
-		userID,
-	).Scan(&cid)
-	if compErr == nil && cid != "" {
-		computerID = &cid
+	computerID := strings.TrimSpace(req.ComputerID)
+	if computerID == "" {
+		writeError(w, http.StatusBadRequest, "computer_id is required")
+		return
+	}
+	var canUseComputer bool
+	if err := tx.QueryRow(r.Context(), `
+		SELECT EXISTS (
+		  SELECT 1 FROM computers c
+		   LEFT JOIN computer_members cm ON cm.computer_id = c.id AND cm.user_id = $2
+		  WHERE c.id = $1
+		    AND (c.owner_id = $2 OR cm.user_id IS NOT NULL)
+		    AND (
+		      (c.credential_hash IS NOT NULL AND c.credential_revoked_at IS NULL)
+		      OR (c.daemon_id IS NOT NULL AND c.status = 'online')
+		    )
+		)`, computerID, userID).Scan(&canUseComputer); err != nil || !canUseComputer {
+		writeError(w, http.StatusBadRequest, "computer is unavailable")
+		return
 	}
 
 	agentID := uuid.NewString()
@@ -268,6 +269,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Kind:          "agent",
 		ModelProvider: modelProvider,
 		ModelName:     modelName,
+		ComputerID:    computerID,
 		SystemPrompt:  systemPrompt,
 		IsActive:      true,
 		AvatarURL:     avatarURL,
@@ -295,7 +297,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		`SELECT a.id, a.name, COALESCE(a.description, ''), a.owner_id,
 		        a.home_channel_id, a.kind, a.model_provider, a.model_name,
 		        system_prompt, is_active, COALESCE(avatar_url, ''),
-		        custom_env, custom_args,
+		        custom_env, custom_args, COALESCE(a.runtime_id, ''),
 		        a.created_at, a.updated_at
 		 FROM agents a
 		 JOIN channel_members ucm
@@ -324,7 +326,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			&a.HomeChannelID, &a.Kind,
 			&a.ModelProvider, &a.ModelName, &a.SystemPrompt,
 			&a.IsActive, &a.AvatarURL,
-			&customEnvBytes, &customArgsBytes,
+			&customEnvBytes, &customArgsBytes, &a.ComputerID,
 			&createdAt, &updatedAt)
 		if err != nil {
 			slog.Error("failed to scan agent row", "error", err)
@@ -361,7 +363,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, name, COALESCE(description, ''), owner_id,
 		        home_channel_id, kind, model_provider, model_name,
 		        system_prompt, is_active, COALESCE(avatar_url, ''),
-		        custom_env, custom_args,
+		        custom_env, custom_args, COALESCE(runtime_id, ''),
 		        created_at, updated_at
 		 FROM agents
 		 WHERE id = $1 AND owner_id = $2 AND is_active = true`,
@@ -370,7 +372,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&a.HomeChannelID, &a.Kind,
 		&a.ModelProvider, &a.ModelName, &a.SystemPrompt,
 		&a.IsActive, &a.AvatarURL,
-		&customEnvBytes, &customArgsBytes,
+		&customEnvBytes, &customArgsBytes, &a.ComputerID,
 		&createdAt, &updatedAt)
 	if err != nil {
 		if isNotFound(err) {
@@ -431,6 +433,54 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		req.ModelName = &modelName
 	}
 
+	var oldComputerID string
+	var computerID any
+	if req.ComputerID != nil {
+		newComputerID := strings.TrimSpace(*req.ComputerID)
+		if newComputerID == "" {
+			writeError(w, http.StatusBadRequest, "computer_id cannot be empty")
+			return
+		}
+		if err := h.pool.QueryRow(r.Context(), `
+			SELECT COALESCE(runtime_id, '') FROM agents
+			 WHERE id = $1 AND owner_id = $2 AND is_active = true
+		`, agentID, userID).Scan(&oldComputerID); err != nil {
+			if isNotFound(err) {
+				writeError(w, http.StatusNotFound, "agent not found")
+			} else {
+				writeError(w, http.StatusInternalServerError, "failed to load agent")
+			}
+			return
+		}
+		if newComputerID != oldComputerID {
+			var usable bool
+			if err := h.pool.QueryRow(r.Context(), `
+				SELECT EXISTS (
+				  SELECT 1 FROM computers c
+				   LEFT JOIN computer_members cm ON cm.computer_id = c.id AND cm.user_id = $2
+				  WHERE c.id = $1
+				    AND (c.owner_id = $2 OR cm.user_id IS NOT NULL)
+				    AND ((c.credential_hash IS NOT NULL AND c.credential_revoked_at IS NULL)
+				      OR (c.daemon_id IS NOT NULL AND c.status = 'online'))
+				)`, newComputerID, userID).Scan(&usable); err != nil || !usable {
+				writeError(w, http.StatusBadRequest, "computer is unavailable")
+				return
+			}
+			var busy bool
+			if err := h.pool.QueryRow(r.Context(), `
+				SELECT EXISTS (SELECT 1 FROM agent_runs WHERE agent_id = $1 AND finished_at IS NULL)
+			`, agentID).Scan(&busy); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to verify agent state")
+				return
+			}
+			if busy {
+				writeError(w, http.StatusConflict, "agent cannot move while a Run is active")
+				return
+			}
+			computerID = newComputerID
+		}
+	}
+
 	// Marshal custom_env if provided; nil bytes means "don't update".
 	var customEnvBytes []byte
 	if req.CustomEnv != nil {
@@ -465,25 +515,37 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 			model_name = COALESCE($5, model_name),
 			custom_env = COALESCE($6, custom_env),
 			custom_args = COALESCE($7, custom_args),
+			runtime_id = COALESCE($8, runtime_id),
 			updated_at = now()
-		 WHERE id = $8 AND owner_id = $9 AND is_active = true
+		 WHERE id = $9 AND owner_id = $10 AND is_active = true
+		   AND ($8::text IS NULL OR NOT EXISTS (
+		       SELECT 1 FROM agent_runs WHERE agent_id = agents.id AND finished_at IS NULL
+		   ))
 		 RETURNING id, name, COALESCE(description, ''), owner_id,
 		           home_channel_id, kind, model_provider, model_name,
 		           system_prompt, is_active, COALESCE(avatar_url, ''),
-		           custom_env, custom_args,
+		           custom_env, custom_args, COALESCE(runtime_id, ''),
 		           created_at, updated_at`,
 		req.Name, req.Description, req.SystemPrompt,
 		req.ModelProvider, req.ModelName,
 		customEnvBytes, customArgsBytes,
-		agentID, userID,
+		computerID, agentID, userID,
 	).Scan(&a.ID, &a.Name, &a.Description, &a.OwnerID,
 		&a.HomeChannelID, &a.Kind,
 		&a.ModelProvider, &a.ModelName, &a.SystemPrompt,
 		&a.IsActive, &a.AvatarURL,
-		&retCustomEnvBytes, &retCustomArgsBytes,
+		&retCustomEnvBytes, &retCustomArgsBytes, &a.ComputerID,
 		&createdAt, &updatedAt)
 	if err != nil {
 		if isNotFound(err) {
+			if computerID != nil {
+				var exists bool
+				_ = h.pool.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM agents WHERE id = $1 AND owner_id = $2 AND is_active = true)`, agentID, userID).Scan(&exists)
+				if exists {
+					writeError(w, http.StatusConflict, "agent cannot move while a Run is active")
+					return
+				}
+			}
 			writeError(w, http.StatusNotFound, "agent not found")
 			return
 		}
@@ -496,6 +558,16 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	a.CustomArgs = unmarshalStringSlice(retCustomArgsBytes)
 	a.CreatedAt = createdAt.Format(time.RFC3339)
 	a.UpdatedAt = updatedAt.Format(time.RFC3339)
+
+	if computerID != nil && oldComputerID != "" && h.dm != nil {
+		go func(oldID, migratedAgentID string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := h.dm.CallControlRPC(ctx, oldID, "agent.cleanup", map[string]string{"agent_id": migratedAgentID}); err != nil {
+				slog.Warn("agent migration: old Computer cleanup failed", "agent_id", migratedAgentID, "computer_id", oldID, "error", err)
+			}
+		}(oldComputerID, agentID)
+	}
 
 	writeJSON(w, http.StatusOK, a)
 }
@@ -595,21 +667,6 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Capture the bound daemon before disconnecting the Agent.
-	var daemonURL string
-	err = tx.QueryRow(r.Context(),
-		`SELECT COALESCE(c.daemon_url, '')
-		   FROM agents a
-		   LEFT JOIN computers c ON c.id::text = a.runtime_id
-		  WHERE a.id = $1`,
-		agentID,
-	).Scan(&daemonURL)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		slog.Error("failed to look up daemon for agent", "agent_id", agentID, "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to delete agent")
-		return
-	}
-
 	_, err = tx.Exec(r.Context(),
 		`UPDATE computers SET agent_ids = array_remove(agent_ids, $1::uuid), updated_at = now()
 		 WHERE $1::uuid = ANY(agent_ids)`,
@@ -637,41 +694,17 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	// Async daemon cleanup (best-effort, daemon may be offline).
 	// Use a detached context so the request returning doesn't cancel it.
-	go h.notifyDaemonCleanup(agentID, daemonURL)
+	if h.dm != nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := h.dm.CleanupAgents(ctx, []string{agentID}); err != nil {
+				slog.Warn("cleanup: daemon call failed", "agent_id", agentID, "error", err)
+			}
+		}()
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "agent deleted"})
-}
-
-// notifyDaemonCleanup asks the given daemon to drop the agent's session,
-// workspace, and memory. daemonURL is captured inside the Delete transaction.
-//
-// Best-effort: errors are logged, never surfaced to the user — the soft-delete
-// already succeeded.
-func (h *AgentHandler) notifyDaemonCleanup(agentID, daemonURL string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if daemonURL == "" {
-		return
-	}
-
-	url := strings.TrimRight(daemonURL, "/") + "/internal/daemon/agents/" + agentID + "/cleanup"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
-	if err != nil {
-		slog.Warn("cleanup: build request failed", "url", url, "error", err)
-		return
-	}
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		slog.Warn("cleanup: daemon call failed", "url", url, "error", err)
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		slog.Warn("cleanup: daemon returned non-2xx", "url", url, "status", resp.StatusCode)
-		return
-	}
-	slog.Info("cleanup: daemon notified", "agent_id", agentID, "url", url)
 }
 
 // AgentSkills handles GET /api/v1/agents/{agentID}/skills — proxies to daemon.
@@ -722,6 +755,10 @@ func (h *AgentHandler) AgentSkills(w http.ResponseWriter, r *http.Request) {
 	data, err := h.proxy.ProxySkillList(r.Context(), d, agentID)
 	if err != nil {
 		slog.Warn("agent skills: daemon proxy failed", "agent_id", agentID, "error", err)
+		if d.ComputerID != "" {
+			writeError(w, http.StatusServiceUnavailable, "computer is offline")
+			return
+		}
 		writeJSON(w, http.StatusOK, empty)
 		return
 	}
@@ -745,7 +782,28 @@ func (h *AgentHandler) AgentBackendsDetect(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusServiceUnavailable, "no runtime daemon available")
 		return
 	}
-	results, err := h.dm.ProxyBackendDetect(r.Context())
+	computerID := strings.TrimSpace(r.URL.Query().Get("computer_id"))
+	var results []byte
+	var err error
+	if computerID != "" {
+		userID, ok := requireUserID(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "not authenticated")
+			return
+		}
+		var allowed bool
+		if queryErr := h.pool.QueryRow(r.Context(), `
+			SELECT EXISTS (
+			 SELECT 1 FROM computers c LEFT JOIN computer_members cm ON cm.computer_id = c.id AND cm.user_id = $2
+			 WHERE c.id = $1 AND (c.owner_id = $2 OR cm.user_id IS NOT NULL)
+			)`, computerID, userID).Scan(&allowed); queryErr != nil || !allowed {
+			writeError(w, http.StatusNotFound, "computer not found")
+			return
+		}
+		results, err = h.dm.ProxyBackendDetectForComputer(r.Context(), computerID)
+	} else {
+		results, err = h.dm.ProxyBackendDetect(r.Context())
+	}
 	if err != nil {
 		slog.Warn("agent backends: daemon detection failed", "error", err)
 		writeError(w, http.StatusServiceUnavailable, "runtime detection unavailable")
@@ -864,12 +922,20 @@ func (h *AgentHandler) Workspace(w http.ResponseWriter, r *http.Request) {
 					w.Write(data)
 					return
 				}
+				if d.ComputerID != "" {
+					writeError(w, http.StatusServiceUnavailable, "computer is offline")
+					return
+				}
 				slog.Warn("workspace: daemon proxy read failed, falling back to local filesystem", "error", err)
 			} else {
 				data, err := h.proxy.ProxyWorkspaceList(r.Context(), d, agentID, relPath)
 				if err == nil {
 					w.Header().Set("Content-Type", "application/json")
 					w.Write(data)
+					return
+				}
+				if d.ComputerID != "" {
+					writeError(w, http.StatusServiceUnavailable, "computer is offline")
 					return
 				}
 				slog.Warn("workspace: daemon proxy list failed, falling back to local filesystem", "error", err)

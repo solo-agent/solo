@@ -86,12 +86,13 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	memberHandler := handler.NewMemberHandler(pool, agentSvc, dm)
 	messageHandler := handler.NewMessageHandler(pool, hub, agentSvc, taskSvc, sendDedupe)
 	agentHandler := handler.NewAgentHandler(pool, dm, hub, agentSvc)
-	agentRunHandler := handler.NewAgentRunHandler(pool)
+	agentRunHandler := handler.NewAgentRunHandler(pool, dm)
 	dashboardHandler := handler.NewDashboardHandler(pool)
 	threadHandler := handler.NewThreadHandler(pool, hub, agentSvc, sendDedupe)
 	thinkingHandler := handler.NewThinkingHandler(pool, hub, agentSvc)
 	dmHandler := handler.NewDMHandler(pool, hub, agentSvc, taskSvc, sendDedupe)
 	daemonHandler := handler.NewDaemonHandler(dm, agentSvc, computerSvc)
+	daemonControlHandler := handler.NewDaemonControlHandler(computerSvc, dm)
 	mentionSvc := service.NewMentionService(pool)
 	taskHandler := handler.NewTaskHandler(pool, hub, agentSvc, taskSvc, mentionSvc)
 	relationshipHandler := handler.NewAgentRelationshipHandler(relationshipSvc)
@@ -115,22 +116,35 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	}
 	attachmentHandler := handler.NewAttachmentHandler(pool, uploadDir)
 
-	// ---- Internal daemon routes (no JWT auth, no rate limit) ----
-	r.Route("/internal/daemon", func(r chi.Router) {
-		r.Use(middleware.InternalAuth())
-
-		r.Post("/register", daemonHandler.Register)
-		r.Post("/heartbeat", daemonHandler.Heartbeat)
-		r.Post("/unregister", daemonHandler.Unregister)
-
-		// Task callbacks from daemon
-		r.Route("/tasks/{taskID}", func(r chi.Router) {
-			r.Post("/complete", daemonHandler.TaskComplete)
-			r.Post("/error", daemonHandler.TaskError)
-		})
+	// Remote Daemon enrollment is intentionally outside user JWT auth. The
+	// one-time token is the credential and this endpoint has its own strict rate limit.
+	r.With(middleware.RateLimiter(5.0/60.0, 5), chimw.AllowContentType("application/json")).
+		Post("/internal/v1/daemon/enroll", daemonControlHandler.Enroll)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.ComputerAuth(computerSvc))
+		r.Get("/internal/v1/daemon/connect", daemonControlHandler.Connect)
+		r.Get("/internal/v1/daemon/runs/pending", daemonControlHandler.PendingRuns)
+		r.Post("/internal/v1/daemon/runs/{runID}/accept", daemonControlHandler.AcceptRun)
+		r.Post("/internal/v1/daemon/runs/{runID}/events", daemonControlHandler.AppendRunEvent)
 	})
 
-	// Public attachment serving (no auth needed for inline images)
+	// Local compatibility transport is never exposed by a production Server.
+	if os.Getenv("APP_ENV") != "production" {
+		r.Route("/internal/daemon", func(r chi.Router) {
+			r.Use(middleware.InternalAuth())
+
+			r.Post("/register", daemonHandler.Register)
+			r.Post("/heartbeat", daemonHandler.Heartbeat)
+			r.Post("/unregister", daemonHandler.Unregister)
+
+			r.Route("/tasks/{taskID}", func(r chi.Router) {
+				r.Post("/complete", daemonHandler.TaskComplete)
+				r.Post("/error", daemonHandler.TaskError)
+			})
+		})
+	}
+
+	// Attachment bodies enforce owner/channel authorization in the handler.
 	r.Get("/api/v1/attachments/{attachmentID}", attachmentHandler.Serve)
 	r.Get("/api/v1/attachments/{attachmentID}/thumbnail", attachmentHandler.ServeThumbnail)
 
@@ -138,14 +152,18 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	r.Route("/api/v1/auth", func(r chi.Router) {
 		r.Use(middleware.RateLimiter(10.0/60.0, 10))
 
+		r.Get("/config", authHandler.PublicConfig)
 		r.Post("/register", authHandler.Register)
+		r.Post("/register/verify", authHandler.VerifyRegistration)
+		r.Post("/password/forgot", authHandler.ForgotPassword)
+		r.Post("/password/reset", authHandler.ResetPassword)
 		r.Post("/login", authHandler.Login)
 		r.Post("/refresh", authHandler.Refresh)
 	})
 
 	// ---- Protected routes (rate-limited: 100 req/s) ----
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth())
+		r.Use(middleware.Auth(pool))
 		r.Use(middleware.RateLimiter(100, 100))
 
 		// Auth logout requires authentication
@@ -361,6 +379,8 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 				r.Patch("/", computerHandler.Update)
 				r.Delete("/", computerHandler.Delete)
 				r.Post("/claim", computerHandler.Claim)
+				r.Post("/enrollment", computerHandler.CreateEnrollment)
+				r.Post("/credential/revoke", computerHandler.RevokeCredential)
 
 				// Computer agents (v1.5)
 				r.Get("/agents", computerHandler.ListAgents)

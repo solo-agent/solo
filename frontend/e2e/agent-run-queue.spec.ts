@@ -1,5 +1,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { acquireLocalComputer, type LocalComputerLease } from './support/local-computer';
+import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
 const credentials = { email: 'agent-run-queue-e2e@solo.local', password: 'SoloE2E-2026!' };
@@ -43,7 +45,7 @@ function databaseJSON<T>(query: string): T {
 async function authenticate(request: APIRequestContext): Promise<AuthResponse> {
   const login = await request.post(`${apiBase}/api/v1/auth/login`, { data: credentials });
   if (login.ok()) return login.json();
-  const register = await request.post(`${apiBase}/api/v1/auth/register`, {
+  const register = await registerVerified(request, apiBase, {
     data: { ...credentials, display_name: 'Agent Run Queue E2E' },
   });
   if (!register.ok()) throw new Error(`E2E authentication failed: ${register.status()} ${await register.text()}`);
@@ -109,15 +111,18 @@ test('three real task triggers show one executing run and two queued runs', asyn
   const taskTitles = [1, 2, 3].map((index) => `Queue lifecycle ${suffix}-${index}`);
   let channel: Entity | null = null;
   let agent: Entity | null = null;
+  let localComputer: LocalComputerLease | null = null;
   const tasks: TaskEntity[] = [];
 
   try {
+    localComputer = await acquireLocalComputer(request, apiBase, auth.access_token);
     channel = await api<Entity>(request, auth.access_token, 'post', '/api/v1/channels', {
       name: `queue-e2e-${suffix}`,
       description: 'Real queued Agent Run lifecycle E2E',
     });
     agent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
       name: agentName,
+      computer_id: localComputer.id,
       model_provider: 'claude',
       model_name: 'sonnet',
       system_prompt: 'If asked to introduce yourself, do it immediately. For a message containing Queue lifecycle, first use Bash to run sleep 20. After it finishes, answer with exactly QUEUE_E2E_DONE and nothing else.',
@@ -174,5 +179,6 @@ test('three real task triggers show one executing run and two queued runs', asyn
   } finally {
     if (channel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
     if (agent) await api(request, auth.access_token, 'delete', `/api/v1/agents/${agent.id}`).catch(() => undefined);
+    await localComputer?.release(request);
   }
 });

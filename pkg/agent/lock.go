@@ -55,8 +55,11 @@ func AcquireLock(lockDir string, serverURL string) (*MachineLock, error) {
 		lockDir = defaultLockDir()
 	}
 
-	if err := os.MkdirAll(lockDir, 0o755); err != nil {
+	if err := os.MkdirAll(lockDir, 0o700); err != nil {
 		return nil, fmt.Errorf("lock: create lock directory %s: %w", lockDir, err)
+	}
+	if err := os.Chmod(lockDir, 0o700); err != nil {
+		return nil, fmt.Errorf("lock: secure lock directory %s: %w", lockDir, err)
 	}
 
 	lockPath := filepath.Join(lockDir, "lock.json")
@@ -148,7 +151,7 @@ func writeLockFile(path string, l *MachineLock) error {
 	dir := filepath.Dir(path)
 	tmpPath := filepath.Join(dir, ".lock.json.tmp")
 
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
 		return fmt.Errorf("write temp lock: %w", err)
 	}
 

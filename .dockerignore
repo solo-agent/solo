@@ -1,0 +1,15 @@
+.git
+.worktrees
+.pids
+.DS_Store
+**/.DS_Store
+**/._*
+*.log
+tmp
+graphify-out
+node_modules
+frontend/node_modules
+frontend/.next
+test-results
+*.png
+videos

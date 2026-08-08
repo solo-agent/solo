@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   PIXEL_ART_AVATAR_PREFIX,
   pixelAvatarSource,
 } from '@/components/ui/pixel-avatar';
-import { resolveAttachmentUrl } from '@/lib/attachment-url';
+import { useAuthenticatedAttachmentUrl } from '@/lib/attachment-url';
 import { cn } from '@/lib/utils';
 
 export const USER_AVATAR_PRESET_COUNT = 12;
@@ -57,12 +57,10 @@ export function UserAvatar({
 }: UserAvatarProps) {
   const [imageFailed, setImageFailed] = useState(false);
   const preset = avatarUrl?.startsWith(USER_AVATAR_PRESET_PREFIX) || !avatarUrl;
-  const src = useMemo(
-    () => preset
-      ? userAvatarPresetSource(userAvatarPresetIndex(userId, avatarUrl))
-      : resolveAttachmentUrl(avatarUrl || ''),
-    [avatarUrl, preset, userId],
-  );
+  const uploadedSrc = useAuthenticatedAttachmentUrl(preset ? '' : avatarUrl || '');
+  const src = preset
+    ? userAvatarPresetSource(userAvatarPresetIndex(userId, avatarUrl))
+    : uploadedSrc;
 
   useEffect(() => setImageFailed(false), [src]);
 

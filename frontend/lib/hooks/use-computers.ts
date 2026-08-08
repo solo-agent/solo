@@ -24,6 +24,13 @@ interface ComputerResponse {
   agent_names?: string[];
   created_at: string;
   updated_at: string;
+  pairing_status: Computer['pairing_status'];
+  enrollment_token?: string;
+  enrollment_expires_at?: string;
+  protocol_version?: number;
+  daemon_version?: string;
+  runtime_inventory?: Computer['runtime_inventory'];
+  last_connected_at?: string;
 }
 
 // ---- Mapping helpers ----
@@ -43,6 +50,13 @@ function mapComputer(resp: ComputerResponse): Computer {
     os: (resp as unknown as Record<string, unknown>).os as string | undefined,
     hostname: (resp as unknown as Record<string, unknown>).hostname as string | undefined,
     ip: (resp as unknown as Record<string, unknown>).ip as string | undefined,
+    pairing_status: resp.pairing_status,
+    enrollment_token: resp.enrollment_token,
+    enrollment_expires_at: resp.enrollment_expires_at,
+    protocol_version: resp.protocol_version,
+    daemon_version: resp.daemon_version,
+    runtime_inventory: resp.runtime_inventory,
+    last_connected_at: resp.last_connected_at,
     created_at: resp.created_at,
     updated_at: resp.updated_at,
   };
@@ -56,9 +70,9 @@ export function useComputers() {
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
-  const loadComputers = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+  const loadComputers = useCallback(async (silent = false) => {
+    if (!silent) setIsLoading(true);
+    if (!silent) setError(null);
     try {
       const res = await apiClient.get<ComputerResponse[]>('/api/v1/computers');
       if (mountedRef.current) {
@@ -68,15 +82,17 @@ export function useComputers() {
       const message = err instanceof ApiError ? err.message : `${t('computerListLoadError')}`;
       if (mountedRef.current) setError(message);
     } finally {
-      if (mountedRef.current) setIsLoading(false);
+      if (mountedRef.current && !silent) setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
     mountedRef.current = true;
-    loadComputers();
+    void loadComputers();
+    const poll = window.setInterval(() => void loadComputers(true), 5000);
 
     return () => {
+      window.clearInterval(poll);
       mountedRef.current = false;
     };
   }, [loadComputers]);
@@ -107,6 +123,18 @@ export function useComputers() {
     return claimed;
   }, [loadComputers]);
 
+  const createEnrollment = useCallback(async (id: string): Promise<Computer> => {
+    const res = await apiClient.post<ComputerResponse>(`/api/v1/computers/${id}/enrollment`);
+    const updated = mapComputer(res);
+    setComputers((prev) => prev.map((computer) => computer.id === id ? updated : computer));
+    return updated;
+  }, []);
+
+  const revokeCredential = useCallback(async (id: string) => {
+    await apiClient.post(`/api/v1/computers/${id}/credential/revoke`);
+    await loadComputers();
+  }, [loadComputers]);
+
   return {
     computers,
     isLoading,
@@ -115,6 +143,8 @@ export function useComputers() {
     updateComputer,
     deleteComputer,
     claimComputer,
-    refetch: loadComputers,
+    createEnrollment,
+    revokeCredential,
+    refetch: () => loadComputers(),
   } as const;
 }

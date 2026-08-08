@@ -29,6 +29,7 @@ bin/
 /solo
 /server
 /daemon
+/dist/
 
 # IDE
 .idea/
@@ -67,15 +68,23 @@ docs/*
 !docs/releases/
 docs/releases/*
 !docs/releases/agent-channel-scope.md
+!docs/remote-server.md
+!docs/design/
+docs/design/*
+!docs/design/remote-runtime-architecture.md
+!docs/design/public-remote-product-architecture.md
 *.bak
 *.bak2
 .playwright-cli/
 .superpowers/
 
 # Working artifacts (untracked intentionally)
+/tmp/
 openspec/
 e2e/
 frontend/e2e/
 !frontend/e2e/
 !frontend/e2e/*.spec.ts
+!frontend/e2e/support/
+!frontend/e2e/support/*.ts
 videos/

@@ -27,6 +27,7 @@ interface AgentResponse {
   custom_args: string[] | null;
   created_at: string;
   updated_at: string;
+  computer_id?: string;
 }
 
 // ---- Mapping helpers ----
@@ -48,6 +49,7 @@ function mapAgent(resp: AgentResponse): Agent {
     custom_args: resp.custom_args ?? [],
     created_at: resp.created_at,
     updated_at: resp.updated_at,
+    computer_id: resp.computer_id,
   };
 }
 
@@ -101,6 +103,7 @@ export function useAgents(channelId?: string | null) {
       system_prompt: input.system_prompt || '',
       custom_env: input.custom_env || {},
       custom_args: input.custom_args || [],
+      computer_id: input.computer_id,
     });
     const agent = mapAgent(res);
     setAgents((prev) => [...prev, agent]);
@@ -116,6 +119,7 @@ export function useAgents(channelId?: string | null) {
       system_prompt: input.system_prompt,
       custom_env: input.custom_env,
       custom_args: input.custom_args,
+      computer_id: input.computer_id,
     });
     const updated = mapAgent(res);
     setAgents((prev) => prev.map((a) => (a.id === id ? updated : a)));

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,39 @@ import (
 	"github.com/solo-ai/solo/pkg/agent"
 	"github.com/solo-ai/solo/pkg/llm"
 )
+
+func TestControlRPCReadsTranscriptFromLocalRuntime(t *testing.T) {
+	codexHome := filepath.Join(t.TempDir(), ".codex")
+	sessionID := "remote-transcript-session"
+	path := filepath.Join(codexHome, "sessions", "2026", "08", "07", "rollout-"+sessionID+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"timestamp":"2026-08-07T00:00:00Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"remote transcript works"}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", codexHome)
+	h := newDaemonHandler(newTaskManager(), nil, "", "")
+	h.workspaceManager = agent.NewWorkspaceManager(t.TempDir())
+	payload, _ := json.Marshal(map[string]any{
+		"agent_id": "agent-1", "provider": "codex", "external_session_id": sessionID, "limit": 10,
+	})
+	result, err := h.handleControlRPC(context.Background(), "transcript.read", payload)
+	if err != nil {
+		t.Fatalf("transcript.read: %v", err)
+	}
+	var entries []struct {
+		Text string          `json:"text"`
+		Raw  json.RawMessage `json:"raw"`
+	}
+	if err := json.Unmarshal(result, &entries); err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Text != "remote transcript works" || len(entries[0].Raw) != 0 {
+		t.Fatalf("entries = %#v", entries)
+	}
+}
 
 func TestBackendFinalStatusMapping(t *testing.T) {
 	tests := []struct {
@@ -48,7 +82,7 @@ func TestFinishCancelledTaskDefersTerminalStateDuringShutdown(t *testing.T) {
 	taskID := "task-daemon-shutdown"
 	tm := newTaskManager()
 	tm.AddTask(taskID, &taskState{TaskID: taskID, Status: taskStatusRunning})
-	h := newDaemonHandler(nil, tm, nil, "", "")
+	h := newDaemonHandler(tm, nil, "", "")
 	h.shuttingDown.Store(true)
 
 	h.finishCancelledTask(runTaskRequest{TaskID: taskID})
@@ -74,7 +108,7 @@ func TestProcessTaskWithProviderFailsWhenStreamClosesWithoutDone(t *testing.T) {
 		ChannelID: "channel-1",
 		Status:    taskStatusRunning,
 	})
-	h := newDaemonHandler(nil, tm, fakeStreamProvider{
+	h := newDaemonHandler(tm, fakeStreamProvider{
 		chunks: []llm.StreamChunk{{Content: "partial output"}},
 	}, "", "")
 
@@ -150,8 +184,8 @@ func TestMaterializeMessageAttachmentsCopiesFilesIntoWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h := newDaemonHandler(nil, newTaskManager(), fakeStreamProvider{}, "http://127.0.0.1:8080", "")
-	messages := h.materializeMessageAttachments(context.Background(), []llmMessage{
+	h := newDaemonHandler(newTaskManager(), fakeStreamProvider{}, "http://127.0.0.1:8080", "")
+	messages := h.materializeMessageAttachments(context.Background(), "agent-1", []llmMessage{
 		{
 			Role:    "user",
 			Content: "please read it",
@@ -238,7 +272,7 @@ func TestCloneHTTPClientWithTimeoutPreservesTransport(t *testing.T) {
 }
 
 func TestCleanupThinkingSessionsValidatesNodeIDs(t *testing.T) {
-	h := newDaemonHandler(nil, newTaskManager(), fakeStreamProvider{}, "", "")
+	h := newDaemonHandler(newTaskManager(), fakeStreamProvider{}, "", "")
 
 	invalid := httptest.NewRequest(http.MethodPost, "/internal/daemon/thinking/cleanup", bytes.NewBufferString(`{"node_ids":["not-a-uuid"]}`))
 	invalidResponse := httptest.NewRecorder()

@@ -1,5 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { acquireLocalComputer, type LocalComputerLease } from './support/local-computer';
+import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
 const wsBase = apiBase.replace(/^http/, 'ws');
@@ -30,7 +32,7 @@ function databaseJSON<T>(query: string): T {
 async function authenticate(request: APIRequestContext): Promise<AuthResponse> {
   const login = await request.post(`${apiBase}/api/v1/auth/login`, { data: credentials });
   if (login.ok()) return login.json();
-  const register = await request.post(`${apiBase}/api/v1/auth/register`, {
+  const register = await registerVerified(request, apiBase, {
     data: { ...credentials, display_name: 'Message Reliability E2E' },
   });
   if (!register.ok()) throw new Error(`E2E authentication failed: ${register.status()} ${await register.text()}`);
@@ -141,7 +143,7 @@ test('client message ID deduplicates message, task, and first thread reply', asy
     `);
     expect(state).toEqual({ messages: 1, tasks: 1, replies: 1, reply_count: 1 });
 
-    const secondary = await request.post(`${apiBase}/api/v1/auth/register`, {
+    const secondary = await registerVerified(request, apiBase, {
       data: {
         email: `message-reliability-peer-${suffix}@solo.local`,
         password: credentials.password,
@@ -205,8 +207,10 @@ test('duplicate delivery triggers one real Agent run and one visible CLI reply',
   const suffix = Date.now().toString(36);
   let channelID = '';
   let agentID = '';
+  let localComputer: LocalComputerLease | null = null;
 
   try {
+    localComputer = await acquireLocalComputer(request, apiBase, auth.access_token);
     const channelResponse = await request.post(`${apiBase}/api/v1/channels`, {
       headers,
       data: { name: `reliability-agent-${suffix}`, description: 'Real Agent reliability E2E' },
@@ -217,6 +221,7 @@ test('duplicate delivery triggers one real Agent run and one visible CLI reply',
       headers,
       data: {
         name: `Reliability Agent ${suffix}`,
+        computer_id: localComputer.id,
         model_provider: 'claude',
         model_name: 'sonnet',
         system_prompt: `For every human message, use solo message send to reply with exactly ${acknowledgement}. Do not merely print the reply.`,
@@ -257,5 +262,6 @@ test('duplicate delivery triggers one real Agent run and one visible CLI reply',
   } finally {
     if (agentID) await request.delete(`${apiBase}/api/v1/agents/${agentID}`, { headers }).catch(() => undefined);
     if (channelID) await request.delete(`${apiBase}/api/v1/channels/${channelID}`, { headers }).catch(() => undefined);
+    await localComputer?.release(request);
   }
 });

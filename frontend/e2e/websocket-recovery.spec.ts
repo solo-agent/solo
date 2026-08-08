@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
 
@@ -21,7 +22,7 @@ interface MessageListResponse {
 
 async function register(request: APIRequestContext, label: string): Promise<AuthResponse> {
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const response = await request.post(`${apiBase}/api/v1/auth/register`, {
+  const response = await registerVerified(request, apiBase, {
     data: {
       email: `ws-recovery-${label}-${suffix}@solo.local`,
       password: 'SoloE2E-2026!',

@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	defaultJWTSecret       = "solo-dev-secret-change-in-production"
-	AccessTokenDuration       = 15 * time.Minute
-	AgentAccessTokenDuration  = 365 * 24 * time.Hour // effectively permanent: refreshed per session
-	RefreshTokenDuration      = 7 * 24 * time.Hour
+	defaultJWTSecret         = "solo-dev-secret-change-in-production"
+	AccessTokenDuration      = 15 * time.Minute
+	AgentAccessTokenDuration = 365 * 24 * time.Hour // effectively permanent: refreshed per session
+	AgentRunTokenDuration    = 24 * time.Hour
+	RefreshTokenDuration     = 7 * 24 * time.Hour
 )
 
 var (
@@ -39,13 +40,29 @@ func JWTSecret() []byte {
 // SoloClaims represents the JWT claims for Solo.
 type SoloClaims struct {
 	jwt.RegisteredClaims
-	Email string `json:"email"`
-	Name  string `json:"name"`
+	Email      string `json:"email"`
+	Name       string `json:"name"`
+	ActorType  string `json:"actor_type,omitempty"`
+	RunID      string `json:"run_id,omitempty"`
+	ComputerID string `json:"computer_id,omitempty"`
 }
 
 // GenerateAgentToken creates a long-lived JWT access token for agent sessions (24h).
 func GenerateAgentToken(agentID, displayName string) (string, error) {
 	return generateToken(agentID, agentID+"@solo.agent", displayName, AgentAccessTokenDuration)
+}
+
+func GenerateAgentRunToken(agentID, displayName, runID, computerID string) (string, error) {
+	now := time.Now()
+	claims := SoloClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject: agentID, IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(AgentRunTokenDuration)), Issuer: "solo",
+		},
+		Email: agentID + "@solo.agent", Name: displayName,
+		ActorType: "agent_run", RunID: runID, ComputerID: computerID,
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(JWTSecret())
 }
 
 // GenerateAccessToken creates a short-lived JWT access token (15 min).

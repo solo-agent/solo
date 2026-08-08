@@ -2,12 +2,103 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
 )
 
-func TestClaimComputerAllowsMultipleUsers(t *testing.T) {
+func TestComputerEnrollmentIsOneTimeAndRevocable(t *testing.T) {
+	pool := taskSubmitTestPool(t)
+	ctx := context.Background()
+	ownerID := taskSubmitUser(t, pool)
+	svc := NewComputerService(pool)
+
+	enrollment, err := svc.CreateComputerWithEnrollment(ctx, ownerID, "remote-mac")
+	if err != nil {
+		t.Fatalf("CreateComputerWithEnrollment: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM computers WHERE id = $1`, enrollment.Computer.ID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	credential, err := svc.ExchangeEnrollment(ctx, enrollment.Computer.ID, enrollment.Token)
+	if err != nil {
+		t.Fatalf("ExchangeEnrollment: %v", err)
+	}
+	if credential.Credential == "" {
+		t.Fatal("ExchangeEnrollment returned an empty credential")
+	}
+	if _, err := svc.ExchangeEnrollment(ctx, enrollment.Computer.ID, enrollment.Token); !errors.Is(err, ErrInvalidEnrollment) {
+		t.Fatalf("second ExchangeEnrollment error = %v, want ErrInvalidEnrollment", err)
+	}
+	if err := svc.AuthenticateCredential(ctx, enrollment.Computer.ID, credential.Credential); err != nil {
+		t.Fatalf("AuthenticateCredential: %v", err)
+	}
+	if err := svc.RevokeCredential(ctx, enrollment.Computer.ID, ownerID); err != nil {
+		t.Fatalf("RevokeCredential: %v", err)
+	}
+	if err := svc.AuthenticateCredential(ctx, enrollment.Computer.ID, credential.Credential); !errors.Is(err, ErrInvalidComputerCredential) {
+		t.Fatalf("AuthenticateCredential after revoke error = %v, want ErrInvalidComputerCredential", err)
+	}
+	renewed, err := svc.CreateEnrollment(ctx, enrollment.Computer.ID, ownerID)
+	if err != nil {
+		t.Fatalf("CreateEnrollment: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE computers SET enrollment_expires_at = now() - interval '1 second' WHERE id = $1`, enrollment.Computer.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ExchangeEnrollment(ctx, enrollment.Computer.ID, renewed.Token); !errors.Is(err, ErrInvalidEnrollment) {
+		t.Fatalf("expired ExchangeEnrollment error = %v, want ErrInvalidEnrollment", err)
+	}
+}
+
+func TestMarkConnectedSupersedesLegacyDaemonRegistration(t *testing.T) {
+	pool := taskSubmitTestPool(t)
+	ctx := context.Background()
+	ownerID := taskSubmitUser(t, pool)
+	svc := NewComputerService(pool)
+	target, err := svc.CreateComputerWithEnrollment(ctx, ownerID, "secure-mac")
+	if err != nil {
+		t.Fatalf("CreateComputerWithEnrollment: %v", err)
+	}
+	if _, err := svc.ExchangeEnrollment(ctx, target.Computer.ID, target.Token); err != nil {
+		t.Fatalf("ExchangeEnrollment: %v", err)
+	}
+	legacyID := uuid.NewString()
+	daemonID := "daemon-" + legacyID[:8]
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO computers (id, name, owner_id, daemon_id, status)
+		 VALUES ($1, 'legacy-mac', $2, $3, 'online')`,
+		legacyID, ownerID, daemonID,
+	); err != nil {
+		t.Fatalf("create legacy computer: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM computers WHERE id IN ($1, $2)`, target.Computer.ID, legacyID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	if err := svc.MarkConnected(ctx, target.Computer.ID, daemonID, "test", ComputerProtocolVersion, nil, ComputerSystemInfo{}, nil); err != nil {
+		t.Fatalf("MarkConnected: %v", err)
+	}
+	var targetDaemonID, legacyDaemonID *string
+	var legacyStatus string
+	if err := pool.QueryRow(ctx,
+		`SELECT current.daemon_id, legacy.daemon_id, legacy.status
+		   FROM computers current, computers legacy
+		  WHERE current.id = $1 AND legacy.id = $2`,
+		target.Computer.ID, legacyID,
+	).Scan(&targetDaemonID, &legacyDaemonID, &legacyStatus); err != nil {
+		t.Fatal(err)
+	}
+	if targetDaemonID == nil || *targetDaemonID != daemonID || legacyDaemonID != nil || legacyStatus != "offline" {
+		t.Fatalf("target daemon = %v, legacy daemon/status = %v/%s", targetDaemonID, legacyDaemonID, legacyStatus)
+	}
+}
+
+func TestClaimComputerRejectsNewMemberOnOwnedComputer(t *testing.T) {
 	pool := taskSubmitTestPool(t)
 	ctx := context.Background()
 
@@ -27,19 +118,46 @@ func TestClaimComputerAllowsMultipleUsers(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id IN ($1, $2)`, ownerID, memberID)
 	})
 
-	if _, err := NewComputerService(pool).ClaimComputer(ctx, computerID, memberID); err != nil {
-		t.Fatalf("ClaimComputer second user error = %v, want nil", err)
+	if _, err := NewComputerService(pool).ClaimComputer(ctx, computerID, memberID); !errors.Is(err, ErrComputerForbidden) {
+		t.Fatalf("ClaimComputer second user error = %v, want ErrComputerForbidden", err)
 	}
 
-	var role string
+	var count int
 	if err := pool.QueryRow(ctx,
-		`SELECT role FROM computer_members WHERE computer_id = $1 AND user_id = $2`,
+		`SELECT COUNT(*) FROM computer_members WHERE computer_id = $1 AND user_id = $2`,
 		computerID, memberID,
-	).Scan(&role); err != nil {
-		t.Fatalf("member row missing: %v", err)
+	).Scan(&count); err != nil {
+		t.Fatalf("count member rows: %v", err)
 	}
-	if role != "member" {
-		t.Fatalf("role = %q, want member", role)
+	if count != 0 {
+		t.Fatalf("member rows = %d, want 0", count)
+	}
+}
+
+func TestClaimComputerClaimsLegacyUnownedComputer(t *testing.T) {
+	pool := taskSubmitTestPool(t)
+	ctx := context.Background()
+	ownerID := taskSubmitUser(t, pool)
+	computerID := uuid.NewString()
+	_, err := pool.Exec(ctx,
+		`INSERT INTO computers (id, name, daemon_id, status)
+		 VALUES ($1, 'legacy-mac', $2, 'online')`,
+		computerID, "daemon-"+computerID[:8],
+	)
+	if err != nil {
+		t.Fatalf("create legacy computer: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM computers WHERE id = $1`, computerID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	computer, err := NewComputerService(pool).ClaimComputer(ctx, computerID, ownerID)
+	if err != nil {
+		t.Fatalf("ClaimComputer: %v", err)
+	}
+	if computer.OwnerID != ownerID || computer.MyRole == nil || *computer.MyRole != "owner" {
+		t.Fatalf("claimed computer = %#v, want owner %s", computer, ownerID)
 	}
 }
 

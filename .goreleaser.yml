@@ -1,0 +1,38 @@
+version: 2
+
+project_name: solo
+
+builds:
+  - id: solo
+    main: ./cmd/solo
+    binary: solo
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/solo-ai/solo/pkg/version.Version={{.Version}} -X github.com/solo-ai/solo/pkg/version.Commit={{.Commit}} -X github.com/solo-ai/solo/pkg/version.Date={{.Date}}
+  - id: solo-daemon
+    main: ./cmd/daemon
+    binary: solo-daemon
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/solo-ai/solo/pkg/version.Version={{.Version}} -X github.com/solo-ai/solo/pkg/version.Commit={{.Commit}} -X github.com/solo-ai/solo/pkg/version.Date={{.Date}}
+
+archives:
+  - ids: [solo, solo-daemon]
+    name_template: "solo_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'

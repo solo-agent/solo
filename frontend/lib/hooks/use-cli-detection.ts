@@ -32,7 +32,7 @@ interface DetectResponseItem {
   error?: string;
 }
 
-export function useCliDetection(): CliDetectionState {
+export function useCliDetection(computerId?: string, cached: DetectResponseItem[] = []): CliDetectionState {
   const [results, setResults] = useState<
     Record<string, AgentBackendDetectItem>
   >({});
@@ -40,13 +40,17 @@ export function useCliDetection(): CliDetectionState {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
+  const cachedKey = JSON.stringify(cached);
 
   useEffect(() => {
+    const cachedItems = JSON.parse(cachedKey) as DetectResponseItem[];
     mountedRef.current = true;
     setIsLoading(true);
+    setError(null);
+    setResults({});
 
     apiClient
-      .get<DetectResponseItem[]>('/api/v1/agent-backends/detect')
+      .get<DetectResponseItem[]>(`/api/v1/agent-backends/detect${computerId ? `?computer_id=${encodeURIComponent(computerId)}` : ''}`)
       .then((data) => {
         if (!mountedRef.current) return;
         const map: Record<string, AgentBackendDetectItem> = {};
@@ -66,6 +70,16 @@ export function useCliDetection(): CliDetectionState {
       })
       .catch((err) => {
         if (!mountedRef.current) return;
+        if (cachedItems.length > 0) {
+          const map: Record<string, AgentBackendDetectItem> = {};
+          for (const item of cachedItems) {
+            if (ALLOWED_RUNTIMES.has(item.type)) map[item.type] = item;
+          }
+          setResults(map);
+          setError(null);
+          setIsLoaded(true);
+          return;
+        }
         setError(
           err instanceof Error ? err.message : `${t('cliDetectionError')}`,
         );
@@ -78,7 +92,7 @@ export function useCliDetection(): CliDetectionState {
     return () => {
       mountedRef.current = false;
     };
-  }, []);
+  }, [computerId, cachedKey]);
 
   return { results, isLoaded, isLoading, error };
 }
