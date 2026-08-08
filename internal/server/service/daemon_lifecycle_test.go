@@ -60,6 +60,39 @@ func TestPendingTaskTimeoutsUseCurrentLifecyclePhase(t *testing.T) {
 	}
 }
 
+func TestHealthCheckDoesNotRepeatOfflineTransition(t *testing.T) {
+	dm := NewDaemonManager(nil, nil)
+	dm.Register(&DaemonInfo{ID: "daemon-a"})
+
+	dm.mu.Lock()
+	dm.daemons["daemon-a"].LastHeartbeat = time.Now().Add(-dm.heartbeatInterval - time.Second)
+	dm.daemons["daemon-a"].MissedHeartbeats = dm.maxMissedHB - 1
+	dm.mu.Unlock()
+
+	dm.checkHealth()
+	dm.checkHealth()
+
+	dm.mu.RLock()
+	info := *dm.daemons["daemon-a"]
+	dm.mu.RUnlock()
+	if info.Status != DaemonStatusOffline {
+		t.Fatalf("status = %q, want offline", info.Status)
+	}
+	if info.MissedHeartbeats != dm.maxMissedHB {
+		t.Fatalf("missed heartbeats = %d, want %d", info.MissedHeartbeats, dm.maxMissedHB)
+	}
+
+	if !dm.Heartbeat("daemon-a", 0) {
+		t.Fatal("heartbeat rejected after offline transition")
+	}
+	dm.mu.RLock()
+	info = *dm.daemons["daemon-a"]
+	dm.mu.RUnlock()
+	if info.Status != DaemonStatusOnline || info.MissedHeartbeats != 0 {
+		t.Fatalf("heartbeat recovery = status %q, missed %d", info.Status, info.MissedHeartbeats)
+	}
+}
+
 func TestResolveDaemonForAgentUsesComputerBinding(t *testing.T) {
 	pool := agentRunTestPool(t)
 	ctx := context.Background()

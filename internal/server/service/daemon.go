@@ -870,6 +870,9 @@ func (dm *DaemonManager) checkHealth() {
 	dm.mu.Lock()
 	now := time.Now()
 	for id, info := range dm.daemons {
+		if info.Status == DaemonStatusOffline {
+			continue
+		}
 		sinceHB := now.Sub(info.LastHeartbeat)
 		if sinceHB <= dm.heartbeatInterval {
 			continue
