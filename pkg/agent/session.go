@@ -249,6 +249,11 @@ func (m *AgentSessionManager) CloseSession(agentID string) error {
 	return m.closeScopedSession(AgentSessionKey(agentID), false)
 }
 
+// CloseScopedSession terminates one channel- or node-scoped provider session.
+func (m *AgentSessionManager) CloseScopedSession(sessionKey string) error {
+	return m.closeScopedSession(sessionKey, false)
+}
+
 // CloseThinkingSession terminates one node-scoped provider Session while
 // preserving its persisted provider ID for audit.
 func (m *AgentSessionManager) CloseThinkingSession(nodeID string) error {

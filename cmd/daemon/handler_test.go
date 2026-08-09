@@ -78,6 +78,24 @@ func TestBackendFinalStatusMapping(t *testing.T) {
 	}
 }
 
+func TestTaskFailureDetails(t *testing.T) {
+	tests := []struct {
+		message       string
+		wantCode      string
+		wantRetryable bool
+	}{
+		{"codex executable not found at /missing", "configuration", false},
+		{"API key is missing", "configuration", false},
+		{"provider temporarily unavailable", "provider_transient", true},
+	}
+	for _, tt := range tests {
+		got := taskFailureDetails(tt.message)
+		if got.Code != tt.wantCode || got.Retryable != tt.wantRetryable {
+			t.Fatalf("taskFailureDetails(%q) = %+v, want %s/%t", tt.message, got, tt.wantCode, tt.wantRetryable)
+		}
+	}
+}
+
 func TestFinishCancelledTaskDefersTerminalStateDuringShutdown(t *testing.T) {
 	taskID := "task-daemon-shutdown"
 	tm := newTaskManager()

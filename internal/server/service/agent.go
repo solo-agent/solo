@@ -60,6 +60,7 @@ const (
 	agentFailureDaemonLost            = "daemon_lost"
 	agentFailureTimeout               = "timeout"
 	agentFailureProviderTransient     = "provider_transient"
+	agentFailureConfiguration         = "configuration"
 	agentResultReminderPrompt         = "Your previous turn ended without a user-visible message. Re-check the original goal and the latest conversation state. If the goal already has a visible result, you may stop. Otherwise, send the result the user still needs with `solo message send` to the original target. Do not repeat unrelated content."
 )
 
@@ -649,7 +650,7 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 	}
 	newRun := existingRun == nil
 	run := existingRun
-	if newRun && taskReq.NodeID == "" && taskReq.ResumeSessionID == "" {
+	if newRun && taskReq.NodeID == "" && taskReq.ResumeSessionID == "" && !taskReq.ForceFreshSession {
 		err := s.pool.QueryRow(ctx, `
 			SELECT sess.external_session_id
 			  FROM agent_runs r
@@ -724,12 +725,16 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 				"thread_id":  taskReq.ThreadID,
 			})
 		}
-		s.appendAndBroadcastRunEvent(ctx, runSvc, run, ag.ID, agentName, AgentRunEventRunStarted, "创建 run", "", map[string]any{
+		runStartedPayload := map[string]any{
 			"trigger_type":       triggerType,
 			"trigger_message_id": taskReq.TriggerMessageID,
 			"task_id":            taskReq.OriginTaskID,
 			"result_contract":    resultContract,
-		})
+		}
+		if taskReq.Recovery != nil {
+			runStartedPayload["recovery"] = taskReq.Recovery
+		}
+		s.appendAndBroadcastRunEvent(ctx, runSvc, run, ag.ID, agentName, AgentRunEventRunStarted, "创建 run", "", runStartedPayload)
 	}
 
 	slog.Debug("dispatching agent streaming task",
@@ -1112,10 +1117,11 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 
 		case "error":
 			var data struct {
-				AgentID   string `json:"agent_id"`
-				Error     string `json:"error"`
-				Status    string `json:"status"`
-				Retryable bool   `json:"retryable"`
+				AgentID     string `json:"agent_id"`
+				Error       string `json:"error"`
+				Status      string `json:"status"`
+				Retryable   bool   `json:"retryable"`
+				FailureCode string `json:"failure_code"`
 			}
 			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
 				slog.Error("agent task stream error",
@@ -1126,7 +1132,9 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 				s.broadcastAgentError(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, data.Error)
 				finalState = finalStateFromErrorEventStatus(data.Status)
 				retryable = data.Retryable
-				if data.Retryable {
+				if data.FailureCode != "" {
+					failureCode = data.FailureCode
+				} else if data.Retryable {
 					if finalState == "timeout" {
 						failureCode = agentFailureTimeout
 					} else {
@@ -2209,6 +2217,10 @@ func (s *AgentService) TriggerAllAgentsForTask(ctx context.Context, channelID, t
 }
 
 func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskID, agentID string, taskNumber int, taskTitle, taskDescription string, agentChain, mentionedAgentIDs []string) bool {
+	return s.triggerAgentForTask(ctx, channelID, taskID, agentID, taskNumber, taskTitle, taskDescription, agentChain, mentionedAgentIDs, nil)
+}
+
+func (s *AgentService) triggerAgentForTask(ctx context.Context, channelID, taskID, agentID string, taskNumber int, taskTitle, taskDescription string, agentChain, mentionedAgentIDs []string, recovery *taskRunRecovery) bool {
 	// Get agent info
 	var ag agentChannelInfo
 	err := s.pool.QueryRow(ctx,
@@ -2388,6 +2400,11 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 		OriginTaskID:   taskID,
 		ResultContract: agentResultContractVisibleMessage,
 		ModelSeenSeq:   messageSeq,
+		Recovery:       recovery,
+	}
+	if recovery != nil {
+		taskReq.ResumeSessionID = recovery.ResumeSessionID
+		taskReq.ForceFreshSession = recovery.Mode == taskRecoveryModeFreshSession
 	}
 
 	slog.Info("triggering agent for task",
@@ -2750,6 +2767,7 @@ type daemonTaskRequest struct {
 	ThreadID              string            `json:"thread_id,omitempty"`
 	NodeID                string            `json:"thinking_node_id,omitempty"`
 	ResumeSessionID       string            `json:"resume_session_id,omitempty"`
+	ForceFreshSession     bool              `json:"force_fresh_session,omitempty"`
 	TriggerMessageID      string            `json:"trigger_message_id,omitempty"`
 	Messages              []agent.Message   `json:"messages"`
 	ColdStartMessages     []agent.Message   `json:"cold_start_messages,omitempty"`
@@ -2770,6 +2788,7 @@ type daemonTaskRequest struct {
 	CustomEnv             map[string]string `json:"custom_env,omitempty"`
 	CustomArgs            []string          `json:"custom_args,omitempty"`
 	AgentToken            string            `json:"agent_token,omitempty"`
+	Recovery              *taskRunRecovery  `json:"-"`
 }
 
 func highestMessageSeq(messages []agent.Message) int64 {

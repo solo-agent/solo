@@ -32,6 +32,7 @@ import {
 import { panelHeaderClass, panelTitleClass } from '@/components/ui/panel-header';
 import { TeamsAgentProfile } from '@/components/teams/teams-agent-profile';
 import { TeamsAgentWorkspace } from '@/components/teams/teams-agent-workspace';
+import { AgentObservabilityTab } from '@/components/agents/agent-observability-tab';
 import { useDM } from '@/lib/hooks/use-dm';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { t } from '@/lib/i18n';
@@ -86,7 +87,7 @@ export function RelationshipDetailPanel({
   const router = useRouter();
   const { createOrGetDM } = useDM();
   const [isEditing, setIsEditing] = useState(false);
-  const [agentTab, setAgentTab] = useState<'profile' | 'workspace'>('profile');
+  const [agentTab, setAgentTab] = useState<'profile' | 'runs' | 'workspace'>('profile');
   const [panelWidth, setPanelWidth] = useState(400);
   const [hasUserResizedPanel, setHasUserResizedPanel] = useState(false);
   const [editType, setEditType] = useState<RelationshipType>(
@@ -242,7 +243,7 @@ export function RelationshipDetailPanel({
           </Button>
         </div>
 
-        <div className="grid grid-cols-2 border-b-2 border-black" role="tablist">
+        <div className="grid grid-cols-3 border-b-2 border-black" role="tablist">
           <button
             type="button"
             onClick={() => setAgentTab('profile')}
@@ -254,6 +255,21 @@ export function RelationshipDetailPanel({
             aria-selected={agentTab === 'profile'}
           >
             {t('agentProfileTitle')}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAgentTab('runs');
+              if (!hasUserResizedPanel) setPanelWidth((width) => Math.max(width, 960));
+            }}
+            className={[
+              'tab-button border-r-2 border-black px-3 py-2 font-heading text-xs font-bold uppercase tracking-wider',
+              agentTab === 'runs' ? 'bg-brutal-primary text-black' : 'bg-white hover:bg-brutal-primary-light',
+            ].join(' ')}
+            role="tab"
+            aria-selected={agentTab === 'runs'}
+          >
+            {t('agentRunHistoryTab')}
           </button>
           <button
             type="button"
@@ -288,6 +304,10 @@ export function RelationshipDetailPanel({
                 onClose();
               }}
             />
+          ) : agentTab === 'runs' ? (
+            <div className="h-full overflow-auto bg-brutal-cream p-4">
+              <AgentObservabilityTab agentId={agent.id} />
+            </div>
           ) : (
             <TeamsAgentWorkspace agentId={agent.id} />
           )}

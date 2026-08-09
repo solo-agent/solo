@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { apiClient } from '@/lib/api-client';
-import { displayAgentActivity } from '@/lib/agent-activity';
+import { agentRunStatusText, displayAgentActivity } from '@/lib/agent-activity';
 import type { AgentRunStatus } from '@/lib/agent-run-types';
+import { getLocale, t } from '@/lib/i18n';
 import { useWebSocket } from '@/lib/ws-context';
 import { cn } from '@/lib/utils';
 import { detailSectionTitleClass } from '@/components/ui/detail-section';
@@ -221,7 +222,7 @@ export function AgentObservabilityTab({ agentId, initialRunId }: { agentId: stri
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <span className={detailSectionTitleClass()}>Observability</span>
+        <span className={detailSectionTitleClass()}>{t('observabilityAgentRunHistory')}</span>
         <div className="flex border-2 border-black font-heading text-xs font-bold">
           {(['sessions', 'tasks', 'runs'] as const).map((item) => (
             <button
@@ -230,13 +231,13 @@ export function AgentObservabilityTab({ agentId, initialRunId }: { agentId: stri
               onClick={() => setScope(item)}
               className={cn('border-r-2 border-black px-2 py-1 last:border-r-0', scope === item ? 'bg-brutal-primary' : 'bg-white')}
             >
-              {item}
+              {scopeLabel(item)}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-[280px_260px_1fr]">
+      <div className="grid gap-3 md:grid-cols-2">
         <ScopeList
           scope={scope}
           sessions={sessions}
@@ -258,7 +259,9 @@ export function AgentObservabilityTab({ agentId, initialRunId }: { agentId: stri
           onSelectRun={setSelectedRunId}
         />
         <RunList runs={visibleRuns} selectedRunId={selectedRunId} onSelectRun={setSelectedRunId} />
-        <TranscriptPanel entries={transcript} events={events} selectedRunId={selectedRunId} transcriptPath={selectedRun?.transcript_path} />
+        <div className="md:col-span-2">
+          <TranscriptPanel entries={transcript} events={events} selectedRunId={selectedRunId} transcriptPath={selectedRun?.transcript_path} />
+        </div>
       </div>
     </section>
   );
@@ -278,7 +281,7 @@ function ScopeList(props: {
 }) {
   if (props.scope === 'sessions') {
     return (
-      <Panel title="Sessions">
+      <Panel title={t('observabilitySessions')}>
         {props.sessions.map((session) => (
           <Row key={session.id} active={props.selectedSessionId === session.id} onClick={() => props.onSelectSession(session.id)}>
             <strong>{session.provider}</strong>
@@ -291,11 +294,11 @@ function ScopeList(props: {
   }
   if (props.scope === 'tasks') {
     return (
-      <Panel title="Tasks">
+      <Panel title={t('observabilityTasks')}>
         {props.tasks.map((task) => (
           <Row key={task.id} active={props.selectedTaskId === task.id} onClick={() => props.onSelectTask(task.id, task.last_run_id)}>
             <strong>#{task.task_number} {task.title}</strong>
-            <span>{task.status} · {task.linked_run_count} runs</span>
+            <span>{task.status} · {t('observabilityRuns', { n: task.linked_run_count })}</span>
             <small>{formatTime(task.last_run_at)}</small>
           </Row>
         ))}
@@ -303,10 +306,10 @@ function ScopeList(props: {
     );
   }
   return (
-    <Panel title="Runs">
+    <Panel title={t('observabilityRunCount')}>
       {props.runs.map((run) => (
         <Row key={run.id} active={props.selectedRunId === run.id} onClick={() => props.onSelectRun(run.id)}>
-          <strong>{run.status}</strong>
+          <strong>{agentRunStatusText(run.status)}</strong>
           <span>{displayAgentActivity(run.status, run.activity_text, run.tool_input_summary, run.id.slice(0, 8))}</span>
           <small>{formatTime(run.updated_at)}</small>
         </Row>
@@ -317,10 +320,10 @@ function ScopeList(props: {
 
 function RunList({ runs, selectedRunId, onSelectRun }: { runs: AgentRun[]; selectedRunId: string | null; onSelectRun: (id: string) => void }) {
   return (
-    <Panel title="Related Runs">
+    <Panel title={t('observabilityRelatedRuns')}>
       {runs.map((run) => (
         <Row key={run.id} active={selectedRunId === run.id} onClick={() => onSelectRun(run.id)}>
-          <strong>{run.status}</strong>
+          <strong>{agentRunStatusText(run.status)}</strong>
           <span>{displayAgentActivity(run.status, run.activity_text, run.tool_input_summary, run.id.slice(0, 8))}</span>
           <small>{formatTime(run.updated_at)}</small>
         </Row>
@@ -332,9 +335,10 @@ function RunList({ runs, selectedRunId, onSelectRun }: { runs: AgentRun[]; selec
 function TranscriptPanel({ entries, events, selectedRunId, transcriptPath }: { entries: AgentTranscriptEntry[]; events: AgentRunEvent[]; selectedRunId: string | null; transcriptPath?: string }) {
   const fallback = <EventsTimeline events={events} />;
   return (
-    <Panel title="JSONL Transcript">
+    <Panel title={t('observabilityRunTranscript')}>
+      <RecoverySummary events={events} />
       {!selectedRunId ? (
-        <div className="p-3 text-sm text-muted-foreground">选择一个 run</div>
+        <div className="p-3 text-sm text-muted-foreground">{t('observabilitySelectRun')}</div>
       ) : entries.length > 0 ? (
         <div className="space-y-2 p-2">
           {transcriptPath && (
@@ -361,12 +365,12 @@ function TranscriptPanel({ entries, events, selectedRunId, transcriptPath }: { e
         </div>
       ) : !transcriptPath ? (
         <>
-          <div className="border-b-2 border-black p-3 text-sm text-muted-foreground">当前 run 还没有关联外部 jsonl 路径，先展示轻量 events fallback。</div>
+          <div className="border-b-2 border-black p-3 text-sm text-muted-foreground">{t('observabilityNoTranscriptPath')}</div>
           {fallback}
         </>
       ) : (
         <>
-          <div className="border-b-2 border-black p-3 text-sm text-muted-foreground">已关联 jsonl，但暂无可解析内容：{transcriptPath}</div>
+          <div className="border-b-2 border-black p-3 text-sm text-muted-foreground">{t('observabilityUnreadableTranscriptPath', { path: transcriptPath })}</div>
           {fallback}
         </>
       )}
@@ -374,9 +378,91 @@ function TranscriptPanel({ entries, events, selectedRunId, transcriptPath }: { e
   );
 }
 
+function RecoverySummary({ events }: { events: AgentRunEvent[] }) {
+  const error = [...events].reverse().find((event) => event.type === 'error');
+  const started = events.find((event) => event.type === 'run_started');
+  const scheduled = events.find((event) => event.type === 'task_recovery_scheduled');
+  const blocked = events.find((event) => event.type === 'task_recovery_blocked');
+  const exhausted = events.find((event) => event.type === 'task_retry_exhausted');
+  const taskLinked = events.some((event) => event.type === 'task_linked');
+  const recovery = asRecord(started?.payload?.recovery) ?? scheduled?.payload ?? blocked?.payload ?? exhausted?.payload;
+  const failureCode = stringValue(recovery?.failure_code) || stringValue(error?.payload?.failure_code);
+  if (!taskLinked && !recovery && !blocked && !exhausted) return null;
+
+  const attempt = numberValue(recovery?.attempt) || numberValue(recovery?.attempts);
+  const maxAttempts = numberValue(recovery?.max_attempts);
+  const previousRunID = stringValue(recovery?.previous_run_id);
+  const mode = stringValue(recovery?.mode);
+  const workspaceReused = recovery?.workspace_reused === true;
+  const action = exhausted
+    ? t('observabilityRecoveryExhausted')
+    : blocked
+      ? t('observabilityRecoveryNeedsHuman')
+      : scheduled || recovery
+        ? t('observabilityRecoveryScheduled')
+        : t('observabilityRecoveryPending');
+
+  return (
+    <div className="border-b-2 border-black bg-brutal-primary-light p-3 text-black">
+      <div className="font-heading text-xs font-black uppercase tracking-wider">{t('observabilityRecoveryTitle')}</div>
+      <div className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
+        <RecoveryField label={t('observabilityRecoveryReason')} value={failureLabel(failureCode)} />
+        {attempt > 0 && (
+          <RecoveryField
+            label={t('observabilityRecoveryAttempt')}
+            value={maxAttempts > 0 ? `${attempt}/${maxAttempts}` : String(attempt)}
+          />
+        )}
+        {previousRunID && previousRunID !== events[0]?.run_id && (
+          <RecoveryField label={t('observabilityRecoveryPreviousRun')} value={previousRunID.slice(0, 8)} />
+        )}
+        {mode && (
+          <RecoveryField
+            label={t('observabilityRecoveryConversation')}
+            value={mode === 'fresh_session' ? t('observabilityRecoveryFreshConversation') : t('observabilityRecoveryResumeConversation')}
+          />
+        )}
+        {workspaceReused && <RecoveryField label={t('observabilityRecoveryWorkspace')} value={t('observabilityRecoverySameWorkspace')} />}
+        <RecoveryField label={t('observabilityRecoveryCurrentAction')} value={action} />
+        {(blocked || exhausted) && <RecoveryField label={t('observabilityRecoveryNextOwner')} value={t('observabilityRecoveryTaskCreator')} />}
+      </div>
+    </div>
+  );
+}
+
+function RecoveryField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border-2 border-black bg-white px-2 py-1.5">
+      <div className="font-mono text-[10px] font-bold text-muted-foreground">{label}</div>
+      <div className="mt-0.5 font-heading text-xs font-bold text-black">{value}</div>
+    </div>
+  );
+}
+
+function failureLabel(code: string) {
+  if (code === 'daemon_lost') return t('observabilityFailureDaemonLost');
+  if (code === 'timeout') return t('observabilityFailureTimeout');
+  if (code === 'provider_transient') return t('observabilityFailureProviderTransient');
+  if (code === 'missing_visible_result') return t('observabilityFailureMissingVisibleResult');
+  if (code === 'configuration') return t('observabilityFailureConfiguration');
+  return t('observabilityFailureUnknown');
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function stringValue(value: unknown) {
+  return typeof value === 'string' ? value : '';
+}
+
+function numberValue(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
 function EventsTimeline({ events }: { events: AgentRunEvent[] }) {
   if (events.length === 0) {
-    return <div className="p-3 text-sm text-muted-foreground">暂无 events fallback</div>;
+    return <div className="p-3 text-sm text-muted-foreground">{t('observabilityNoEvents')}</div>;
   }
   const toolNameByCallId = new Map<string, string>();
   for (const event of events) {
@@ -388,7 +474,7 @@ function EventsTimeline({ events }: { events: AgentRunEvent[] }) {
   return (
     <div className="space-y-2 p-2">
       {events.map((event) => {
-        const message = readableEventText(event.message || payloadText(event.payload) || '暂无摘要');
+        const message = readableEventText(event.message || payloadText(event.payload) || t('observabilityNoSummary'));
         const meta = eventMeta(event.payload);
         const callID = typeof event.payload?.call_id === 'string' ? event.payload.call_id : '';
         const toolName = event.tool_name || toolNameByCallId.get(callID) || '';
@@ -448,15 +534,18 @@ function eventMeta(payload?: Record<string, unknown>) {
 }
 
 function eventLabel(type: string, toolName: string) {
-  if (type === 'tool_started') return toolName ? `${toolName} 调用` : '工具调用';
-  if (type === 'tool_finished') return toolName ? `${toolName} 结果` : '工具结果';
-  if (type === 'thinking') return '思考过程';
-  if (type === 'assistant_message') return 'Assistant';
-  if (type === 'user_message_received') return '用户消息';
-  if (type === 'task_linked') return '关联 task';
-  if (type === 'run_started') return '创建 run';
-  if (type === 'done') return '完成';
-  if (type === 'error') return '错误';
+  if (type === 'tool_started') return t('observabilityToolCall', { name: toolName || t('observabilityTool') });
+  if (type === 'tool_finished') return t('observabilityToolResult', { name: toolName || t('observabilityTool') });
+  if (type === 'thinking') return t('observabilityThinking');
+  if (type === 'assistant_message') return t('observabilityAssistant');
+  if (type === 'user_message_received') return t('observabilityUser');
+  if (type === 'task_linked') return t('observabilityTaskLinked');
+  if (type === 'run_started') return t('observabilityRunStarted');
+  if (type === 'task_recovery_scheduled') return t('observabilityRecoveryScheduled');
+  if (type === 'task_recovery_blocked') return t('observabilityRecoveryNeedsHuman');
+  if (type === 'task_retry_exhausted') return t('observabilityRecoveryExhausted');
+  if (type === 'done') return t('observabilityDone');
+  if (type === 'error') return t('observabilityError');
   return type;
 }
 
@@ -494,15 +583,21 @@ function Row({ active, onClick, children }: { active: boolean; onClick: () => vo
 }
 
 function entryLabel(entry: AgentTranscriptEntry) {
-  if (entry.type === 'thinking') return '思考过程';
-  if (entry.type === 'tool_use') return `${entry.tool_name || 'Tool'} 调用`;
-  if (entry.type === 'tool_result') return `${entry.tool_name || 'Tool'} 结果`;
-  return entry.role === 'user' ? '用户消息' : 'Assistant';
+  if (entry.type === 'thinking') return t('observabilityThinking');
+  if (entry.type === 'tool_use') return t('observabilityToolCall', { name: entry.tool_name || t('observabilityTool') });
+  if (entry.type === 'tool_result') return t('observabilityToolResult', { name: entry.tool_name || t('observabilityTool') });
+  return entry.role === 'user' ? t('observabilityUser') : t('observabilityAssistant');
 }
 
 function formatTime(value?: string) {
   if (!value) return '-';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
-  return date.toLocaleString('zh-CN', { hour12: false });
+  return date.toLocaleString(getLocale(), { hour12: false });
+}
+
+function scopeLabel(scope: Scope) {
+  if (scope === 'sessions') return t('observabilitySessions');
+  if (scope === 'tasks') return t('observabilityTasks');
+  return t('observabilityRunCount');
 }

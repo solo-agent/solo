@@ -547,6 +547,11 @@ func (b *ClaudeBackend) persistentStreamLoop(
 				errMsg = state.exitErr.Error()
 			}
 			state.metaMu.RUnlock()
+			if state.stderrTail != nil {
+				if tail := state.stderrTail.Tail(); tail != "" {
+					errMsg = fmt.Sprintf("%s (stderr: %s)", errMsg, tail)
+				}
+			}
 		}
 		state.finishTurn(turn, &Result{
 			Status:     status,
