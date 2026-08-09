@@ -22,6 +22,7 @@ import { useWebSocket } from '@/lib/ws-context';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 import { motionScrollBehavior } from '@/lib/motion';
+import { formatTokens } from '@/components/budget/budget-settings-card';
 
 interface DashboardLive {
   groups: DashboardLiveGroup[];
@@ -118,6 +119,14 @@ interface AgentRunDetail {
   tool_input_summary?: string;
   source?: string;
   updated_at?: string;
+  budget_state?: string;
+  reserved_tokens?: number;
+  actual_tokens?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  token_overrun?: boolean;
 }
 
 interface AgentTranscriptEntry {
@@ -372,6 +381,7 @@ function AgentWorkPanel({ agent, autoOpenRunId, onClose }: { agent: DashboardLiv
   const [isLoading, setIsLoading] = useState(false);
   const [timeline, setTimeline] = useState<AgentTimeline | null>(null);
   const [timelineLoading, setTimelineLoading] = useState(false);
+  const [runCost, setRunCost] = useState<AgentRunDetail | null>(null);
   const seenRunSessions = useRef(new Set<string>());
 
   const loadLists = useCallback(async () => {
@@ -395,6 +405,18 @@ function AgentWorkPanel({ agent, autoOpenRunId, onClose }: { agent: DashboardLiv
       cancelled = true;
     };
   }, [agent.agent_id, loadLists]);
+
+  useEffect(() => {
+    if (!agent.run_id) {
+      setRunCost(null);
+      return;
+    }
+    let cancelled = false;
+    apiClient.get<AgentRunDetail>(`/api/v1/agent-runs/${agent.run_id}`)
+      .then((run) => { if (!cancelled) setRunCost(run); })
+      .catch(() => { if (!cancelled) setRunCost(null); });
+    return () => { cancelled = true; };
+  }, [agent.run_id, agent.updated_at]);
 
   useEffect(() => onEvent((event) => {
     if (
@@ -463,6 +485,20 @@ function AgentWorkPanel({ agent, autoOpenRunId, onClose }: { agent: DashboardLiv
           <X className="h-4 w-4" />
         </button>
       </div>
+
+      {runCost?.budget_state && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b-2 border-black bg-brutal-primary-light px-4 py-2 font-mono text-[11px] font-bold text-foreground">
+          <span>{t('runCostTitle')}</span>
+          <span>{t('runCostReserved')}: {formatTokens(runCost.reserved_tokens ?? 0)}</span>
+          <span>{t('runCostActual')}: {runCost.actual_tokens === undefined ? '-' : formatTokens(runCost.actual_tokens)}</span>
+          <span>{t('runTokenInput')}: {formatTokens(runCost.input_tokens ?? 0)}</span>
+          <span>{t('runTokenOutput')}: {formatTokens(runCost.output_tokens ?? 0)}</span>
+          <span>{t('runTokenCacheRead')}: {formatTokens(runCost.cache_read_tokens ?? 0)}</span>
+          <span>{t('runTokenCacheWrite')}: {formatTokens(runCost.cache_write_tokens ?? 0)}</span>
+          {runCost.budget_state === 'usage_unknown' && <span className="bg-brutal-warning px-1 text-foreground">{t('runCostUnknown')}</span>}
+          {runCost.token_overrun && <span className="bg-brutal-danger px-1 text-foreground">{t('runCostOverrun')}</span>}
+        </div>
+      )}
 
       {!timeline && (
         <div className="flex h-14 items-center gap-2 border-b-2 border-black bg-brutal-cream px-4">

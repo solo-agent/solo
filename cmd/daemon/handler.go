@@ -1242,6 +1242,12 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 			"error":     errMsg,
 			"status":    finalStatus,
 			"retryable": finalStatus != "cancelled",
+			"usage": map[string]int{
+				"input_tokens":       inputTokens,
+				"output_tokens":      outputTokens,
+				"cache_read_tokens":  cacheReadTokens,
+				"cache_write_tokens": cacheWriteTokens,
+			},
 		})
 		h.taskManager.CloseAllSubscribers(req.TaskID)
 		return

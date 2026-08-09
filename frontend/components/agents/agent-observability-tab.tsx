@@ -7,7 +7,9 @@ import { displayAgentActivity } from '@/lib/agent-activity';
 import type { AgentRunStatus } from '@/lib/agent-run-types';
 import { useWebSocket } from '@/lib/ws-context';
 import { cn } from '@/lib/utils';
+import { t } from '@/lib/i18n';
 import { detailSectionTitleClass } from '@/components/ui/detail-section';
+import { formatTokens } from '@/components/budget/budget-settings-card';
 
 interface AgentRun {
   id: string;
@@ -22,6 +24,14 @@ interface AgentRun {
   started_at: string;
   backend_started_at?: string;
   updated_at: string;
+  budget_state?: string;
+  reserved_tokens?: number;
+  actual_tokens?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  token_overrun?: boolean;
 }
 
 interface AgentSession {
@@ -129,6 +139,16 @@ export function AgentObservabilityTab({ agentId, initialRunId }: { agentId: stri
         tool_input_summary: event.tool_input_summary,
         source: event.source,
         transcript_path: event.transcript_path,
+        ...(event.budget_state ? {
+          budget_state: event.budget_state,
+          reserved_tokens: event.reserved_tokens,
+          actual_tokens: event.actual_tokens,
+          input_tokens: event.input_tokens,
+          output_tokens: event.output_tokens,
+          cache_read_tokens: event.cache_read_tokens,
+          cache_write_tokens: event.cache_write_tokens,
+          token_overrun: event.token_overrun,
+        } : {}),
         started_at: event.timestamp ?? new Date().toISOString(),
         updated_at: event.timestamp ?? new Date().toISOString(),
       };
@@ -258,7 +278,7 @@ export function AgentObservabilityTab({ agentId, initialRunId }: { agentId: stri
           onSelectRun={setSelectedRunId}
         />
         <RunList runs={visibleRuns} selectedRunId={selectedRunId} onSelectRun={setSelectedRunId} />
-        <TranscriptPanel entries={transcript} events={events} selectedRunId={selectedRunId} transcriptPath={selectedRun?.transcript_path} />
+        <TranscriptPanel entries={transcript} events={events} selectedRun={selectedRun} />
       </div>
     </section>
   );
@@ -308,6 +328,7 @@ function ScopeList(props: {
         <Row key={run.id} active={props.selectedRunId === run.id} onClick={() => props.onSelectRun(run.id)}>
           <strong>{run.status}</strong>
           <span>{displayAgentActivity(run.status, run.activity_text, run.tool_input_summary, run.id.slice(0, 8))}</span>
+          <RunCostLine run={run} />
           <small>{formatTime(run.updated_at)}</small>
         </Row>
       ))}
@@ -322,6 +343,7 @@ function RunList({ runs, selectedRunId, onSelectRun }: { runs: AgentRun[]; selec
         <Row key={run.id} active={selectedRunId === run.id} onClick={() => onSelectRun(run.id)}>
           <strong>{run.status}</strong>
           <span>{displayAgentActivity(run.status, run.activity_text, run.tool_input_summary, run.id.slice(0, 8))}</span>
+          <RunCostLine run={run} />
           <small>{formatTime(run.updated_at)}</small>
         </Row>
       ))}
@@ -329,14 +351,17 @@ function RunList({ runs, selectedRunId, onSelectRun }: { runs: AgentRun[]; selec
   );
 }
 
-function TranscriptPanel({ entries, events, selectedRunId, transcriptPath }: { entries: AgentTranscriptEntry[]; events: AgentRunEvent[]; selectedRunId: string | null; transcriptPath?: string }) {
+function TranscriptPanel({ entries, events, selectedRun }: { entries: AgentTranscriptEntry[]; events: AgentRunEvent[]; selectedRun?: AgentRun }) {
   const fallback = <EventsTimeline events={events} />;
+  const selectedRunId = selectedRun?.id ?? null;
+  const transcriptPath = selectedRun?.transcript_path;
   return (
     <Panel title="JSONL Transcript">
       {!selectedRunId ? (
         <div className="p-3 text-sm text-muted-foreground">选择一个 run</div>
       ) : entries.length > 0 ? (
         <div className="space-y-2 p-2">
+          <RunTokenSummary run={selectedRun} />
           {transcriptPath && (
             <div className="truncate border-2 border-black bg-white px-2 py-1 font-mono text-[11px] text-muted-foreground">
               {transcriptPath}
@@ -361,17 +386,53 @@ function TranscriptPanel({ entries, events, selectedRunId, transcriptPath }: { e
         </div>
       ) : !transcriptPath ? (
         <>
+          <RunTokenSummary run={selectedRun} />
           <div className="border-b-2 border-black p-3 text-sm text-muted-foreground">当前 run 还没有关联外部 jsonl 路径，先展示轻量 events fallback。</div>
           {fallback}
         </>
       ) : (
         <>
+          <RunTokenSummary run={selectedRun} />
           <div className="border-b-2 border-black p-3 text-sm text-muted-foreground">已关联 jsonl，但暂无可解析内容：{transcriptPath}</div>
           {fallback}
         </>
       )}
     </Panel>
   );
+}
+
+function RunCostLine({ run }: { run: AgentRun }) {
+  if (!run.budget_state) return null;
+  if (run.budget_state === 'usage_unknown') return <span className="text-brutal-danger">{t('runCostUnknown')} · {formatTokens(run.reserved_tokens ?? 0)}</span>;
+  if (run.actual_tokens !== undefined) return <span>{t('runCostActual')} {formatTokens(run.actual_tokens)}</span>;
+  return <span>{t('runCostReserved')} {formatTokens(run.reserved_tokens ?? 0)}</span>;
+}
+
+function RunTokenSummary({ run }: { run?: AgentRun }) {
+  if (!run?.budget_state) return null;
+  return (
+    <div className="border-2 border-black bg-brutal-primary-light px-2 py-2 text-foreground">
+      <div className="font-heading text-xs font-black">{t('runCostTitle')}</div>
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[11px]">
+        <span>{t('runCostStatus')}: {budgetStateText(run.budget_state)}</span>
+        <span>{t('runCostReserved')}: {formatTokens(run.reserved_tokens ?? 0)}</span>
+        <span>{t('runCostActual')}: {run.actual_tokens === undefined ? '-' : formatTokens(run.actual_tokens)}</span>
+        <span>{t('runTokenInput')}: {formatTokens(run.input_tokens ?? 0)}</span>
+        <span>{t('runTokenOutput')}: {formatTokens(run.output_tokens ?? 0)}</span>
+        <span>{t('runTokenCacheRead')}: {formatTokens(run.cache_read_tokens ?? 0)}</span>
+        <span>{t('runTokenCacheWrite')}: {formatTokens(run.cache_write_tokens ?? 0)}</span>
+        {run.token_overrun && <span className="bg-brutal-warning px-1 text-foreground">{t('runCostOverrun')}</span>}
+      </div>
+    </div>
+  );
+}
+
+function budgetStateText(state: string): string {
+  if (state === 'pending') return t('runTokenPending');
+  if (state === 'settled') return t('runTokenSettled');
+  if (state === 'released') return t('runTokenReleased');
+  if (state === 'usage_unknown') return t('runCostUnknown');
+  return state;
 }
 
 function EventsTimeline({ events }: { events: AgentRunEvent[] }) {

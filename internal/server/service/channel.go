@@ -254,7 +254,7 @@ func (s *ChannelService) RemoveMember(ctx context.Context, channelID, requesterI
 		`, channelID, memberID); txErr != nil {
 			return "", txErr
 		}
-		if _, txErr = tx.Exec(ctx, `
+		cancelledRows, txErr := tx.Query(ctx, `
 			UPDATE agent_runs
 			   SET status = 'cancelled',
 			       activity_text = 'Cancelled because the Agent was removed',
@@ -265,7 +265,26 @@ func (s *ChannelService) RemoveMember(ctx context.Context, channelID, requesterI
 			       'queued', 'thinking', 'running', 'streaming',
 			       'waiting_input', 'waiting_approval'
 			   )
-		`, memberID); txErr != nil {
+			 RETURNING id::text
+		`, memberID)
+		if txErr != nil {
+			return "", txErr
+		}
+		cancelledRunIDs := make([]string, 0)
+		for cancelledRows.Next() {
+			var runID string
+			if txErr = cancelledRows.Scan(&runID); txErr != nil {
+				cancelledRows.Close()
+				return "", txErr
+			}
+			cancelledRunIDs = append(cancelledRunIDs, runID)
+		}
+		txErr = cancelledRows.Err()
+		cancelledRows.Close()
+		if txErr != nil {
+			return "", txErr
+		}
+		if txErr = NewBudgetService(s.pool).SettleTerminalRunsTx(ctx, tx, cancelledRunIDs); txErr != nil {
 			return "", txErr
 		}
 		if _, txErr = tx.Exec(ctx, `
