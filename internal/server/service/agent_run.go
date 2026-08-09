@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,6 +113,14 @@ type AgentRun struct {
 	BackendStartedAt *time.Time      `json:"backend_started_at,omitempty"`
 	UpdatedAt        time.Time       `json:"updated_at"`
 	FinishedAt       *time.Time      `json:"finished_at,omitempty"`
+	BudgetState      string          `json:"budget_state,omitempty"`
+	ReservedTokens   int64           `json:"reserved_tokens"`
+	ActualTokens     *int64          `json:"actual_tokens,omitempty"`
+	InputTokens      int64           `json:"input_tokens"`
+	OutputTokens     int64           `json:"output_tokens"`
+	CacheReadTokens  int64           `json:"cache_read_tokens"`
+	CacheWriteTokens int64           `json:"cache_write_tokens"`
+	TokenOverrun     bool            `json:"token_overrun"`
 }
 
 type AgentRunEvent struct {
@@ -310,7 +319,13 @@ func (s *AgentRunService) StartRun(ctx context.Context, input StartRunInput) (*A
 	if err != nil {
 		return nil, err
 	}
-	return scanAgentRun(s.pool.QueryRow(ctx,
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	runID := uuid.NewString()
+	run, err := scanAgentRun(tx.QueryRow(ctx,
 		`INSERT INTO agent_runs (
 		   id, agent_id, daemon_id, session_id, trigger_type, trigger_message_id, channel_id, thread_id, thinking_node_id,
 		   status, activity_text, tool_name, tool_input_summary, source, usage_json, freshness_seen_seq
@@ -322,11 +337,24 @@ func (s *AgentRunService) StartRun(ctx context.Context, input StartRunInput) (*A
 		       COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		       COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
 		       started_at, backend_started_at, updated_at, finished_at`,
-		uuid.NewString(), input.AgentID, nullableStr(input.DaemonID), nullableUUID(input.SessionID), input.TriggerType,
+		runID, input.AgentID, nullableStr(input.DaemonID), nullableUUID(input.SessionID), input.TriggerType,
 		nullableUUID(input.TriggerMessageID), nullableUUID(input.ChannelID), nullableUUID(input.ThreadID), nullableUUID(input.ThinkingNodeID),
 		string(input.Status), input.ActivityText, nullableStr(input.ToolName),
 		nullableStr(input.ToolInputSummary), nullableStr(input.Source), usage, nullableInt64(input.FreshnessSeenSeq),
 	))
+	if err != nil {
+		return nil, err
+	}
+	if err := NewBudgetService(s.pool).ReserveRunTx(ctx, tx, runID, input.AgentID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	if err := s.hydrateAgentRunTokenUsage(ctx, run); err != nil {
+		slog.Warn("run created but token usage could not be reloaded", "run_id", run.ID, "error", err)
+	}
+	return run, nil
 }
 
 func (s *AgentRunService) BindRunSession(ctx context.Context, input BindRunSessionInput) (*AgentRun, error) {
@@ -497,7 +525,12 @@ func (s *AgentRunService) FinishRun(ctx context.Context, input FinishRunInput) (
 	if err != nil {
 		return nil, err
 	}
-	return s.scanAgentRunUpdate(ctx, input.RunID, s.pool.QueryRow(ctx,
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	run, err := scanAgentRun(tx.QueryRow(ctx,
 		`UPDATE agent_runs
 		    SET status = $2,
 		        activity_text = $3,
@@ -515,6 +548,29 @@ func (s *AgentRunService) FinishRun(ctx context.Context, input FinishRunInput) (
 		        started_at, backend_started_at, updated_at, finished_at`,
 		input.RunID, string(input.Status), input.ActivityText, usage,
 	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		current, currentErr := s.GetRun(ctx, input.RunID)
+		if currentErr != nil {
+			return nil, currentErr
+		}
+		if current.FinishedAt != nil {
+			return current, ErrAgentRunAlreadyFinished
+		}
+		return nil, err
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := NewBudgetService(s.pool).SettleRunTx(ctx, tx, run.ID, run.BackendStartedAt != nil, run.UsageJSON); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	if err := s.hydrateAgentRunTokenUsage(ctx, run); err != nil {
+		slog.Warn("run finished but token usage could not be reloaded", "run_id", run.ID, "error", err)
+	}
+	return run, nil
 }
 
 // scanAgentRunUpdate turns the database's finished_at guard into an explicit
@@ -538,11 +594,18 @@ func (s *AgentRunService) scanAgentRunUpdate(ctx context.Context, runID string, 
 }
 
 func (s *AgentRunService) GetRun(ctx context.Context, runID string) (*AgentRun, error) {
-	return scanAgentRun(s.pool.QueryRow(ctx, baseAgentRunSelect()+` WHERE r.id = $1`, runID))
+	run, err := scanAgentRun(s.pool.QueryRow(ctx, baseAgentRunSelect()+` WHERE r.id = $1`, runID))
+	if err != nil {
+		return nil, err
+	}
+	if err := s.hydrateAgentRunTokenUsage(ctx, run); err != nil {
+		return nil, err
+	}
+	return run, nil
 }
 
 func (s *AgentRunService) ListActiveRuns(ctx context.Context) ([]AgentRun, error) {
-	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
+	rows, err := s.pool.Query(ctx, baseAgentRunSelect()+`
 		 WHERE r.status = ANY($1)
 		 ORDER BY r.updated_at DESC
 		 LIMIT 100`,
@@ -554,14 +617,16 @@ func (s *AgentRunService) ListActiveRuns(ctx context.Context) ([]AgentRun, error
 			string(AgentRunStatusWaitingInput),
 			string(AgentRunStatusWaitingApproval),
 		},
-	))
+	)
+	return s.scanAndHydrateAgentRuns(ctx, rows, err)
 }
 
 func (s *AgentRunService) ListActiveRunsByDaemon(ctx context.Context, daemonID string) ([]AgentRun, error) {
-	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
+	rows, err := s.pool.Query(ctx, baseAgentRunSelect()+`
 		 WHERE r.status = ANY($1) AND r.daemon_id = $2
 		 ORDER BY r.updated_at DESC
-		 LIMIT 100`, activeAgentRunStatuses(), daemonID))
+		 LIMIT 100`, activeAgentRunStatuses(), daemonID)
+	return s.scanAndHydrateAgentRuns(ctx, rows, err)
 }
 
 func (s *AgentRunService) GetRunDaemonID(ctx context.Context, runID string) (string, error) {
@@ -614,7 +679,7 @@ func (s *AgentRunService) ListActiveRunsForUser(ctx context.Context, userID stri
 	if userID == "" {
 		return nil, fmt.Errorf("user_id is required")
 	}
-	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
+	rows, err := s.pool.Query(ctx, baseAgentRunSelect()+`
 		 WHERE r.status = ANY($1)
 		   AND (
 		     a.owner_id = $2
@@ -637,7 +702,8 @@ func (s *AgentRunService) ListActiveRunsForUser(ctx context.Context, userID stri
 			string(AgentRunStatusWaitingApproval),
 		},
 		userID,
-	))
+	)
+	return s.scanAndHydrateAgentRuns(ctx, rows, err)
 }
 
 func (s *AgentRunService) UserCanAccessRun(ctx context.Context, userID, runID string) (bool, error) {
@@ -703,20 +769,22 @@ func (s *AgentRunService) UserCanAccessTask(ctx context.Context, userID, taskID 
 }
 
 func (s *AgentRunService) ListRecentRuns(ctx context.Context) ([]AgentRun, error) {
-	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
+	rows, err := s.pool.Query(ctx, baseAgentRunSelect()+`
 		 ORDER BY r.updated_at DESC
-		 LIMIT 100`))
+		 LIMIT 100`)
+	return s.scanAndHydrateAgentRuns(ctx, rows, err)
 }
 
 func (s *AgentRunService) ListRunsByAgent(ctx context.Context, agentID string) ([]AgentRun, error) {
-	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
+	rows, err := s.pool.Query(ctx, baseAgentRunSelect()+`
 		 WHERE r.agent_id = $1
 		 ORDER BY r.started_at DESC
-		 LIMIT 100`, agentID))
+		 LIMIT 100`, agentID)
+	return s.scanAndHydrateAgentRuns(ctx, rows, err)
 }
 
 func (s *AgentRunService) ListRunsByTask(ctx context.Context, taskID string) ([]AgentRun, error) {
-	return scanAgentRuns(s.pool.Query(ctx, baseAgentRunSelect()+`
+	rows, err := s.pool.Query(ctx, baseAgentRunSelect()+`
 		 WHERE r.id IN (SELECT run_id FROM agent_run_task_links WHERE task_id = $1)
 		   AND (
 		     NOT (r.status = ANY($2))
@@ -728,7 +796,8 @@ func (s *AgentRunService) ListRunsByTask(ctx context.Context, taskID string) ([]
 		     )
 		   )
 		 ORDER BY r.started_at DESC
-		 LIMIT 100`, taskID, nonPrimaryTaskRunStatuses))
+		 LIMIT 100`, taskID, nonPrimaryTaskRunStatuses)
+	return s.scanAndHydrateAgentRuns(ctx, rows, err)
 }
 
 func (s *AgentRunService) ListSessionsByAgent(ctx context.Context, agentID string) ([]AgentSession, error) {
@@ -973,6 +1042,76 @@ func scanAgentRuns(rows pgx.Rows, err error) ([]AgentRun, error) {
 		runs = append(runs, *run)
 	}
 	return runs, rows.Err()
+}
+
+func (s *AgentRunService) scanAndHydrateAgentRuns(ctx context.Context, rows pgx.Rows, err error) ([]AgentRun, error) {
+	runs, err := scanAgentRuns(rows, err)
+	if err != nil || len(runs) == 0 {
+		return runs, err
+	}
+	ids := make([]string, 0, len(runs))
+	byID := make(map[string]*AgentRun, len(runs))
+	for i := range runs {
+		ids = append(ids, runs[i].ID)
+		byID[runs[i].ID] = &runs[i]
+	}
+	usageRows, err := s.pool.Query(ctx, `
+		SELECT run_id::text, state, reserved_tokens, actual_tokens, input_tokens,
+		       output_tokens, cache_read_tokens, cache_write_tokens, overrun
+		  FROM agent_run_token_usage
+		 WHERE run_id = ANY($1)`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer usageRows.Close()
+	for usageRows.Next() {
+		var runID string
+		var actual sql.NullInt64
+		var state string
+		var reserved, input, output, cacheRead, cacheWrite int64
+		var overrun bool
+		if err := usageRows.Scan(&runID, &state, &reserved, &actual, &input, &output, &cacheRead, &cacheWrite, &overrun); err != nil {
+			return nil, err
+		}
+		if run := byID[runID]; run != nil {
+			applyAgentRunTokenUsage(run, state, reserved, actual, input, output, cacheRead, cacheWrite, overrun)
+		}
+	}
+	return runs, usageRows.Err()
+}
+
+func (s *AgentRunService) hydrateAgentRunTokenUsage(ctx context.Context, run *AgentRun) error {
+	var actual sql.NullInt64
+	var state string
+	var reserved, input, output, cacheRead, cacheWrite int64
+	var overrun bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT state, reserved_tokens, actual_tokens, input_tokens, output_tokens,
+		       cache_read_tokens, cache_write_tokens, overrun
+		  FROM agent_run_token_usage WHERE run_id = $1`, run.ID).Scan(
+		&state, &reserved, &actual, &input, &output, &cacheRead, &cacheWrite, &overrun)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	applyAgentRunTokenUsage(run, state, reserved, actual, input, output, cacheRead, cacheWrite, overrun)
+	return nil
+}
+
+func applyAgentRunTokenUsage(run *AgentRun, state string, reserved int64, actual sql.NullInt64, input, output, cacheRead, cacheWrite int64, overrun bool) {
+	run.BudgetState = state
+	run.ReservedTokens = reserved
+	run.InputTokens = input
+	run.OutputTokens = output
+	run.CacheReadTokens = cacheRead
+	run.CacheWriteTokens = cacheWrite
+	run.TokenOverrun = overrun
+	if actual.Valid {
+		value := actual.Int64
+		run.ActualTokens = &value
+	}
 }
 
 func scanAgentSession(row interface {

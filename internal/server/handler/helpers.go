@@ -16,6 +16,7 @@ import (
 type ErrorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message,omitempty"`
+	Code    string `json:"code,omitempty"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -26,6 +27,10 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, ErrorResponse{Error: http.StatusText(status), Message: message})
+}
+
+func writeErrorCode(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, ErrorResponse{Error: http.StatusText(status), Message: message, Code: code})
 }
 
 func validateClientMessageID(raw string) (string, bool) {

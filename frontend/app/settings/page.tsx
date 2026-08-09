@@ -26,6 +26,7 @@ import {
   userAvatarPresetIndex,
   userAvatarPresetValue,
 } from '@/components/ui/user-avatar';
+import { BudgetSettingsCard } from '@/components/budget/budget-settings-card';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -375,6 +376,8 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
+
+          <BudgetSettingsCard />
 
           {/* Logout */}
           <div className="mt-6">
