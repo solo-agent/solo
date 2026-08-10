@@ -641,7 +641,7 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete agent")
 		return
 	}
-	if _, err = tx.Exec(r.Context(), `
+	cancelledRows, err := tx.Query(r.Context(), `
 		UPDATE agent_runs
 		   SET status = 'cancelled',
 		       activity_text = 'Cancelled because the Agent was deleted',
@@ -652,8 +652,31 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		       'queued', 'thinking', 'running', 'streaming',
 		       'waiting_input', 'waiting_approval'
 		   )
-	`, agentID); err != nil {
+		 RETURNING id::text
+	`, agentID)
+	if err != nil {
 		slog.Error("failed to cancel agent runs", "agent_id", agentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete agent")
+		return
+	}
+	cancelledRunIDs := make([]string, 0)
+	for cancelledRows.Next() {
+		var runID string
+		if err := cancelledRows.Scan(&runID); err != nil {
+			cancelledRows.Close()
+			writeError(w, http.StatusInternalServerError, "failed to delete agent")
+			return
+		}
+		cancelledRunIDs = append(cancelledRunIDs, runID)
+	}
+	err = cancelledRows.Err()
+	cancelledRows.Close()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete agent")
+		return
+	}
+	if err := service.NewBudgetService(h.pool).SettleTerminalRunsTx(r.Context(), tx, cancelledRunIDs); err != nil {
+		slog.Error("failed to settle cancelled agent run budgets", "agent_id", agentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to delete agent")
 		return
 	}

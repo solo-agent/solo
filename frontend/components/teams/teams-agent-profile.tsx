@@ -31,6 +31,7 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { t } from '@/lib/i18n';
 import { apiClient } from '@/lib/api-client';
+import { BudgetSettingsCard } from '@/components/budget/budget-settings-card';
 
 interface TeamsAgentProfileProps {
   agentId: string;
@@ -76,6 +77,7 @@ export function TeamsAgentProfile({
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         <AgentProfileTab agentId={agentId} showHeader={showProfileHeader} onUpdated={onAgentUpdated} />
+        <BudgetSettingsCard agentId={agentId} compact />
         {showObservability && (
           <div className={detailSectionClass()}>
             <AgentObservabilityTab agentId={agentId} />

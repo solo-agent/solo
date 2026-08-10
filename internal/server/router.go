@@ -87,6 +87,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	messageHandler := handler.NewMessageHandler(pool, hub, agentSvc, taskSvc, sendDedupe)
 	agentHandler := handler.NewAgentHandler(pool, dm, hub, agentSvc)
 	agentRunHandler := handler.NewAgentRunHandler(pool, dm)
+	budgetHandler := handler.NewBudgetHandler(service.NewBudgetService(pool))
 	dashboardHandler := handler.NewDashboardHandler(pool)
 	threadHandler := handler.NewThreadHandler(pool, hub, agentSvc, sendDedupe)
 	thinkingHandler := handler.NewThinkingHandler(pool, hub, agentSvc)
@@ -172,6 +173,8 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 		// User routes
 		r.Get("/api/v1/users/me", authHandler.CurrentUser)
 		r.Patch("/api/v1/users/me", authHandler.UpdateCurrentUser)
+		r.Get("/api/v1/users/me/budget", budgetHandler.GetCurrentUser)
+		r.Put("/api/v1/users/me/budget", budgetHandler.SaveCurrentUser)
 		// Channel routes
 		r.Get("/api/v1/server/info", channelHandler.ServerInfo)
 
@@ -268,6 +271,8 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 				r.Get("/runs", agentRunHandler.AgentRuns)
 				r.Get("/sessions", agentRunHandler.AgentSessions)
 				r.Get("/tasks", agentRunHandler.AgentTasks)
+				r.Get("/budget", budgetHandler.GetAgent)
+				r.Put("/budget", budgetHandler.SaveAgent)
 
 				// Agent skill catalog (proxied to daemon).
 				r.Get("/skills", agentHandler.AgentSkills)

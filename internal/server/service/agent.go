@@ -690,7 +690,12 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 		})
 		if err != nil {
 			slog.Warn("failed to start agent run", "agent_id", ag.ID, "error", err)
-			s.broadcastAgentError(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, err.Error())
+			errorCode := err.Error()
+			var budgetErr *BudgetStartError
+			if errors.As(err, &budgetErr) {
+				errorCode = budgetErr.Code()
+			}
+			s.broadcastAgentError(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, errorCode)
 			return
 		}
 	}
@@ -760,7 +765,10 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 		s.broadcastAgentChunk(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, "context", lastMsg.Content, nil)
 	}
 
-	var inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int
+	inputTokens := taskReq.AccumulatedInputTokens
+	outputTokens := taskReq.AccumulatedOutputTokens
+	cacheReadTokens := taskReq.AccumulatedCacheReadTokens
+	cacheWriteTokens := taskReq.AccumulatedCacheWriteTokens
 	failureCode := ""
 	retryable := false
 	finishRun := func(status AgentRunStatus) {
@@ -838,6 +846,10 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 					}
 					reminderReq.InitialGreeting = ""
 					reminderReq.ResultReminderAttempt = true
+					reminderReq.AccumulatedInputTokens = inputTokens
+					reminderReq.AccumulatedOutputTokens = outputTokens
+					reminderReq.AccumulatedCacheReadTokens = cacheReadTokens
+					reminderReq.AccumulatedCacheWriteTokens = cacheWriteTokens
 					s.runStreamingAgentTask(ctx, daemon, reminderReq, ag, run)
 					return
 				}
@@ -1107,10 +1119,10 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 			}
 			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
 				bindRunSession(data.ExternalSessionID, data.TranscriptPath)
-				inputTokens = data.Usage.InputTokens
-				outputTokens = data.Usage.OutputTokens
-				cacheReadTokens = data.Usage.CacheReadTokens
-				cacheWriteTokens = data.Usage.CacheWriteTokens
+				inputTokens += data.Usage.InputTokens
+				outputTokens += data.Usage.OutputTokens
+				cacheReadTokens += data.Usage.CacheReadTokens
+				cacheWriteTokens += data.Usage.CacheWriteTokens
 				taskCompleted = true
 				finalState = "completed"
 			}
@@ -1122,8 +1134,18 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 				Status      string `json:"status"`
 				Retryable   bool   `json:"retryable"`
 				FailureCode string `json:"failure_code"`
+				Usage       struct {
+					InputTokens      int `json:"input_tokens"`
+					OutputTokens     int `json:"output_tokens"`
+					CacheReadTokens  int `json:"cache_read_tokens"`
+					CacheWriteTokens int `json:"cache_write_tokens"`
+				} `json:"usage"`
 			}
 			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
+				inputTokens += data.Usage.InputTokens
+				outputTokens += data.Usage.OutputTokens
+				cacheReadTokens += data.Usage.CacheReadTokens
+				cacheWriteTokens += data.Usage.CacheWriteTokens
 				slog.Error("agent task stream error",
 					"agent_id", ag.ID,
 					"error", data.Error,
@@ -1243,7 +1265,7 @@ func stringOrEmpty(session *AgentSession) string {
 }
 
 func runPayload(run *AgentRun, agentID, agentName, taskID string) map[string]any {
-	return map[string]any{
+	payload := map[string]any{
 		"run_id":             run.ID,
 		"session_id":         run.SessionID,
 		"agent_id":           agentID,
@@ -1261,6 +1283,17 @@ func runPayload(run *AgentRun, agentID, agentName, taskID string) map[string]any
 		"backend_started_at": run.BackendStartedAt,
 		"timestamp":          time.Now().UTC().Format(time.RFC3339),
 	}
+	if run.BudgetState != "" {
+		payload["budget_state"] = run.BudgetState
+		payload["reserved_tokens"] = run.ReservedTokens
+		payload["actual_tokens"] = run.ActualTokens
+		payload["input_tokens"] = run.InputTokens
+		payload["output_tokens"] = run.OutputTokens
+		payload["cache_read_tokens"] = run.CacheReadTokens
+		payload["cache_write_tokens"] = run.CacheWriteTokens
+		payload["token_overrun"] = run.TokenOverrun
+	}
+	return payload
 }
 
 func (s *AgentService) broadcastAgentRun(_ string, eventType string, payload map[string]any) {
@@ -2760,35 +2793,39 @@ func (s *AgentService) getChannelOpenTasksSummary(ctx context.Context, channelID
 
 // daemonTaskRequest is the format for tasks sent from server to daemon.
 type daemonTaskRequest struct {
-	TaskID                string            `json:"task_id"`
-	RunID                 string            `json:"run_id,omitempty"`
-	AgentID               string            `json:"agent_id"`
-	ChannelID             string            `json:"channel_id"`
-	ThreadID              string            `json:"thread_id,omitempty"`
-	NodeID                string            `json:"thinking_node_id,omitempty"`
-	ResumeSessionID       string            `json:"resume_session_id,omitempty"`
-	ForceFreshSession     bool              `json:"force_fresh_session,omitempty"`
-	TriggerMessageID      string            `json:"trigger_message_id,omitempty"`
-	Messages              []agent.Message   `json:"messages"`
-	ColdStartMessages     []agent.Message   `json:"cold_start_messages,omitempty"`
-	SystemPrompt          string            `json:"system_prompt"`
-	ThinkingRuntimePrompt string            `json:"thinking_runtime_prompt,omitempty"`
-	ModelConfig           agent.ModelConfig `json:"model_config"`
-	OriginTaskID          string            `json:"origin_task_id,omitempty"`   // SOLO-123-B: task ID for status update
-	TaskContext           string            `json:"task_context,omitempty"`     // SOLO-221-B: summary of pending tasks in channel
-	AgentChain            []string          `json:"agent_chain,omitempty"`      // SOLO-228-B: agent trigger chain for loop prevention
-	MentionedNames        []string          `json:"mentioned_names,omitempty"`  // v1.3: names of @mentioned agents for context awareness
-	InitialGreeting       string            `json:"initial_greeting,omitempty"` // greeting message to prepend as system context
-	ReturnHandoff         bool              `json:"return_handoff,omitempty"`
-	ResultContract        string            `json:"result_contract,omitempty"`
-	ResultReminderAttempt bool              `json:"result_reminder_attempt,omitempty"`
-	ModelSeenSeq          int64             `json:"-"`
-	AgentName             string            `json:"agent_name,omitempty"`
-	ChannelName           string            `json:"channel_name,omitempty"`
-	CustomEnv             map[string]string `json:"custom_env,omitempty"`
-	CustomArgs            []string          `json:"custom_args,omitempty"`
-	AgentToken            string            `json:"agent_token,omitempty"`
-	Recovery              *taskRunRecovery  `json:"-"`
+	TaskID                      string            `json:"task_id"`
+	RunID                       string            `json:"run_id,omitempty"`
+	AgentID                     string            `json:"agent_id"`
+	ChannelID                   string            `json:"channel_id"`
+	ThreadID                    string            `json:"thread_id,omitempty"`
+	NodeID                      string            `json:"thinking_node_id,omitempty"`
+	ResumeSessionID             string            `json:"resume_session_id,omitempty"`
+	ForceFreshSession           bool              `json:"force_fresh_session,omitempty"`
+	TriggerMessageID            string            `json:"trigger_message_id,omitempty"`
+	Messages                    []agent.Message   `json:"messages"`
+	ColdStartMessages           []agent.Message   `json:"cold_start_messages,omitempty"`
+	SystemPrompt                string            `json:"system_prompt"`
+	ThinkingRuntimePrompt       string            `json:"thinking_runtime_prompt,omitempty"`
+	ModelConfig                 agent.ModelConfig `json:"model_config"`
+	OriginTaskID                string            `json:"origin_task_id,omitempty"`   // SOLO-123-B: task ID for status update
+	TaskContext                 string            `json:"task_context,omitempty"`     // SOLO-221-B: summary of pending tasks in channel
+	AgentChain                  []string          `json:"agent_chain,omitempty"`      // SOLO-228-B: agent trigger chain for loop prevention
+	MentionedNames              []string          `json:"mentioned_names,omitempty"`  // v1.3: names of @mentioned agents for context awareness
+	InitialGreeting             string            `json:"initial_greeting,omitempty"` // greeting message to prepend as system context
+	ReturnHandoff               bool              `json:"return_handoff,omitempty"`
+	ResultContract              string            `json:"result_contract,omitempty"`
+	ResultReminderAttempt       bool              `json:"result_reminder_attempt,omitempty"`
+	ModelSeenSeq                int64             `json:"-"`
+	AgentName                   string            `json:"agent_name,omitempty"`
+	ChannelName                 string            `json:"channel_name,omitempty"`
+	CustomEnv                   map[string]string `json:"custom_env,omitempty"`
+	CustomArgs                  []string          `json:"custom_args,omitempty"`
+	AgentToken                  string            `json:"agent_token,omitempty"`
+	Recovery                    *taskRunRecovery  `json:"-"`
+	AccumulatedInputTokens      int               `json:"-"`
+	AccumulatedOutputTokens     int               `json:"-"`
+	AccumulatedCacheReadTokens  int               `json:"-"`
+	AccumulatedCacheWriteTokens int               `json:"-"`
 }
 
 func highestMessageSeq(messages []agent.Message) int64 {

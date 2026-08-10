@@ -670,7 +670,7 @@ func (h *ChannelHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete channel")
 		return
 	}
-	if _, err := tx.Exec(r.Context(), `
+	cancelledRows, err := tx.Query(r.Context(), `
 		UPDATE agent_runs
 		   SET status = 'cancelled',
 		       activity_text = 'Cancelled because the Channel was closed',
@@ -681,7 +681,29 @@ func (h *ChannelHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		       'queued', 'thinking', 'running', 'streaming',
 		       'waiting_input', 'waiting_approval'
 		   )
-	`, channelID); err != nil {
+		 RETURNING id::text
+	`, channelID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete channel")
+		return
+	}
+	cancelledRunIDs := make([]string, 0)
+	for cancelledRows.Next() {
+		var runID string
+		if err := cancelledRows.Scan(&runID); err != nil {
+			cancelledRows.Close()
+			writeError(w, http.StatusInternalServerError, "failed to delete channel")
+			return
+		}
+		cancelledRunIDs = append(cancelledRunIDs, runID)
+	}
+	err = cancelledRows.Err()
+	cancelledRows.Close()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete channel")
+		return
+	}
+	if err := service.NewBudgetService(h.pool).SettleTerminalRunsTx(r.Context(), tx, cancelledRunIDs); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete channel")
 		return
 	}
