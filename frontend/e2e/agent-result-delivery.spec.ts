@@ -63,6 +63,7 @@ interface AgentHeartbeatState {
 }
 
 interface TaskRetryState {
+  run_id: string;
   status: string;
   claimer_id: string;
   attempts: number;
@@ -70,7 +71,12 @@ interface TaskRetryState {
   latest_status: string;
   latest_agent_id: string;
   latest_message_id: string;
-  reassigned_events: number;
+  failure_code: string;
+  recovery_previous_run_id: string;
+  recovery_mode: string;
+  workspace_reused: boolean;
+  recovery_scheduled_events: number;
+  recovery_blocked_events: number;
   retry_messages: number;
   exhausted_messages: number;
 }
@@ -300,6 +306,7 @@ function taskRetryState(taskID: string): TaskRetryState {
       SELECT * FROM linked ORDER BY started_at DESC, id DESC LIMIT 1
     )
     SELECT json_build_object(
+	  'run_id', COALESCE((SELECT id::text FROM latest), ''),
       'status', t.status,
       'claimer_id', COALESCE(t.claimer_id::text, ''),
       'attempts', (SELECT COUNT(*) FROM linked),
@@ -312,14 +319,42 @@ function taskRetryState(taskID: string): TaskRetryState {
          WHERE m.metadata->>'agent_run_id' = (SELECT id::text FROM latest)
          LIMIT 1
       ), ''),
-      'reassigned_events', (
+      'failure_code', COALESCE((
+        SELECT e.payload->>'failure_code'
+          FROM agent_run_events e
+         WHERE e.run_id = (SELECT id FROM latest) AND e.type = 'error'
+         ORDER BY e.seq DESC LIMIT 1
+      ), ''),
+      'recovery_previous_run_id', COALESCE((
+        SELECT e.payload->'recovery'->>'previous_run_id'
+          FROM agent_run_events e
+         WHERE e.run_id = (SELECT id FROM latest) AND e.type = 'run_started'
+         ORDER BY e.seq LIMIT 1
+      ), ''),
+      'recovery_mode', COALESCE((
+        SELECT e.payload->'recovery'->>'mode'
+          FROM agent_run_events e
+         WHERE e.run_id = (SELECT id FROM latest) AND e.type = 'run_started'
+         ORDER BY e.seq LIMIT 1
+      ), ''),
+      'workspace_reused', COALESCE((
+        SELECT (e.payload->'recovery'->>'workspace_reused')::boolean
+          FROM agent_run_events e
+         WHERE e.run_id = (SELECT id FROM latest) AND e.type = 'run_started'
+         ORDER BY e.seq LIMIT 1
+      ), false),
+      'recovery_scheduled_events', (
         SELECT COUNT(*) FROM agent_run_events e
-         WHERE e.run_id IN (SELECT id FROM linked) AND e.type = 'task_reassigned'
+         WHERE e.run_id IN (SELECT id FROM linked) AND e.type = 'task_recovery_scheduled'
+      ),
+      'recovery_blocked_events', (
+        SELECT COUNT(*) FROM agent_run_events e
+         WHERE e.run_id IN (SELECT id FROM linked) AND e.type = 'task_recovery_blocked'
       ),
       'retry_messages', (
         SELECT COUNT(*) FROM messages m
          WHERE m.metadata->>'task_id' = t.id::text
-           AND m.metadata->>'auto_reassign' = 'true'
+           AND m.metadata->>'auto_recovery' = 'true'
            AND m.metadata->>'exhausted' = 'false'
       ),
       'exhausted_messages', (
@@ -585,7 +620,7 @@ test.describe('real Agent result delivery contract', () => {
       }, { timeout: 120000, intervals: [500, 1000, 2000] }).toBe(true);
       const interruptedRunID = recoveryState(agent.id).run_id;
 
-      execFileSync('make', ['rebuild'], { cwd: '..', stdio: 'inherit' });
+      execFileSync('make', ['rebuild', `DAEMON_SERVER_URL=${apiBase}`], { cwd: '..', stdio: 'inherit' });
 
       await expect.poll(() => {
         const state = recoveryState(agent!.id);
@@ -646,7 +681,7 @@ test.describe('real Agent result delivery contract', () => {
       }, { timeout: 180000, intervals: [500, 1000, 2000] }).toBe('completed/true/STORED');
       const first = channelSessionState(rememberMessage.id);
 
-      execFileSync('make', ['rebuild'], { cwd: '..', stdio: 'inherit' });
+      execFileSync('make', ['rebuild', `DAEMON_SERVER_URL=${apiBase}`], { cwd: '..', stdio: 'inherit' });
 
       const recallMessage = await api<{ id: string }>(
         request,
@@ -764,7 +799,7 @@ test.describe('real Agent result delivery contract', () => {
     }
   });
 
-  test('automatically reassigns a failed real Task run to another Agent', async ({ page, request }) => {
+  test('automatically recovers a failed real Task run with the same Agent', async ({ page, request }) => {
     const auth = await authenticate(request);
     const suffix = Date.now().toString(36);
     let channel: Entity | null = null;
@@ -774,8 +809,8 @@ test.describe('real Agent result delivery contract', () => {
 
     try {
       channel = await api<Entity>(request, auth.access_token, 'post', '/api/v1/channels', {
-        name: `auto-reassign-e2e-${suffix}`,
-        description: 'Real Task automatic reassignment E2E',
+        name: `auto-recovery-e2e-${suffix}`,
+        description: 'Real Task same-Agent recovery E2E',
       });
       failingAgent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `FailingWorker${suffix}`,
@@ -792,7 +827,7 @@ test.describe('real Agent result delivery contract', () => {
         system_prompt: 'For a Task, do not submit or close it. Use solo message send exactly once with the target from the request to deliver a concise completed result.',
       });
       task = await api<TaskEntity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/tasks`, {
-        title: `@${failingAgent.name} Automatic reassignment ${suffix}`,
+        title: `@${failingAgent.name} Automatic recovery ${suffix}`,
         description: 'Deliver a short confirmation through solo message send.',
       });
 
@@ -801,19 +836,25 @@ test.describe('real Agent result delivery contract', () => {
         const active = ['queued', 'running', 'thinking', 'streaming', 'waiting_input', 'waiting_approval'].includes(state.latest_status);
         return `${state.attempts}/${state.latest_agent_id}/${active}`;
       }, { timeout: 120000, intervals: [500, 1000, 2000] }).toBe(`1/${failingAgent.id}/true`);
+      const interruptedRunID = taskRetryState(task.id).run_id;
 
-      execFileSync('make', ['rebuild'], { cwd: '..', stdio: 'inherit' });
+      execFileSync('make', ['rebuild', `DAEMON_SERVER_URL=${apiBase}`], { cwd: '..', stdio: 'inherit' });
 
       await expect.poll(() => {
         const state = taskRetryState(task!.id);
-        return `${state.status}/${state.claimer_id}/${state.attempts}/${state.failed_attempts}/${state.latest_status}/${state.latest_agent_id}/${Boolean(state.latest_message_id)}/${state.reassigned_events}/${state.retry_messages}`;
+        return `${state.status}/${state.claimer_id}/${state.attempts}/${state.failed_attempts}/${state.latest_status}/${state.latest_agent_id}/${Boolean(state.latest_message_id)}/${state.recovery_scheduled_events}/${state.retry_messages}/${state.recovery_previous_run_id}/${state.recovery_mode}/${state.workspace_reused}`;
       }, { timeout: 180000, intervals: [1000, 2000, 5000] }).toBe(
-        `in_progress/${succeedingAgent.id}/2/1/completed/${succeedingAgent.id}/true/1/1`,
+        `in_progress/${failingAgent.id}/2/1/completed/${failingAgent.id}/true/1/1/${interruptedRunID}/resume_session/true`,
       );
 
       await authenticatePage(page, auth);
       await page.goto(`/dashboard?channel=${channel.id}`);
-      await expect(page.getByText(/Solo 正在自动改派/).first()).toBeVisible();
+      await expect(page.getByText(/Solo 正由原 Agent/).first()).toBeVisible();
+      await page.locator('.relationship-flow .react-flow__node').filter({ hasText: failingAgent.name }).click();
+      await page.getByRole('tab', { name: 'Run history' }).click();
+      await expect(page.getByText('Failure and recovery')).toBeVisible();
+      await expect(page.getByText('Continue the previous conversation')).toBeVisible();
+      await expect(page.getByText('Reuse the original workspace')).toBeVisible();
     } finally {
       if (task && channel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${channel.id}/tasks/${task.id}`).catch(() => undefined);
       if (succeedingAgent) await api(request, auth.access_token, 'delete', `/api/v1/agents/${succeedingAgent.id}`).catch(() => undefined);
@@ -822,7 +863,7 @@ test.describe('real Agent result delivery contract', () => {
     }
   });
 
-  test('stops after three failed real Task attempts and returns it to TODO', async ({ page, request }) => {
+  test('returns a real Task configuration failure to its creator without retrying', async ({ page, request }) => {
     const auth = await authenticate(request);
     const suffix = Date.now().toString(36);
     let channel: Entity | null = null;
@@ -831,30 +872,35 @@ test.describe('real Agent result delivery contract', () => {
 
     try {
       channel = await api<Entity>(request, auth.access_token, 'post', '/api/v1/channels', {
-        name: `retry-exhaustion-e2e-${suffix}`,
-        description: 'Real Task retry exhaustion E2E',
+        name: `configuration-failure-e2e-${suffix}`,
+        description: 'Real Task configuration failure E2E',
       });
       agent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
-        name: `Always Failing Worker ${suffix}`,
+        name: `Misconfigured Worker ${suffix}`,
         computer_id: localComputer.id,
         model_provider: 'claude',
         model_name: 'sonnet',
         custom_args: ['--solo-e2e-intentionally-invalid-flag'],
-        system_prompt: 'This Task is intentionally used to verify retry exhaustion.',
+        system_prompt: 'This Task is intentionally used to verify configuration failure handling.',
       });
       task = await api<TaskEntity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/tasks`, {
-        title: `Retry exhaustion ${suffix}`,
+        title: `Configuration failure ${suffix}`,
         description: 'This real Task intentionally cannot deliver.',
       });
 
       await expect.poll(() => {
         const state = taskRetryState(task!.id);
-        return `${state.status}/${Boolean(state.claimer_id)}/${state.attempts}/${state.failed_attempts}/${state.latest_status}/${state.reassigned_events}/${state.retry_messages}/${state.exhausted_messages}`;
-      }, { timeout: 220000, intervals: [1000, 2000, 5000] }).toBe('todo/false/3/3/failed/2/2/1');
+        return `${state.status}/${Boolean(state.claimer_id)}/${state.attempts}/${state.failed_attempts}/${state.latest_status}/${state.failure_code}/${state.recovery_scheduled_events}/${state.recovery_blocked_events}/${state.retry_messages}/${state.exhausted_messages}`;
+      }, { timeout: 120000, intervals: [1000, 2000, 5000] }).toBe('todo/false/1/1/failed/configuration/0/1/1/0');
 
       await authenticatePage(page, auth);
       await page.goto(`/dashboard?channel=${channel.id}`);
-      await expect(page.getByText(/自动重派已尝试 3 次/).first()).toBeVisible();
+      await expect(page.getByText(/配置问题未自动恢复/).first()).toBeVisible();
+      await page.locator('.relationship-flow .react-flow__node').filter({ hasText: agent.name }).click();
+      await page.getByRole('tab', { name: 'Run history' }).click();
+      await expect(page.getByText('Configuration is missing or invalid')).toBeVisible();
+      await expect(page.getByText('Waiting for human handling').first()).toBeVisible();
+      await expect(page.getByText('Task creator')).toBeVisible();
     } finally {
       if (task && channel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${channel.id}/tasks/${task.id}`).catch(() => undefined);
       if (agent) await api(request, auth.access_token, 'delete', `/api/v1/agents/${agent.id}`).catch(() => undefined);

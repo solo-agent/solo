@@ -538,6 +538,7 @@ type runTaskRequest struct {
 	ThreadID              string             `json:"thread_id,omitempty"`
 	NodeID                string             `json:"thinking_node_id,omitempty"`
 	ResumeSessionID       string             `json:"resume_session_id,omitempty"`
+	ForceFreshSession     bool               `json:"force_fresh_session,omitempty"`
 	ReturnHandoff         bool               `json:"return_handoff,omitempty"`
 	Messages              []llmMessage       `json:"messages"`
 	ColdStartMessages     []llmMessage       `json:"cold_start_messages,omitempty"`
@@ -710,11 +711,10 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 			"error", err,
 		)
 		h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
-
+		failure := taskFailureDetails(err.Error())
 		h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
-			"agent_id":  req.AgentID,
-			"error":     err.Error(),
-			"retryable": true,
+			"agent_id": req.AgentID, "error": err.Error(),
+			"failure_code": failure.Code, "retryable": failure.Retryable,
 		})
 		h.taskManager.CloseAllSubscribers(req.TaskID)
 		return
@@ -741,11 +741,10 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 				"error", chunk.Error,
 			)
 			h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
-
+			failure := taskFailureDetails(chunk.Error.Error())
 			h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
-				"agent_id":  req.AgentID,
-				"error":     chunk.Error.Error(),
-				"retryable": true,
+				"agent_id": req.AgentID, "error": chunk.Error.Error(),
+				"failure_code": failure.Code, "retryable": failure.Retryable,
 			})
 			h.taskManager.CloseAllSubscribers(req.TaskID)
 			return
@@ -782,9 +781,8 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 		)
 		h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
 		h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
-			"agent_id":  req.AgentID,
-			"error":     errMsg,
-			"retryable": true,
+			"agent_id": req.AgentID, "error": errMsg,
+			"failure_code": "provider_transient", "retryable": true,
 		})
 		h.taskManager.CloseAllSubscribers(req.TaskID)
 		return
@@ -864,7 +862,8 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		slog.Error("task: workspace preparation failed", "task_id", req.TaskID, "error", err)
 		h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
 		h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
-			"agent_id": req.AgentID, "error": "workspace preparation failed", "retryable": true,
+			"agent_id": req.AgentID, "error": "workspace preparation failed",
+			"failure_code": "configuration", "retryable": false,
 		})
 		h.taskManager.CloseAllSubscribers(req.TaskID)
 		return
@@ -1023,6 +1022,12 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		if req.NodeID != "" {
 			sessionKey = agent.ThinkingSessionKey(req.NodeID)
 		}
+		if req.ForceFreshSession {
+			if closeErr := sm.CloseScopedSession(sessionKey); closeErr != nil {
+				slog.Warn("task: failed to close session before fresh recovery", "agent_id", req.AgentID, "session_key", sessionKey, "error", closeErr)
+			}
+			req.ResumeSessionID = ""
+		}
 		slog.Info("task: getting persistent session", "agent_id", req.AgentID, "session_key", sessionKey, "resume", req.ResumeSessionID)
 		ps, psErr := sm.GetOrCreateScopedSession(ctx, sessionKey, req.AgentID, agentCfg, channelCtx, msgs, coldStartMsgs, req.ResumeSessionID, req.MentionedNames)
 		if psErr == nil {
@@ -1055,8 +1060,10 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 			}
 			slog.Error("task: Backend.Execute failed", "task_id", req.TaskID, "error", execErr)
 			h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
+			failure := taskFailureDetails(execErr.Error())
 			h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
-				"agent_id": req.AgentID, "error": execErr.Error(), "retryable": true,
+				"agent_id": req.AgentID, "error": execErr.Error(),
+				"failure_code": failure.Code, "retryable": failure.Retryable,
 			})
 			h.taskManager.CloseAllSubscribers(req.TaskID)
 			return
@@ -1153,8 +1160,10 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 			}
 			slog.Error("task: backend stream error", "task_id", req.TaskID, "error", chunk.Content)
 			h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
+			failure := taskFailureDetails(chunk.Content)
 			h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
-				"agent_id": req.AgentID, "error": chunk.Content, "retryable": true,
+				"agent_id": req.AgentID, "error": chunk.Content,
+				"failure_code": failure.Code, "retryable": failure.Retryable,
 			})
 			h.taskManager.CloseAllSubscribers(req.TaskID)
 			return
@@ -1236,12 +1245,19 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 
 	if finalStatus != "completed" {
 		errMsg := backendErrorMessage(result)
+		failure := taskFailureDetails(errMsg)
+		if finalStatus == "timeout" {
+			failure = taskFailure{Code: "timeout", Retryable: true}
+		} else if finalStatus == "cancelled" {
+			failure = taskFailure{Code: "cancelled", Retryable: false}
+		}
 		h.taskManager.UpdateStatus(req.TaskID, backendTaskStatus(finalStatus))
 		h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
-			"agent_id":  req.AgentID,
-			"error":     errMsg,
-			"status":    finalStatus,
-			"retryable": finalStatus != "cancelled",
+			"agent_id":     req.AgentID,
+			"error":        errMsg,
+			"status":       finalStatus,
+			"failure_code": failure.Code,
+			"retryable":    failure.Retryable,
 			"usage": map[string]int{
 				"input_tokens":       inputTokens,
 				"output_tokens":      outputTokens,
@@ -1510,6 +1526,35 @@ func backendErrorMessage(result *agent.Result) string {
 	default:
 		return "agent execution failed"
 	}
+}
+
+type taskFailure struct {
+	Code      string
+	Retryable bool
+}
+
+func taskFailureDetails(message string) taskFailure {
+	normalized := strings.ToLower(strings.TrimSpace(message))
+	configurationMarkers := []string{
+		"executable not found",
+		"unknown backend",
+		"api key",
+		"authentication",
+		"not authenticated",
+		"unknown flag",
+		"unknown option",
+		"unrecognized option",
+		"flag provided but not defined",
+		"invalid argument",
+		"workspace preparation failed",
+		"session start cooldown",
+	}
+	for _, marker := range configurationMarkers {
+		if strings.Contains(normalized, marker) {
+			return taskFailure{Code: "configuration", Retryable: false}
+		}
+	}
+	return taskFailure{Code: "provider_transient", Retryable: true}
 }
 
 func transcriptPathForProvider(provider, workspaceDir, sessionID string) string {

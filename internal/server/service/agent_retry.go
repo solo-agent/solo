@@ -15,18 +15,40 @@ import (
 const maxTaskRunAttempts = 3
 
 type retryableTaskRun struct {
-	RunID      string
-	AgentID    string
-	TaskID     string
-	FinishedAt time.Time
+	RunID           string
+	AgentID         string
+	TaskID          string
+	FinishedAt      time.Time
+	FailureCode     string
+	Retryable       bool
+	ResumeSessionID string
+}
+
+const (
+	taskRecoveryModeResumeSession = "resume_session"
+	taskRecoveryModeFreshSession  = "fresh_session"
+)
+
+type taskRunRecovery struct {
+	PreviousRunID   string `json:"previous_run_id"`
+	Attempt         int    `json:"attempt"`
+	MaxAttempts     int    `json:"max_attempts"`
+	Mode            string `json:"mode"`
+	WorkspaceReused bool   `json:"workspace_reused"`
+	FailureCode     string `json:"failure_code"`
+	ResumeSessionID string `json:"-"`
 }
 
 func (s *AgentService) retryFailedTaskRuns(ctx context.Context) error {
 	rows, err := s.pool.Query(ctx, `
-		SELECT r.id::text, r.agent_id::text, link.task_id::text, r.finished_at
+		SELECT r.id::text, r.agent_id::text, link.task_id::text, r.finished_at,
+		       COALESCE(failure.payload->>'failure_code', ''),
+		       COALESCE((failure.payload->>'retryable')::boolean, false),
+		       COALESCE(sess.external_session_id, '')
 		  FROM agent_runs r
 		  JOIN agent_run_task_links link ON link.run_id = r.id AND link.role = $1
 		  JOIN tasks t ON t.id = link.task_id
+		  LEFT JOIN agent_sessions sess ON sess.id = r.session_id
 		  JOIN LATERAL (
 		    SELECT payload
 		      FROM agent_run_events
@@ -38,19 +60,17 @@ func (s *AgentService) retryFailedTaskRuns(ctx context.Context) error {
 		   AND t.status = ANY($4)
 		   AND (t.claimer_id IS NULL OR t.claimer_id = r.agent_id)
 		   AND t.updated_at <= r.finished_at
-		   AND failure.payload->>'failure_code' = ANY($5)
-		   AND COALESCE((failure.payload->>'retryable')::boolean, false)
 		   AND (
 		     SELECT payload->>'result_contract'
 		       FROM agent_run_events
-		      WHERE run_id = r.id AND type = $6
+		      WHERE run_id = r.id AND type = $5
 		      ORDER BY seq
 		      LIMIT 1
-		   ) = $7
+		   ) = $6
 		   AND NOT EXISTS (
 		     SELECT 1
 		       FROM agent_run_events
-		      WHERE run_id = r.id AND type = ANY($8)
+		      WHERE run_id = r.id AND type = ANY($7)
 		   )
 		   AND r.id = (
 		     SELECT r2.id
@@ -66,10 +86,9 @@ func (s *AgentService) retryFailedTaskRuns(ctx context.Context) error {
 		AgentRunEventError,
 		[]string{string(AgentRunStatusFailed), string(AgentRunStatusTimeout)},
 		[]string{TaskStatusTodo, TaskStatusInProgress},
-		[]string{agentFailureDaemonLost, agentFailureTimeout, agentFailureProviderTransient, agentFailureMissingVisibleResult},
 		AgentRunEventRunStarted,
 		agentResultContractVisibleMessage,
-		[]string{AgentRunEventTaskReassigned, AgentRunEventTaskRetryExhausted},
+		[]string{AgentRunEventTaskReassigned, AgentRunEventTaskRecoveryScheduled, AgentRunEventTaskRecoveryBlocked, AgentRunEventTaskRetryExhausted},
 	)
 	if err != nil {
 		return err
@@ -79,7 +98,7 @@ func (s *AgentService) retryFailedTaskRuns(ctx context.Context) error {
 	var runs []retryableTaskRun
 	for rows.Next() {
 		var run retryableTaskRun
-		if err := rows.Scan(&run.RunID, &run.AgentID, &run.TaskID, &run.FinishedAt); err != nil {
+		if err := rows.Scan(&run.RunID, &run.AgentID, &run.TaskID, &run.FinishedAt, &run.FailureCode, &run.Retryable, &run.ResumeSessionID); err != nil {
 			return err
 		}
 		runs = append(runs, run)
@@ -143,7 +162,7 @@ func (s *AgentService) retryTaskRun(ctx context.Context, failed retryableTaskRun
 		SELECT EXISTS (
 		  SELECT 1 FROM agent_run_events
 		   WHERE run_id = $1 AND type = ANY($2)
-		)`, failed.RunID, []string{AgentRunEventTaskReassigned, AgentRunEventTaskRetryExhausted},
+		)`, failed.RunID, []string{AgentRunEventTaskReassigned, AgentRunEventTaskRecoveryScheduled, AgentRunEventTaskRecoveryBlocked, AgentRunEventTaskRetryExhausted},
 	).Scan(&handled); err != nil {
 		return err
 	}
@@ -169,7 +188,14 @@ func (s *AgentService) retryTaskRun(ctx context.Context, failed retryableTaskRun
 		return err
 	}
 
-	if attempts >= maxTaskRunAttempts {
+	mode, canRecover := automaticTaskRecoveryMode(failed)
+	if attempts >= maxTaskRunAttempts || !canRecover {
+		eventType := AgentRunEventTaskRecoveryBlocked
+		exhausted := false
+		if attempts >= maxTaskRunAttempts {
+			eventType = AgentRunEventTaskRetryExhausted
+			exhausted = true
+		}
 		task.Status = TaskStatusTodo
 		task.ClaimerID = ""
 		task.ClaimerName = ""
@@ -181,8 +207,12 @@ func (s *AgentService) retryTaskRun(ctx context.Context, failed retryableTaskRun
 		).Scan(&task.UpdatedAt); err != nil {
 			return err
 		}
-		if err := appendTaskRetryEvent(ctx, tx, failed.RunID, AgentRunEventTaskRetryExhausted, map[string]any{
-			"attempts": maxTaskRunAttempts,
+		if err := appendTaskRetryEvent(ctx, tx, failed.RunID, eventType, map[string]any{
+			"attempts":       attempts,
+			"max_attempts":   maxTaskRunAttempts,
+			"failure_code":   failed.FailureCode,
+			"next_owner":     "task_creator",
+			"recovery_state": "needs_human",
 		}); err != nil {
 			return err
 		}
@@ -190,41 +220,37 @@ func (s *AgentService) retryTaskRun(ctx context.Context, failed retryableTaskRun
 			return err
 		}
 		s.broadcastTaskClaimed(&task, task.ChannelID)
+		if exhausted {
+			return s.persistTaskRetryMessage(ctx, &task,
+				fmt.Sprintf("Task #%d 已自动恢复 %d 次，现已退回待处理。下一步由任务创建者决定。", task.TaskNumber, attempts),
+				attempts, true)
+		}
 		return s.persistTaskRetryMessage(ctx, &task,
-			fmt.Sprintf("Task #%d 自动重派已尝试 %d 次，已退回 TODO 等待处理。", task.TaskNumber, maxTaskRunAttempts),
-			maxTaskRunAttempts, true)
+			fmt.Sprintf("Task #%d 因%s未自动恢复，现已退回待处理。下一步由任务创建者决定。", task.TaskNumber, taskFailureName(failed.FailureCode)),
+			attempts, false)
 	}
 
-	var nextAgentID, nextAgentName string
+	var agentName string
 	if err := tx.QueryRow(ctx, `
-		SELECT a.id::text, a.name
-		  FROM channel_members cm
-		  JOIN agents a ON a.id = cm.member_id
-		 WHERE cm.channel_id = $1
-		   AND cm.member_type = 'agent'
-		   AND a.is_active = true
-		 ORDER BY (a.id = $2), cm.joined_at, a.created_at, a.id
-		 LIMIT 1`, task.ChannelID, failed.AgentID,
-	).Scan(&nextAgentID, &nextAgentName); err != nil {
+		SELECT name FROM agents WHERE id = $1 AND is_active = true`, failed.AgentID,
+	).Scan(&agentName); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		return err
 	}
-	if _, err := s.dm.ResolveDaemonForAgent(ctx, nextAgentID, "llm"); err != nil {
+	if _, err := s.dm.ResolveDaemonForAgent(ctx, failed.AgentID, "llm"); err != nil {
 		return nil
 	}
 
-	previousStatus := task.Status
-	previousClaimer := currentClaimer
 	task.Status = TaskStatusInProgress
-	task.ClaimerID = nextAgentID
-	task.ClaimerName = nextAgentName
+	task.ClaimerID = failed.AgentID
+	task.ClaimerName = agentName
 	if err := tx.QueryRow(ctx, `
 		UPDATE tasks
 		   SET status = $2, claimer_id = $3, updated_at = now()
 		 WHERE id = $1
-		 RETURNING updated_at`, task.ID, TaskStatusInProgress, nextAgentID,
+		 RETURNING updated_at`, task.ID, TaskStatusInProgress, failed.AgentID,
 	).Scan(&task.UpdatedAt); err != nil {
 		return err
 	}
@@ -232,35 +258,92 @@ func (s *AgentService) retryTaskRun(ctx context.Context, failed retryableTaskRun
 		return err
 	}
 
-	if !s.TriggerAgentForTask(ctx, task.ChannelID, task.ID, nextAgentID, task.TaskNumber, task.Title, task.Description, nil, nil) {
-		_, _ = s.pool.Exec(ctx, `
+	nextAttempt := attempts + 1
+	recovery := &taskRunRecovery{
+		PreviousRunID:   failed.RunID,
+		Attempt:         nextAttempt,
+		MaxAttempts:     maxTaskRunAttempts,
+		Mode:            mode,
+		WorkspaceReused: true,
+		FailureCode:     failed.FailureCode,
+		ResumeSessionID: failed.ResumeSessionID,
+	}
+	if !s.triggerAgentForTask(ctx, task.ChannelID, task.ID, failed.AgentID, task.TaskNumber, task.Title, task.Description, nil, nil, recovery) {
+		if _, err := s.pool.Exec(ctx, `
 			UPDATE tasks
-			   SET status = $2, claimer_id = $3, updated_at = now()
-			 WHERE id = $1 AND claimer_id = $4`,
-			task.ID, previousStatus, nullableStr(previousClaimer), nextAgentID,
-		)
-		return nil
+			   SET status = $2, claimer_id = NULL, updated_at = now()
+			 WHERE id = $1 AND claimer_id = $3`,
+			task.ID, TaskStatusTodo, failed.AgentID,
+		); err != nil {
+			return err
+		}
+		task.Status = TaskStatusTodo
+		task.ClaimerID = ""
+		task.ClaimerName = ""
+		runSvc := NewAgentRunService(s.pool)
+		if _, err := runSvc.AppendEvent(ctx, AppendRunEventInput{
+			RunID:   failed.RunID,
+			Type:    AgentRunEventTaskRecoveryBlocked,
+			Message: "task recovery could not start",
+			Payload: map[string]any{
+				"attempts": attempts, "max_attempts": maxTaskRunAttempts,
+				"failure_code": failed.FailureCode, "next_owner": "task_creator",
+				"recovery_state": "needs_human",
+			},
+		}); err != nil {
+			return err
+		}
+		s.broadcastTaskClaimed(&task, task.ChannelID)
+		return s.persistTaskRetryMessage(ctx, &task,
+			fmt.Sprintf("Task #%d 自动恢复未能启动，现已退回待处理。下一步由任务创建者决定。", task.TaskNumber),
+			attempts, false)
 	}
 
-	nextAttempt := attempts + 1
 	runSvc := NewAgentRunService(s.pool)
 	_, err = runSvc.AppendEvent(ctx, AppendRunEventInput{
 		RunID:   failed.RunID,
-		Type:    AgentRunEventTaskReassigned,
-		Message: "task automatically reassigned",
-		Payload: map[string]any{
-			"attempt":       nextAttempt,
-			"max_attempts":  maxTaskRunAttempts,
-			"next_agent_id": nextAgentID,
-		},
+		Type:    AgentRunEventTaskRecoveryScheduled,
+		Message: "task recovery scheduled",
+		Payload: recovery,
 	})
 	if err != nil {
 		return err
 	}
 	s.broadcastTaskClaimed(&task, task.ChannelID)
 	return s.persistTaskRetryMessage(ctx, &task,
-		fmt.Sprintf("本次尝试未成功交付，Solo 正在自动改派（第 %d/%d 次）：@%s", nextAttempt, maxTaskRunAttempts, nextAgentName),
+		fmt.Sprintf("本次执行因%s中断，Solo 正由原 Agent @%s 自动恢复（第 %d/%d 次）。", taskFailureName(failed.FailureCode), agentName, nextAttempt, maxTaskRunAttempts),
 		nextAttempt, false)
+}
+
+func automaticTaskRecoveryMode(failed retryableTaskRun) (string, bool) {
+	if !failed.Retryable {
+		return "", false
+	}
+	switch failed.FailureCode {
+	case agentFailureDaemonLost, agentFailureTimeout, agentFailureProviderTransient:
+		return taskRecoveryModeResumeSession, true
+	case agentFailureMissingVisibleResult:
+		return taskRecoveryModeFreshSession, true
+	default:
+		return "", false
+	}
+}
+
+func taskFailureName(code string) string {
+	switch code {
+	case agentFailureDaemonLost:
+		return "本机运行程序断线"
+	case agentFailureTimeout:
+		return "执行超时"
+	case agentFailureProviderTransient:
+		return "模型服务临时故障"
+	case agentFailureMissingVisibleResult:
+		return "没有最终交付"
+	case agentFailureConfiguration:
+		return "配置问题"
+	default:
+		return "未知故障"
+	}
 }
 
 func appendTaskRetryEvent(ctx context.Context, tx pgx.Tx, runID, eventType string, payload any) error {
@@ -283,7 +366,7 @@ func (s *AgentService) persistTaskRetryMessage(ctx context.Context, task *Task, 
 	now := time.Now()
 	metadata := map[string]any{
 		"task_id":       task.ID,
-		"auto_reassign": true,
+		"auto_recovery": true,
 		"attempt":       attempt,
 		"exhausted":     exhausted,
 	}
