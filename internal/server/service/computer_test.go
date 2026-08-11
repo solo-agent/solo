@@ -93,8 +93,62 @@ func TestMarkConnectedSupersedesLegacyDaemonRegistration(t *testing.T) {
 	).Scan(&targetDaemonID, &legacyDaemonID, &legacyStatus); err != nil {
 		t.Fatal(err)
 	}
-	if targetDaemonID == nil || *targetDaemonID != daemonID || legacyDaemonID != nil || legacyStatus != "offline" {
+	if targetDaemonID == nil || *targetDaemonID != target.Computer.ID || legacyDaemonID != nil || legacyStatus != "offline" {
 		t.Fatalf("target daemon = %v, legacy daemon/status = %v/%s", targetDaemonID, legacyDaemonID, legacyStatus)
+	}
+}
+
+func TestMarkConnectedCanonicalizesSharedReportedDaemonIDs(t *testing.T) {
+	pool := taskSubmitTestPool(t)
+	ctx := context.Background()
+	ownerID := taskSubmitUser(t, pool)
+	svc := NewComputerService(pool)
+
+	first, err := svc.CreateComputerWithEnrollment(ctx, ownerID, "first-mac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.CreateComputerWithEnrollment(ctx, ownerID, "second-mac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, enrollment := range []*ComputerEnrollment{first, second} {
+		if _, err := svc.ExchangeEnrollment(ctx, enrollment.Computer.ID, enrollment.Token); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM computers WHERE id IN ($1, $2)`, first.Computer.ID, second.Computer.ID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	for _, enrollment := range []*ComputerEnrollment{first, second} {
+		if err := svc.MarkConnected(ctx, enrollment.Computer.ID, "daemon-01", "test", ComputerProtocolVersion, nil, ComputerSystemInfo{}, nil); err != nil {
+			t.Fatalf("MarkConnected(%s): %v", enrollment.Computer.Name, err)
+		}
+	}
+
+	rows, err := pool.Query(ctx, `SELECT id::text, daemon_id FROM computers WHERE id IN ($1, $2)`, first.Computer.ID, second.Computer.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	seen := 0
+	for rows.Next() {
+		var computerID, daemonID string
+		if err := rows.Scan(&computerID, &daemonID); err != nil {
+			t.Fatal(err)
+		}
+		if daemonID != computerID {
+			t.Fatalf("Computer %s daemon_id = %q", computerID, daemonID)
+		}
+		seen++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if seen != 2 {
+		t.Fatalf("connected Computers = %d, want 2", seen)
 	}
 }
 
