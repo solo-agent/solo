@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,13 +23,57 @@ type BackendConfig struct {
 	Logger       *slog.Logger
 }
 
+// CapabilityStatus describes whether a backend capability is available
+// through Solo's integration. The zero value is normalized to unknown so
+// adapters compiled before the capability table remain safe and visible.
+type CapabilityStatus string
+
+const (
+	CapabilitySupported   CapabilityStatus = "supported"
+	CapabilityUnsupported CapabilityStatus = "unsupported"
+	CapabilityUnknown     CapabilityStatus = "unknown"
+)
+
+// BackendCapabilities is the runtime contract for one backend adapter.
+// It describes Solo's integration rather than every feature the underlying
+// CLI may expose on its own.
+type BackendCapabilities struct {
+	PersistentConversation CapabilityStatus `json:"persistent_conversation"`
+	ResumeConversation     CapabilityStatus `json:"resume_conversation"`
+	BusyMessageDelivery    CapabilityStatus `json:"busy_message_delivery"`
+	SafeStop               CapabilityStatus `json:"safe_stop"`
+	InteractiveInput       CapabilityStatus `json:"interactive_input"`
+	TokenUsage             CapabilityStatus `json:"token_usage"`
+}
+
+func normalizeCapabilityStatus(status CapabilityStatus) CapabilityStatus {
+	switch status {
+	case CapabilitySupported, CapabilityUnsupported, CapabilityUnknown:
+		return status
+	default:
+		return CapabilityUnknown
+	}
+}
+
+func (c BackendCapabilities) normalized() BackendCapabilities {
+	return BackendCapabilities{
+		PersistentConversation: normalizeCapabilityStatus(c.PersistentConversation),
+		ResumeConversation:     normalizeCapabilityStatus(c.ResumeConversation),
+		BusyMessageDelivery:    normalizeCapabilityStatus(c.BusyMessageDelivery),
+		SafeStop:               normalizeCapabilityStatus(c.SafeStop),
+		InteractiveInput:       normalizeCapabilityStatus(c.InteractiveInput),
+		TokenUsage:             normalizeCapabilityStatus(c.TokenUsage),
+	}
+}
+
 // AdapterMeta describes a registered backend adapter for discovery and UI.
 type AdapterMeta struct {
-	Type           string   `json:"type"`            // "claude", "codex", "opencode"...
-	DisplayName    string   `json:"display_name"`    // "Claude Code", "Codex CLI"
-	RequiresBinary string   `json:"requires_binary"` // CLI binary name, e.g. "claude", "codex", "opencode"
-	DetectCommand  string   `json:"-"`               // e.g. "--version"
-	Protocols      []string `json:"protocols"`       // "stream-json", "json-rpc", "acp", "jsonl"
+	Type           string              `json:"type"`            // "claude", "codex", "opencode"...
+	DisplayName    string              `json:"display_name"`    // "Claude Code", "Codex CLI"
+	RequiresBinary string              `json:"requires_binary"` // CLI binary name, e.g. "claude", "codex", "opencode"
+	DetectCommand  string              `json:"-"`               // e.g. "--version"
+	Protocols      []string            `json:"protocols"`       // "stream-json", "json-rpc", "acp", "jsonl"
+	Capabilities   BackendCapabilities `json:"capabilities"`
 }
 
 // Meta returns the registered metadata for typ.
@@ -63,6 +108,7 @@ func GlobalRegistry() *BackendRegistry { return globalRegistry }
 // Register adds a backend adapter to the registry. It overwrites any
 // existing entry with the same meta.Type. Safe for concurrent use.
 func (r *BackendRegistry) Register(meta AdapterMeta, factory BackendFactory) {
+	meta.Capabilities = meta.Capabilities.normalized()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.backends[meta.Type] = registryEntry{Factory: factory, Meta: meta}
@@ -137,5 +183,6 @@ func (r *BackendRegistry) ListMeta() []AdapterMeta {
 	for _, e := range r.backends {
 		metas = append(metas, e.Meta)
 	}
+	sort.Slice(metas, func(i, j int) bool { return metas[i].Type < metas[j].Type })
 	return metas
 }

@@ -5,6 +5,28 @@ import (
 	"os"
 )
 
+func persistentCapabilities(safeStop CapabilityStatus) BackendCapabilities {
+	return BackendCapabilities{
+		PersistentConversation: CapabilitySupported,
+		ResumeConversation:     CapabilitySupported,
+		BusyMessageDelivery:    CapabilityUnsupported,
+		SafeStop:               safeStop,
+		InteractiveInput:       CapabilityUnsupported,
+		TokenUsage:             CapabilitySupported,
+	}
+}
+
+func oneShotCapabilities() BackendCapabilities {
+	return BackendCapabilities{
+		PersistentConversation: CapabilityUnsupported,
+		ResumeConversation:     CapabilityUnsupported,
+		BusyMessageDelivery:    CapabilityUnsupported,
+		SafeStop:               CapabilitySupported,
+		InteractiveInput:       CapabilityUnsupported,
+		TokenUsage:             CapabilitySupported,
+	}
+}
+
 // init registers all built-in backend adapters into the global registry
 // when the agent package is imported. Each adapter carries its metadata
 // (display name, binary requirements, protocols) and a factory function
@@ -23,6 +45,7 @@ func init() {
 		RequiresBinary: "codex",
 		DetectCommand:  "--version",
 		Protocols:      []string{"json-rpc"},
+		Capabilities:   persistentCapabilities(CapabilitySupported),
 	}, codexFactory)
 
 	// ── opencode — OpenCode CLI via ACP ─────────────────────────────
@@ -32,6 +55,7 @@ func init() {
 		RequiresBinary: "opencode",
 		DetectCommand:  "--version",
 		Protocols:      []string{"acp"},
+		Capabilities:   persistentCapabilities(CapabilityUnsupported),
 	}, opencodeFactory)
 
 	// ── cursor — Cursor Agent CLI via stream-json ───────────────────
@@ -41,6 +65,7 @@ func init() {
 		RequiresBinary: "cursor-agent",
 		DetectCommand:  "--version",
 		Protocols:      []string{"stream-json"},
+		Capabilities:   oneShotCapabilities(),
 	}, cursorFactory)
 
 	// ── gemini — Google Gemini CLI via stream-json ──────────────────
@@ -50,6 +75,7 @@ func init() {
 		RequiresBinary: "gemini",
 		DetectCommand:  "--version",
 		Protocols:      []string{"stream-json"},
+		Capabilities:   oneShotCapabilities(),
 	}, geminiFactory)
 
 	// ── kimi — Kimi CLI via ACP ─────────────────────────────────────
@@ -59,6 +85,7 @@ func init() {
 		RequiresBinary: "kimi",
 		DetectCommand:  "--version",
 		Protocols:      []string{"acp"},
+		Capabilities:   persistentCapabilities(CapabilityUnsupported),
 	}, kimiFactory)
 
 	// ── kiro — Kiro CLI via ACP ─────────────────────────────────────
@@ -68,6 +95,7 @@ func init() {
 		RequiresBinary: "kiro-cli",
 		DetectCommand:  "--version",
 		Protocols:      []string{"acp"},
+		Capabilities:   persistentCapabilities(CapabilityUnsupported),
 	}, kiroFactory)
 
 	// ── copilot — GitHub Copilot CLI via JSONL ──────────────────────
@@ -77,6 +105,7 @@ func init() {
 		RequiresBinary: "copilot",
 		DetectCommand:  "--version",
 		Protocols:      []string{"jsonl"},
+		Capabilities:   oneShotCapabilities(),
 	}, copilotFactory)
 
 	// ── openclaw — OpenClaw Agent CLI via ACP ───────────────────────
@@ -86,6 +115,7 @@ func init() {
 		RequiresBinary: "openclaw",
 		DetectCommand:  "--version",
 		Protocols:      []string{"acp"},
+		Capabilities:   persistentCapabilities(CapabilityUnsupported),
 	}, openclawFactory)
 
 	// ── hermes — Hermes CLI via ACP ─────────────────────────────────
@@ -95,6 +125,7 @@ func init() {
 		RequiresBinary: "hermes",
 		DetectCommand:  "--version",
 		Protocols:      []string{"acp"},
+		Capabilities:   persistentCapabilities(CapabilityUnsupported),
 	}, hermesFactory)
 
 	// ── pi — Pi CLI via JSONL ───────────────────────────────────────
@@ -104,6 +135,7 @@ func init() {
 		RequiresBinary: "pi",
 		DetectCommand:  "--version",
 		Protocols:      []string{"jsonl"},
+		Capabilities:   oneShotCapabilities(),
 	}, piFactory)
 }
 
@@ -116,6 +148,7 @@ func claudeMeta(typ, displayName string) AdapterMeta {
 		RequiresBinary: "claude",
 		DetectCommand:  "--version",
 		Protocols:      []string{"stream-json"},
+		Capabilities:   persistentCapabilities(CapabilityUnsupported),
 	}
 }
 
