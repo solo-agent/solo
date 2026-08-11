@@ -143,6 +143,14 @@ func startManagedDaemon(extraEnv []string) error {
 	if err != nil {
 		return err
 	}
+	credentialPath, err = filepath.Abs(credentialPath)
+	if err != nil {
+		return err
+	}
+	// A managed Daemon belongs to Solo, not to the project directory where the
+	// user happened to invoke the CLI. Keep config.LoadDotenv in the child from
+	// loading an unrelated project .env and overriding the persisted pairing.
+	cmd.Dir = filepath.Dir(logPath)
 	cmd.Env = append(os.Environ(), "SOLO_DAEMON_CREDENTIAL_FILE="+credentialPath)
 	cmd.Env = append(cmd.Env, extraEnv...)
 	cmd.Stdin = nil
@@ -152,12 +160,13 @@ func startManagedDaemon(extraEnv []string) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	pid := cmd.Process.Pid
 	pidPath, err := daemonStatePath("daemon.pid")
 	if err != nil {
 		_ = cmd.Process.Kill()
 		return err
 	}
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
 		_ = cmd.Process.Kill()
 		return err
 	}
@@ -166,7 +175,7 @@ func startManagedDaemon(extraEnv []string) error {
 	if _, running := daemonPID(); !running {
 		return fmt.Errorf("failed to start; inspect %s", logPath)
 	}
-	fmt.Printf("Solo Daemon started (pid %d). Logs: %s\n", cmd.Process.Pid, logPath)
+	fmt.Printf("Solo Daemon started (pid %d). Logs: %s\n", pid, logPath)
 	return nil
 }
 
