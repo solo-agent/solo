@@ -9,7 +9,7 @@ import (
 
 func TestBuiltins_AllTypesCreatable(t *testing.T) {
 	types := []string{
-		"claude", "codex", "opencode", "cursor",
+		"claude", "local", "codex", "opencode", "cursor",
 		"gemini", "kimi", "kiro", "copilot", "openclaw", "hermes", "pi",
 	}
 
@@ -24,8 +24,12 @@ func TestBuiltins_AllTypesCreatable(t *testing.T) {
 			t.Errorf("Create(%q): nil backend", typ)
 			continue
 		}
-		if got := b.Name(); got != typ {
-			t.Errorf("Create(%q): Name() = %q, want %q", typ, got, typ)
+		wantName := typ
+		if typ == "local" {
+			wantName = "claude"
+		}
+		if got := b.Name(); got != wantName {
+			t.Errorf("Create(%q): Name() = %q, want %q", typ, got, wantName)
 		}
 	}
 }
@@ -34,13 +38,13 @@ func TestBuiltins_AllTypesCreatable(t *testing.T) {
 
 func TestBuiltins_ListMeta(t *testing.T) {
 	expected := []string{
-		"claude", "codex", "opencode", "cursor",
+		"claude", "local", "codex", "opencode", "cursor",
 		"gemini", "kimi", "kiro", "copilot", "openclaw", "hermes", "pi",
 	}
 
 	metas := GlobalRegistry().ListMeta()
-	if len(metas) < 11 {
-		t.Errorf("ListMeta: expected >= 11 entries, got %d", len(metas))
+	if len(metas) < 12 {
+		t.Errorf("ListMeta: expected >= 12 entries, got %d", len(metas))
 	}
 
 	typeSet := make(map[string]bool, len(metas))
@@ -57,6 +61,68 @@ func TestBuiltins_ListMeta(t *testing.T) {
 	for _, want := range expected {
 		if !typeSet[want] {
 			t.Errorf("ListMeta: missing type %q", want)
+		}
+	}
+}
+
+func TestBuiltinsCapabilitiesAreCompleteAndMatchPersistentInterface(t *testing.T) {
+	valid := map[CapabilityStatus]bool{
+		CapabilitySupported:   true,
+		CapabilityUnsupported: true,
+	}
+	for _, meta := range GlobalRegistry().ListMeta() {
+		statuses := map[string]CapabilityStatus{
+			"persistent_conversation": meta.Capabilities.PersistentConversation,
+			"resume_conversation":     meta.Capabilities.ResumeConversation,
+			"busy_message_delivery":   meta.Capabilities.BusyMessageDelivery,
+			"safe_stop":               meta.Capabilities.SafeStop,
+			"interactive_input":       meta.Capabilities.InteractiveInput,
+			"token_usage":             meta.Capabilities.TokenUsage,
+		}
+		for name, status := range statuses {
+			if !valid[status] {
+				t.Errorf("%s capability %s = %q, want an explicit supported/unsupported value", meta.Type, name, status)
+			}
+		}
+
+		backend, err := GlobalRegistry().Create(meta.Type, BackendConfig{ProviderType: meta.Type})
+		if err != nil {
+			t.Fatalf("Create(%q): %v", meta.Type, err)
+		}
+		_, implementsPersistent := backend.(PersistentBackend)
+		declaresPersistent := meta.Capabilities.PersistentConversation == CapabilitySupported
+		if implementsPersistent != declaresPersistent {
+			t.Errorf("%s persistent declaration = %v, interface implementation = %v", meta.Type, declaresPersistent, implementsPersistent)
+		}
+		if meta.Capabilities.ResumeConversation == CapabilitySupported && !declaresPersistent {
+			t.Errorf("%s declares resume without persistent conversation", meta.Type)
+		}
+	}
+}
+
+func TestBuiltinsCapabilityMatrix(t *testing.T) {
+	want := map[string]BackendCapabilities{
+		"claude":   persistentCapabilities(CapabilityUnsupported),
+		"local":    persistentCapabilities(CapabilityUnsupported),
+		"codex":    persistentCapabilities(CapabilitySupported),
+		"opencode": persistentCapabilities(CapabilityUnsupported),
+		"kimi":     persistentCapabilities(CapabilityUnsupported),
+		"kiro":     persistentCapabilities(CapabilityUnsupported),
+		"openclaw": persistentCapabilities(CapabilityUnsupported),
+		"hermes":   persistentCapabilities(CapabilityUnsupported),
+		"cursor":   oneShotCapabilities(),
+		"gemini":   oneShotCapabilities(),
+		"copilot":  oneShotCapabilities(),
+		"pi":       oneShotCapabilities(),
+	}
+	for typ, expected := range want {
+		meta, ok := GlobalRegistry().Meta(typ)
+		if !ok {
+			t.Errorf("missing metadata for %s", typ)
+			continue
+		}
+		if meta.Capabilities != expected {
+			t.Errorf("%s capabilities = %+v, want %+v", typ, meta.Capabilities, expected)
 		}
 	}
 }
@@ -142,8 +208,8 @@ func TestBuiltins_NewPersistentBackend(t *testing.T) {
 		if pb != nil {
 			t.Errorf("NewPersistentBackend(%q): expected nil backend on error", typ)
 		}
-		if err != nil && !strings.Contains(err.Error(), "persistent backend not supported") {
-			t.Errorf("NewPersistentBackend(%q): error missing 'persistent backend not supported': %v", typ, err)
+		if err != nil && !strings.Contains(err.Error(), "persistent conversation not supported") {
+			t.Errorf("NewPersistentBackend(%q): error missing capability reason: %v", typ, err)
 		}
 	}
 

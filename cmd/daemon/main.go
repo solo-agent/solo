@@ -103,9 +103,13 @@ func main() {
 	// v1.4: Initialize persistent agent session managers for all registered types.
 	var sessionManagers []*agent.AgentSessionManager
 	for _, meta := range agent.GlobalRegistry().ListMeta() {
+		if meta.Capabilities.PersistentConversation != agent.CapabilitySupported {
+			continue
+		}
 		psBackend, err := agent.NewPersistentBackend(meta.Type)
 		if err != nil {
-			continue // not all types support persistent sessions
+			slog.Error("backend declares persistent conversation but cannot initialize it", "provider", meta.Type, "error", err)
+			continue
 		}
 		workspaceMgr = agent.NewWorkspaceManager("")
 		memoryMgr := agent.NewMemoryManager("")

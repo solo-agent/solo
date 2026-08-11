@@ -67,18 +67,23 @@ func newClaudeBackendFromEnv() *ClaudeBackend {
 }
 
 // NewPersistentBackend creates a PersistentBackend for the given provider type.
-// It delegates to the global BackendRegistry and checks whether the created
-// Backend satisfies the PersistentBackend interface.
-//
-// Supported: claude, codex, opencode, hermes, kimi, kiro, openclaw.
+// The registry capability is the product contract; the interface assertion is
+// a second guard against an adapter declaring support it does not implement.
 func NewPersistentBackend(providerType string) (PersistentBackend, error) {
+	meta, ok := GlobalRegistry().Meta(providerType)
+	if !ok {
+		return nil, fmt.Errorf("unknown backend type: %q", providerType)
+	}
+	if meta.Capabilities.PersistentConversation != CapabilitySupported {
+		return nil, fmt.Errorf("persistent conversation not supported for provider %q", providerType)
+	}
 	backend, err := GlobalRegistry().Create(providerType, BackendConfig{ProviderType: providerType})
 	if err != nil {
 		return nil, err
 	}
 	pb, ok := backend.(PersistentBackend)
 	if !ok {
-		return nil, fmt.Errorf("persistent backend not supported for provider %q (supported: claude, local, codex, opencode, hermes, kimi, kiro, openclaw)", providerType)
+		return nil, fmt.Errorf("backend %q declares persistent conversation but does not implement it", providerType)
 	}
 	return pb, nil
 }

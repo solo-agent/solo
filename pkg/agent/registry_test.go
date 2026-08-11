@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -147,11 +148,44 @@ func TestRegistry_ListMeta(t *testing.T) {
 			t.Errorf("missing entry for type %q", want)
 		}
 	}
+	if got := []string{metas[0].Type, metas[1].Type, metas[2].Type}; !slices.Equal(got, []string{"a", "b", "c"}) {
+		t.Fatalf("ListMeta order = %v, want stable type order", got)
+	}
+}
+
+func TestRegistryNormalizesMissingAndInvalidCapabilities(t *testing.T) {
+	reg := &BackendRegistry{backends: make(map[string]registryEntry)}
+	reg.Register(AdapterMeta{
+		Type: "future",
+		Capabilities: BackendCapabilities{
+			SafeStop: CapabilityStatus("invalid"),
+		},
+	}, nil)
+
+	meta, ok := reg.Meta("future")
+	if !ok {
+		t.Fatal("Meta(future) not found")
+	}
+	for name, status := range map[string]CapabilityStatus{
+		"persistent_conversation": meta.Capabilities.PersistentConversation,
+		"resume_conversation":     meta.Capabilities.ResumeConversation,
+		"busy_message_delivery":   meta.Capabilities.BusyMessageDelivery,
+		"safe_stop":               meta.Capabilities.SafeStop,
+		"interactive_input":       meta.Capabilities.InteractiveInput,
+		"token_usage":             meta.Capabilities.TokenUsage,
+	} {
+		if status != CapabilityUnknown {
+			t.Errorf("%s = %q, want unknown", name, status)
+		}
+	}
 }
 
 func TestRegistry_Meta(t *testing.T) {
 	reg := &BackendRegistry{backends: make(map[string]registryEntry)}
-	reg.Register(AdapterMeta{Type: "acp-agent", DisplayName: "ACP Agent", DetectCommand: "--version", Protocols: []string{"acp"}}, nil)
+	reg.Register(AdapterMeta{
+		Type: "acp-agent", DisplayName: "ACP Agent", DetectCommand: "--version", Protocols: []string{"acp"},
+		Capabilities: BackendCapabilities{PersistentConversation: CapabilitySupported},
+	}, nil)
 
 	meta, ok := reg.Meta("acp-agent")
 	if !ok || len(meta.Protocols) != 1 || meta.Protocols[0] != "acp" {
@@ -164,7 +198,9 @@ func TestRegistry_Meta(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(wire); !strings.Contains(got, `"type":"acp-agent"`) || strings.Contains(got, "DetectCommand") || strings.Contains(got, "detect_command") {
+	if got := string(wire); !strings.Contains(got, `"type":"acp-agent"`) ||
+		!strings.Contains(got, `"persistent_conversation":"supported"`) ||
+		strings.Contains(got, "DetectCommand") || strings.Contains(got, "detect_command") {
 		t.Fatalf("AdapterMeta JSON = %s", got)
 	}
 }

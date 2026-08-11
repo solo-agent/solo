@@ -36,6 +36,7 @@ interface DeliveryState {
   input_tokens: number;
   output_tokens: number;
   failure_code: string;
+  external_session_id: string;
 }
 
 interface RecoveryState {
@@ -150,10 +151,15 @@ function deliveryState(agentID: string): DeliveryState {
            WHERE e.run_id = r.id AND e.type = 'error'
            ORDER BY e.seq DESC
            LIMIT 1
+        ), ''),
+        'external_session_id', COALESCE((
+          SELECT s.external_session_id
+            FROM agent_sessions s
+           WHERE s.id = r.session_id
         ), '')
       )::text
       FROM latest r
-    ), '{"run_id":"","daemon_id":"","bound_daemon_id":"","status":"","contract":"","message_id":"","visible_event":false,"input_tokens":0,"output_tokens":0,"failure_code":""}')
+    ), '{"run_id":"","daemon_id":"","bound_daemon_id":"","status":"","contract":"","message_id":"","visible_event":false,"input_tokens":0,"output_tokens":0,"failure_code":"","external_session_id":""}')
   `);
 }
 
@@ -416,7 +422,7 @@ test.describe('real Agent result delivery contract', () => {
     await localComputer?.release(request);
   });
 
-  test('persists and renders a run-linked visible result before completing', async ({ page, request }) => {
+  test('persists a run-linked result and reuses the declared persistent runtime', async ({ page, request }) => {
     const auth = await authenticate(request);
     const suffix = Date.now().toString(36);
     let channel: Entity | null = null;
@@ -432,7 +438,7 @@ test.describe('real Agent result delivery contract', () => {
         computer_id: localComputer.id,
         model_provider: 'claude',
         model_name: 'sonnet',
-        system_prompt: 'When asked to introduce yourself, use solo message send to post the introduction to the current channel. Do not merely print it.',
+        system_prompt: 'Always use solo message send for visible replies. When asked to introduce yourself, post the introduction. When the user says SECOND, send exactly SECOND_OK. Do not merely print replies.',
       });
 
       await expect.poll(() => {
@@ -442,13 +448,30 @@ test.describe('real Agent result delivery contract', () => {
 
       const state = deliveryState(agent.id);
       expect(state.input_tokens + state.output_tokens).toBeGreaterThan(0);
+      expect(state.external_session_id).not.toBe('');
       expect(state.daemon_id).not.toBe('');
       expect(state.daemon_id).toBe(state.bound_daemon_id);
+
+      const secondMessage = await api<{ id: string }>(
+        request,
+        auth.access_token,
+        'post',
+        `/api/v1/channels/${channel.id}/messages`,
+        { content: 'SECOND' },
+      );
+      await expect.poll(() => {
+        const second = channelSessionState(secondMessage.id);
+        return `${second.status}/${second.external_session_id}/${second.message_content}`;
+      }, { timeout: 180000, intervals: [500, 1000, 2000] }).toBe(
+        `completed/${state.external_session_id}/SECOND_OK`,
+      );
+      const second = channelSessionState(secondMessage.id);
 
       await authenticatePage(page, auth);
       await page.goto(`/dashboard?channel=${channel.id}`);
       const persistedMessage = page.locator(`[data-message-id="${state.message_id}"]`);
       await expect(persistedMessage).toBeVisible();
+      await expect(page.locator(`[data-message-id="${second.message_id}"]`)).toContainText('SECOND_OK');
     } finally {
       if (agent) await api(request, auth.access_token, 'delete', `/api/v1/agents/${agent.id}`).catch(() => undefined);
       if (channel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);

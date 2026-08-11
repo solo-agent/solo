@@ -1016,8 +1016,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	var session *agent.Session
 	var providerSessionID string
 	var transcriptPath string
-	if _, isPersistent := backend.(agent.PersistentBackend); isPersistent && h.getSessionManager(req.ModelConfig.Provider) != nil {
-		sm := h.getSessionManager(req.ModelConfig.Provider)
+	if sm := h.getSessionManager(req.ModelConfig.Provider); sm != nil {
 		sessionKey := agent.ChannelSessionKey(req.AgentID, req.ChannelID)
 		if req.NodeID != "" {
 			sessionKey = agent.ThinkingSessionKey(req.NodeID)

@@ -17,6 +17,18 @@ interface BackendMeta {
   display_name: string;
   requires_binary: string;
   protocols: string[];
+  capabilities: BackendCapabilities;
+}
+
+type CapabilityStatus = 'supported' | 'unsupported' | 'unknown';
+
+interface BackendCapabilities {
+  persistent_conversation: CapabilityStatus;
+  resume_conversation: CapabilityStatus;
+  busy_message_delivery: CapabilityStatus;
+  safe_stop: CapabilityStatus;
+  interactive_input: CapabilityStatus;
+  token_usage: CapabilityStatus;
 }
 
 interface BackendStatus {
@@ -79,6 +91,25 @@ test.describe('M9 runtime boundaries', () => {
     expect(metadata.find((item) => item.type === 'opencode')?.protocols).toEqual(['acp']);
     expect(metadata.find((item) => item.type === 'openclaw')?.protocols).toEqual(['acp']);
     expect(metadata.every((item) => item.type && item.display_name && item.requires_binary)).toBeTruthy();
+    const capabilityKeys: (keyof BackendCapabilities)[] = [
+      'persistent_conversation',
+      'resume_conversation',
+      'busy_message_delivery',
+      'safe_stop',
+      'interactive_input',
+      'token_usage',
+    ];
+    expect(metadata.every((item) => capabilityKeys.every((key) =>
+      ['supported', 'unsupported', 'unknown'].includes(item.capabilities[key]),
+    ))).toBeTruthy();
+    expect(metadata.find((item) => item.type === 'codex')?.capabilities).toMatchObject({
+      persistent_conversation: 'supported',
+      resume_conversation: 'supported',
+      busy_message_delivery: 'unsupported',
+      safe_stop: 'supported',
+      interactive_input: 'unsupported',
+      token_usage: 'supported',
+    });
 
     const daemonResponse = await request.get(`${daemonBase}/internal/daemon/backends/detect`);
     expect(daemonResponse.ok()).toBeTruthy();
@@ -111,10 +142,24 @@ test.describe('M9 runtime boundaries', () => {
       await page.getByRole('option').filter({ hasText: computerLease.name }).click();
       await dialog.getByRole('button', { name: 'Select Runtime...' }).click();
       const visibleRuntime = serverResults.find((item) =>
-        ['openclaw', 'hermes', 'claude', 'opencode', 'codex'].includes(item.type),
+        item.available && ['codex', 'claude', 'opencode', 'hermes', 'openclaw'].includes(item.type),
       );
       expect(visibleRuntime).toBeDefined();
-      await expect(page.locator('[role="option"]').filter({ hasText: visibleRuntime!.display_name })).toBeVisible();
+      const runtimeOption = page.locator('[role="option"]').filter({ hasText: visibleRuntime!.display_name });
+      await expect(runtimeOption).toBeVisible();
+      await runtimeOption.click();
+
+      const agentName = `Runtime Agent ${suffix}`;
+      await dialog.getByLabel('Name *').fill(agentName);
+      await dialog.getByRole('button', { name: 'Create Agent', exact: true }).click();
+      await expect(dialog).toBeHidden();
+
+      const agentNode = page.locator('.relationship-agent-node').filter({ hasText: agentName });
+      await expect(agentNode).toBeVisible();
+      await agentNode.click();
+      await expect(page.getByRole('heading', { name: /Runtime Config/ })).toBeVisible();
+      await expect(page.getByText('Runtime Capabilities', { exact: true })).toHaveCount(0);
+      await expect(page.locator('[data-capability]')).toHaveCount(0);
 
       const persisted = onlineComputerState();
       expect(persisted.count).toBeGreaterThanOrEqual(1);
