@@ -295,6 +295,62 @@ export interface UpdateTaskInput {
   due_date?: string;
 }
 
+// ---- Channel automations ----
+
+export type AutomationScheduleType = 'daily' | 'weekdays' | 'weekly';
+export type AutomationRunStatus = 'running' | 'completed' | 'skipped' | 'failed';
+
+export interface AutomationRun {
+  id: string;
+  automation_id: string;
+  source: 'scheduled' | 'manual';
+  status: AutomationRunStatus;
+  scheduled_for: string;
+  task_id?: string;
+  task_number?: number;
+  task_title?: string;
+  coalesced_into_run_id?: string;
+  failure_reason?: string;
+  created_at: string;
+  completed_at?: string;
+}
+
+export interface Automation {
+  id: string;
+  channel_id: string;
+  creator_id: string;
+  creator_name?: string;
+  name: string;
+  task_title: string;
+  task_description: string;
+  target_agent_id?: string;
+  target_agent_name?: string;
+  schedule_type: AutomationScheduleType;
+  schedule_hour: number;
+  schedule_minute: number;
+  schedule_weekday?: number;
+  timezone: string;
+  enabled: boolean;
+  next_run_at?: string;
+  last_run_at?: string;
+  last_run?: AutomationRun;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AutomationInput {
+  name: string;
+  task_title: string;
+  task_description: string;
+  target_agent_id: string;
+  schedule_type: AutomationScheduleType;
+  schedule_hour: number;
+  schedule_minute: number;
+  schedule_weekday?: number;
+  timezone: string;
+  enabled: boolean;
+}
+
 // ---- DM types ----
 
 /** 与另一个用户或 Agent 的私信频道 */

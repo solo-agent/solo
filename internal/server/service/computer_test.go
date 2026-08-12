@@ -69,8 +69,8 @@ func TestMarkConnectedSupersedesLegacyDaemonRegistration(t *testing.T) {
 	legacyID := uuid.NewString()
 	daemonID := "daemon-" + legacyID[:8]
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO computers (id, name, owner_id, daemon_id, status)
-		 VALUES ($1, 'legacy-mac', $2, $3, 'online')`,
+		`INSERT INTO computers (id, name, owner_id, daemon_id, status, os, hostname)
+		 VALUES ($1, 'legacy-mac', $2, $3, 'online', 'darwin', 'same-mac')`,
 		legacyID, ownerID, daemonID,
 	); err != nil {
 		t.Fatalf("create legacy computer: %v", err)
@@ -80,7 +80,7 @@ func TestMarkConnectedSupersedesLegacyDaemonRegistration(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
 	})
 
-	if err := svc.MarkConnected(ctx, target.Computer.ID, daemonID, "test", ComputerProtocolVersion, nil, ComputerSystemInfo{}, nil); err != nil {
+	if err := svc.MarkConnected(ctx, target.Computer.ID, daemonID, "test", ComputerProtocolVersion, nil, ComputerSystemInfo{OS: "darwin", Hostname: "same-mac"}, nil); err != nil {
 		t.Fatalf("MarkConnected: %v", err)
 	}
 	var targetDaemonID, legacyDaemonID *string
@@ -98,11 +98,50 @@ func TestMarkConnectedSupersedesLegacyDaemonRegistration(t *testing.T) {
 	}
 }
 
+func TestMarkConnectedDoesNotSupersedeDifferentHostLegacyRegistration(t *testing.T) {
+	pool := taskSubmitTestPool(t)
+	ctx := context.Background()
+	ownerID := taskSubmitUser(t, pool)
+	svc := NewComputerService(pool)
+	target, err := svc.CreateComputerWithEnrollment(ctx, ownerID, "secure-mac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ExchangeEnrollment(ctx, target.Computer.ID, target.Token); err != nil {
+		t.Fatal(err)
+	}
+	legacyID := uuid.NewString()
+	reportedDaemonID := "daemon-test-" + uuid.NewString()
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO computers (id, name, owner_id, daemon_id, status, os, hostname)
+		 VALUES ($1, 'other-mac', $2, $3, 'online', 'darwin', 'other-host')`,
+		legacyID, ownerID, reportedDaemonID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM computers WHERE id IN ($1, $2)`, target.Computer.ID, legacyID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	if err := svc.MarkConnected(ctx, target.Computer.ID, reportedDaemonID, "test", ComputerProtocolVersion, nil, ComputerSystemInfo{OS: "darwin", Hostname: "secure-host"}, nil); err != nil {
+		t.Fatalf("MarkConnected: %v", err)
+	}
+	var daemonID, status string
+	if err := pool.QueryRow(ctx, `SELECT daemon_id, status FROM computers WHERE id = $1`, legacyID).Scan(&daemonID, &status); err != nil {
+		t.Fatal(err)
+	}
+	if daemonID != reportedDaemonID || status != "online" {
+		t.Fatalf("different-host legacy registration = %q/%s, want unchanged", daemonID, status)
+	}
+}
+
 func TestMarkConnectedCanonicalizesSharedReportedDaemonIDs(t *testing.T) {
 	pool := taskSubmitTestPool(t)
 	ctx := context.Background()
 	ownerID := taskSubmitUser(t, pool)
 	svc := NewComputerService(pool)
+	reportedDaemonID := "daemon-test-" + uuid.NewString()
 
 	first, err := svc.CreateComputerWithEnrollment(ctx, ownerID, "first-mac")
 	if err != nil {
@@ -123,7 +162,7 @@ func TestMarkConnectedCanonicalizesSharedReportedDaemonIDs(t *testing.T) {
 	})
 
 	for _, enrollment := range []*ComputerEnrollment{first, second} {
-		if err := svc.MarkConnected(ctx, enrollment.Computer.ID, "daemon-01", "test", ComputerProtocolVersion, nil, ComputerSystemInfo{}, nil); err != nil {
+		if err := svc.MarkConnected(ctx, enrollment.Computer.ID, reportedDaemonID, "test", ComputerProtocolVersion, nil, ComputerSystemInfo{}, nil); err != nil {
 			t.Fatalf("MarkConnected(%s): %v", enrollment.Computer.Name, err)
 		}
 	}
@@ -212,6 +251,61 @@ func TestClaimComputerClaimsLegacyUnownedComputer(t *testing.T) {
 	}
 	if computer.OwnerID != ownerID || computer.MyRole == nil || *computer.MyRole != "owner" {
 		t.Fatalf("claimed computer = %#v, want owner %s", computer, ownerID)
+	}
+}
+
+func TestClaimComputerRecoversIdleAgentsFromRecreatedLocalComputer(t *testing.T) {
+	pool := taskSubmitTestPool(t)
+	ctx := context.Background()
+	ownerID := taskSubmitUser(t, pool)
+	idleAgentID := taskSubmitAgent(t, pool, ownerID)
+	busyAgentID := taskSubmitAgent(t, pool, ownerID)
+	previousID := uuid.NewString()
+	replacementID := uuid.NewString()
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO computers (id, name, owner_id, status, os, hostname)
+		VALUES ($1, 'old-local', $3, 'offline', 'darwin', 'same-mac'),
+		       ($2, 'new-local', NULL, 'online', 'darwin', 'same-mac')`,
+		previousID, replacementID, ownerID); err != nil {
+		t.Fatalf("create Computers: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE agents SET runtime_id = $1 WHERE id IN ($2, $3)`,
+		previousID, idleAgentID, busyAgentID,
+	); err != nil {
+		t.Fatalf("bind Agents to previous Computer: %v", err)
+	}
+	activeRunID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO agent_runs (id, agent_id, trigger_type, status)
+		VALUES ($1, $2, 'message', 'running')`, activeRunID, busyAgentID); err != nil {
+		t.Fatalf("create active Run: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE id = $1`, activeRunID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id IN ($1, $2)`, idleAgentID, busyAgentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM computers WHERE id IN ($1, $2)`, previousID, replacementID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE created_by = $1`, ownerID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	if _, err := NewComputerService(pool).ClaimComputer(ctx, replacementID, ownerID); err != nil {
+		t.Fatalf("ClaimComputer: %v", err)
+	}
+
+	var idleRuntimeID, busyRuntimeID string
+	if err := pool.QueryRow(ctx,
+		`SELECT idle.runtime_id, busy.runtime_id FROM agents idle, agents busy WHERE idle.id = $1 AND busy.id = $2`,
+		idleAgentID, busyAgentID,
+	).Scan(&idleRuntimeID, &busyRuntimeID); err != nil {
+		t.Fatalf("load Agent bindings: %v", err)
+	}
+	if idleRuntimeID != replacementID {
+		t.Fatalf("idle Agent runtime_id = %q, want %q", idleRuntimeID, replacementID)
+	}
+	if busyRuntimeID != previousID {
+		t.Fatalf("busy Agent runtime_id = %q, want unchanged %q", busyRuntimeID, previousID)
 	}
 }
 

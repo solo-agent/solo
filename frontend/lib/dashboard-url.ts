@@ -1,4 +1,4 @@
-export type DashboardView = 'team' | 'task' | 'thinking';
+export type DashboardView = 'team' | 'task' | 'automation' | 'thinking';
 export type DashboardPanel = 'conversation' | 'thread' | 'agent' | 'relationship';
 
 export interface DashboardUrlState {
@@ -13,7 +13,7 @@ export interface DashboardUrlState {
   nodeId: string | null;
 }
 
-const views = new Set<DashboardView>(['team', 'task', 'thinking']);
+const views = new Set<DashboardView>(['team', 'task', 'automation', 'thinking']);
 const panels = new Set<DashboardPanel>(['conversation', 'thread', 'agent', 'relationship']);
 type SearchParamsLike = Pick<URLSearchParams, 'get'>;
 

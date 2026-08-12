@@ -20,6 +20,10 @@ export async function acquireLocalComputer(
   apiBase: string,
   token: string,
 ): Promise<LocalComputerLease> {
+  const expectedDaemonID = process.env.SOLO_E2E_DAEMON_ID?.trim();
+  if (!expectedDaemonID?.startsWith('daemon-e2e-')) {
+    throw new Error('SOLO_E2E_DAEMON_ID must identify an isolated daemon-e2e-* Computer');
+  }
   const headers = { authorization: `Bearer ${token}` };
   const deadline = Date.now() + 40000;
   let computer: Computer | undefined;
@@ -30,11 +34,11 @@ export async function acquireLocalComputer(
     computer = computers.find((item) => (
       item.status === 'online'
       && item.pairing_status === 'unpaired'
-      && Boolean(item.daemon_id)
+      && item.daemon_id === expectedDaemonID
     ));
     if (!computer) await new Promise((resolve) => setTimeout(resolve, 1000));
   } while (!computer && Date.now() < deadline);
-  if (!computer) throw new Error('No online unpaired local Computer is available for E2E');
+  if (!computer) throw new Error(`No online unpaired Computer exists for E2E Daemon ${expectedDaemonID}`);
 
   if (!computer.my_role) {
     const claim = await request.post(`${apiBase}/api/v1/computers/${computer.id}/claim`, { headers });
@@ -45,8 +49,19 @@ export async function acquireLocalComputer(
     id: computer.id,
     name: computer.name,
     release: async (releaseRequest) => {
+      if (computer.daemon_id !== expectedDaemonID) {
+        throw new Error(`Refusing to delete non-E2E Computer ${computer.id}`);
+      }
       const deletion = await releaseRequest.delete(`${apiBase}/api/v1/computers/${computer.id}`, { headers });
-      if (!deletion.ok() && deletion.status() !== 404) {
+      if (deletion.ok()) return;
+      if (deletion.status() === 404) {
+        const list = await releaseRequest.get(`${apiBase}/api/v1/computers`, { headers });
+        if (list.ok()) {
+          const remaining = await list.json() as Computer[];
+          if (!remaining.some((item) => item.id === computer.id)) return;
+        }
+      }
+      if (!deletion.ok()) {
         throw new Error(`Release Computer: ${deletion.status()} ${await deletion.text()}`);
       }
     },

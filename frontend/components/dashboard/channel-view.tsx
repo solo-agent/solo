@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Users, Loader2, SquareCheckBig, Plus, Network, Maximize2, Minimize2, BrainCircuit, Sparkles } from 'lucide-react';
+import { Users, Loader2, SquareCheckBig, Plus, Network, Maximize2, Minimize2, BrainCircuit, Sparkles, CalendarClock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
 import { useThinkingSpace } from '@/lib/hooks/use-thinking-space';
@@ -22,6 +22,7 @@ import { MessageInput } from './message-input';
 import { MemberList } from './member-list';
 import { AddAgentModal } from './add-agent-modal';
 import { TaskBoard } from '@/components/tasks/task-board';
+import { AutomationWorkspace } from '@/components/tasks/automation-workspace';
 import { RelationshipWorkspace } from '@/components/relationships/relationship-workspace';
 import { RelationshipDetailPanel } from '@/components/relationships/relationship-detail-panel';
 import { ThinkingWorkspace } from '@/components/thinking/thinking-workspace';
@@ -1156,6 +1157,15 @@ export function ChannelView({
             </button>
             <button
               type="button"
+              onClick={() => pushDashboardState({ view: 'automation', panel: 'conversation', nodeId: null })}
+              className={tabButtonClass(workspaceView === 'automation')}
+              aria-pressed={workspaceView === 'automation'}
+            >
+              <CalendarClock className="h-3.5 w-3.5" />
+              {t('automations')}
+            </button>
+            <button
+              type="button"
               onClick={() => handleThinkingModeChange(true)}
               className={tabButtonClass(workspaceView === 'thinking')}
               aria-pressed={workspaceView === 'thinking'}
@@ -1258,6 +1268,14 @@ export function ChannelView({
           </div>
         )}
 
+        {workspaceView === 'automation' && (
+          <AutomationWorkspace
+            channelId={channel.id}
+            agents={agents}
+            onTaskCreated={() => { void refetchTasks(); }}
+          />
+        )}
+
         {workspaceView === 'thinking' && (
           <ThinkingWorkspace
             space={thinking.space}
@@ -1327,7 +1345,6 @@ export function ChannelView({
           setTeamRefreshKey((key) => key + 1);
         }}
       />
-
 
       {/* Member popover */}
       <Dialog open={isMemberPopoverOpen} onOpenChange={setIsMemberPopoverOpen}>
