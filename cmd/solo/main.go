@@ -138,7 +138,10 @@ func handleTemplate(args []string, baseURL, token string) {
 	jsonOutput := fs.Bool("json", false, "Print compact JSON")
 	fs.Parse(args[1:])
 
-	statusCode, body, err := doHTTP(http.MethodGet, baseURL+"/api/v1/templates", token, nil)
+	statusCode, body, err := proxyRequest("template_list", "", "", "", token, 0, "", "")
+	if err != nil && allowDirectFallback() {
+		statusCode, body, err = doHTTP(http.MethodGet, baseURL+"/api/v1/templates", token, nil)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
 		doExit(exitUsage)

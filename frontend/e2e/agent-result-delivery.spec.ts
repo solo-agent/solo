@@ -478,6 +478,121 @@ test.describe('real Agent result delivery contract', () => {
     }
   });
 
+  test('lists templates through the current Run across a persistent Agent Session', async ({ page, request }) => {
+    const auth = await authenticate(request);
+    const suffix = Date.now().toString(36);
+    let channel: Entity | null = null;
+    let agent: Entity | null = null;
+
+    try {
+      channel = await api<Entity>(request, auth.access_token, 'post', '/api/v1/channels', {
+        name: `template-proxy-e2e-${suffix}`,
+        description: 'Persistent Agent template credential E2E',
+      });
+      agent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
+        name: `Template Proxy E2E ${suffix}`,
+        computer_id: localComputer.id,
+        model_provider: 'claude',
+        model_name: 'sonnet',
+        system_prompt: [
+          'Always deliver replies with solo message send.',
+          'When introducing yourself, run solo template list --json first. If it succeeds, send exactly TEMPLATE_LIST_FIRST_OK.',
+          'When the user says LIST_AGAIN, run solo template list --json again. If it succeeds, send exactly TEMPLATE_LIST_SECOND_OK.',
+          'Do not guess or memorize the catalog. Do not send an OK result unless the command returned a non-empty JSON template array.',
+        ].join(' '),
+      });
+
+      await expect.poll(() => {
+        const state = deliveryState(agent!.id);
+        return `${state.status}/${state.message_id ? 'visible' : 'missing'}`;
+      }, { timeout: 180000, intervals: [500, 1000, 2000] }).toBe('completed/visible');
+      const first = deliveryState(agent.id);
+      expect(first.external_session_id).not.toBe('');
+
+      const secondTrigger = await api<{ id: string }>(
+        request,
+        auth.access_token,
+        'post',
+        `/api/v1/channels/${channel.id}/messages`,
+        { content: 'LIST_AGAIN' },
+      );
+      await expect.poll(() => {
+        const state = channelSessionState(secondTrigger.id);
+        return `${state.status}/${state.external_session_id}/${state.message_content}`;
+      }, { timeout: 180000, intervals: [500, 1000, 2000] }).toBe(
+        `completed/${first.external_session_id}/TEMPLATE_LIST_SECOND_OK`,
+      );
+
+      const second = channelSessionState(secondTrigger.id);
+      const persisted = databaseJSON<{
+        runs: number;
+        completed: number;
+        sessions: number;
+        visible_messages: number;
+        transcript_path: string;
+      }>(`
+        SELECT json_build_object(
+          'runs', COUNT(*),
+          'completed', COUNT(*) FILTER (WHERE r.status = 'completed'),
+          'sessions', COUNT(DISTINCT r.session_id),
+          'visible_messages', COUNT(*) FILTER (WHERE EXISTS (
+            SELECT 1 FROM messages m WHERE m.metadata->>'agent_run_id' = r.id::text
+          )),
+          'transcript_path', COALESCE(MAX(r.transcript_path), '')
+        )::text
+          FROM agent_runs r
+         WHERE r.agent_id = '${agent.id}'
+      `);
+      expect(persisted).toMatchObject({ runs: 2, completed: 2, sessions: 1, visible_messages: 2 });
+      expect(persisted.transcript_path).not.toBe('');
+
+      const transcriptEntries = readFileSync(persisted.transcript_path, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as {
+          message?: { content?: Array<{
+            type?: string;
+            id?: string;
+            tool_use_id?: string;
+            is_error?: boolean;
+            content?: string;
+            name?: string;
+            input?: { command?: string };
+          }> };
+        });
+      const templateToolIDs = new Set(transcriptEntries.flatMap((entry) => (
+        entry.message?.content ?? []
+      )).filter((content) => (
+        content.type === 'tool_use'
+        && content.name === 'Bash'
+        && content.input?.command === 'solo template list --json'
+        && content.id
+      )).map((content) => content.id!));
+      const successfulTemplateResults = transcriptEntries.flatMap((entry) => (
+        entry.message?.content ?? []
+      )).filter((content) => {
+        if (content.type !== 'tool_result' || !content.tool_use_id || content.is_error) return false;
+        if (!templateToolIDs.has(content.tool_use_id) || typeof content.content !== 'string') return false;
+        try {
+          const templates = JSON.parse(content.content) as unknown;
+          return Array.isArray(templates) && templates.length > 0;
+        } catch {
+          return false;
+        }
+      });
+      expect(templateToolIDs.size).toBe(2);
+      expect(successfulTemplateResults).toHaveLength(2);
+
+      await authenticatePage(page, auth);
+      await page.goto(`/dashboard?channel=${channel.id}`);
+      await expect(page.locator(`[data-message-id="${first.message_id}"]`)).toContainText('TEMPLATE_LIST_FIRST_OK');
+      await expect(page.locator(`[data-message-id="${second.message_id}"]`)).toContainText('TEMPLATE_LIST_SECOND_OK');
+    } finally {
+      if (agent) await api(request, auth.access_token, 'delete', `/api/v1/agents/${agent.id}`).catch(() => undefined);
+      if (channel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
+    }
+  });
+
   test('routes an unmentioned Channel message only to the unique Coordinator', async ({ page, request }) => {
     const auth = await authenticate(request);
     const suffix = Date.now().toString(36);

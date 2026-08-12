@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -46,6 +47,62 @@ func TestControlRPCReadsTranscriptFromLocalRuntime(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Text != "remote transcript works" || len(entries[0].Raw) != 0 {
 		t.Fatalf("entries = %#v", entries)
+	}
+}
+
+func TestProxyTemplateListUsesCurrentExecutingRunCredential(t *testing.T) {
+	const freshToken = "fresh-current-run-token"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/templates" || r.Method != http.MethodGet {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer "+freshToken {
+			t.Fatalf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `[{"id":"dev-team"}]`)
+	}))
+	defer server.Close()
+
+	tm := newTaskManager()
+	tm.AddTask("task-current", &taskState{
+		TaskID:     "task-current",
+		RunID:      "run-current",
+		AgentID:    "agent-1",
+		ChannelID:  "channel-1",
+		Status:     taskStatusRunning,
+		AgentToken: freshToken,
+	})
+	h := newDaemonHandler(tm, nil, server.URL, "")
+
+	body := bytes.NewBufferString(`{"agent_id":"agent-1","action":"template_list"}`)
+	req := httptest.NewRequest(http.MethodPost, "/internal/daemon/proxy", body)
+	req.RemoteAddr = "127.0.0.1:45678"
+	recorder := httptest.NewRecorder()
+	h.ProxyRequest(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"id":"dev-team"`) {
+		t.Fatalf("body = %s", recorder.Body.String())
+	}
+}
+
+func TestProxyWithoutExecutingRunExplainsRuntimeStateNotPermission(t *testing.T) {
+	h := newDaemonHandler(newTaskManager(), nil, "http://remote-server.invalid", "")
+	body := bytes.NewBufferString(`{"agent_id":"agent-1","action":"template_list"}`)
+	req := httptest.NewRequest(http.MethodPost, "/internal/daemon/proxy", body)
+	req.RemoteAddr = "127.0.0.1:45678"
+	recorder := httptest.NewRecorder()
+	h.ProxyRequest(recorder, req)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	response := strings.ToLower(recorder.Body.String())
+	if !strings.Contains(response, "active agent turn") || strings.Contains(response, "permission") {
+		t.Fatalf("body = %s", recorder.Body.String())
 	}
 }
 

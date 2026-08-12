@@ -1,4 +1,4 @@
-.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-release-install test-e2e-agent-delivery test-e2e-budget-gate test-e2e-budget-gate-run test-e2e-agent-session-resume test-e2e-agent-idle-resume test-e2e-agent-scope-router test-e2e-send-freshness test-e2e-websocket-recovery test-e2e-m8 test-e2e-m9 test-e2e-remote-server test-e2e-public-remote
+.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-release-install test-e2e-agent-delivery test-e2e-agent-template-credential test-e2e-budget-gate test-e2e-budget-gate-run test-e2e-agent-session-resume test-e2e-agent-idle-resume test-e2e-agent-scope-router test-e2e-send-freshness test-e2e-websocket-recovery test-e2e-m8 test-e2e-m9 test-e2e-remote-server test-e2e-public-remote
 .DEFAULT_GOAL := help
 
 ENV_FILE ?= .env
@@ -41,6 +41,9 @@ rebuild: stop clean-pids build start ## Rebuild binaries from a clean .pids dir 
 
 test-e2e-agent-delivery: rebuild ## Rebuild and verify the real Agent result delivery contract
 	@cd frontend && CI=1 SOLO_E2E_REAL_AGENT_DELIVERY=1 npx playwright test e2e/agent-result-delivery.spec.ts
+
+test-e2e-agent-template-credential: rebuild ## Verify template discovery across persistent Agent Runs
+	@cd frontend && CI=1 SOLO_E2E_REAL_AGENT_DELIVERY=1 npx playwright test e2e/agent-result-delivery.spec.ts --grep "lists templates through the current Run" --workers=1
 
 test-e2e-budget-gate: export DAEMON_SERVER_URL := http://127.0.0.1:8080
 test-e2e-budget-gate: export SOLO_DAEMON_CREDENTIAL_FILE := /tmp/solo-budget-gate-e2e-credentials.json
