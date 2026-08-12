@@ -196,7 +196,11 @@ func (s *ComputerService) RevokeCredential(ctx context.Context, computerID, user
 	return nil
 }
 
-func (s *ComputerService) MarkConnected(ctx context.Context, computerID, daemonID, daemonVersion string, protocolVersion int, inventory json.RawMessage, sysinfo ComputerSystemInfo, agentIDs []string) error {
+func (s *ComputerService) MarkConnected(ctx context.Context, computerID, reportedDaemonID, daemonVersion string, protocolVersion int, inventory json.RawMessage, sysinfo ComputerSystemInfo, agentIDs []string) error {
+	// The authenticated Computer is the remote routing identity. Older clients
+	// all report "daemon-01", so persisting that client label would make the
+	// second paired Computer violate the global daemon_id uniqueness constraint.
+	canonicalDaemonID := computerID
 	if len(inventory) == 0 || !json.Valid(inventory) {
 		inventory = json.RawMessage("[]")
 	}
@@ -216,7 +220,7 @@ func (s *ComputerService) MarkConnected(ctx context.Context, computerID, daemonI
 		`UPDATE computers
 		    SET daemon_id = NULL, daemon_url = NULL, status = 'offline', updated_at = now()
 		  WHERE daemon_id = $1 AND id <> $2 AND credential_hash IS NULL`,
-		daemonID, computerID,
+		reportedDaemonID, computerID,
 	); err != nil {
 		return fmt.Errorf("mark computer connected: release legacy registration: %w", err)
 	}
@@ -228,7 +232,7 @@ func (s *ComputerService) MarkConnected(ctx context.Context, computerID, daemonI
 		        runtime_inventory = $5, os = $6, hostname = $7, ip = $8,
 		        agent_ids = $9, last_heartbeat = now(), last_connected_at = now(), updated_at = now()
 		  WHERE id = $1 AND credential_hash IS NOT NULL AND credential_revoked_at IS NULL`,
-		computerID, daemonID, daemonVersion, protocolVersion, inventory,
+		computerID, canonicalDaemonID, daemonVersion, protocolVersion, inventory,
 		sysinfo.OS, sysinfo.Hostname, sysinfo.IP, activeAgentIDs,
 	)
 	if err != nil {
