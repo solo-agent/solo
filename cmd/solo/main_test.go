@@ -1212,6 +1212,57 @@ func TestHandleChannelMembersMissingChannel(t *testing.T) {
 	}
 }
 
+func TestHandleTemplateListUsesDaemonRunCredential(t *testing.T) {
+	var request map[string]any
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/internal/daemon/proxy" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `[{"id":"dev-team","name":"Development Team","description":"Build software","roles":["lead","engineer"]}]`)
+	}))
+	defer daemon.Close()
+
+	t.Setenv("SOLO_DAEMON_URL", daemon.URL)
+	t.Setenv("SOLO_AGENT_ID", "agent-1")
+	t.Setenv("SOLO_RUN_ID", "old-run-from-persistent-process")
+
+	code, stdout, stderr := captureAndRun(t, func() {
+		handleTemplate([]string{"list", "--json"}, "http://remote-server.invalid", "stale-process-token")
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+	if request["action"] != "template_list" || request["agent_id"] != "agent-1" {
+		t.Fatalf("proxy request = %#v", request)
+	}
+	if !strings.Contains(stdout, `"id":"dev-team"`) {
+		t.Fatalf("stdout = %q", stdout)
+	}
+}
+
+func TestHandleTemplateListFallsBackToDirectAPIForHumanCLI(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer user-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		fmt.Fprint(w, `[{"id":"dev-team"}]`)
+	}))
+	defer server.Close()
+
+	t.Setenv("SOLO_DAEMON_URL", "")
+	t.Setenv("SOLO_AGENT_ID", "")
+	code, stdout, stderr := captureAndRun(t, func() {
+		handleTemplate([]string{"list", "--json"}, server.URL, "user-token")
+	})
+	if code != exitOK || !strings.Contains(stdout, `"id":"dev-team"`) {
+		t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+	}
+}
+
 func TestHandleTeamFormSendsDeclarativePlan(t *testing.T) {
 	const channelID = "550e8400-e29b-41d4-a716-446655440099"
 	const sourceMessageID = "a1b2c3d4"

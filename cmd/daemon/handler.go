@@ -368,7 +368,9 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	_, token := h.taskManager.ExecutingCredential(req.AgentID, req.ChannelID, req.NodeID)
 	if token == "" {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "no executing Run credential for this Agent scope"})
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "this command must run during one active Agent turn; no unique current Run was found",
+		})
 		return
 	}
 
@@ -407,6 +409,8 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		serverPath = fmt.Sprintf("/api/v1/channels/%s/members", req.ChannelID)
 	case "server_info":
 		serverPath = "/api/v1/server/info"
+	case "template_list":
+		serverPath = "/api/v1/templates"
 	case "message_read":
 		serverPath = fmt.Sprintf("/api/v1/channels/%s/messages", req.ChannelID)
 		if req.NodeID != "" {
