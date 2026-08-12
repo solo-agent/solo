@@ -214,13 +214,20 @@ func (s *ComputerService) MarkConnected(ctx context.Context, computerID, reporte
 	}
 	defer tx.Rollback(ctx)
 
-	// Secure pairing supersedes the old unauthenticated local registration for
-	// the same physical daemon while preserving that row as history.
+	// Secure pairing supersedes the old unauthenticated local registration only
+	// when both records identify the same physical host. The reported daemon ID
+	// is a client label and may be shared by unrelated computers.
 	if _, err := tx.Exec(ctx,
 		`UPDATE computers
 		    SET daemon_id = NULL, daemon_url = NULL, status = 'offline', updated_at = now()
-		  WHERE daemon_id = $1 AND id <> $2 AND credential_hash IS NULL`,
-		reportedDaemonID, computerID,
+		  WHERE daemon_id = $1
+		    AND id <> $2
+		    AND credential_hash IS NULL
+		    AND $3 <> ''
+		    AND $4 <> ''
+		    AND hostname = $3
+		    AND os = $4`,
+		reportedDaemonID, computerID, sysinfo.Hostname, sysinfo.OS,
 	); err != nil {
 		return fmt.Errorf("mark computer connected: release legacy registration: %w", err)
 	}

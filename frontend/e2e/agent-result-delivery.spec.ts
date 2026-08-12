@@ -408,6 +408,23 @@ async function authenticatePage(page: Page, auth: AuthResponse) {
   }, { accessToken: auth.access_token, refreshToken: auth.refresh_token });
 }
 
+function rebuildIsolatedE2EStack() {
+  const daemonID = process.env.SOLO_E2E_DAEMON_ID?.trim();
+  const credentialFile = process.env.SOLO_DAEMON_CREDENTIAL_FILE?.trim();
+  if (!daemonID?.startsWith('daemon-e2e-') || !credentialFile) {
+    throw new Error('isolated E2E Daemon environment is required before restarting the stack');
+  }
+  execFileSync('make', [
+    'rebuild',
+    `DAEMON_SERVER_URL=${apiBase}`,
+    `DAEMON_ID=${daemonID}`,
+    `SOLO_DAEMON_CREDENTIAL_FILE=${credentialFile}`,
+    'SOLO_COMPUTER_ID=',
+    'SOLO_COMPUTER_CREDENTIAL=',
+    'SOLO_ENROLLMENT_TOKEN=',
+  ], { cwd: '..', stdio: 'inherit' });
+}
+
 test.describe('real Agent result delivery contract', () => {
   test.skip(process.env.SOLO_E2E_REAL_AGENT_DELIVERY !== '1', 'requires the make-managed stack and authenticated local Claude runtime');
   test.setTimeout(240000);
@@ -758,7 +775,7 @@ test.describe('real Agent result delivery contract', () => {
       }, { timeout: 120000, intervals: [500, 1000, 2000] }).toBe(true);
       const interruptedRunID = recoveryState(agent.id).run_id;
 
-      execFileSync('make', ['rebuild', `DAEMON_SERVER_URL=${apiBase}`], { cwd: '..', stdio: 'inherit' });
+      rebuildIsolatedE2EStack();
 
       await expect.poll(() => {
         const state = recoveryState(agent!.id);
@@ -819,7 +836,7 @@ test.describe('real Agent result delivery contract', () => {
       }, { timeout: 180000, intervals: [500, 1000, 2000] }).toBe('completed/true/STORED');
       const first = channelSessionState(rememberMessage.id);
 
-      execFileSync('make', ['rebuild', `DAEMON_SERVER_URL=${apiBase}`], { cwd: '..', stdio: 'inherit' });
+      rebuildIsolatedE2EStack();
 
       const recallMessage = await api<{ id: string }>(
         request,
@@ -976,7 +993,7 @@ test.describe('real Agent result delivery contract', () => {
       }, { timeout: 120000, intervals: [500, 1000, 2000] }).toBe(`1/${failingAgent.id}/true`);
       const interruptedRunID = taskRetryState(task.id).run_id;
 
-      execFileSync('make', ['rebuild', `DAEMON_SERVER_URL=${apiBase}`], { cwd: '..', stdio: 'inherit' });
+      rebuildIsolatedE2EStack();
 
       await expect.poll(() => {
         const state = taskRetryState(task!.id);

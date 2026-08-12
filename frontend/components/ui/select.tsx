@@ -69,7 +69,13 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
   ) => {
     const [open, setOpen] = React.useState(false);
     const [activeIndex, setActiveIndex] = React.useState(-1);
-    const [dropdownPos, setDropdownPos] = React.useState<{ top: number; left: number; width: number } | null>(null);
+    const [dropdownPos, setDropdownPos] = React.useState<{
+      top?: number;
+      bottom?: number;
+      left: number;
+      width: number;
+      maxHeight: number;
+    } | null>(null);
     const containerRef = React.useRef<HTMLDivElement | null>(null);
     const triggerRef = React.useRef<HTMLButtonElement | null>(null);
     const dropdownRef = React.useRef<HTMLUListElement | null>(null);
@@ -83,7 +89,18 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
       const update = () => {
         if (!triggerRef.current) return;
         const r = triggerRef.current.getBoundingClientRect();
-        setDropdownPos({ top: r.bottom + 4, left: r.left, width: r.width });
+        const desiredHeight = Math.min(240, options.length * 30);
+        const spaceBelow = window.innerHeight - r.bottom - 8;
+        const spaceAbove = r.top - 8;
+        const openAbove = spaceBelow < desiredHeight && spaceAbove > spaceBelow;
+        setDropdownPos({
+          ...(openAbove
+            ? { bottom: window.innerHeight - r.top + 4 }
+            : { top: r.bottom + 4 }),
+          left: r.left,
+          width: r.width,
+          maxHeight: Math.max(80, Math.min(240, openAbove ? spaceAbove : spaceBelow)),
+        });
       };
       update();
       window.addEventListener('scroll', update, true);
@@ -92,7 +109,7 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
         window.removeEventListener('scroll', update, true);
         window.removeEventListener('resize', update);
       };
-    }, [open]);
+    }, [open, options.length]);
 
     const selected = options.find((o) => o.value === value);
     const displayLabel = selected?.label ?? placeholder;
@@ -121,6 +138,14 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
         setActiveIndex(-1);
       }
     }, [open, value, options]);
+
+    React.useEffect(() => {
+      if (!open || activeIndex < 0 || !dropdownPos) return;
+      const frame = window.requestAnimationFrame(() => {
+        dropdownRef.current?.children.item(activeIndex)?.scrollIntoView({ block: 'nearest' });
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }, [activeIndex, dropdownPos, open]);
 
     const selectOption = React.useCallback(
       (opt: SelectOption) => {
@@ -213,11 +238,13 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
               style={{
                 position: 'fixed',
                 top: dropdownPos.top,
+                bottom: dropdownPos.bottom,
                 left: dropdownPos.left,
                 width: dropdownPos.width,
+                maxHeight: dropdownPos.maxHeight,
                 zIndex: 9999,
               }}
-              className="max-h-60 overflow-y-auto border-2 border-black bg-brutal-cream shadow-brutal"
+              className="overflow-y-auto border-2 border-black bg-brutal-cream shadow-brutal"
             >
               {options.map((opt, i) => {
                 const isSelected = opt.value === value;
