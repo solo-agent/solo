@@ -187,6 +187,10 @@ func taskSubmitUser(t *testing.T, pool *pgxpool.Pool) string {
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `UPDATE channels SET is_archived=true WHERE created_by=$1 AND name LIKE 'submit-test-%'`, id)
+		_, _ = pool.Exec(context.Background(), `UPDATE users SET is_active=false WHERE id=$1`, id)
+	})
 	return id
 }
 

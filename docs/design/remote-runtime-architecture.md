@@ -314,6 +314,50 @@ Every Agent creation path selects Computer before runtime. Runtime options come 
 
 Computer lists no longer filter out offline rows. Normal routing remains UI-silent; queue/offline/expired/revoked failures are visible.
 
+### 12.1 Offline recovery and Computer retirement
+
+A Computer is user-scoped infrastructure, while an Agent remains scoped to its
+home Channel and Workspace. An offline Computer therefore has two deliberately
+different recovery paths:
+
+1. **Reconnect the same Computer.** Rotating the enrollment token keeps the
+   Computer UUID and every Agent binding unchanged. This is the preferred path
+   when the original machine or its local Solo data still exists, because the
+   Daemon can continue to use that machine's Agent workspace, memory files, and
+   provider state.
+2. **Retire the Computer.** V1 requires the owner to move or remove every bound
+   Agent before deleting the Computer. Existing single-Agent
+   `PATCH /api/v1/agents/{id}` migration may be used for an idle Agent, but the
+   UI must not imply that an unreachable machine's local files, local-only
+   memory, credentials, or provider transcripts will move with it. A dedicated
+   bulk migration flow is deferred until that data-loss boundary and partial
+   ownership of shared Computers can be represented safely.
+
+`DELETE /api/v1/computers/{id}` remains owner-only. Deletion is rejected with
+`409 Conflict` while the Computer is online, any active Agent is bound to it, or
+any unfinished Run targets it. A successful delete disconnects the server-side control socket
+and invalidates the stored machine credential by removing its database row; it
+does not uninstall or stop a local Daemon process. The Computers UI exposes
+an owner-only **Delete Computer** action, uses a themed confirmation dialog,
+preserves selection after failed operations, and removes the deleted row from
+client state after success. No schema migration or backfill is required because
+the existing `agents.runtime_id` and `agent_runs.computer_id` fields are
+authoritative.
+
+The make-managed development Daemon has one stable legacy identity (`DAEMON_ID`,
+default `daemon-01`). `make start`, `make restart`, and `make rebuild` must
+upsert that same Computer row and never create a new row per process start.
+Tests that temporarily pair the make-managed Daemon must set a test-specific
+`DAEMON_ID`; otherwise secure pairing releases the legacy ID and a later default
+rebuild can create an orphaned history row. Every E2E-created Computer and user
+must be removed in `finally`, after deleting or deactivating its bound Agents.
+This is test-data isolation, not a production migration.
+
+Compatibility is unchanged for existing default Daemons, named Daemon
+profiles, offline queueing, Lucy-per-Workspace isolation, and single-Agent
+`PATCH /api/v1/agents/{id}` migration. Single-Agent migration follows the same
+fresh-session rule: changing `computer_id` closes its active provider sessions.
+
 ## 13. Configuration and deployment
 
 ### Remote Server

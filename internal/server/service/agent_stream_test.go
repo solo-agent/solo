@@ -353,5 +353,6 @@ func (noopBroadcaster) BroadcastToChannel(string, []byte)       {}
 func (noopBroadcaster) SendToUser(string, []byte)               {}
 func (noopBroadcaster) BroadcastToThread(string, []byte)        {}
 func (noopBroadcaster) Broadcast([]byte)                        {}
+func (noopBroadcaster) BroadcastToWorkspace(string, []byte)     {}
 
 var _ realtime.Broadcaster = noopBroadcaster{}

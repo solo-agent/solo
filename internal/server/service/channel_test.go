@@ -2,8 +2,56 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/google/uuid"
 )
+
+func TestOrdinaryChannelInheritsWorkspaceUsers(t *testing.T) {
+	pool := taskSubmitTestPool(t)
+	ctx := context.Background()
+	ownerID := taskSubmitUser(t, pool)
+	memberID := taskSubmitUser(t, pool)
+	workspaceID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO workspaces (id,name,created_by) VALUES ($1,$2,$3)`, workspaceID, "Channel inheritance "+workspaceID[:8], ownerID); err != nil {
+		t.Fatalf("create Workspace: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO workspace_members (workspace_id,user_id,role) VALUES ($1,$2,'owner'),($1,$3,'member')`, workspaceID, ownerID, memberID); err != nil {
+		t.Fatalf("create Workspace members: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM workspaces WHERE id=$1`, workspaceID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id IN ($1,$2)`, ownerID, memberID)
+	})
+
+	channelID, err := NewChannelService(pool).CreateChannelInWorkspace(
+		ctx, "inherited-"+workspaceID[:8], "", "channel", ownerID, workspaceID,
+	)
+	if err != nil {
+		t.Fatalf("CreateChannelInWorkspace: %v", err)
+	}
+
+	rows, err := pool.Query(ctx, `SELECT member_id::text,role FROM channel_members WHERE channel_id=$1 AND member_type='user'`, channelID)
+	if err != nil {
+		t.Fatalf("list inherited members: %v", err)
+	}
+	defer rows.Close()
+	roles := map[string]string{}
+	for rows.Next() {
+		var id, role string
+		if err := rows.Scan(&id, &role); err != nil {
+			t.Fatalf("scan inherited member: %v", err)
+		}
+		roles[id] = role
+	}
+	if roles[ownerID] != "owner" || roles[memberID] != "member" || len(roles) != 2 {
+		t.Fatalf("inherited roles = %#v", roles)
+	}
+	if _, err := NewChannelService(pool).RemoveMember(ctx, channelID, ownerID, memberID); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("RemoveMember inherited User error = %v, want %v", err, ErrPermissionDenied)
+	}
+}
 
 func TestListMembersHidesInactiveAgentMembers(t *testing.T) {
 	pool := taskSubmitTestPool(t)

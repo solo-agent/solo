@@ -27,6 +27,7 @@ import {
   userAvatarPresetValue,
 } from '@/components/ui/user-avatar';
 import { BudgetSettingsCard } from '@/components/budget/budget-settings-card';
+import { WorkspaceSettingsCard } from '@/components/workspaces/workspace-members-dialog';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -149,10 +150,11 @@ export default function SettingsPage() {
       <div className="mb-8">
         <div className="flex items-center gap-3">
           <div
+            data-testid="settings-page-icon"
             className="flex h-10 w-10 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm"
             style={{ transform: 'rotate(-3deg)' }}
           >
-            <User className="h-6 w-6 text-white" />
+            <User className="h-6 w-6 text-foreground" />
           </div>
           <div>
             <h1
@@ -378,6 +380,7 @@ export default function SettingsPage() {
           </div>
 
           <BudgetSettingsCard />
+          <WorkspaceSettingsCard />
 
           {/* Logout */}
           <div className="mt-6">

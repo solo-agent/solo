@@ -30,6 +30,7 @@ type MachineLock struct {
 	Hostname  string `json:"hostname"`
 	StartedAt string `json:"started_at"`
 	ServerURL string `json:"server_url,omitempty"`
+	lockDir   string
 }
 
 // defaultLockDir returns the default lock directory (~/.solo/daemon).
@@ -86,6 +87,7 @@ func AcquireLock(lockDir string, serverURL string) (*MachineLock, error) {
 		Hostname:  hostname,
 		StartedAt: time.Now().UTC().Format(time.RFC3339),
 		ServerURL: serverURL,
+		lockDir:   lockDir,
 	}
 
 	if err := writeLockFile(lockPath, l); err != nil {
@@ -99,7 +101,10 @@ func AcquireLock(lockDir string, serverURL string) (*MachineLock, error) {
 // when no lock file exists. If the lock file was written by a different
 // PID (e.g. after fork recovery), Release will not remove it.
 func (l *MachineLock) Release() error {
-	lockDir := defaultLockDir()
+	lockDir := l.lockDir
+	if lockDir == "" {
+		lockDir = defaultLockDir()
+	}
 	lockPath := filepath.Join(lockDir, "lock.json")
 
 	// Only remove if the lock still belongs to us.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
 )
 
 // Maximum number of search results allowed per page.
@@ -156,6 +157,7 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN users u ON m.sender_type = 'user' AND m.sender_id = u.id
 		LEFT JOIN agents a ON m.sender_type = 'agent' AND m.sender_id = a.id
 		WHERE m.is_deleted = false
+		  AND c.workspace_id = $6
 		  AND m.search_vector @@ sq.q
 		  AND ($2::uuid IS NULL OR m.channel_id = $2)
 		  AND ($3::timestamptz IS NULL OR m.created_at < $3)
@@ -163,7 +165,7 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 		LIMIT $4`
 
 	// Fetch limit+1 rows so we can detect has_more.
-	rows, err := h.pool.Query(r.Context(), query, q, channelID, cursorArg, limit+1, userID)
+	rows, err := h.pool.Query(r.Context(), query, q, channelID, cursorArg, limit+1, userID, serverworkspace.ID(r))
 	if err != nil {
 		slog.Error("search query failed", "error", err, "user_id", userID, "q", q)
 		writeError(w, http.StatusInternalServerError, "search failed")
@@ -244,13 +246,15 @@ func (h *SearchHandler) countApprox(r *http.Request, q string, channelID *uuid.U
 		)
 		SELECT COUNT(*)
 		FROM messages m
+		JOIN channels c ON c.id=m.channel_id
 		JOIN user_channel_ids uc ON m.channel_id = uc.channel_id
 		WHERE m.is_deleted = false
 		  AND m.search_vector @@ plainto_tsquery('simple', $1)
-		  AND ($2::uuid IS NULL OR m.channel_id = $2)`
+		  AND ($2::uuid IS NULL OR m.channel_id = $2)
+		  AND c.workspace_id = $4`
 
 	var count int
-	err := h.pool.QueryRow(r.Context(), countQuery, q, channelID, userID).Scan(&count)
+	err := h.pool.QueryRow(r.Context(), countQuery, q, channelID, userID, serverworkspace.ID(r)).Scan(&count)
 	if err != nil {
 		slog.Warn("failed to get search count approximation", "error", err)
 		return -1

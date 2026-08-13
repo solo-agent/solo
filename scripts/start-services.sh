@@ -81,7 +81,7 @@ else
     echo "Building server..."
     go build -o "$PID_DIR/server" ./cmd/server/
   fi
-  nohup env PORT="$SERVER_PORT" SOLO_DEV_AUTH_CODE="${SOLO_DEV_AUTH_CODE:-123456}" "$PID_DIR/server" > server.log 2>&1 &
+  nohup env PORT="$SERVER_PORT" SOLO_DEV_AUTH_CODE="${SOLO_DEV_AUTH_CODE:-123456}" SOLO_DEV_AUTO_VERIFY_LOCAL="${SOLO_DEV_AUTO_VERIFY_LOCAL:-true}" "$PID_DIR/server" > server.log 2>&1 &
   echo $! > "$PID_DIR/server.pid"
   STARTED_PIDS+=("$(cat "$PID_DIR/server.pid")")
   STARTED_PIDFILES+=("$PID_DIR/server.pid")

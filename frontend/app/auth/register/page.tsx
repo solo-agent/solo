@@ -77,11 +77,16 @@ export default function RegisterPage() {
     clearError();
     submittingRef.current = true;
     try {
-      await authRegister({
+      const localVerificationCode = await authRegister({
         email: data.email,
         password: data.password,
         display_name: data.displayName || data.email.split("@")[0],
       });
+      if (localVerificationCode) {
+        await verifyRegistration({ email: data.email, code: localVerificationCode });
+        router.push('/dashboard?lucy=1');
+        return;
+      }
       setPending(data);
       setResendIn(60);
       submittingRef.current = false;

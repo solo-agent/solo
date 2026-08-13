@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/solo-ai/solo/internal/server/service"
+	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
 )
 
 // ChannelHandler handles channel-related HTTP requests.
@@ -51,6 +52,7 @@ type UpdateChannelRequest struct {
 
 type ChannelResponse struct {
 	ID               string `json:"id"`
+	WorkspaceID      string `json:"workspace_id"`
 	Name             string `json:"name"`
 	Description      string `json:"description,omitempty"`
 	Type             string `json:"type"`
@@ -82,13 +84,13 @@ func (h *ChannelHandler) JoinByTarget(w http.ResponseWriter, r *http.Request) {
 	}
 	channelName := strings.TrimPrefix(req.Target, "#")
 	var channelID string
-	err := h.pool.QueryRow(r.Context(), `SELECT id FROM channels WHERE name = $1`, channelName).Scan(&channelID)
+	err := h.pool.QueryRow(r.Context(), `SELECT id FROM channels WHERE workspace_id = $1 AND name = $2 AND type = 'channel' AND is_archived = false`, serverworkspace.ID(r), channelName).Scan(&channelID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	}
 	_, err = h.pool.Exec(r.Context(),
-		`INSERT INTO channel_members (channel_id, member_type, member_id) VALUES ($1, 'agent', $2) ON CONFLICT DO NOTHING`,
+		`INSERT INTO channel_members (channel_id, member_type, member_id) VALUES ($1, 'user', $2) ON CONFLICT DO NOTHING`,
 		channelID, userID,
 	)
 	if err != nil {
@@ -111,7 +113,7 @@ func (h *ChannelHandler) ServerInfo(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.pool.Query(r.Context(),
 		`SELECT c.id, c.name, COALESCE(c.description,''), c.type,
 		 EXISTS(SELECT 1 FROM channel_members WHERE channel_id=c.id AND member_id=$1) as joined
-		 FROM channels c WHERE (c.type='channel' AND NOT c.is_archived) OR (c.type='dm' AND EXISTS(SELECT 1 FROM channel_members WHERE channel_id=c.id AND member_id=$1))`, userID)
+		 FROM channels c WHERE c.workspace_id=$2 AND ((c.type='channel' AND NOT c.is_archived) OR (c.type='dm' AND EXISTS(SELECT 1 FROM channel_members WHERE channel_id=c.id AND member_id=$1)))`, userID, serverworkspace.ID(r))
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -131,7 +133,8 @@ func (h *ChannelHandler) ServerInfo(w http.ResponseWriter, r *http.Request) {
 		  FROM agents
 		 WHERE is_active = true
 		   AND owner_id = $1
-	`, userID)
+		   AND home_channel_id IN (SELECT id FROM channels WHERE workspace_id = $2)
+	`, userID, serverworkspace.ID(r))
 	if err == nil {
 		defer rows2.Close()
 		for rows2.Next() {
@@ -172,6 +175,7 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if templateID != "" {
 		result, err := h.templates.CreateChannel(r.Context(), service.TemplateProvisionRequest{
 			OwnerID:     userID,
+			WorkspaceID: serverworkspace.ID(r),
 			TemplateID:  templateID,
 			ChannelName: name,
 			Description: req.Description,
@@ -193,6 +197,7 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusCreated, ChannelResponse{
 			ID:               result.ChannelID,
+			WorkspaceID:      serverworkspace.ID(r),
 			Name:             result.ChannelName,
 			Description:      req.Description,
 			Type:             "channel",
@@ -209,8 +214,8 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT EXISTS(
 			SELECT 1 FROM channels
-			WHERE name = $1 AND type = 'channel' AND is_archived = false
-		)`, name,
+			WHERE workspace_id = $1 AND name = $2 AND type = 'channel' AND is_archived = false
+		)`, serverworkspace.ID(r), name,
 	).Scan(&exists)
 	if err != nil {
 		slog.Error("failed to check channel name", "error", err)
@@ -234,10 +239,10 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var channelID string
 	var createdAt, updatedAt time.Time
 	err = tx.QueryRow(r.Context(),
-		`INSERT INTO channels (name, description, type, created_by)
-		 VALUES ($1, $2, 'channel', $3)
+		`INSERT INTO channels (workspace_id, name, description, type, created_by)
+		 VALUES ($1, $2, $3, 'channel', $4)
 		 RETURNING id, created_at, updated_at`,
-		name, req.Description, userID,
+		serverworkspace.ID(r), name, req.Description, userID,
 	).Scan(&channelID, &createdAt, &updatedAt)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -249,11 +254,16 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Add creator as owner member
+	// Ordinary Channels inherit every active Workspace User. Agents, Lucy, and
+	// DMs keep their explicit per-Channel memberships.
 	_, err = tx.Exec(r.Context(),
 		`INSERT INTO channel_members (channel_id, member_type, member_id, role)
-		 VALUES ($1, 'user', $2, 'owner')`,
-		channelID, userID,
+		 SELECT $1, 'user', wm.user_id,
+		        CASE WHEN wm.user_id = $3 THEN 'owner' ELSE 'member' END
+		   FROM workspace_members wm
+		   JOIN users u ON u.id = wm.user_id AND u.is_active = true
+		  WHERE wm.workspace_id = $2`,
+		channelID, serverworkspace.ID(r), userID,
 	)
 	if err != nil {
 		slog.Error("failed to add creator as channel member", "error", err)
@@ -271,6 +281,7 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusCreated, ChannelResponse{
 		ID:          channelID,
+		WorkspaceID: serverworkspace.ID(r),
 		Name:        name,
 		Description: req.Description,
 		Type:        "channel",
@@ -307,6 +318,7 @@ func (h *ChannelHandler) ApplyTemplate(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.templates.ApplyToChannel(r.Context(), service.TemplateProvisionRequest{
 		OwnerID:         userID,
+		WorkspaceID:     serverworkspace.ID(r),
 		TemplateID:      req.TemplateID,
 		TargetChannelID: channelID,
 		Locale:          req.Locale,
@@ -340,13 +352,13 @@ func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.pool.Query(r.Context(),
-		`SELECT c.id, c.name, COALESCE(c.description, ''), c.type, c.created_by,
+		`SELECT c.id, c.workspace_id::text, c.name, COALESCE(c.description, ''), c.type, c.created_by,
 		        c.is_archived, COALESCE(c.source_template_id, ''), c.created_at, c.updated_at
 		 FROM channels c
 		 JOIN channel_members cm ON cm.channel_id = c.id
-		 WHERE cm.member_type = 'user' AND cm.member_id = $1 AND c.is_archived = false AND c.type = 'channel'
+		 WHERE cm.member_type = 'user' AND cm.member_id = $1 AND c.workspace_id = $2 AND c.is_archived = false AND c.type = 'channel'
 		 ORDER BY c.created_at DESC`,
-		userID,
+		userID, serverworkspace.ID(r),
 	)
 	if err != nil {
 		slog.Error("failed to query channels", "error", err)
@@ -359,7 +371,7 @@ func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var ch ChannelResponse
 		var createdAt, updatedAt time.Time
-		err := rows.Scan(&ch.ID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
+		err := rows.Scan(&ch.ID, &ch.WorkspaceID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
 			&ch.IsArchived, &ch.SourceTemplateID, &createdAt, &updatedAt)
 		if err != nil {
 			slog.Error("failed to scan channel row", "error", err)
@@ -385,7 +397,7 @@ func (h *ChannelHandler) GetLucy(w http.ResponseWriter, r *http.Request) {
 	var ch ChannelResponse
 	var createdAt, updatedAt time.Time
 	err := h.pool.QueryRow(r.Context(), `
-		SELECT c.id, c.name, COALESCE(c.description, ''), c.type, c.created_by,
+		SELECT c.id, c.workspace_id::text, c.name, COALESCE(c.description, ''), c.type, c.created_by,
 		       c.is_archived, COALESCE(c.source_template_id, ''), c.created_at, c.updated_at
 		  FROM channels c
 		  JOIN channel_members cm
@@ -393,6 +405,7 @@ func (h *ChannelHandler) GetLucy(w http.ResponseWriter, r *http.Request) {
 		   AND cm.member_type = 'user'
 		   AND cm.member_id = $1
 	 WHERE c.type = 'lucy'
+	   AND c.workspace_id = $2
 	   AND c.is_archived = false
 	 ORDER BY EXISTS (
 	              SELECT 1
@@ -404,8 +417,8 @@ func (h *ChannelHandler) GetLucy(w http.ResponseWriter, r *http.Request) {
 	          ) DESC,
 	          c.created_at ASC
 	 LIMIT 1
-	`, userID).Scan(
-		&ch.ID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
+	`, userID, serverworkspace.ID(r)).Scan(
+		&ch.ID, &ch.WorkspaceID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
 		&ch.IsArchived, &ch.SourceTemplateID, &createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -439,9 +452,9 @@ func (h *ChannelHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var isMember bool
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT EXISTS(
-			SELECT 1 FROM channel_members
-			WHERE channel_id = $1 AND member_type = 'user' AND member_id = $2
-		)`, channelID, userID,
+			SELECT 1 FROM channel_members cm JOIN channels c ON c.id = cm.channel_id
+			WHERE cm.channel_id = $1 AND cm.member_type = 'user' AND cm.member_id = $2 AND c.workspace_id = $3
+		)`, channelID, userID, serverworkspace.ID(r),
 	).Scan(&isMember)
 	if err != nil {
 		slog.Error("failed to check membership", "error", err)
@@ -456,11 +469,11 @@ func (h *ChannelHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var ch ChannelResponse
 	var createdAt, updatedAt time.Time
 	err = h.pool.QueryRow(r.Context(),
-		`SELECT id, name, COALESCE(description, ''), type, created_by,
+		`SELECT id, workspace_id::text, name, COALESCE(description, ''), type, created_by,
 		        is_archived, COALESCE(source_template_id, ''), created_at, updated_at
-		 FROM channels WHERE id = $1 AND is_archived = false`,
-		channelID,
-	).Scan(&ch.ID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
+		 FROM channels WHERE id = $1 AND workspace_id = $2 AND is_archived = false`,
+		channelID, serverworkspace.ID(r),
+	).Scan(&ch.ID, &ch.WorkspaceID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
 		&ch.IsArchived, &ch.SourceTemplateID, &createdAt, &updatedAt)
 	if err != nil {
 		if isNotFound(err) {
@@ -496,9 +509,9 @@ func (h *ChannelHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var isMember bool
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT EXISTS(
-			SELECT 1 FROM channel_members
-			WHERE channel_id = $1 AND member_type = 'user' AND member_id = $2
-		)`, channelID, userID,
+			SELECT 1 FROM channel_members cm JOIN channels c ON c.id = cm.channel_id
+			WHERE cm.channel_id = $1 AND cm.member_type = 'user' AND cm.member_id = $2 AND c.workspace_id = $3
+		)`, channelID, userID, serverworkspace.ID(r),
 	).Scan(&isMember)
 	if err != nil {
 		slog.Error("failed to check membership", "error", err)
@@ -533,8 +546,8 @@ func (h *ChannelHandler) Update(w http.ResponseWriter, r *http.Request) {
 		err := h.pool.QueryRow(r.Context(),
 			`SELECT EXISTS(
 				SELECT 1 FROM channels
-				WHERE name = $1 AND type = 'channel' AND is_archived = false AND id != $2
-			)`, name, channelID,
+					WHERE workspace_id = $1 AND name = $2 AND type = 'channel' AND is_archived = false AND id != $3
+				)`, serverworkspace.ID(r), name, channelID,
 		).Scan(&exists)
 		if err != nil {
 			slog.Error("failed to check channel name", "error", err)
@@ -555,11 +568,11 @@ func (h *ChannelHandler) Update(w http.ResponseWriter, r *http.Request) {
 			name = COALESCE($1, name),
 			description = COALESCE($2, description),
 			updated_at = now()
-		 WHERE id = $3 AND is_archived = false
-		 RETURNING id, name, COALESCE(description, ''), type, created_by,
-		           is_archived, COALESCE(source_template_id, ''), created_at, updated_at`,
-		req.Name, req.Description, channelID,
-	).Scan(&ch.ID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
+			 WHERE id = $3 AND workspace_id = $4 AND is_archived = false
+			 RETURNING id, workspace_id::text, name, COALESCE(description, ''), type, created_by,
+			           is_archived, COALESCE(source_template_id, ''), created_at, updated_at`,
+		req.Name, req.Description, channelID, serverworkspace.ID(r),
+	).Scan(&ch.ID, &ch.WorkspaceID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
 		&ch.IsArchived, &ch.SourceTemplateID, &createdAt, &updatedAt)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -609,13 +622,14 @@ func (h *ChannelHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			  FROM channels c
 			  JOIN channel_members cm ON cm.channel_id = c.id
 			 WHERE c.id = $1
+			   AND c.workspace_id = $3
 			   AND c.type = 'channel'
 			   AND c.is_archived = false
 			   AND cm.member_type = 'user'
 			   AND cm.member_id = $2
 			   AND cm.role IN ('owner', 'admin')
 		)
-	`, channelID, userID).Scan(&canDelete)
+	`, channelID, userID, serverworkspace.ID(r)).Scan(&canDelete)
 	if err != nil || !canDelete {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return

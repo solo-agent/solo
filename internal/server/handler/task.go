@@ -16,6 +16,7 @@ import (
 	"github.com/solo-ai/solo/internal/i18n"
 	"github.com/solo-ai/solo/internal/realtime"
 	"github.com/solo-ai/solo/internal/server/service"
+	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
 	"github.com/solo-ai/solo/internal/server/ws"
 )
 
@@ -1100,7 +1101,7 @@ func (h *TaskHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 	channelID := r.URL.Query().Get("channel_id")
 	creatorID := r.URL.Query().Get("creator_id")
 
-	tasks, err := h.svc.ListAllUserTasks(r.Context(), userID, channelID, status, claimerID, creatorID)
+	tasks, err := h.svc.ListAllUserTasks(r.Context(), userID, channelID, status, claimerID, creatorID, serverworkspace.ID(r))
 	if err != nil {
 		slog.Error("failed to list all tasks", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list tasks")
@@ -1129,6 +1130,16 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.Title) > 500 {
 		writeError(w, http.StatusBadRequest, "task title exceeds maximum length of 500 characters")
+		return
+	}
+	var channelAllowed bool
+	if err := h.pool.QueryRow(r.Context(), `
+		SELECT EXISTS(
+			SELECT 1 FROM channels c
+			JOIN channel_members cm ON cm.channel_id=c.id
+			WHERE c.id=$1 AND c.workspace_id=$2 AND cm.member_id=$3
+		)`, req.ChannelID, serverworkspace.ID(r), userID).Scan(&channelAllowed); err != nil || !channelAllowed {
+		writeError(w, http.StatusForbidden, "not a Channel member in this Workspace")
 		return
 	}
 

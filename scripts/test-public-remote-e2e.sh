@@ -27,6 +27,7 @@ SMTP_PORT="$SMTP_PORT" \
 SMTP_FROM='Solo <noreply@solo.local>' \
 SMTP_TLS=starttls \
 SOLO_DEV_AUTH_CODE=123456 \
+SOLO_DEV_AUTO_VERIFY_LOCAL=false \
 make rebuild
 
 cd "$ROOT/frontend"

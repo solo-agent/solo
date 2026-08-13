@@ -45,6 +45,13 @@ type Member struct {
 
 // CreateChannel creates a new channel and adds the creator as an owner member.
 func (s *ChannelService) CreateChannel(ctx context.Context, name, description, channelType, createdBy string) (string, error) {
+	return s.CreateChannelInWorkspace(ctx, name, description, channelType, createdBy, "00000000-0000-0000-0000-000000000001")
+}
+
+// CreateChannelInWorkspace creates a Channel in one logical Workspace.
+// Ordinary Channels inherit all active Workspace Users; Lucy and other
+// participant-scoped Channel types keep only their creator.
+func (s *ChannelService) CreateChannelInWorkspace(ctx context.Context, name, description, channelType, createdBy, workspaceID string) (string, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -57,8 +64,8 @@ func (s *ChannelService) CreateChannel(ctx context.Context, name, description, c
 		err := tx.QueryRow(ctx,
 			`SELECT EXISTS(
 				SELECT 1 FROM channels
-				WHERE name = $1 AND type = 'channel' AND is_archived = false
-			)`, name,
+				WHERE workspace_id = $2 AND name = $1 AND type = 'channel' AND is_archived = false
+			)`, name, workspaceID,
 		).Scan(&exists)
 		if err != nil {
 			return "", err
@@ -70,21 +77,34 @@ func (s *ChannelService) CreateChannel(ctx context.Context, name, description, c
 
 	var channelID string
 	err = tx.QueryRow(ctx,
-		`INSERT INTO channels (name, description, type, created_by)
-		 VALUES ($1, $2, $3, $4)
+		`INSERT INTO channels (workspace_id, name, description, type, created_by)
+		 VALUES ($1, $2, $3, $4, $5)
 		 RETURNING id`,
-		name, description, channelType, createdBy,
+		workspaceID, name, description, channelType, createdBy,
 	).Scan(&channelID)
 	if err != nil {
 		return "", err
 	}
 
-	// Add creator as owner
-	_, err = tx.Exec(ctx,
-		`INSERT INTO channel_members (channel_id, member_type, member_id, role)
-		 VALUES ($1, 'user', $2, 'owner')`,
-		channelID, createdBy,
-	)
+	if channelType == "channel" {
+		_, err = tx.Exec(ctx, `
+			INSERT INTO channel_members (channel_id, member_type, member_id, role)
+			SELECT $1, 'user', inherited.user_id,
+			       CASE WHEN inherited.user_id = $3::uuid THEN 'owner' ELSE 'member' END
+			  FROM (
+			       SELECT wm.user_id
+			         FROM workspace_members wm
+			         JOIN users u ON u.id=wm.user_id AND u.is_active=true
+			        WHERE wm.workspace_id=$2
+			       UNION SELECT $3::uuid
+			  ) inherited`, channelID, workspaceID, createdBy)
+	} else {
+		_, err = tx.Exec(ctx,
+			`INSERT INTO channel_members (channel_id, member_type, member_id, role)
+			 VALUES ($1, 'user', $2, 'owner')`,
+			channelID, createdBy,
+		)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -132,7 +152,12 @@ func (s *ChannelService) AddMember(ctx context.Context, channelID, requesterID, 
 	case "user":
 		var userExists bool
 		err = s.pool.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND is_active = true)`, memberID,
+			`SELECT EXISTS(
+				SELECT 1 FROM users u
+				JOIN workspace_members wm ON wm.user_id=u.id
+				JOIN channels c ON c.workspace_id=wm.workspace_id
+				WHERE u.id=$1 AND c.id=$2 AND u.is_active=true
+			)`, memberID, channelID,
 		).Scan(&userExists)
 		if err != nil {
 			return err
@@ -141,20 +166,24 @@ func (s *ChannelService) AddMember(ctx context.Context, channelID, requesterID, 
 			return ErrUserNotFound
 		}
 	case "agent":
-		var agentOwnerID, homeChannelID, kind string
+		var kind string
 		err = s.pool.QueryRow(ctx,
-			`SELECT owner_id, home_channel_id, kind
-			   FROM agents
-			  WHERE id = $1 AND is_active = true`, memberID,
-		).Scan(&agentOwnerID, &homeChannelID, &kind)
+			`SELECT a.kind
+			   FROM agents a
+			   JOIN channels home ON home.id=a.home_channel_id
+			   JOIN channels target ON target.id=$2
+			   JOIN workspace_members wm ON wm.workspace_id=target.workspace_id AND wm.user_id=a.owner_id
+			  WHERE a.id=$1 AND a.is_active=true AND home.workspace_id=target.workspace_id`, memberID, channelID,
+		).Scan(&kind)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrAgentNotFound
 			}
 			return err
 		}
-		// Verify the agent belongs to the requesting user
-		if agentOwnerID != requesterID || kind != "agent" || homeChannelID != channelID {
+		// Any ordinary Agent owned by a member of this Workspace can join.
+		// Runtime secrets remain owner-only in the Agent API.
+		if kind != "agent" {
 			return ErrAgentNotFound
 		}
 	}
@@ -199,6 +228,21 @@ func (s *ChannelService) RemoveMember(ctx context.Context, channelID, requesterI
 		}
 		return "", err
 	}
+	if memberType == "user" {
+		var inherited bool
+		if err := s.pool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				  FROM channels c
+				  JOIN workspace_members wm ON wm.workspace_id=c.workspace_id
+				 WHERE c.id=$1 AND c.type='channel' AND wm.user_id=$2
+			)`, channelID, memberID).Scan(&inherited); err != nil {
+			return "", err
+		}
+		if inherited {
+			return "", ErrPermissionDenied
+		}
+	}
 
 	// Check permissions
 	if memberID != requesterID {
@@ -226,6 +270,14 @@ func (s *ChannelService) RemoveMember(ctx context.Context, channelID, requesterI
 	}
 
 	if memberType == "agent" {
+		var homeChannelID string
+		if err := s.pool.QueryRow(ctx, `SELECT home_channel_id::text FROM agents WHERE id=$1`, memberID).Scan(&homeChannelID); err != nil {
+			return "", ErrMemberNotFound
+		}
+		if homeChannelID != channelID {
+			_, err = s.pool.Exec(ctx, `DELETE FROM channel_members WHERE channel_id=$1 AND member_type='agent' AND member_id=$2`, channelID, memberID)
+			return memberType, err
+		}
 		tx, txErr := s.pool.Begin(ctx)
 		if txErr != nil {
 			return "", txErr
@@ -321,6 +373,11 @@ func (s *ChannelService) RemoveMember(ctx context.Context, channelID, requesterI
 	return memberType, err
 }
 
+func (s *ChannelService) IsAgentHomeChannel(ctx context.Context, channelID, agentID string) bool {
+	var matches bool
+	return s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agents WHERE id=$1 AND home_channel_id=$2)`, agentID, channelID).Scan(&matches) == nil && matches
+}
+
 // ListMembers returns all members of a channel.
 func (s *ChannelService) ListMembers(ctx context.Context, channelID, requesterID string) ([]Member, error) {
 	// Verify requester is a member of the channel
@@ -391,8 +448,12 @@ func (s *ChannelService) IsChannelMember(ctx context.Context, channelID, userID 
 
 // ResolveChannelName looks up a channel ID by its name.
 func (s *ChannelService) ResolveChannelName(ctx context.Context, name string) (string, bool) {
+	return s.ResolveChannelNameInWorkspace(ctx, name, "00000000-0000-0000-0000-000000000001")
+}
+
+func (s *ChannelService) ResolveChannelNameInWorkspace(ctx context.Context, name, workspaceID string) (string, bool) {
 	var id string
-	err := s.pool.QueryRow(ctx, `SELECT id FROM channels WHERE name = $1`, name).Scan(&id)
+	err := s.pool.QueryRow(ctx, `SELECT id FROM channels WHERE workspace_id=$2 AND name = $1 AND is_archived=false`, name, workspaceID).Scan(&id)
 	if err != nil {
 		return "", false
 	}

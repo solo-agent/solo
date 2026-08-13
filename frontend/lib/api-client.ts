@@ -77,6 +77,17 @@ export interface ApiResponseBody<T = unknown> {
 
 const STORAGE_KEY_ACCESS_TOKEN = 'access_token';
 const STORAGE_KEY_REFRESH_TOKEN = 'refresh_token';
+const STORAGE_KEY_ACTIVE_WORKSPACE = 'solo_active_workspace_id';
+export const PUBLIC_WORKSPACE_ID = '00000000-0000-0000-0000-000000000001';
+
+export function getActiveWorkspaceId(): string {
+  if (typeof window === 'undefined') return PUBLIC_WORKSPACE_ID;
+  return localStorage.getItem(STORAGE_KEY_ACTIVE_WORKSPACE) || PUBLIC_WORKSPACE_ID;
+}
+
+export function setStoredActiveWorkspaceId(workspaceId: string): void {
+  localStorage.setItem(STORAGE_KEY_ACTIVE_WORKSPACE, workspaceId);
+}
 
 /** 默认的 localStorage token 读取/写入函数 */
 export const defaultTokenStorage = {
@@ -215,6 +226,7 @@ export class ApiClient {
     // 自动附加 JWT token
     if (accessToken) {
       headers['Authorization'] = `Bearer ${accessToken}`;
+      headers['X-Workspace-ID'] = getActiveWorkspaceId();
     }
 
     // 自动设置 Content-Type（非 FormData 时）
@@ -242,6 +254,7 @@ export class ApiClient {
       if (newToken) {
         // 重试原请求（仅重试一次，避免死循环）
         headers['Authorization'] = `Bearer ${newToken}`;
+        headers['X-Workspace-ID'] = getActiveWorkspaceId();
         return fetch(url, { ...options, headers });
       }
 

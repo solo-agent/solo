@@ -73,6 +73,7 @@ docs/releases/*
 docs/design/*
 !docs/design/remote-runtime-architecture.md
 !docs/design/public-remote-product-architecture.md
+!docs/design/workspace-multi-daemon-architecture.md
 *.bak
 *.bak2
 .playwright-cli/
@@ -87,4 +88,5 @@ frontend/e2e/
 !frontend/e2e/*.spec.ts
 !frontend/e2e/support/
 !frontend/e2e/support/*.ts
+!frontend/e2e/workspace-multi-daemon.spec.ts
 videos/

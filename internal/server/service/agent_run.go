@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
 	agentruntime "github.com/solo-ai/solo/pkg/agent"
 )
 
@@ -683,6 +684,7 @@ func (s *AgentRunService) ListActiveRunsForUser(ctx context.Context, userID stri
 	}
 	rows, err := s.pool.Query(ctx, baseAgentRunSelect()+`
 		 WHERE r.status = ANY($1)
+		   AND EXISTS (SELECT 1 FROM channels wc WHERE wc.id = r.channel_id AND ($3 = '' OR wc.workspace_id::text = $3))
 		   AND (
 		     a.owner_id = $2
 		     OR EXISTS (
@@ -703,7 +705,7 @@ func (s *AgentRunService) ListActiveRunsForUser(ctx context.Context, userID stri
 			string(AgentRunStatusWaitingInput),
 			string(AgentRunStatusWaitingApproval),
 		},
-		userID,
+		userID, serverworkspace.FilterID(ctx),
 	)
 	return s.scanAndHydrateAgentRuns(ctx, rows, err)
 }
@@ -772,8 +774,30 @@ func (s *AgentRunService) UserCanAccessTask(ctx context.Context, userID, taskID 
 
 func (s *AgentRunService) ListRecentRuns(ctx context.Context) ([]AgentRun, error) {
 	rows, err := s.pool.Query(ctx, baseAgentRunSelect()+`
+		 WHERE EXISTS (SELECT 1 FROM channels wc WHERE wc.id = r.channel_id AND ($1 = '' OR wc.workspace_id::text = $1))
 		 ORDER BY r.updated_at DESC
-		 LIMIT 100`)
+		 LIMIT 100`, serverworkspace.FilterID(ctx))
+	return s.scanAndHydrateAgentRuns(ctx, rows, err)
+}
+
+func (s *AgentRunService) ListRecentRunsForUser(ctx context.Context, userID string) ([]AgentRun, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id is required")
+	}
+	rows, err := s.pool.Query(ctx, baseAgentRunSelect()+`
+		 WHERE EXISTS (SELECT 1 FROM channels wc WHERE wc.id = r.channel_id AND ($1 = '' OR wc.workspace_id::text = $1))
+		   AND (
+		     a.owner_id = $2
+		     OR EXISTS (
+		       SELECT 1 FROM channel_members cm
+		        WHERE cm.channel_id = r.channel_id
+		          AND cm.member_type = 'user'
+		          AND cm.member_id = $2
+		     )
+		   )
+		 ORDER BY r.updated_at DESC
+		 LIMIT 100`, serverworkspace.FilterID(ctx), userID)
 	return s.scanAndHydrateAgentRuns(ctx, rows, err)
 }
 
@@ -1035,7 +1059,7 @@ func scanAgentRuns(rows pgx.Rows, err error) ([]AgentRun, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var runs []AgentRun
+	runs := make([]AgentRun, 0)
 	for rows.Next() {
 		run, err := scanAgentRun(rows)
 		if err != nil {

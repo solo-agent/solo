@@ -1296,8 +1296,8 @@ func runPayload(run *AgentRun, agentID, agentName, taskID string) map[string]any
 	return payload
 }
 
-func (s *AgentService) broadcastAgentRun(_ string, eventType string, payload map[string]any) {
-	s.hub.Broadcast(realtime.Envelope(eventType, payload))
+func (s *AgentService) broadcastAgentRun(channelID string, eventType string, payload map[string]any) {
+	s.hub.BroadcastToChannel(channelID, realtime.Envelope(eventType, payload))
 }
 
 func (s *AgentService) appendAndBroadcastRunEvent(ctx context.Context, runSvc *AgentRunService, run *AgentRun, agentID, agentName, eventType, message, toolName string, payload any) {
@@ -1315,7 +1315,7 @@ func (s *AgentService) appendAndBroadcastRunEvent(ctx context.Context, runSvc *A
 		slog.Warn("failed to append agent run event", "run_id", run.ID, "event_type", eventType, "error", err)
 		return
 	}
-	s.hub.Broadcast(realtime.Envelope("agent.run.event", map[string]any{
+	s.hub.BroadcastToChannel(run.ChannelID, realtime.Envelope("agent.run.event", map[string]any{
 		"id":               event.ID,
 		"run_id":           run.ID,
 		"session_id":       run.SessionID,

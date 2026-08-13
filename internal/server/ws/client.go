@@ -27,10 +27,11 @@ const (
 
 // Client represents a single WebSocket connection.
 type Client struct {
-	hub    *Hub
-	conn   *websocket.Conn
-	send   chan []byte
-	userID string
+	hub         *Hub
+	conn        *websocket.Conn
+	send        chan []byte
+	userID      string
+	workspaceID string
 
 	// Subscribed channel IDs
 	channels map[string]bool
@@ -40,14 +41,19 @@ type Client struct {
 }
 
 // NewClient creates a new Client.
-func NewClient(hub *Hub, conn *websocket.Conn, userID string) *Client {
+func NewClient(hub *Hub, conn *websocket.Conn, userID string, workspaceIDs ...string) *Client {
+	workspaceID := "00000000-0000-0000-0000-000000000001"
+	if len(workspaceIDs) > 0 && workspaceIDs[0] != "" {
+		workspaceID = workspaceIDs[0]
+	}
 	return &Client{
-		hub:      hub,
-		conn:     conn,
-		send:     make(chan []byte, 256),
-		userID:   userID,
-		channels: make(map[string]bool),
-		threads:  make(map[string]bool),
+		hub:         hub,
+		conn:        conn,
+		send:        make(chan []byte, 256),
+		userID:      userID,
+		workspaceID: workspaceID,
+		channels:    make(map[string]bool),
+		threads:     make(map[string]bool),
 	}
 }
 
@@ -159,7 +165,9 @@ func (c *Client) handleMessage(msg realtime.WSMessage) {
 			c.sendError("INVALID_PAYLOAD", "channel_id is required")
 			return
 		}
-		c.hub.Subscribe(c, payload.ChannelID)
+		if !c.hub.Subscribe(c, payload.ChannelID) {
+			c.sendError("FORBIDDEN", "Channel access denied")
+		}
 
 	case EventUnsubscribe:
 		var payload UnsubscribePayload
@@ -191,7 +199,9 @@ func (c *Client) handleMessage(msg realtime.WSMessage) {
 			c.sendError("INVALID_PAYLOAD", "invalid channel.join payload")
 			return
 		}
-		c.hub.Subscribe(c, payload.ChannelID)
+		if !c.hub.Subscribe(c, payload.ChannelID) {
+			c.sendError("FORBIDDEN", "Channel access denied")
+		}
 
 	case EventChannelLeave:
 		var payload UnsubscribePayload
@@ -219,7 +229,9 @@ func (c *Client) handleMessage(msg realtime.WSMessage) {
 			c.sendError("INVALID_PAYLOAD", "thread_id is required")
 			return
 		}
-		c.hub.SubscribeThread(c, payload.ThreadID)
+		if !c.hub.SubscribeThread(c, payload.ThreadID) {
+			c.sendError("FORBIDDEN", "Thread access denied")
+		}
 
 	case EventThreadUnsubscribe:
 		var payload ThreadUnsubscribePayload
@@ -244,7 +256,9 @@ func (c *Client) handleMessage(msg realtime.WSMessage) {
 			return
 		}
 		slog.Info("ws: dm.subscribe received", "dm_id", payload.DMChannelID, "user_id", c.userID)
-		c.hub.Subscribe(c, payload.DMChannelID)
+		if !c.hub.Subscribe(c, payload.DMChannelID) {
+			c.sendError("FORBIDDEN", "DM access denied")
+		}
 
 	case EventDMUnsubscribe:
 		var payload DMUnsubscribePayload

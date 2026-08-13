@@ -107,6 +107,7 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 	artifactHandler := handler.NewArtifactHandler(artifactSvc)
 	artifactHandler.SetTaskBroadcaster(taskSvc, hub)
 	onboardingHandler := handler.NewOnboardingHandler(pool, agentSvc)
+	workspaceHandler := handler.NewWorkspaceHandler(pool, dm)
 	go automationSvc.Start(ctx)
 
 	// Attachment handler
@@ -165,10 +166,19 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 		r.Post("/refresh", authHandler.Refresh)
 	})
 
+	// Scoped, read-only Guest links use their own revocable credentials and
+	// never enter the authenticated user/Agent middleware path.
+	r.Route("/api/v1/guest", func(r chi.Router) {
+		r.Use(middleware.RateLimiter(60.0/60.0, 30))
+		r.Get("/embed", workspaceHandler.GuestEmbed)
+		r.Get("/channels/{channelID}/messages", workspaceHandler.GuestMessages)
+	})
+
 	// ---- Protected routes (rate-limited: 100 req/s) ----
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(pool))
 		r.Use(middleware.RateLimiter(100, 100))
+		r.Use(middleware.WorkspaceScope(pool))
 
 		// Auth logout requires authentication
 		r.Post("/api/v1/auth/logout", authHandler.Logout)
@@ -176,6 +186,35 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 		// User routes
 		r.Get("/api/v1/users/me", authHandler.CurrentUser)
 		r.Patch("/api/v1/users/me", authHandler.UpdateCurrentUser)
+		r.Route("/api/v1/workspaces", func(r chi.Router) {
+			r.Get("/", workspaceHandler.List)
+			r.Post("/", workspaceHandler.Create)
+			r.Route("/{workspaceID}", func(r chi.Router) {
+				r.Patch("/", workspaceHandler.Update)
+				r.Delete("/", workspaceHandler.Delete)
+				r.Route("/members", func(r chi.Router) {
+					r.Get("/", workspaceHandler.Members)
+					r.Post("/", workspaceHandler.AddMember)
+					r.Patch("/{userID}", workspaceHandler.UpdateMember)
+					r.Delete("/{userID}", workspaceHandler.RemoveMember)
+				})
+				r.Route("/invitations", func(r chi.Router) {
+					r.Get("/", workspaceHandler.Invitations)
+					r.Delete("/{invitationID}", workspaceHandler.DeleteInvitation)
+				})
+				r.Route("/join-rules", func(r chi.Router) {
+					r.Get("/", workspaceHandler.JoinRules)
+					r.Post("/", workspaceHandler.AddJoinRule)
+					r.Delete("/{ruleID}", workspaceHandler.DeleteJoinRule)
+				})
+				r.Route("/embed", func(r chi.Router) {
+					r.Get("/", workspaceHandler.EmbedSettings)
+					r.Put("/", workspaceHandler.UpdateEmbedSettings)
+					r.Post("/tokens", workspaceHandler.CreateGuestToken)
+					r.Delete("/tokens/{tokenID}", workspaceHandler.RevokeGuestToken)
+				})
+			})
+		})
 		r.Get("/api/v1/users/me/budget", budgetHandler.GetCurrentUser)
 		r.Put("/api/v1/users/me/budget", budgetHandler.SaveCurrentUser)
 		// Channel routes
@@ -278,6 +317,7 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 
 		// Agent routes
 		r.Route("/api/v1/agents", func(r chi.Router) {
+			r.Get("/", agentHandler.ListWorkspace)
 			r.Route("/{agentID}", func(r chi.Router) {
 				r.Get("/", agentHandler.Get)
 				r.Patch("/", agentHandler.Update)

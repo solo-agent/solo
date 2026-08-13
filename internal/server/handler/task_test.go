@@ -24,6 +24,7 @@ func (b *testBroadcaster) BroadcastToChannel(channelID string, message []byte)  
 func (b *testBroadcaster) BroadcastToThread(threadID string, message []byte)          {}
 func (b *testBroadcaster) SendToUser(userID string, message []byte)                   {}
 func (b *testBroadcaster) Broadcast(message []byte)                                   {}
+func (b *testBroadcaster) BroadcastToWorkspace(workspaceID string, message []byte)    {}
 
 var _ realtime.Broadcaster = (*testBroadcaster)(nil)
 
@@ -311,7 +312,8 @@ func (b *spyBroadcaster) SendToUser(userID string, message []byte) {
 	b.userMessages[userID] = append(b.userMessages[userID], message)
 }
 
-func (b *spyBroadcaster) Broadcast(message []byte) {}
+func (b *spyBroadcaster) Broadcast(message []byte)                                {}
+func (b *spyBroadcaster) BroadcastToWorkspace(workspaceID string, message []byte) {}
 
 var _ realtime.Broadcaster = (*spyBroadcaster)(nil)
 

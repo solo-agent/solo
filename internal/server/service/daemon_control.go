@@ -123,6 +123,14 @@ func (dm *DaemonManager) ServeControlConnection(ctx context.Context, conn *webso
 	if old != nil {
 		old.replace()
 	}
+	// MarkConnected happens before registration. Refresh after registration so
+	// this new connection wins if the replaced connection disconnects between
+	// those two steps and marks the Computer offline.
+	if err := computers.UpdateRemoteHeartbeat(ctx, computerID, hello.AgentIDs, hello.RuntimeInventory); err != nil {
+		control.close()
+		dm.unregisterControlConnectionAndMarkOffline(control, computers)
+		return err
+	}
 	slog.Info("daemon control ready", "computer_id", computerID, "daemon_id", hello.DaemonID, "connection_id", control.ID)
 	metrics.Global.IncDaemonConnects()
 	dm.Register(&DaemonInfo{
@@ -136,7 +144,7 @@ func (dm *DaemonManager) ServeControlConnection(ctx context.Context, conn *webso
 	go func() { writeErr <- control.writePump() }()
 	readErr := control.readPump(ctx, dm, computers)
 	control.close()
-	dm.unregisterControlConnection(control)
+	dm.unregisterControlConnectionAndMarkOffline(control, computers)
 	select {
 	case err := <-writeErr:
 		if readErr == nil {
@@ -157,11 +165,31 @@ func (dm *DaemonManager) registerControlConnection(control *DaemonControlConnect
 	return old
 }
 
-func (dm *DaemonManager) unregisterControlConnection(control *DaemonControlConnection) {
+func (dm *DaemonManager) unregisterControlConnection(control *DaemonControlConnection) bool {
 	dm.controlMu.Lock()
 	defer dm.controlMu.Unlock()
-	if dm.controlConnections[control.ComputerID] != control {
+	return dm.unregisterControlConnectionLocked(control)
+}
+
+func (dm *DaemonManager) unregisterControlConnectionAndMarkOffline(control *DaemonControlConnection, computers *ComputerService) {
+	dm.controlMu.Lock()
+	defer dm.controlMu.Unlock()
+	if !dm.unregisterControlConnectionLocked(control) {
 		return
+	}
+	// Keep this update inside controlMu. A replacement connection may have
+	// authenticated already, but it cannot register until this transition is
+	// persisted; its post-registration heartbeat then restores online status.
+	disconnectCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := computers.MarkControlDisconnected(disconnectCtx, control.ComputerID); err != nil && !errors.Is(err, ErrNotFound) {
+		slog.Warn("mark daemon control disconnected", "computer_id", control.ComputerID, "error", err)
+	}
+}
+
+func (dm *DaemonManager) unregisterControlConnectionLocked(control *DaemonControlConnection) bool {
+	if dm.controlConnections[control.ComputerID] != control {
+		return false
 	}
 	delete(dm.controlConnections, control.ComputerID)
 	metrics.Global.SetDaemonControls(int64(len(dm.controlConnections)))
@@ -170,6 +198,7 @@ func (dm *DaemonManager) unregisterControlConnection(control *DaemonControlConne
 		Until:        time.Now().Add(controlLeaseGracePeriod),
 	}
 	slog.Info("daemon control disconnected", "computer_id", control.ComputerID, "connection_id", control.ID)
+	return true
 }
 
 func (dm *DaemonManager) AuthorizeControlLease(computerID, connectionID string) error {

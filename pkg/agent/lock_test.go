@@ -118,6 +118,20 @@ func TestRelease(t *testing.T) {
 	}
 }
 
+func TestReleaseCustomDirectory(t *testing.T) {
+	lockDir := t.TempDir()
+	lock, err := AcquireLock(lockDir, "http://solo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(lockDir, "lock.json")); !os.IsNotExist(err) {
+		t.Fatal("custom profile lock still exists after release")
+	}
+}
+
 func TestRelease_Idempotent(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)

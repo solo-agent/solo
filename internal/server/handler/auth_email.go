@@ -12,13 +12,17 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
 	"net/mail"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/solo-ai/solo/internal/auth"
 	"golang.org/x/crypto/bcrypt"
@@ -58,11 +62,48 @@ type emailChallenge struct {
 	ExpiresAt    time.Time
 }
 
-func (h *AuthHandler) PublicConfig(w http.ResponseWriter, _ *http.Request) {
+func (h *AuthHandler) PublicConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{
 		"signup_available":   h.cfg.AllowSignup || len(h.cfg.AllowedEmails) > 0 || len(h.cfg.AllowedEmailDomains) > 0,
-		"email_verification": true,
+		"email_verification": !localRegistrationAutoVerify(r),
 	})
+}
+
+func localRegistrationAutoVerify(r *http.Request) bool {
+	enabled, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("SOLO_DEV_AUTO_VERIFY_LOCAL")))
+	if err != nil || !enabled || os.Getenv("APP_ENV") == "production" {
+		return false
+	}
+	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil || !isLoopbackHost(remoteHost) || !isLoopbackHost(r.Host) {
+		return false
+	}
+	if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
+		parsed, err := url.Parse(origin)
+		if err != nil || !isLoopbackHost(parsed.Host) {
+			return false
+		}
+	}
+	for _, header := range []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Real-IP"} {
+		for _, value := range strings.Split(r.Header.Get(header), ",") {
+			if value = strings.TrimSpace(value); value != "" && !isLoopbackHost(value) {
+				return false
+			}
+		}
+	}
+	// A standardized Forwarded header is intentionally not trusted for this
+	// development-only capability. Local direct browser/API requests do not set it.
+	return strings.TrimSpace(r.Header.Get("Forwarded")) == ""
+}
+
+func isLoopbackHost(raw string) bool {
+	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		host = parsedHost
+	} else {
+		host = strings.Trim(host, "[]")
+	}
+	return host == "localhost" || (net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback())
 }
 
 func normalizeEmail(raw string) (string, error) {
@@ -256,11 +297,105 @@ func (h *AuthHandler) VerifyRegistration(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to verify email")
 		return
 	}
+	if _, err := tx.Exec(r.Context(), `
+			INSERT INTO workspace_members (workspace_id, user_id, role)
+			VALUES ('00000000-0000-0000-0000-000000000001', $1, 'member')`, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to join public Workspace")
+		return
+	}
+	personalWorkspaceID := uuid.NewString()
+	personalName := strings.TrimSpace(*challenge.DisplayName) + "'s Workspace"
+	if len([]rune(personalName)) > 100 {
+		personalName = string([]rune(personalName)[:100])
+	}
+	personalIcon := strings.ToUpper(string([]rune(strings.TrimSpace(*challenge.DisplayName))[0]))
+	if _, err := tx.Exec(r.Context(), `
+			INSERT INTO workspaces (id,name,icon,visibility,is_personal,created_by)
+			VALUES ($1,$2,$3,'private',true,$4)`, personalWorkspaceID, personalName, personalIcon, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create personal Workspace")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `
+			INSERT INTO workspace_members (workspace_id,user_id,role)
+			VALUES ($1,$2,'owner')`, personalWorkspaceID, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create personal Workspace")
+		return
+	}
+	personalGeneralID := uuid.NewString()
+	if _, err := tx.Exec(r.Context(), `
+			INSERT INTO channels (id,workspace_id,name,description,type,created_by)
+			VALUES ($1,$2,'general','Personal Workspace lobby','channel',$3)`, personalGeneralID, personalWorkspaceID, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to initialize personal Workspace")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `
+			INSERT INTO channel_members (channel_id,member_type,member_id,role)
+			VALUES ($1,'user',$2,'owner')`, personalGeneralID, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to initialize personal Workspace")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `
+			INSERT INTO channels (id, workspace_id, name, description, type, created_by)
+			SELECT '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001',
+			       'general', 'Public lobby for everyone on Solo', 'channel', $1
+			 WHERE NOT EXISTS (
+			       SELECT 1 FROM channels
+			        WHERE workspace_id = '00000000-0000-0000-0000-000000000001'
+			          AND name = 'general' AND type = 'channel' AND is_archived = false
+			 )
+			ON CONFLICT (id) DO NOTHING`, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to initialize public Workspace")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `
+			INSERT INTO channel_members (channel_id, member_type, member_id, role)
+			SELECT id, 'user', $1, 'member'
+			  FROM channels
+			 WHERE workspace_id = '00000000-0000-0000-0000-000000000001'
+			   AND type = 'channel' AND is_archived = false
+			ON CONFLICT DO NOTHING`, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to join public Channel")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `
+			WITH accepted_invitations AS (
+				UPDATE workspace_invitations
+				   SET accepted_by = $1, accepted_at = now()
+				 WHERE lower(email) = lower($2) AND accepted_at IS NULL AND expires_at > now()
+				 RETURNING workspace_id, role
+			), membership_sources AS (
+				SELECT ai.workspace_id, ai.role FROM accepted_invitations ai
+				JOIN workspaces w ON w.id=ai.workspace_id AND w.deleted_at IS NULL
+				UNION ALL
+				SELECT r.workspace_id, r.role FROM workspace_join_rules r
+				JOIN workspaces w ON w.id=r.workspace_id AND w.deleted_at IS NULL
+				 WHERE (rule_type='email' AND lower(value)=lower($2))
+				    OR (rule_type='domain' AND lower(value)=split_part(lower($2),'@',2))
+			), eligible AS (
+				SELECT workspace_id,
+				       CASE WHEN bool_or(role='admin') THEN 'admin' ELSE 'member' END AS role
+				  FROM membership_sources
+				 GROUP BY workspace_id
+			), joined AS (
+				INSERT INTO workspace_members (workspace_id, user_id, role)
+				SELECT workspace_id, $1, role FROM eligible
+				ON CONFLICT (workspace_id, user_id) DO UPDATE SET role=EXCLUDED.role
+				RETURNING workspace_id
+			)
+			INSERT INTO channel_members (channel_id, member_type, member_id, role)
+			SELECT c.id, 'user', $1, 'member'
+			  FROM joined j
+			  JOIN channels c ON c.workspace_id=j.workspace_id
+			                 AND c.type='channel' AND c.is_archived=false
+			ON CONFLICT DO NOTHING`, userID, email); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to accept Workspace invitations")
+		return
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to verify email")
 		return
 	}
-	response, err := h.newUserAuthResponse(r.Context(), userID, email, *challenge.DisplayName, createdAt)
+	response, err := h.newUserAuthResponse(r.Context(), userID, email, *challenge.DisplayName, createdAt, personalWorkspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to generate token")
 		return
@@ -269,7 +404,7 @@ func (h *AuthHandler) VerifyRegistration(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, response)
 }
 
-func (h *AuthHandler) newUserAuthResponse(ctx context.Context, userID, email, displayName string, createdAt time.Time) (AuthResponse, error) {
+func (h *AuthHandler) newUserAuthResponse(ctx context.Context, userID, email, displayName string, createdAt time.Time, workspaceID string) (AuthResponse, error) {
 	accessToken, err := auth.GenerateAccessToken(userID, email, displayName)
 	if err != nil {
 		return AuthResponse{}, err
@@ -281,9 +416,9 @@ func (h *AuthHandler) newUserAuthResponse(ctx context.Context, userID, email, di
 	if _, err := h.pool.Exec(ctx, `INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`, userID, auth.HashToken(refreshToken), time.Now().Add(auth.RefreshTokenDuration)); err != nil {
 		return AuthResponse{}, err
 	}
-	channelID := h.bootstrapOnboarding(ctx, userID, displayName, email)
+	channelID := h.bootstrapOnboarding(ctx, userID, displayName, email, workspaceID)
 	return AuthResponse{
-		AccessToken: accessToken, RefreshToken: refreshToken, ExpiresIn: int64(auth.AccessTokenDuration.Seconds()), OnboardingChannelID: channelID,
+		AccessToken: accessToken, RefreshToken: refreshToken, ExpiresIn: int64(auth.AccessTokenDuration.Seconds()), OnboardingChannelID: channelID, WorkspaceID: workspaceID,
 		User: UserResponse{ID: userID, Email: email, DisplayName: displayName, Role: "member", CreatedAt: createdAt.Format(time.RFC3339)},
 	}, nil
 }

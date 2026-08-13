@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -206,6 +207,7 @@ func (s *ComputerService) DeleteComputer(ctx context.Context, id, userID string)
 	result, err := s.pool.Exec(ctx,
 		`DELETE FROM computers c
 		 WHERE c.id = $1 AND c.owner_id = $2
+		   AND c.status <> 'online'
 		   AND NOT EXISTS (
 		       SELECT 1 FROM agents a
 		        WHERE a.runtime_id = c.id::text AND a.is_active = true
@@ -220,6 +222,18 @@ func (s *ComputerService) DeleteComputer(ctx context.Context, id, userID string)
 		return fmt.Errorf("delete computer: %w", err)
 	}
 	if result.RowsAffected() == 0 {
+		var owned, inUse bool
+		if err := s.pool.QueryRow(ctx, `
+			SELECT EXISTS(SELECT 1 FROM computers WHERE id=$1::uuid AND owner_id=$2::uuid),
+			       EXISTS(SELECT 1 FROM computers WHERE id=$1::uuid AND status='online')
+			       OR EXISTS(SELECT 1 FROM agents WHERE runtime_id=$1::text AND is_active=true)
+			       OR EXISTS(SELECT 1 FROM agent_runs WHERE computer_id=$1::uuid AND finished_at IS NULL)
+		`, id, userID).Scan(&owned, &inUse); err != nil {
+			return fmt.Errorf("delete computer: inspect conflict: %w", err)
+		}
+		if owned && inUse {
+			return ErrComputerInUse
+		}
 		return ErrNotFound
 	}
 	return nil
@@ -424,3 +438,7 @@ func (s *ComputerService) ClaimComputer(ctx context.Context, computerID, userID 
 
 // ErrNotFound is returned when a requested computer does not exist.
 var ErrNotFound = fmt.Errorf("computer not found")
+
+// ErrComputerInUse is returned when a Computer is online, still owns the
+// execution binding for an active Agent, or targets an unfinished Run.
+var ErrComputerInUse = errors.New("computer is online or still has bound Agents or active Runs")

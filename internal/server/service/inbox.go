@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
 )
 
 type InboxService struct {
@@ -96,6 +97,7 @@ const listInboxQuery = `
 		  AND (COALESCE($5::text[], '{}'::text[]) = '{}'::text[] OR 'thread_reply' = ANY($5::text[]))
 		  AND ($6 = '' OR COALESCE(u.display_name, a.name) ILIKE '%' || $6 || '%')
 		  AND COALESCE(m.is_deleted, false) = false
+		  AND c.workspace_id = $7
 
 		UNION ALL
 
@@ -132,6 +134,7 @@ const listInboxQuery = `
 		  AND ($5::text[] = '{}' OR 'dm' = ANY($5::text[]))
 		  AND ($6 = '' OR COALESCE(u.display_name, a.name) ILIKE '%' || $6 || '%')
 		  AND COALESCE(m.is_deleted, false) = false
+		  AND c.workspace_id = $7
 
 		UNION ALL
 
@@ -168,6 +171,7 @@ const listInboxQuery = `
 		  AND ($5::text[] = '{}' OR 'mention' = ANY($5::text[]))
 		  AND ($6 = '' OR COALESCE(u.display_name, a.name) ILIKE '%' || $6 || '%')
 		  AND COALESCE(m.is_deleted, false) = false
+		  AND c.workspace_id = $7
 	) sub
 	ORDER BY created_at DESC
 	LIMIT $4
@@ -179,12 +183,13 @@ func (s *InboxService) List(ctx context.Context, userID string, before time.Time
 	}
 
 	var clearedBefore time.Time
+	workspaceID := serverworkspace.ContextID(ctx)
 	s.pool.QueryRow(ctx,
 		`SELECT COALESCE(cleared_before, '1970-01-01'::timestamptz)
-		 FROM user_inbox_state WHERE user_id = $1`, userID,
+		 FROM workspace_inbox_state WHERE user_id = $1 AND workspace_id=$2`, userID, workspaceID,
 	).Scan(&clearedBefore)
 
-	args := []any{userID, before, clearedBefore, limit + 1, types, senderFilter}
+	args := []any{userID, before, clearedBefore, limit + 1, types, senderFilter, workspaceID}
 	rows, err := s.pool.Query(ctx, listInboxQuery, args...)
 	if err != nil {
 		return nil, false, fmt.Errorf("inbox list: %w", err)
@@ -220,6 +225,7 @@ func (s *InboxService) List(ctx context.Context, userID string, before time.Time
 
 func (s *InboxService) UnreadCount(ctx context.Context, userID string) (*UnreadCount, error) {
 	readFilter := `AND m.id NOT IN (SELECT message_id FROM user_inbox_reads WHERE user_id = $1)`
+	workspaceID := serverworkspace.ContextID(ctx)
 
 	result := &UnreadCount{}
 
@@ -243,8 +249,9 @@ func (s *InboxService) UnreadCount(ctx context.Context, userID string) (*UnreadC
 		       )
 		   )
 		   AND COALESCE(m.is_deleted, false) = false
+		   AND c.workspace_id = $2
 		   `+readFilter,
-		userID,
+		userID, workspaceID,
 	).Scan(&result.ThreadReplies)
 	if err != nil {
 		result.ThreadReplies = 0
@@ -262,8 +269,9 @@ func (s *InboxService) UnreadCount(ctx context.Context, userID string) (*UnreadC
 		   AND (u.id IS NOT NULL OR a.id IS NOT NULL)
 		   AND m.thread_id IS NULL
 		   AND COALESCE(m.is_deleted, false) = false
+		   AND c.workspace_id = $2
 		   `+readFilter,
-		userID,
+		userID, workspaceID,
 	).Scan(&result.DM)
 	if err != nil {
 		result.DM = 0
@@ -281,8 +289,9 @@ func (s *InboxService) UnreadCount(ctx context.Context, userID string) (*UnreadC
 		   AND (u.id IS NOT NULL OR a.id IS NOT NULL)
 		   AND m.thread_id IS NULL
 		   AND COALESCE(m.is_deleted, false) = false
+		   AND c.workspace_id = $2
 		   `+readFilter,
-		userID,
+		userID, workspaceID,
 	).Scan(&result.Mentions)
 	if err != nil {
 		result.Mentions = 0
@@ -294,8 +303,11 @@ func (s *InboxService) UnreadCount(ctx context.Context, userID string) (*UnreadC
 
 func (s *InboxService) MarkRead(ctx context.Context, userID, messageID string) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO user_inbox_reads (user_id, message_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-		userID, messageID,
+		`INSERT INTO user_inbox_reads (user_id, message_id)
+		 SELECT $1, m.id FROM messages m JOIN channels c ON c.id=m.channel_id
+		 WHERE m.id=$2 AND c.workspace_id=$3
+		 ON CONFLICT DO NOTHING`,
+		userID, messageID, serverworkspace.ContextID(ctx),
 	)
 	if err != nil {
 		return fmt.Errorf("mark inbox item read: %w", err)
@@ -305,10 +317,10 @@ func (s *InboxService) MarkRead(ctx context.Context, userID, messageID string) e
 
 func (s *InboxService) ClearAll(ctx context.Context, userID string) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO user_inbox_state (user_id, last_read_at, cleared_before, updated_at)
-		 VALUES ($1, now(), now(), now())
-		 ON CONFLICT (user_id) DO UPDATE SET cleared_before = now(), updated_at = now()`,
-		userID,
+		`INSERT INTO workspace_inbox_state (user_id, workspace_id, cleared_before, updated_at)
+		 VALUES ($1, $2, now(), now())
+		 ON CONFLICT (user_id, workspace_id) DO UPDATE SET cleared_before = now(), updated_at = now()`,
+		userID, serverworkspace.ContextID(ctx),
 	)
 	if err != nil {
 		return fmt.Errorf("clear inbox: %w", err)
@@ -338,6 +350,7 @@ func (s *InboxService) MarkAllRead(ctx context.Context, userID string) error {
 			      )
 			  )
 			  AND COALESCE(m.is_deleted, false) = false
+			  AND c.workspace_id=$2
 			  AND r.message_id IS NULL
 			UNION
 			SELECT m.id FROM messages m
@@ -349,6 +362,7 @@ func (s *InboxService) MarkAllRead(ctx context.Context, userID string) error {
 			WHERE m.sender_id != $1
 			  AND m.sender_type IN ('user', 'agent') AND (u.id IS NOT NULL OR a.id IS NOT NULL)
 			  AND m.thread_id IS NULL AND COALESCE(m.is_deleted, false) = false
+			  AND c.workspace_id=$2
 			  AND r.message_id IS NULL
 			UNION
 			SELECT m.id FROM messages m
@@ -360,8 +374,9 @@ func (s *InboxService) MarkAllRead(ctx context.Context, userID string) error {
 			WHERE m.sender_id != $1
 			  AND m.sender_type IN ('user', 'agent') AND (u.id IS NOT NULL OR a.id IS NOT NULL)
 			  AND m.thread_id IS NULL AND COALESCE(m.is_deleted, false) = false AND r.message_id IS NULL
+			  AND c.workspace_id=$2
 		 ) sub ON CONFLICT DO NOTHING`,
-		userID,
+		userID, serverworkspace.ContextID(ctx),
 	)
 	if err != nil {
 		return fmt.Errorf("mark all inbox read: %w", err)

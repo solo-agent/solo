@@ -3,6 +3,7 @@ import { Inter, Literata, Space_Grotesk, Space_Mono } from "next/font/google";
 import { AuthProvider } from "@/lib/auth-context";
 import { t } from '@/lib/i18n';
 import { WSProvider } from "@/lib/ws-context";
+import { WorkspaceProvider } from "@/lib/workspace-context";
 import { WSAuthBridge } from "@/components/ws-auth-bridge";
 import { ConnectionBanner } from "@/components/connection-banner";
 import { NetworkStatus } from "@/components/network-status";
@@ -60,17 +61,19 @@ export default function RootLayout({
       </head>
       <body className="min-h-screen antialiased">
         <AuthProvider>
-          <WSProvider>
-            <ToastProvider>
-              <WSAuthBridge />
-              <LocaleHydrator>
-                <ConnectionBanner />
-                <NetworkStatus />
-                <GlobalSearchTrigger />
-                {children}
-              </LocaleHydrator>
-            </ToastProvider>
-          </WSProvider>
+          <WorkspaceProvider>
+            <WSProvider>
+              <ToastProvider>
+                <WSAuthBridge />
+                <LocaleHydrator>
+                  <ConnectionBanner />
+                  <NetworkStatus />
+                  <GlobalSearchTrigger />
+                  {children}
+                </LocaleHydrator>
+              </ToastProvider>
+            </WSProvider>
+          </WorkspaceProvider>
         </AuthProvider>
       </body>
     </html>

@@ -1028,7 +1028,7 @@ func (dm *DaemonManager) finishPendingTaskRun(task PendingTaskInfo, status Agent
 	}
 	if dm.hub != nil {
 		if event != nil {
-			dm.hub.Broadcast(realtime.Envelope("agent.run.event", map[string]any{
+			dm.hub.BroadcastToChannel(finished.ChannelID, realtime.Envelope("agent.run.event", map[string]any{
 				"id":         event.ID,
 				"run_id":     finished.ID,
 				"agent_id":   finished.AgentID,
@@ -1042,7 +1042,7 @@ func (dm *DaemonManager) finishPendingTaskRun(task PendingTaskInfo, status Agent
 				"timestamp":  event.CreatedAt.UTC().Format(time.RFC3339),
 			}))
 		}
-		dm.hub.Broadcast(realtime.Envelope("agent.run.finished", runPayload(finished, finished.AgentID, finished.AgentName, "")))
+		dm.hub.BroadcastToChannel(finished.ChannelID, realtime.Envelope("agent.run.finished", runPayload(finished, finished.AgentID, finished.AgentName, "")))
 	}
 }
 
