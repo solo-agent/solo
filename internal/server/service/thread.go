@@ -56,7 +56,7 @@ func (s *ThreadService) GetThreadContextMessages(ctx context.Context, threadID s
 		 FROM messages m
 		 LEFT JOIN users u ON m.sender_id = u.id
 		 LEFT JOIN agents a ON m.sender_id = a.id
-		 WHERE m.thread_id = $1
+		 WHERE m.thread_id = $1 AND m.is_deleted = false
 		 ORDER BY created_at ASC, id ASC`,
 		threadID,
 	)

@@ -199,6 +199,15 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 	if !shouldTriggerAgentForSender(senderType, mentionedAgentIDs) {
 		return
 	}
+	policy, err := s.getChannelWakePolicy(ctx, channelID)
+	if err != nil {
+		slog.Error("failed to load Channel Agent wake policy", "channel_id", channelID, "error", err)
+		return
+	}
+	if len(mentionedAgentIDs) == 0 && !hasMentions && policy.suppressesUnmentionedAgentWake() {
+		slog.Info("public Channel Agent wake suppressed", "channel_id", channelID, "message_id", messageID)
+		return
+	}
 	// If the message was sent by an agent, only proceed if it @mentions other agents.
 	// Agents don't respond to themselves or to non-mentioned agent messages.
 
@@ -217,7 +226,7 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 	if senderType == "agent" {
 		excludeAgentID = senderID
 	}
-	targetAgents, _ := s.routeWakeTargets(ctx, agents, wakeRouteRequest{
+	targetAgents, decision := s.routeWakeTargets(ctx, agents, wakeRouteRequest{
 		Scope:             wakeScopeChannel,
 		ChannelID:         channelID,
 		TriggerMessageID:  messageID,
@@ -245,8 +254,11 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 	// Query for open tasks in the channel to provide task context to agents
 	taskContext := s.getChannelOpenTasksSummary(ctx, channelID)
 
-	// Each persisted message gets its own Run. Duplicate client sends are
-	// coalesced before persistence by the reliable-send layer.
+	resultContract := agentResultContractNone
+	if policy.requiresVisibleResult(decision.Reason) {
+		resultContract = agentResultContractVisibleMessage
+	}
+
 	for _, ag := range targetAgents {
 		// SOLO-228-B: Validate agent trigger chain to prevent infinite loops.
 		if agentChain != nil {
@@ -291,12 +303,11 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 			TaskContext:    taskContext,
 			AgentChain:     newChain,
 			MentionedNames: mentionedNames,
-			ResultContract: agentResultContractVisibleMessage,
+			ResultContract: resultContract,
 			ModelSeenSeq:   highestMessageSeq(contextMessages),
 		}
 
-		// Dispatch via streaming SSE and handle events
-		go s.handleStreamingAgentTask(context.Background(), daemon, taskReq, ag)
+		s.dispatchOrQueueMessageWake(ctx, daemon, taskReq, ag)
 	}
 }
 
@@ -649,8 +660,9 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 		triggerType = AgentRunTriggerTask
 	}
 	newRun := existingRun == nil
+	startingRun := newRun || taskReq.PrestartedRun
 	run := existingRun
-	if newRun && taskReq.NodeID == "" && taskReq.ResumeSessionID == "" && !taskReq.ForceFreshSession {
+	if startingRun && taskReq.NodeID == "" && taskReq.ResumeSessionID == "" && !taskReq.ForceFreshSession {
 		err := s.pool.QueryRow(ctx, `
 			SELECT sess.external_session_id
 			  FROM agent_runs r
@@ -710,7 +722,7 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 	s.dm.TrackTask(taskReq.TaskID, daemon.ID, ag.ID)
 	s.dm.AttachTaskRun(taskReq.TaskID, run.ID)
 	defer s.dm.RemoveTask(taskReq.TaskID)
-	if newRun && taskReq.OriginTaskID != "" {
+	if startingRun && taskReq.OriginTaskID != "" {
 		if err := runSvc.LinkTask(ctx, LinkRunTaskInput{RunID: run.ID, TaskID: taskReq.OriginTaskID, Role: AgentRunTaskRolePrimary, Confidence: 1}); err != nil {
 			slog.Warn("failed to link agent run task", "run_id", run.ID, "task_id", taskReq.OriginTaskID, "error", err)
 		} else {
@@ -721,7 +733,7 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 			})
 		}
 	}
-	if newRun {
+	if startingRun {
 		s.broadcastAgentRun(taskReq.ChannelID, "agent.run.started", runPayload(run, ag.ID, agentName, taskReq.OriginTaskID))
 		if taskReq.TriggerMessageID != "" {
 			s.appendAndBroadcastRunEvent(ctx, runSvc, run, ag.ID, agentName, AgentRunEventUserMessageReceived, "用户消息触发 run", "", map[string]any{
@@ -735,6 +747,12 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 			"trigger_message_id": taskReq.TriggerMessageID,
 			"task_id":            taskReq.OriginTaskID,
 			"result_contract":    resultContract,
+		}
+		if taskReq.WakeFirstMessageSeq > 0 {
+			runStartedPayload["wake_first_message_seq"] = taskReq.WakeFirstMessageSeq
+			runStartedPayload["wake_latest_message_seq"] = taskReq.WakeLatestMessageSeq
+			runStartedPayload["wake_message_count"] = taskReq.WakeMessageCount
+			runStartedPayload["coalesced"] = taskReq.WakeMessageCount > 1
 		}
 		if taskReq.Recovery != nil {
 			runStartedPayload["recovery"] = taskReq.Recovery
@@ -846,6 +864,8 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 					}
 					reminderReq.InitialGreeting = ""
 					reminderReq.ResultReminderAttempt = true
+					reminderReq.PrestartedRun = false
+					reminderReq.RemotePrequeued = false
 					reminderReq.AccumulatedInputTokens = inputTokens
 					reminderReq.AccumulatedOutputTokens = outputTokens
 					reminderReq.AccumulatedCacheReadTokens = cacheReadTokens
@@ -860,6 +880,12 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 				failureCode = agentFailureMissingVisibleResult
 				retryable = true
 				s.broadcastAgentError(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, agentErrorMissingVisibleResult)
+			}
+		}
+		if (status == AgentRunStatusFailed || status == AgentRunStatusTimeout) && run.BackendStartedAt == nil {
+			if err := s.requeueUndeliveredMessageWake(ctx, run); err != nil {
+				slog.Warn("failed to requeue undelivered Agent messages", "run_id", run.ID, "error", err)
+				return
 			}
 		}
 		activityText := finalStateActivityText(status)
@@ -902,6 +928,13 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 		}
 		s.appendAndBroadcastRunEvent(ctx, runSvc, finished, ag.ID, agentName, eventType, activityText, "", eventPayload)
 		s.broadcastAgentRun(taskReq.ChannelID, "agent.run.finished", runPayload(finished, ag.ID, agentName, taskReq.OriginTaskID))
+		if finished.TriggerType == AgentRunTriggerMessage && finished.TriggerMessageID != "" && finished.ThinkingNodeID == "" {
+			go func() {
+				if err := s.advancePendingMessageWake(context.Background(), finished.AgentID, finished.ChannelID); err != nil {
+					slog.Warn("failed to advance pending Agent messages", "agent_id", finished.AgentID, "channel_id", finished.ChannelID, "error", err)
+				}
+			}()
+		}
 	}
 
 	// Send via SSE streaming
@@ -915,7 +948,12 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 			return
 		}
 	}
-	if newRun || taskReq.ResultReminderAttempt {
+	if taskReq.RemotePrequeued && daemon.ComputerID != "" {
+		eventCh, err = s.dm.SubscribeTask(streamCtx, daemon, taskReq.TaskID)
+		if err == nil {
+			s.dm.NotifyRun(daemon.ComputerID, run.ID)
+		}
+	} else if startingRun || taskReq.ResultReminderAttempt {
 		eventCh, err = s.dm.StreamTask(streamCtx, daemon, taskReq)
 	} else {
 		eventCh, err = s.dm.SubscribeTask(streamCtx, daemon, taskReq.TaskID)
@@ -929,7 +967,7 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 		)
 		s.broadcastAgentError(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, err.Error())
 		retryable = true
-		if newRun {
+		if startingRun {
 			failureCode = agentFailureProviderTransient
 		} else {
 			failureCode = agentFailureDaemonLost
@@ -1418,6 +1456,15 @@ func (s *AgentService) ReconcileRemoteRuns(ctx context.Context, daemon *DaemonIn
 		if taskReq.TaskID == "" {
 			taskReq.TaskID = run.ID
 		}
+		taskReq.RemotePrequeued = true
+		if err := s.pool.QueryRow(ctx, `
+			SELECT NOT EXISTS (
+				SELECT 1 FROM agent_run_events WHERE run_id = $1 AND type = $2
+			)`, run.ID, AgentRunEventRunStarted,
+		).Scan(&taskReq.PrestartedRun); err != nil {
+			slog.Warn("failed to inspect remote Run start event", "run_id", run.ID, "error", err)
+			continue
+		}
 		if s.dm.IsTaskTracked(taskReq.TaskID) {
 			continue
 		}
@@ -1487,6 +1534,11 @@ func (s *AgentService) loadRecoveredRun(ctx context.Context, run *AgentRun) (dae
 }
 
 func (s *AgentService) finishDaemonLostRun(ctx context.Context, run *AgentRun) error {
+	if run.BackendStartedAt == nil {
+		if err := s.requeueUndeliveredMessageWake(ctx, run); err != nil {
+			return fmt.Errorf("requeue undelivered Agent messages: %w", err)
+		}
+	}
 	runSvc := NewAgentRunService(s.pool)
 	finished, err := runSvc.FinishRun(ctx, FinishRunInput{
 		RunID:        run.ID,
@@ -1506,6 +1558,11 @@ func (s *AgentService) finishDaemonLostRun(ctx context.Context, run *AgentRun) e
 	})
 	s.broadcastAgentError(finished.ThreadID, finished.ChannelID, finished.AgentID, finished.AgentName, agentActivityDaemonLost)
 	s.broadcastAgentRun(finished.ChannelID, "agent.run.finished", runPayload(finished, finished.AgentID, finished.AgentName, ""))
+	if finished.TriggerType == AgentRunTriggerMessage && finished.TriggerMessageID != "" && finished.ThinkingNodeID == "" {
+		if err := s.advancePendingMessageWake(ctx, finished.AgentID, finished.ChannelID); err != nil {
+			slog.Warn("failed to advance pending Agent messages after daemon loss", "run_id", finished.ID, "error", err)
+		}
+	}
 	return nil
 }
 
@@ -1550,7 +1607,10 @@ func (s *AgentService) CheckAgentRunWatchdogs(ctx context.Context, now time.Time
 			return err
 		}
 	}
-	return s.retryFailedTaskRuns(ctx)
+	if err := s.retryFailedTaskRuns(ctx); err != nil {
+		return err
+	}
+	return s.drainPendingMessageWakes(ctx)
 }
 
 func (s *AgentService) listStaleQueuedRuns(ctx context.Context, before time.Time) ([]AgentRun, error) {
@@ -1662,6 +1722,11 @@ func (s *AgentService) timeoutStaleQueuedAgentRun(ctx context.Context, runSvc *A
 }
 
 func (s *AgentService) finishTimedOutAgentRun(ctx context.Context, runSvc *AgentRunService, run *AgentRun, activity string) error {
+	if run.BackendStartedAt == nil {
+		if err := s.requeueUndeliveredMessageWake(ctx, run); err != nil {
+			return fmt.Errorf("requeue timed-out Agent messages: %w", err)
+		}
+	}
 	retryable := false
 	var daemon *DaemonInfo
 	if daemonID, err := runSvc.GetRunDaemonID(ctx, run.ID); err == nil && daemonID != "" {
@@ -1695,6 +1760,11 @@ func (s *AgentService) finishTimedOutAgentRun(ctx context.Context, runSvc *Agent
 		"retryable":    retryable,
 	})
 	s.broadcastAgentRun(finished.ChannelID, "agent.run.finished", runPayload(finished, finished.AgentID, finished.AgentName, ""))
+	if finished.TriggerType == AgentRunTriggerMessage && finished.TriggerMessageID != "" && finished.ThinkingNodeID == "" {
+		if err := s.advancePendingMessageWake(ctx, finished.AgentID, finished.ChannelID); err != nil {
+			slog.Warn("failed to advance pending Agent messages after timeout", "run_id", finished.ID, "error", err)
+		}
+	}
 	return nil
 }
 
@@ -2039,6 +2109,15 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 	if !shouldTriggerAgentForSender(senderType, mentionedAgentIDs) {
 		return
 	}
+	policy, err := s.getChannelWakePolicy(ctx, channelID)
+	if err != nil {
+		slog.Error("failed to load Thread Agent wake policy", "channel_id", channelID, "thread_id", threadID, "error", err)
+		return
+	}
+	if len(mentionedAgentIDs) == 0 && !hasMentions && policy.suppressesUnmentionedAgentWake() {
+		slog.Info("public Thread Agent wake suppressed", "channel_id", channelID, "thread_id", threadID, "message_id", messageID)
+		return
+	}
 
 	agents, err := s.getChannelActiveAgents(ctx, channelID)
 	if err != nil {
@@ -2050,7 +2129,7 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 	if senderType == "agent" {
 		excludeAgentID = senderID
 	}
-	targetAgents, _ := s.routeWakeTargets(ctx, agents, wakeRouteRequest{
+	targetAgents, decision := s.routeWakeTargets(ctx, agents, wakeRouteRequest{
 		Scope:             wakeScopeThread,
 		ChannelID:         channelID,
 		ThreadID:          threadID,
@@ -2149,6 +2228,10 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 
 	// Resolve @mentioned agent names for context awareness.
 	threadMentionedNames := s.resolveMentionedNames(ctx, mentionedAgentIDs)
+	resultContract := agentResultContractNone
+	if policy.requiresVisibleResult(decision.Reason) {
+		resultContract = agentResultContractVisibleMessage
+	}
 
 	for _, ag := range targetAgents {
 		// SOLO-228-B: Validate agent trigger chain to prevent infinite loops.
@@ -2187,12 +2270,11 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 			TaskContext:    taskContext,
 			AgentChain:     newChain,
 			MentionedNames: threadMentionedNames,
-			ResultContract: agentResultContractVisibleMessage,
+			ResultContract: resultContract,
 			ModelSeenSeq:   highestMessageSeq(turnMessages),
 		}
 
-		// Use streaming for thread as well
-		go s.handleStreamingAgentTask(context.Background(), daemon, taskReq, ag)
+		s.dispatchOrQueueMessageWake(ctx, daemon, taskReq, ag)
 	}
 }
 
@@ -2598,6 +2680,7 @@ func (s *AgentService) getMessagesForNode(ctx context.Context, channelID, nodeID
 		`SELECT m.id, m.seq, m.sender_type, m.sender_id, m.content, m.created_at, COALESCE(m.attachment_ids, '{}') as attachment_ids
 		 FROM messages m
 			 WHERE m.channel_id = $1 AND m.thread_id IS NULL
+			   AND m.is_deleted = false
 			   AND (($3 = '' AND m.thinking_node_id IS NULL) OR m.thinking_node_id = NULLIF($3, '')::uuid)
 			   AND ($4 = '' OR m.id = NULLIF($4, '')::uuid)
 			 ORDER BY m.created_at DESC, m.id DESC
@@ -2826,6 +2909,11 @@ type daemonTaskRequest struct {
 	AccumulatedOutputTokens     int               `json:"-"`
 	AccumulatedCacheReadTokens  int               `json:"-"`
 	AccumulatedCacheWriteTokens int               `json:"-"`
+	PrestartedRun               bool              `json:"-"`
+	WakeFirstMessageSeq         int64             `json:"-"`
+	WakeLatestMessageSeq        int64             `json:"-"`
+	WakeMessageCount            int               `json:"-"`
+	RemotePrequeued             bool              `json:"-"`
 }
 
 func highestMessageSeq(messages []agent.Message) int64 {

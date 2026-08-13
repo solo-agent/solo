@@ -184,6 +184,9 @@ type StartRunInput struct {
 	Source           string
 	Usage            any
 	FreshnessSeenSeq int64
+	WakeFirstSeq     int64
+	WakeLatestSeq    int64
+	WakeVisible      bool
 }
 
 type AppendRunEventInput struct {
@@ -315,6 +318,28 @@ func stableTranscriptSessionID(transcriptPath string) string {
 }
 
 func (s *AgentRunService) StartRun(ctx context.Context, input StartRunInput) (*AgentRun, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	run, err := s.startRunTx(ctx, tx, input)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	if err := s.hydrateAgentRunTokenUsage(ctx, run); err != nil {
+		slog.Warn("run created but token usage could not be reloaded", "run_id", run.ID, "error", err)
+	}
+	return run, nil
+}
+
+// startRunTx keeps Run insertion and budget reservation in the caller's
+// transaction. Message wake single-flight uses it so assigning the wake slot
+// and creating the Run cannot be observed separately.
+func (s *AgentRunService) startRunTx(ctx context.Context, tx pgx.Tx, input StartRunInput) (*AgentRun, error) {
 	if input.Status == "" {
 		input.Status = AgentRunStatusQueued
 	}
@@ -322,17 +347,13 @@ func (s *AgentRunService) StartRun(ctx context.Context, input StartRunInput) (*A
 	if err != nil {
 		return nil, err
 	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
 	runID := uuid.NewString()
 	run, err := scanAgentRun(tx.QueryRow(ctx,
 		`INSERT INTO agent_runs (
 		   id, agent_id, daemon_id, session_id, trigger_type, trigger_message_id, channel_id, thread_id, thinking_node_id,
-		   status, activity_text, tool_name, tool_input_summary, source, usage_json, freshness_seen_seq
-		 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		   status, activity_text, tool_name, tool_input_summary, source, usage_json, freshness_seen_seq,
+		   wake_first_message_seq, wake_latest_message_seq, wake_requires_visible_result
+		 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		 RETURNING id::text, agent_id::text,
 		       COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
 		       COALESCE(session_id::text, ''), trigger_type,
@@ -344,18 +365,13 @@ func (s *AgentRunService) StartRun(ctx context.Context, input StartRunInput) (*A
 		nullableUUID(input.TriggerMessageID), nullableUUID(input.ChannelID), nullableUUID(input.ThreadID), nullableUUID(input.ThinkingNodeID),
 		string(input.Status), input.ActivityText, nullableStr(input.ToolName),
 		nullableStr(input.ToolInputSummary), nullableStr(input.Source), usage, nullableInt64(input.FreshnessSeenSeq),
+		nullableInt64(input.WakeFirstSeq), nullableInt64(input.WakeLatestSeq), input.WakeVisible,
 	))
 	if err != nil {
 		return nil, err
 	}
 	if err := NewBudgetService(s.pool).ReserveRunTx(ctx, tx, runID, input.AgentID); err != nil {
 		return nil, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-	if err := s.hydrateAgentRunTokenUsage(ctx, run); err != nil {
-		slog.Warn("run created but token usage could not be reloaded", "run_id", run.ID, "error", err)
 	}
 	return run, nil
 }
@@ -890,7 +906,27 @@ func (s *AgentRunService) ValidateMessageDelivery(ctx context.Context, runID, ag
 		}
 		return false, err
 	}
-	return runChannelID == channelID && runThreadID == threadID && runThinkingNodeID == thinkingNodeID, nil
+	if runChannelID != channelID {
+		return false, nil
+	}
+	if runThinkingNodeID != "" || thinkingNodeID != "" {
+		return runThreadID == threadID && runThinkingNodeID == thinkingNodeID, nil
+	}
+	if runThreadID != "" {
+		return runThreadID == threadID, nil
+	}
+	if threadID == "" {
+		return true, nil
+	}
+
+	var belongsToChannel bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM threads WHERE id = $1 AND channel_id = $2)`,
+		threadID, channelID,
+	).Scan(&belongsToChannel); err != nil {
+		return false, err
+	}
+	return belongsToChannel, nil
 }
 
 func (s *AgentRunService) HasVisibleMessage(ctx context.Context, runID string) (bool, error) {
@@ -903,8 +939,6 @@ func (s *AgentRunService) HasVisibleMessage(ctx context.Context, runID string) (
 			    ON m.sender_type = 'agent'
 			   AND m.sender_id = r.agent_id
 			   AND m.channel_id = r.channel_id
-			   AND COALESCE(m.thread_id::text, '') = COALESCE(r.thread_id::text, '')
-			   AND COALESCE(m.thinking_node_id::text, '') = COALESCE(r.thinking_node_id::text, '')
 			   AND m.metadata->>'agent_run_id' = r.id::text
 			 WHERE r.id = $1
 		)`, runID,
