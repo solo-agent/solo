@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
 )
 
 type DashboardLive struct {
@@ -140,11 +142,12 @@ func (s *AgentRunService) GetDashboardLive(ctx context.Context, ownerID string) 
 		        COALESCE(lr.tool_input_summary, ''), COALESCE(lr.source, ''), lr.updated_at,
 		        COALESCE(c.active_count, 0), COALESCE(c.attention_count, 0), COALESCE(c.run_count, 0)
 		   FROM agents a
+		   JOIN channels home ON home.id = a.home_channel_id
 		   LEFT JOIN latest_runs lr ON lr.agent_id = a.id
 		   LEFT JOIN counts c ON c.agent_id = a.id
-		  WHERE a.owner_id = $1 AND a.is_active = true
+		  WHERE a.owner_id = $1 AND a.is_active = true AND ($2 = '' OR home.workspace_id::text = $2)
 		  ORDER BY lr.updated_at DESC NULLS LAST, a.name ASC
-		  LIMIT 200`, ownerID)
+		  LIMIT 200`, ownerID, serverworkspace.FilterID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -217,19 +220,21 @@ func (s *AgentRunService) GetDashboardInsight(ctx context.Context, ownerID strin
 		GeneratedAt: time.Now().UTC(),
 		Terms:       []DashboardCount{},
 	}
-	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM messages WHERE created_at >= $1`, since).Scan(&result.Messages); err != nil {
+	workspaceID := serverworkspace.FilterID(ctx)
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM messages m JOIN channels c ON c.id=m.channel_id WHERE m.created_at >= $1 AND ($2 = '' OR c.workspace_id::text = $2)`, since, workspaceID).Scan(&result.Messages); err != nil {
 		return nil, err
 	}
 	if err := s.pool.QueryRow(ctx,
 		`SELECT COUNT(*)
 		   FROM agent_runs r
 		   JOIN agents a ON a.id = r.agent_id
-		  WHERE r.updated_at >= $1 AND a.owner_id = $2 AND a.is_active = true`,
-		since, ownerID,
+		  JOIN channels c ON c.id = a.home_channel_id
+		  WHERE r.updated_at >= $1 AND a.owner_id = $2 AND a.is_active = true AND ($3 = '' OR c.workspace_id::text = $3)`,
+		since, ownerID, workspaceID,
 	).Scan(&result.AgentRuns); err != nil {
 		return nil, err
 	}
-	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM tasks WHERE updated_at >= $1`, since).Scan(&result.Tasks); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM tasks t JOIN channels c ON c.id=t.channel_id WHERE t.updated_at >= $1 AND ($2 = '' OR c.workspace_id::text = $2)`, since, workspaceID).Scan(&result.Tasks); err != nil {
 		return nil, err
 	}
 	tokens, err := s.dashboardTokenUsage(ctx, ownerID, since)
@@ -242,13 +247,14 @@ func (s *AgentRunService) GetDashboardInsight(ctx context.Context, ownerID strin
 		`SELECT r.status, r.status, COUNT(*)
 		   FROM agent_runs r
 		   JOIN agents a ON a.id = r.agent_id
-		  WHERE r.updated_at >= $1 AND a.owner_id = $2 AND a.is_active = true
+		   JOIN channels c ON c.id = a.home_channel_id
+		  WHERE r.updated_at >= $1 AND a.owner_id = $2 AND a.is_active = true AND ($3 = '' OR c.workspace_id::text = $3)
 		  GROUP BY r.status
-		  ORDER BY COUNT(*) DESC`, since, ownerID)
+		  ORDER BY COUNT(*) DESC`, since, ownerID, workspaceID)
 	if err != nil {
 		return nil, err
 	}
-	result.TaskStatus, err = s.dashboardCounts(ctx, `SELECT status, status, COUNT(*) FROM tasks WHERE updated_at >= $1 GROUP BY status ORDER BY COUNT(*) DESC`, since)
+	result.TaskStatus, err = s.dashboardCounts(ctx, `SELECT t.status, t.status, COUNT(*) FROM tasks t JOIN channels c ON c.id=t.channel_id WHERE t.updated_at >= $1 AND ($2 = '' OR c.workspace_id::text = $2) GROUP BY t.status ORDER BY COUNT(*) DESC`, since, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -257,10 +263,11 @@ func (s *AgentRunService) GetDashboardInsight(ctx context.Context, ownerID strin
 		   FROM agent_run_events e
 		   JOIN agent_runs r ON r.id = e.run_id
 		   JOIN agents a ON a.id = r.agent_id
-		  WHERE e.created_at >= $1 AND a.owner_id = $2 AND a.is_active = true AND COALESCE(e.tool_name, '') <> ''
+		   JOIN channels c ON c.id = a.home_channel_id
+		  WHERE e.created_at >= $1 AND a.owner_id = $2 AND a.is_active = true AND ($3 = '' OR c.workspace_id::text = $3) AND COALESCE(e.tool_name, '') <> ''
 		  GROUP BY e.tool_name
 		  ORDER BY COUNT(*) DESC
-		  LIMIT 20`, since, ownerID)
+		  LIMIT 20`, since, ownerID, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -289,9 +296,10 @@ func (s *AgentRunService) dashboardTokenUsage(ctx context.Context, ownerID strin
 		        COALESCE(r.computer_id::text, '')
 		   FROM agent_runs r
 		   JOIN agents a ON a.id = r.agent_id
+		   JOIN channels c ON c.id = a.home_channel_id
 		   LEFT JOIN agent_sessions sess ON sess.id = r.session_id
-		  WHERE r.updated_at >= $1 AND a.owner_id = $2 AND a.is_active = true`,
-		since, ownerID)
+		  WHERE r.updated_at >= $1 AND a.owner_id = $2 AND a.is_active = true AND ($3 = '' OR c.workspace_id::text = $3)`,
+		since, ownerID, serverworkspace.FilterID(ctx))
 	if err != nil {
 		return DashboardTokenUsage{}, err
 	}
@@ -387,10 +395,11 @@ func (s *AgentRunService) dashboardAgentUsage(ctx context.Context, ownerID strin
 		`SELECT a.id::text, a.name, COUNT(r.id), MAX(r.updated_at)
 		   FROM agents a
 		   JOIN agent_runs r ON r.agent_id = a.id AND r.updated_at >= $1
-		  WHERE a.owner_id = $2 AND a.is_active = true
+		   JOIN channels c ON c.id = a.home_channel_id
+		  WHERE a.owner_id = $2 AND a.is_active = true AND ($3 = '' OR c.workspace_id::text = $3)
 		  GROUP BY a.id, a.name
 		  ORDER BY COUNT(r.id) DESC, MAX(r.updated_at) DESC NULLS LAST
-		  LIMIT 20`, since, ownerID)
+		  LIMIT 20`, since, ownerID, serverworkspace.FilterID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -421,15 +430,17 @@ func (s *AgentRunService) dashboardSeries(ctx context.Context, ownerID string, s
 	if err := s.fillDailyCounts(ctx, byDate, "messages",
 		`SELECT date_trunc('day', m.created_at)::date::text, COUNT(*)
 		   FROM messages m
-		  WHERE m.created_at >= $1
-		  GROUP BY 1`, since); err != nil {
+		   JOIN channels c ON c.id=m.channel_id
+		  WHERE m.created_at >= $1 AND ($2 = '' OR c.workspace_id::text = $2)
+		  GROUP BY 1`, since, serverworkspace.FilterID(ctx)); err != nil {
 		return nil, err
 	}
 	if err := s.fillDailyCounts(ctx, byDate, "tasks",
 		`SELECT date_trunc('day', t.updated_at)::date::text, COUNT(*)
 		   FROM tasks t
-		  WHERE t.updated_at >= $1
-		  GROUP BY 1`, since); err != nil {
+		   JOIN channels c ON c.id=t.channel_id
+		  WHERE t.updated_at >= $1 AND ($2 = '' OR c.workspace_id::text = $2)
+		  GROUP BY 1`, since, serverworkspace.FilterID(ctx)); err != nil {
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx,
@@ -438,9 +449,10 @@ func (s *AgentRunService) dashboardSeries(ctx context.Context, ownerID string, s
 		        COALESCE(r.computer_id::text, '')
 		   FROM agent_runs r
 		   JOIN agents a ON a.id = r.agent_id
+		   JOIN channels c ON c.id = a.home_channel_id
 		   LEFT JOIN agent_sessions sess ON sess.id = r.session_id
-		  WHERE r.updated_at >= $1 AND a.owner_id = $2 AND a.is_active = true`,
-		since, ownerID)
+		  WHERE r.updated_at >= $1 AND a.owner_id = $2 AND a.is_active = true AND ($3 = '' OR c.workspace_id::text = $3)`,
+		since, ownerID, serverworkspace.FilterID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -509,9 +521,10 @@ func (s *AgentRunService) dashboardTerms(ctx context.Context, since time.Time) (
 	rows, err := s.pool.Query(ctx,
 		`SELECT m.content
 		   FROM messages m
-		  WHERE m.created_at >= $1 AND m.sender_type = 'user'
+		   JOIN channels c ON c.id=m.channel_id
+		  WHERE m.created_at >= $1 AND m.sender_type = 'user' AND ($2 = '' OR c.workspace_id::text = $2)
 		  ORDER BY m.created_at DESC
-		  LIMIT 5000`, since)
+		  LIMIT 5000`, since, serverworkspace.FilterID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -578,10 +591,11 @@ func (s *AgentRunService) dashboardTaskUsage(ctx context.Context, ownerID string
 		   JOIN agent_run_task_links l ON l.task_id = t.id
 		   JOIN agent_runs r ON r.id = l.run_id
 		   JOIN agents a ON a.id = r.agent_id
-		  WHERE r.updated_at >= $1 AND a.owner_id = $2 AND a.is_active = true
+		   JOIN channels c ON c.id = t.channel_id
+		  WHERE r.updated_at >= $1 AND a.owner_id = $2 AND a.is_active = true AND ($3 = '' OR c.workspace_id::text = $3)
 		  GROUP BY t.id, t.task_number, t.title, t.status
 		  ORDER BY COUNT(r.id) DESC, MAX(r.updated_at) DESC
-		  LIMIT 20`, since, ownerID)
+		  LIMIT 20`, since, ownerID, serverworkspace.FilterID(ctx))
 	if err != nil {
 		return nil, err
 	}

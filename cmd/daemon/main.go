@@ -85,8 +85,10 @@ func main() {
 	llmProvider = llm.NewProvider(providerType, apiKey)
 	slog.Info("LLM provider initialized", "provider", providerType)
 
-	// Acquire machine lock to prevent duplicate daemon processes
-	machineLock, err = agent.AcquireLock("", serverURL)
+	// The lock is per managed Daemon profile. Multiple independently paired
+	// profiles may run on one physical machine, while a duplicate start of the
+	// same profile is still rejected.
+	machineLock, err = agent.AcquireLock(strings.TrimSpace(os.Getenv("SOLO_DAEMON_STATE_DIR")), serverURL)
 	if err != nil {
 		slog.Error("failed to acquire machine lock — another daemon may be running", "error", err)
 		os.Exit(1)

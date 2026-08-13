@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useState } from 'react';
-import { AlertCircle } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { AlertCircle, Bot, Link2 } from 'lucide-react';
 import { AgentForm, type AgentFormValues } from '@/components/agents/agent-form';
 import {
   Dialog,
@@ -11,6 +11,17 @@ import {
 } from '@/components/ui/dialog';
 import { useAgents } from '@/lib/hooks/use-agents';
 import { t } from '@/lib/i18n';
+import { apiClient } from '@/lib/api-client';
+import { Button } from '@/components/ui/button';
+
+interface WorkspaceAgent {
+  id: string;
+  name: string;
+  description: string;
+  owner_id: string;
+  home_channel_id: string;
+  avatar_url?: string;
+}
 
 interface AddAgentModalProps {
   open: boolean;
@@ -35,6 +46,14 @@ export function AddAgentModal({
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formKey, setFormKey] = useState(0);
+  const [workspaceAgents, setWorkspaceAgents] = useState<WorkspaceAgent[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    apiClient.get<WorkspaceAgent[]>('/api/v1/agents')
+      .then((items) => setWorkspaceAgents(items.filter((item) => item.home_channel_id !== channelId)))
+      .catch(() => setWorkspaceAgents([]));
+  }, [open, channelId]);
 
   const handleOpenChange = useCallback((next: boolean) => {
     setError(null);
@@ -68,8 +87,40 @@ export function AddAgentModal({
       </DialogHeader>
 
       <p className="mb-4 border-2 border-black bg-brutal-primary-light px-3 py-2 font-body text-xs">
-        {t('channelAgentScopeNotice')}
+        Create an Agent on your Computer, or connect an existing Agent owned by another member of this Workspace. Runtime credentials and local files remain visible only to its owner.
       </p>
+
+      {workspaceAgents.length > 0 && (
+        <section className="mb-5">
+          <h3 className="mb-2 flex items-center gap-2 font-heading text-sm font-black uppercase"><Link2 className="h-4 w-4" /> Connect Workspace Agent</h3>
+          <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
+            {workspaceAgents.map((agent) => (
+              <div key={agent.id} className="flex items-center gap-3 border-2 border-black bg-white px-3 py-2">
+                <div className="flex h-8 w-8 items-center justify-center border-2 border-black bg-[#DBEAFE]"><Bot className="h-4 w-4" /></div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-bold">{agent.name}</div>
+                  <div className="truncate font-mono text-[10px] text-black/50">{agent.description || 'Workspace Agent'}</div>
+                </div>
+                <Button size="sm" variant="outline" onClick={async () => {
+                  setIsCreating(true);
+                  setError(null);
+                  try {
+                    await apiClient.post(`/api/v1/channels/${channelId}/members`, { member_type: 'agent', member_id: agent.id });
+                    await onChanged?.();
+                    handleOpenChange(false);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : 'Failed to connect Agent');
+                  } finally {
+                    setIsCreating(false);
+                  }
+                }} disabled={isCreating}>Connect</Button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <h3 className="mb-2 font-heading text-sm font-black uppercase">Create new Agent</h3>
 
       {error && (
         <div className="mb-4 flex items-center gap-2 border-2 border-brutal-danger bg-brutal-danger-light/30 px-3 py-2">

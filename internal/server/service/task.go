@@ -1185,8 +1185,12 @@ func (s *TaskService) GetTaskGlobal(ctx context.Context, taskID, userID string) 
 }
 
 // ListAllUserTasks returns all tasks across channels the user is a member of.
-func (s *TaskService) ListAllUserTasks(ctx context.Context, userID string, channelID string, status string, claimerID string, creatorID string) ([]Task, error) {
-	query, args := buildListAllUserTasksQuery(userID, channelID, status, claimerID, creatorID)
+func (s *TaskService) ListAllUserTasks(ctx context.Context, userID string, channelID string, status string, claimerID string, creatorID string, workspaceIDs ...string) ([]Task, error) {
+	workspaceID := ""
+	if len(workspaceIDs) > 0 {
+		workspaceID = workspaceIDs[0]
+	}
+	query, args := buildListAllUserTasksQuery(userID, channelID, status, claimerID, creatorID, workspaceID)
 
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -1216,7 +1220,11 @@ func (s *TaskService) ListAllUserTasks(ctx context.Context, userID string, chann
 	return tasks, rows.Err()
 }
 
-func buildListAllUserTasksQuery(userID string, channelID string, status string, claimerID string, creatorID string) (string, []interface{}) {
+func buildListAllUserTasksQuery(userID string, channelID string, status string, claimerID string, creatorID string, workspaceIDs ...string) (string, []interface{}) {
+	workspaceID := ""
+	if len(workspaceIDs) > 0 {
+		workspaceID = workspaceIDs[0]
+	}
 	query := `SELECT t.id, t.task_number, t.channel_id, t.creator_id, COALESCE(u_creator.display_name, a_creator.name, '') as creator_name, t.title, COALESCE(t.description, ''),
 		t.status, COALESCE(t.claimer_id::text, ''), t.priority, t.due_date, COALESCE(t.message_id::text, ''), COALESCE(t.parent_task_id::text, ''),
 		(SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id) AS subtask_count,
@@ -1235,6 +1243,11 @@ func buildListAllUserTasksQuery(userID string, channelID string, status string, 
 		WHERE cm.member_type = 'user' AND cm.member_id = $1`
 	args := []interface{}{userID}
 	argIdx := 2
+	if workspaceID != "" {
+		query += fmt.Sprintf(" AND c.workspace_id = $%d", argIdx)
+		args = append(args, workspaceID)
+		argIdx++
+	}
 
 	if channelID != "" {
 		query += fmt.Sprintf(" AND t.channel_id = $%d", argIdx)

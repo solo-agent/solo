@@ -2,9 +2,10 @@ package realtime
 
 // Scope types recognised by the broadcaster.
 const (
-	ScopeChannel = "channel"
-	ScopeUser    = "user"
-	ScopeThread  = "thread"
+	ScopeChannel   = "channel"
+	ScopeUser      = "user"
+	ScopeThread    = "thread"
+	ScopeWorkspace = "workspace"
 )
 
 // Broadcaster is the abstraction every realtime event producer should depend
@@ -22,6 +23,9 @@ type Broadcaster interface {
 
 	// BroadcastToThread is a shortcut for BroadcastToScope("thread", threadID, message).
 	BroadcastToThread(threadID string, message []byte)
+
+	// BroadcastToWorkspace reaches connected clients whose active Workspace matches.
+	BroadcastToWorkspace(workspaceID string, message []byte)
 
 	// Broadcast fans a message out to every connection on this node.
 	Broadcast(message []byte)

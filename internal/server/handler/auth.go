@@ -57,6 +57,7 @@ type AuthResponse struct {
 	ExpiresIn           int64        `json:"expires_in"`
 	User                UserResponse `json:"user"`
 	OnboardingChannelID string       `json:"onboarding_channel_id,omitempty"`
+	WorkspaceID         string       `json:"workspace_id,omitempty"`
 }
 
 type UserResponse struct {
@@ -110,6 +111,13 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to send verification code")
 		return
 	}
+	if localRegistrationAutoVerify(r) {
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"message": "registration ready", "email": email, "expires_in": 600, "retry_after": 60,
+			"email_verification": false, "verification_code": code,
+		})
+		return
+	}
 	if err := h.mail.SendCode(r.Context(), email, code, challengeRegister); err != nil {
 		h.invalidateEmailChallenge(r.Context(), challengeID)
 		slog.Error("failed to send registration code", "error", err)
@@ -118,6 +126,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"message": "verification code sent", "email": email, "expires_in": 600, "retry_after": 60,
+		"email_verification": true,
 	})
 }
 
@@ -327,15 +336,15 @@ func onboardingUniqueName(base, userID string) string {
 // a runtime first.
 // Returns the Channel ID for clients that need to initialize Lucy.
 // All failures are logged but not returned — registration succeeds regardless.
-func (h *AuthHandler) bootstrapOnboarding(ctx context.Context, userID, displayName, email string) string {
+func (h *AuthHandler) bootstrapOnboarding(ctx context.Context, userID, displayName, email, workspaceID string) string {
 	channelName := onboarding.OnboardingChannelName(displayName)
 	channelDesc := "Your pinned Channel with Lucy, Solo's steward."
 
 	// Step 1: Create the pinned Lucy Channel.
-	channelID, err := h.svc.CreateChannel(ctx, channelName, channelDesc, "lucy", userID)
+	channelID, err := h.svc.CreateChannelInWorkspace(ctx, channelName, channelDesc, "lucy", userID, workspaceID)
 	if errors.Is(err, service.ErrChannelNameExists) {
 		channelName = onboardingUniqueName(channelName, userID)
-		channelID, err = h.svc.CreateChannel(ctx, channelName, channelDesc, "lucy", userID)
+		channelID, err = h.svc.CreateChannelInWorkspace(ctx, channelName, channelDesc, "lucy", userID, workspaceID)
 	}
 	if err != nil {
 		slog.Warn("onboarding: failed to create channel",
@@ -344,7 +353,7 @@ func (h *AuthHandler) bootstrapOnboarding(ctx context.Context, userID, displayNa
 	}
 
 	// Step 1b: Preserve the per-user #all Channel. New Agents are not auto-added.
-	h.ensureAllChannel(ctx, userID, displayName)
+	h.ensureAllChannel(ctx, userID, displayName, workspaceID)
 
 	// Step 2: Insert a wizard welcome message.
 	msgID := uuid.New().String()
@@ -369,12 +378,12 @@ func (h *AuthHandler) bootstrapOnboarding(ctx context.Context, userID, displayNa
 
 // ensureAllChannel preserves the current per-user #all-{name} Channel.
 // New Channel-scoped Agents and Lucy are intentionally not auto-added.
-func (h *AuthHandler) ensureAllChannel(ctx context.Context, userID, displayName string) {
+func (h *AuthHandler) ensureAllChannel(ctx context.Context, userID, displayName, workspaceID string) {
 	channelName := "all-" + onboarding.SanitizeDisplayName(displayName)
-	_, err := h.svc.CreateChannel(ctx, channelName, "All your agents and members", "channel", userID)
+	_, err := h.svc.CreateChannelInWorkspace(ctx, channelName, "All your agents and members", "channel", userID, workspaceID)
 	if errors.Is(err, service.ErrChannelNameExists) {
 		channelName = onboardingUniqueName(channelName, userID)
-		_, err = h.svc.CreateChannel(ctx, channelName, "All your agents and members", "channel", userID)
+		_, err = h.svc.CreateChannelInWorkspace(ctx, channelName, "All your agents and members", "channel", userID, workspaceID)
 	}
 	if err != nil {
 		slog.Debug("onboarding: #all channel exists", "user_id", userID, "channel", channelName, "error", err)

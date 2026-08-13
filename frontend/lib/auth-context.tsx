@@ -19,7 +19,7 @@ import {
   useReducer,
   type ReactNode,
 } from 'react';
-import { ApiError, apiClient, defaultTokenStorage, setAuthTokens, clearAuthTokens } from './api-client';
+import { ApiError, apiClient, defaultTokenStorage, setAuthTokens, clearAuthTokens, setStoredActiveWorkspaceId } from './api-client';
 import { cancelAllReliableSends } from './reliable-send';
 
 // ---- 类型定义 ----
@@ -55,6 +55,7 @@ export interface AuthResponse {
   refresh_token: string;
   user: User;
   onboarding_channel_id?: string;
+  workspace_id?: string;
 }
 
 export interface UpdateProfileRequest {
@@ -114,7 +115,7 @@ export interface AuthContextValue {
   isLoading: boolean;
   error: string | null;
   login: (req: LoginRequest) => Promise<void>;
-  register: (req: RegisterRequest) => Promise<void>;
+  register: (req: RegisterRequest) => Promise<string | undefined>;
   verifyRegistration: (req: VerifyRegistrationRequest) => Promise<string | undefined>;
   updateProfile: (req: UpdateProfileRequest) => Promise<User>;
   logout: () => Promise<void>;
@@ -185,11 +186,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // ---- Register ----
 
-  const register = useCallback(async (req: RegisterRequest): Promise<void> => {
+  const register = useCallback(async (req: RegisterRequest): Promise<string | undefined> => {
     dispatch({ type: 'AUTH_START' });
     try {
-      await apiClient.post('/api/v1/auth/register', req);
+      const data = await apiClient.post<{ verification_code?: string }>('/api/v1/auth/register', req);
       dispatch({ type: 'AUTH_IDLE' });
+      return data.verification_code;
     } catch (err: unknown) {
       const message =
         err instanceof ApiError ? err.message : t('authRegisterError');
@@ -203,6 +205,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       const data = await apiClient.post<AuthResponse>('/api/v1/auth/register/verify', req);
       setAuthTokens(data.access_token, data.refresh_token);
+      if (data.workspace_id) setStoredActiveWorkspaceId(data.workspace_id);
       dispatch({ type: 'AUTH_SUCCESS', user: data.user });
       return data.onboarding_channel_id;
     } catch (err: unknown) {

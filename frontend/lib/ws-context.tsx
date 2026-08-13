@@ -16,7 +16,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { defaultTokenStorage } from './api-client';
+import { defaultTokenStorage, getActiveWorkspaceId } from './api-client';
 import { WSClient, type WSClientConfig } from './ws-client';
 import { retryFailedReliableSends } from './reliable-send';
 import type {
@@ -108,6 +108,7 @@ export function WSProvider({
     const config: WSClientConfig = {
       baseUrl,
       getToken: resolvedGetToken,
+      getWorkspaceId: getActiveWorkspaceId,
       onStateChange: setConnectionState,
       onReconnectChange: (reconnecting, attempt) => {
         setIsReconnecting(reconnecting);

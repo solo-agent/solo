@@ -112,3 +112,23 @@ func TestStartManagedDaemonUsesSoloStateDirectory(t *testing.T) {
 		t.Fatalf("child credential path = %q, want %q", got, wantCredential)
 	}
 }
+
+func TestDaemonProfilesUseIndependentState(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	alpha, err := daemonProfileStateDir("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beta, err := daemonProfileStateDir("beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alpha == beta || !strings.HasSuffix(alpha, filepath.Join("daemons", "alpha")) || !strings.HasSuffix(beta, filepath.Join("daemons", "beta")) {
+		t.Fatalf("profiles share state: alpha=%q beta=%q", alpha, beta)
+	}
+	profile, remaining, err := parseDaemonProfile([]string{"--server", "https://solo.example", "--profile", "alpha"})
+	if err != nil || profile != "alpha" || len(remaining) != 2 {
+		t.Fatalf("profile parse = %q %#v %v", profile, remaining, err)
+	}
+}

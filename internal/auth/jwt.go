@@ -49,7 +49,15 @@ type SoloClaims struct {
 
 // GenerateAgentToken creates a long-lived JWT access token for agent sessions (24h).
 func GenerateAgentToken(agentID, displayName string) (string, error) {
-	return generateToken(agentID, agentID+"@solo.agent", displayName, AgentAccessTokenDuration)
+	now := time.Now()
+	claims := SoloClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject: agentID, IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(AgentAccessTokenDuration)), Issuer: "solo",
+		},
+		Email: agentID + "@solo.agent", Name: displayName, ActorType: "agent",
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(JWTSecret())
 }
 
 func GenerateAgentRunToken(agentID, displayName, runID, computerID string) (string, error) {

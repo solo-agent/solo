@@ -50,6 +50,7 @@ func Auth(pools ...*pgxpool.Pool) func(http.Handler) http.Handler {
 				r.Header.Set("X-Solo-Run-ID", claims.RunID)
 				r.Header.Set("X-Solo-Computer-ID", claims.ComputerID)
 			}
+			r.Header.Set("X-Solo-Actor-Type", claims.ActorType)
 
 			r.Header.Set("X-User-ID", claims.Subject)
 			r.Header.Set("X-User-Email", claims.Email)

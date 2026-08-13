@@ -12,6 +12,7 @@ import (
 
 	"github.com/solo-ai/solo/internal/server/onboarding"
 	"github.com/solo-ai/solo/internal/server/service"
+	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
 	"github.com/solo-ai/solo/pkg/agent"
 )
 
@@ -80,7 +81,7 @@ func (h *OnboardingHandler) CreateLucy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify channel exists and user is a member.
-	if !h.userOwnsChannel(r.Context(), channelID, userID) {
+	if !h.userOwnsChannel(r.Context(), channelID, userID, serverworkspace.ID(r)) {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	}
@@ -210,7 +211,7 @@ func isValidRuntime(runtimeType string) bool {
 }
 
 // userOwnsChannel checks the user is a member of the given channel.
-func (h *OnboardingHandler) userOwnsChannel(ctx context.Context, channelID, userID string) bool {
+func (h *OnboardingHandler) userOwnsChannel(ctx context.Context, channelID, userID, workspaceID string) bool {
 	var isMember bool
 	err := h.pool.QueryRow(ctx,
 		`SELECT EXISTS(
@@ -218,11 +219,12 @@ func (h *OnboardingHandler) userOwnsChannel(ctx context.Context, channelID, user
 			  FROM channels c
 			  JOIN channel_members cm ON cm.channel_id = c.id
 			 WHERE c.id = $1
+			   AND c.workspace_id = $3
 			   AND c.type = 'lucy'
 			   AND c.is_archived = false
 			   AND cm.member_type = 'user'
 			   AND cm.member_id = $2
-		)`, channelID, userID,
+		)`, channelID, userID, workspaceID,
 	).Scan(&isMember)
 	return err == nil && isMember
 }

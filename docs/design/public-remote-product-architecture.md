@@ -281,7 +281,80 @@ Daemon, and a real local Agent runtime. No HTTP or database behavior is mocked.
 8. Stopping and restarting the managed Daemon preserves the credential and
    restores the Computer connection.
 
-## 13. Verification results
+## 13. Localhost registration convenience
+
+### 13.1 Domain model and ownership
+
+Local registration convenience is an ephemeral development capability, not a
+second User type or a persisted account flag. `SOLO_DEV_AUTO_VERIFY_LOCAL`
+belongs to the make-managed Server process. The Server remains the only owner
+of registration challenges and the existing verified-User transaction remains
+the only path that creates a User, personal Workspace, `general` and Lucy
+Channels, Public membership, and an authenticated session.
+
+### 13.2 Lifecycle and data flow
+
+`make rebuild` enables the capability for its development Server. For a request
+whose TCP peer, API Host, browser Origin, and forwarded client/host headers (if
+present) all resolve to loopback, `POST /auth/register` creates the normal
+hashed challenge but does not call the mail transport. Its `202` response
+includes the short-lived development code and declares that manual email
+verification is not required. The registration page immediately posts that
+code to the unchanged `/auth/register/verify` route, stores the returned tokens,
+selects the personal Workspace, and enters onboarding without rendering the
+verification form.
+
+Any non-loopback signal, a disabled capability, or `APP_ENV=production` uses
+the existing email-delivery lifecycle. The frontend does not infer trust from
+its own URL and cannot request the bypass with a body field.
+
+### 13.3 Persistence and recovery
+
+The development flow persists the same HMAC challenge and consumes it in the
+same PostgreSQL transaction as remote registration. There is no schema change,
+no unverified User, and no development-only value stored on the User. If the
+automatic verify request is interrupted, resubmitting registration after the
+existing cooldown creates a fresh challenge; an already completed account
+continues through normal login.
+
+### 13.4 HTTP API and frontend state
+
+`GET /auth/config` reports `email_verification=false` only for an eligible
+localhost request. The registration `202` response may additionally contain
+`verification_code` only under that same Server-side predicate. Remote
+responses retain their existing shape apart from an explicit
+`email_verification=true` field and never expose a raw code.
+
+`AuthContext.register` returns the optional local code to the registration
+page. When present, the page keeps its submitting state, invokes the existing
+verification action, and redirects exactly as the manual form does. When
+absent, the current pending-email, resend, edit-address, and error states are
+unchanged.
+
+### 13.5 Failure boundaries and compatibility
+
+- A public hostname routed to the same make-managed Server does not qualify;
+  it sends mail and requires the code.
+- Reverse-proxy requests qualify only when forwarded client and host values are
+  also loopback; production mode disables the feature unconditionally.
+- A malformed or expired returned code fails in the existing generic verify
+  state and creates no User.
+- Password reset still requires email verification, including on localhost;
+  this convenience applies only to first-time registration.
+- Existing remote deployments, users, challenges, sessions, Daemons, and
+  database migrations are compatible without changes.
+
+### 13.6 Acceptance
+
+Validation uses the make-managed frontend, API Server, and PostgreSQL without
+mocks. A browser opened at `http://localhost:3000` must submit the registration
+form once, never render the verification-code UI, arrive at the dashboard, and
+leave a verified User, session, personal Workspace, Public membership, and
+ordinary-Channel memberships in PostgreSQL. Unit coverage separately proves
+that production, public Host/Origin, and public forwarded headers cannot enable
+the shortcut.
+
+## 14. Verification results
 
 Completed against the real repository stack on 2026-08-07. Mail delivery below
 uses a real SMTP exchange with Mailpit; it does not claim delivery through the

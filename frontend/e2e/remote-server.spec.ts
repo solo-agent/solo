@@ -7,8 +7,13 @@ import { registerVerified } from './support/auth';
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
 const repoRoot = join(process.cwd(), '..');
 const credentialFile = `/tmp/solo-remote-e2e-${process.pid}.json`;
+const pairedDaemonID = `remote-e2e-${process.pid}`;
 
-interface AuthResponse { access_token: string; refresh_token: string }
+interface AuthResponse {
+  access_token: string;
+  refresh_token: string;
+  user: { id: string };
+}
 interface Entity { id: string; name: string }
 interface Computer extends Entity {
   status: string;
@@ -48,11 +53,36 @@ function rebuildPaired(computerID: string, enrollmentToken: string) {
     `SOLO_COMPUTER_ID=${computerID}`,
     `SOLO_ENROLLMENT_TOKEN=${enrollmentToken}`,
     `SOLO_DAEMON_CREDENTIAL_FILE=${credentialFile}`,
+    `DAEMON_ID=${pairedDaemonID}`,
   ], { cwd: repoRoot, stdio: 'inherit', timeout: 240000 });
 }
 
 function rebuildDefault() {
   execFileSync('make', ['rebuild'], { cwd: repoRoot, stdio: 'inherit', timeout: 240000 });
+}
+
+function deactivateTestUsers(...auths: AuthResponse[]) {
+  const ids = auths.map((auth) => `'${auth.user.id}'`).join(',');
+  if (!ids) return;
+  execFileSync('docker', [
+    'exec', process.env.SOLO_POSTGRES_CONTAINER ?? 'solo-postgres',
+    'psql', '-v', 'ON_ERROR_STOP=1',
+    '-U', process.env.POSTGRES_USER ?? 'solo',
+    '-d', process.env.POSTGRES_DB ?? 'solo', '-c', `
+      BEGIN;
+      DELETE FROM channel_members
+       WHERE member_type='user' AND member_id IN (${ids});
+      DELETE FROM workspace_members WHERE user_id IN (${ids});
+      DELETE FROM sessions WHERE user_id IN (${ids});
+      UPDATE agent_sessions SET status='closed',last_active_at=now()
+       WHERE agent_id IN (SELECT id FROM agents WHERE owner_id IN (${ids}));
+      UPDATE agents SET is_active=false,updated_at=now()
+       WHERE owner_id IN (${ids});
+      DELETE FROM computers WHERE owner_id IN (${ids});
+      UPDATE users SET is_active=false,updated_at=now() WHERE id IN (${ids});
+      COMMIT;
+    `,
+  ], { encoding: 'utf8' });
 }
 
 async function authenticate(request: APIRequestContext): Promise<AuthResponse> {
@@ -134,6 +164,9 @@ test.describe('complete remote Server path', () => {
     let computer: Computer | null = null;
     let channel: Entity | null = null;
     let agent: Entity | null = null;
+    let outsider: AuthResponse | null = null;
+    const defaultComputerID = databaseJSON<string>(`SELECT to_json(COALESCE((SELECT id::text FROM computers WHERE daemon_id='daemon-01'),''))::text`);
+    expect(defaultComputerID).not.toBe('');
 
     try {
       computer = await api<Computer>(request, auth.access_token, 'post', '/api/v1/computers', { name: computerName });
@@ -195,13 +228,15 @@ test.describe('complete remote Server path', () => {
 	  expect(transcript.length).toBeGreaterThan(0);
 	  const timeline = await api<SessionTimeline>(request, auth.access_token, 'get', `/api/v1/agent-sessions/${onlineRun.session_id}/timeline`);
 	  expect(timeline.entries.length).toBeGreaterThan(0);
-	  const outsider = await authenticate(request);
+	  outsider = await authenticate(request);
+	  // New registrations auto-join the public Workspace and its Channels, so
+	  // another public member can inspect the shared Agent's observable history.
 	  expect((await request.get(`${apiBase}/api/v1/agent-runs/${onlineRun.run_id}/transcript`, {
 	    headers: { authorization: `Bearer ${outsider.access_token}` },
-	  })).status()).toBe(404);
+	  })).status()).toBe(200);
 	  expect((await request.get(`${apiBase}/api/v1/agent-sessions/${onlineRun.session_id}/timeline`, {
 	    headers: { authorization: `Bearer ${outsider.access_token}` },
-	  })).status()).toBe(404);
+	  })).status()).toBe(200);
 
       const workspace = await request.get(`${apiBase}/api/v1/agents/${agent.id}/workspace`, { headers: { authorization: `Bearer ${auth.access_token}` } });
       expect(workspace.ok()).toBe(true);
@@ -265,9 +300,14 @@ test.describe('complete remote Server path', () => {
     } finally {
       if (agent) await api(request, auth.access_token, 'delete', `/api/v1/agents/${agent.id}`).catch(() => undefined);
       if (channel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
-      if (computer) await api(request, auth.access_token, 'delete', `/api/v1/computers/${computer.id}`).catch(() => undefined);
       rmSync(credentialFile, { force: true });
       rebuildDefault();
+      if (computer) await api(request, auth.access_token, 'delete', `/api/v1/computers/${computer.id}`);
+      expect(databaseJSON<string>(`SELECT to_json(COALESCE((SELECT id::text FROM computers WHERE daemon_id='daemon-01'),''))::text`)).toBe(defaultComputerID);
+      if (computer) {
+        expect(databaseJSON<number>(`SELECT to_json(count(*))::text FROM computers WHERE id='${computer.id}'`)).toBe(0);
+      }
+      deactivateTestUsers(auth, ...(outsider ? [outsider] : []));
     }
   });
 });

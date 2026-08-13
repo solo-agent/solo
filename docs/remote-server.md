@@ -56,11 +56,27 @@ curl -fsSL 'https://raw.githubusercontent.com/solo-agent/solo/master/scripts/ins
   --computer-id '...' --token '...'
 ```
 
-The Daemon stores the exchanged machine credential in `~/.solo/daemon/credentials.json` with mode `0600`. Later starts need no pairing variables because the stored Server URL and credential are reused. Provider credentials and CLI login remain local. The Daemon listens only on `127.0.0.1:8081` for the local `solo` CLI.
+The default Daemon stores the exchanged machine credential in `~/.solo/daemon/credentials.json` with mode `0600`. Later starts need no pairing variables because the stored Server URL and credential are reused. Provider credentials and CLI login remain local. The default Daemon listens only on `127.0.0.1:8081` for the local `solo` CLI.
 
 Manage it with `solo daemon status`, `solo daemon logs`, `solo daemon restart`,
 and `solo daemon stop`. Re-running the installer upgrades both binaries; the
 credential remains in place.
+
+One machine can also host several independently paired Daemons. Give each one a
+profile; Solo keeps separate credentials, PID, log, lock, and a stable local port
+under `~/.solo/daemons/<profile>/`:
+
+```bash
+solo daemon connect --profile studio-a --server 'https://solo.example.com' --computer-id '...' --token '...'
+solo daemon connect --profile studio-b --server 'https://solo.example.com' --computer-id '...' --token '...'
+solo daemon status --profile studio-a
+solo daemon stop --profile studio-b
+```
+
+Profiles are process identities, not Workspace identities. A Computer remains
+owned by one user; an Agent binds to that Computer, while the Agent's home
+Channel determines its Workspace. This lets one Workspace use Agents backed by
+several users' Daemons without sharing either user's local filesystem.
 
 ## User accounts and email
 

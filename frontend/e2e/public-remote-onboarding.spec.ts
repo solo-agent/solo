@@ -1,8 +1,18 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
 const authCode = process.env.SOLO_E2E_AUTH_CODE ?? '123456';
+
+async function postAuth(request: APIRequestContext, path: string, data: unknown): Promise<APIResponse> {
+  let response = await request.post(`${apiBase}${path}`, { data });
+  for (let attempt = 0; response.status() === 429 && attempt < 3; attempt += 1) {
+    const retryAfter = Number(response.headers()['retry-after'] ?? '6');
+    await new Promise((resolve) => setTimeout(resolve, Math.max(1, retryAfter) * 1000));
+    response = await request.post(`${apiBase}${path}`, { data });
+  }
+  return response;
+}
 
 function databaseJSON<T>(query: string): T {
   const output = execFileSync('docker', [
@@ -13,13 +23,40 @@ function databaseJSON<T>(query: string): T {
   return JSON.parse(output) as T;
 }
 
+function deactivateTestUser(email: string): void {
+  const escapedEmail = email.replaceAll("'", "''");
+  execFileSync('docker', [
+    'exec', process.env.SOLO_POSTGRES_CONTAINER ?? 'solo-postgres',
+    'psql', '-U', process.env.POSTGRES_USER ?? 'solo',
+    '-d', process.env.POSTGRES_DB ?? 'solo', '-v', 'ON_ERROR_STOP=1', '-c', `
+      BEGIN;
+      DELETE FROM channel_members
+       WHERE member_type='user'
+         AND member_id IN (SELECT id FROM users WHERE email='${escapedEmail}')
+         AND channel_id IN (SELECT id FROM channels WHERE workspace_id='00000000-0000-0000-0000-000000000001');
+      DELETE FROM workspace_members
+       WHERE user_id IN (SELECT id FROM users WHERE email='${escapedEmail}')
+         AND workspace_id='00000000-0000-0000-0000-000000000001';
+      DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email='${escapedEmail}');
+      UPDATE users SET is_active=false WHERE email='${escapedEmail}';
+      COMMIT;
+    `,
+  ], { stdio: 'ignore' });
+}
+
 test.describe('public remote first-user experience', () => {
   test.skip(process.env.SOLO_E2E_PUBLIC_REMOTE !== '1', 'requires the make-managed frontend, API, and PostgreSQL stack');
   test.setTimeout(180000);
+  let testEmail = '';
+
+  test.afterEach(() => {
+    if (testEmail) deactivateTestUser(testEmail);
+  });
 
   test('registers, recovers the password, and exposes a clean-machine pairing command', async ({ page, request, context }) => {
     const suffix = Date.now().toString(36);
     const email = `public-remote-${suffix}@solo.local`;
+    testEmail = email;
     const password = 'SoloPublic-2026!';
     const newPassword = 'SoloRecovered-2026!';
     let computerID = '';
@@ -53,7 +90,7 @@ test.describe('public remote first-user experience', () => {
     expect(persisted.verified).toBe(true);
     expect(persisted.onboarding_channels).toBeGreaterThan(0);
 
-    const initialLogin = await request.post(`${apiBase}/api/v1/auth/login`, { data: { email, password } });
+    const initialLogin = await postAuth(request, '/api/v1/auth/login', { email, password });
     expect(initialLogin.ok()).toBe(true);
     const initialAuth = await initialLogin.json() as { access_token: string; refresh_token: string };
 
@@ -70,11 +107,11 @@ test.describe('public remote first-user experience', () => {
     await page.getByRole('button', { name: 'Reset password' }).click();
     await expect(page.getByText('Password reset. You can now log in with your new password.')).toBeVisible();
 
-    expect((await request.post(`${apiBase}/api/v1/auth/login`, { data: { email, password } })).status()).toBe(401);
-    const recoveredLogin = await request.post(`${apiBase}/api/v1/auth/login`, { data: { email, password: newPassword } });
+    expect((await postAuth(request, '/api/v1/auth/login', { email, password })).status()).toBe(401);
+    const recoveredLogin = await postAuth(request, '/api/v1/auth/login', { email, password: newPassword });
     expect(recoveredLogin.ok()).toBe(true);
     const recoveredAuth = await recoveredLogin.json() as { access_token: string; refresh_token: string };
-    expect((await request.post(`${apiBase}/api/v1/auth/refresh`, { data: { refresh_token: initialAuth.refresh_token } })).status()).toBe(401);
+    expect((await postAuth(request, '/api/v1/auth/refresh', { refresh_token: initialAuth.refresh_token })).status()).toBe(401);
 
     await page.addInitScript(({ accessToken, refreshToken }) => {
       localStorage.setItem('access_token', accessToken);

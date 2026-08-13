@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
 )
 
 const (
@@ -150,12 +151,14 @@ func (s *AgentRelationshipService) List(ctx context.Context, userID, agentID str
 		  FROM agent_relationships r
 		  JOIN agents fa ON fa.id = r.from_agent_id
 		  JOIN agents ta ON ta.id = r.to_agent_id
+		  JOIN channels c ON c.id = fa.home_channel_id
 		 WHERE fa.owner_id = $1::uuid AND ta.owner_id = $1::uuid
+		   AND ($3 = '' OR c.workspace_id::text = $3)
 		   AND fa.is_active = true AND ta.is_active = true
 		   AND fa.home_channel_id = ta.home_channel_id
 		   AND ($2 = '' OR r.from_agent_id::text = $2 OR r.to_agent_id::text = $2)
 		 ORDER BY r.created_at DESC
-	`, userID, agentID)
+	`, userID, agentID, serverworkspace.FilterID(ctx))
 	if err != nil {
 		return nil, err
 	}

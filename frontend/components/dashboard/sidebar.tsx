@@ -5,8 +5,9 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { Plus, Sparkles } from 'lucide-react';
+import { ChevronDown, Plus, Sparkles } from 'lucide-react';
 import { ChannelList } from './channel-list';
 import { NAV_ITEMS } from '@/components/ui/navbar';
 import { UserAvatar } from '@/components/ui/user-avatar';
@@ -16,6 +17,8 @@ import { t } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import type { Channel, DMChannel } from '@/lib/types';
+import { WorkspaceSwitcher } from '@/components/workspaces/workspace-switcher';
+import { WorkspacePeople } from '@/components/workspaces/workspace-people';
 
 interface SidebarProps {
   channels: Channel[];
@@ -51,6 +54,7 @@ export function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
   const { user } = useAuth();
+  const [channelsExpanded, setChannelsExpanded] = useState(true);
   const userName = user?.display_name || user?.email || t('navSettings');
 
   if (isCollapsed) {
@@ -74,17 +78,8 @@ export function Sidebar({
       className="navbar-brutal flex h-full w-[240px] flex-shrink-0 flex-col border-r-2 border-black py-3"
     >
       <div className="flex flex-col gap-2">
-        <div className="flex w-full items-center gap-3 px-3">
-          <Link
-            href="/dashboard"
-            className="flex h-9 w-9 shrink-0 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm"
-            aria-label={t('navSoloWorkspace')}
-          >
-            <span className="font-heading text-sm font-black text-black">S</span>
-          </Link>
-          <div className="min-w-0 flex-1">
-            <div className="truncate font-heading text-xl font-black text-black">Solo</div>
-          </div>
+        <div className="flex w-full items-center gap-2 px-3">
+          <WorkspaceSwitcher />
           <button
             type="button"
             onClick={onToggleCollapsed}
@@ -153,14 +148,23 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className="mt-3 flex min-h-0 flex-1 flex-col border-t-2 border-black pt-2">
+      <div className="mt-3 min-h-0 flex-1 overflow-y-auto pt-2">
         <div className="flex items-center gap-2 px-3 py-2">
-          <div className="min-w-0 flex-1 font-heading text-xs font-black uppercase tracking-wider text-black/70">
-            {t('navChannels')}
-          </div>
-          <span className="font-mono text-xs font-bold tabular-nums text-black/45">
-            {channels.length}
-          </span>
+          <button
+            type="button"
+            onClick={() => setChannelsExpanded((value) => !value)}
+            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+            aria-expanded={channelsExpanded}
+            aria-label={`${t('navChannels')} ${channels.length}`}
+          >
+            <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 transition-transform', !channelsExpanded && '-rotate-90')} />
+            <span className="min-w-0 flex-1 font-heading text-xs font-black uppercase tracking-wider text-black/70">
+              {t('navChannels')}
+            </span>
+            <span className="font-mono text-xs font-bold tabular-nums text-black/45">
+              {channels.length}
+            </span>
+          </button>
           <button
             type="button"
             onClick={onCreateChannel}
@@ -171,21 +175,24 @@ export function Sidebar({
             <Plus className="h-3.5 w-3.5" />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto pb-2">
-          <ChannelList
-            channels={channels}
-            isLoading={isLoading}
-            selectedChannelId={selectedChannelId}
-            onSelectChannel={onSelectChannel}
-            onCreateChannel={onCreateChannel}
-            onDeleteChannel={onDeleteChannel}
-            showHeader={false}
-            railSurface
-          />
-        </div>
+        {channelsExpanded && (
+          <div className="pb-1">
+            <ChannelList
+              channels={channels}
+              isLoading={isLoading}
+              selectedChannelId={selectedChannelId}
+              onSelectChannel={onSelectChannel}
+              onCreateChannel={onCreateChannel}
+              onDeleteChannel={onDeleteChannel}
+              showHeader={false}
+              railSurface
+            />
+          </div>
+        )}
+        <WorkspacePeople />
       </div>
 
-      <div className="mt-auto flex flex-col gap-0.5 pt-3">
+      <div className="flex flex-col gap-0.5 border-t-2 border-black pt-1">
         <Link
           href="/settings"
           className={selectableRowClass(

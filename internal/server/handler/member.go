@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/solo-ai/solo/internal/server/service"
+	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
 	"strings"
 )
 
@@ -125,6 +126,7 @@ func (h *MemberHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isAgentHome := h.svc.IsAgentHomeChannel(r.Context(), channelID, memberID)
 	memberType, err := h.svc.RemoveMember(r.Context(), channelID, requesterID, memberID)
 	if err != nil {
 		switch {
@@ -150,7 +152,7 @@ func (h *MemberHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 	if h.agentSvc != nil {
 		h.agentSvc.BroadcastMemberEvent(channelID, "member.removed", memberType, memberID, "")
 	}
-	if memberType == "agent" && h.dm != nil {
+	if memberType == "agent" && isAgentHome && h.dm != nil {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
@@ -200,7 +202,7 @@ func looksLikeUUID(s string) bool {
 }
 
 func (h *MemberHandler) resolveChannelName(r *http.Request, name string) (string, error) {
-	id, ok := h.svc.ResolveChannelName(r.Context(), name)
+	id, ok := h.svc.ResolveChannelNameInWorkspace(r.Context(), name, serverworkspace.ID(r))
 	if !ok {
 		return "", errors.New("channel not found")
 	}

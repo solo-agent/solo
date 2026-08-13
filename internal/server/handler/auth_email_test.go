@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -43,6 +45,43 @@ func TestDevelopmentVerificationCode(t *testing.T) {
 	if err != nil || len(code) != 6 {
 		t.Fatalf("production verificationCode() = %q, %v", code, err)
 	}
+}
+
+func TestLocalRegistrationAutoVerifyBoundary(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("SOLO_DEV_AUTO_VERIFY_LOCAL", "true")
+
+	local := httptest.NewRequest("POST", "http://127.0.0.1:8080/api/v1/auth/register", nil)
+	local.RemoteAddr = "127.0.0.1:49152"
+	local.Header.Set("Origin", "http://localhost:3000")
+	if !localRegistrationAutoVerify(local) {
+		t.Fatal("direct localhost registration did not enable automatic verification")
+	}
+
+	for name, mutate := range map[string]func(*http.Request){
+		"public host":        func(r *http.Request) { r.Host = "solo.example.com" },
+		"public origin":      func(r *http.Request) { r.Header.Set("Origin", "https://solo.example.com") },
+		"public peer":        func(r *http.Request) { r.RemoteAddr = "203.0.113.8:49152" },
+		"forwarded client":   func(r *http.Request) { r.Header.Set("X-Forwarded-For", "203.0.113.8") },
+		"forwarded host":     func(r *http.Request) { r.Header.Set("X-Forwarded-Host", "solo.example.com") },
+		"standard forwarded": func(r *http.Request) { r.Header.Set("Forwarded", "for=127.0.0.1;host=localhost") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := local.Clone(local.Context())
+			r.Header = local.Header.Clone()
+			mutate(r)
+			if localRegistrationAutoVerify(r) {
+				t.Fatal("non-local registration enabled automatic verification")
+			}
+		})
+	}
+
+	t.Run("production", func(t *testing.T) {
+		t.Setenv("APP_ENV", "production")
+		if localRegistrationAutoVerify(local) {
+			t.Fatal("production registration enabled automatic verification")
+		}
+	})
 }
 
 func TestEmailCodeHashIsBoundToAccountPurposeAndSecret(t *testing.T) {

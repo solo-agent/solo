@@ -16,6 +16,7 @@ import (
 
 	"github.com/solo-ai/solo/internal/i18n"
 	"github.com/solo-ai/solo/internal/server/service"
+	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
 	"github.com/solo-ai/solo/internal/server/ws"
 )
 
@@ -117,8 +118,8 @@ func (h *DMHandler) CreateOrGetDM(w http.ResponseWriter, r *http.Request) {
 	switch req.MemberType {
 	case "user":
 		err := h.pool.QueryRow(r.Context(),
-			`SELECT display_name, COALESCE(avatar_url, '') FROM users WHERE id = $1 AND is_active = true`,
-			req.MemberID,
+			`SELECT u.display_name, COALESCE(u.avatar_url, '') FROM users u JOIN workspace_members wm ON wm.user_id=u.id WHERE u.id = $1 AND wm.workspace_id=$2 AND u.is_active = true`,
+			req.MemberID, serverworkspace.ID(r),
 		).Scan(&targetName, &targetAvatar)
 		if err != nil {
 			if isNotFound(err) {
@@ -134,8 +135,8 @@ func (h *DMHandler) CreateOrGetDM(w http.ResponseWriter, r *http.Request) {
 		// Verify agent exists and belongs to the requesting user
 		var agentName, ownerID string
 		err := h.pool.QueryRow(r.Context(),
-			`SELECT name, owner_id, COALESCE(avatar_url, '') FROM agents WHERE id = $1 AND is_active = true`,
-			req.MemberID,
+			`SELECT a.name, a.owner_id, COALESCE(a.avatar_url, '') FROM agents a JOIN channels c ON c.id=a.home_channel_id WHERE a.id = $1 AND c.workspace_id=$2 AND a.is_active = true`,
+			req.MemberID, serverworkspace.ID(r),
 		).Scan(&agentName, &ownerID, &targetAvatar)
 		if err != nil {
 			if isNotFound(err) {
@@ -162,11 +163,11 @@ func (h *DMHandler) CreateOrGetDM(w http.ResponseWriter, r *http.Request) {
 		`SELECT dm1.channel_id, c.created_at, c.updated_at
 		 FROM dm_members dm1
 		 JOIN dm_members dm2 ON dm1.channel_id = dm2.channel_id
-		 JOIN channels c ON c.id = dm1.channel_id AND c.type = 'dm' AND c.is_archived = false
+			 JOIN channels c ON c.id = dm1.channel_id AND c.type = 'dm' AND c.is_archived = false
 		 WHERE dm1.member_type = 'user' AND dm1.member_id = $1
-		   AND dm2.member_type = $2 AND dm2.member_id = $3
+			   AND dm2.member_type = $2 AND dm2.member_id = $3 AND c.workspace_id=$4
 		 LIMIT 1`,
-		userID, req.MemberType, req.MemberID,
+		userID, req.MemberType, req.MemberID, serverworkspace.ID(r),
 	).Scan(&existingChannelID, &existingCreatedAt, &existingUpdatedAt)
 	if err == nil && existingChannelID != "" {
 		// Existing DM found — return it with other member info
@@ -208,10 +209,10 @@ func (h *DMHandler) CreateOrGetDM(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = tx.QueryRow(r.Context(),
-		`INSERT INTO channels (name, description, type, created_by)
-		 VALUES ($1, $2, 'dm', $3)
+		`INSERT INTO channels (workspace_id, name, description, type, created_by)
+		 VALUES ($1, $2, $3, 'dm', $4)
 		 RETURNING id, created_at, updated_at`,
-		channelName, "Direct Message", userID,
+		serverworkspace.ID(r), channelName, "Direct Message", userID,
 	).Scan(&channelID, &createdAt, &updatedAt)
 	if err != nil {
 		slog.Error("failed to create DM channel", "error", err)
@@ -316,9 +317,9 @@ func (h *DMHandler) ListDMs(w http.ResponseWriter, r *http.Request) {
 		     WHERE channel_id = c.id AND thread_id IS NULL
 		     ORDER BY created_at DESC LIMIT 1
 		 ) msg ON true
-		 WHERE c.type = 'dm' AND c.is_archived = false
+			 WHERE c.type = 'dm' AND c.workspace_id=$2 AND c.is_archived = false
 		 ORDER BY COALESCE(msg.created_at, c.created_at) DESC`,
-		userID,
+		userID, serverworkspace.ID(r),
 	)
 	if err != nil {
 		slog.Error("failed to query DM list", "error", err)

@@ -17,6 +17,7 @@ import (
 	"github.com/solo-ai/solo/internal/realtime"
 	"github.com/solo-ai/solo/internal/server/service"
 	"github.com/solo-ai/solo/internal/server/workspace"
+	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
 	"github.com/solo-ai/solo/pkg/agent"
 )
 
@@ -183,13 +184,14 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			  FROM channels c
 			  JOIN channel_members cm ON cm.channel_id = c.id
 			 WHERE c.id = $1
+			   AND c.workspace_id = $3
 			   AND c.type = 'channel'
 			   AND c.is_archived = false
 			   AND cm.member_type = 'user'
 			   AND cm.member_id = $2
-			   AND cm.role IN ('owner', 'admin')
+			   AND cm.role IN ('owner', 'admin', 'member')
 		)
-	`, channelID, userID).Scan(&canCreate)
+	`, channelID, userID, serverworkspace.ID(r)).Scan(&canCreate)
 	if err != nil || !canCreate {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
@@ -296,19 +298,22 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.pool.Query(r.Context(),
 		`SELECT a.id, a.name, COALESCE(a.description, ''), a.owner_id,
 		        a.home_channel_id, a.kind, a.model_provider, a.model_name,
-		        system_prompt, is_active, COALESCE(avatar_url, ''),
-		        custom_env, custom_args, COALESCE(a.runtime_id, ''),
+		        CASE WHEN a.owner_id=$2 THEN system_prompt ELSE '' END, is_active, COALESCE(avatar_url, ''),
+		        CASE WHEN a.owner_id=$2 THEN custom_env ELSE '{}'::jsonb END,
+		        CASE WHEN a.owner_id=$2 THEN custom_args ELSE '[]'::jsonb END,
+		        CASE WHEN a.owner_id=$2 THEN COALESCE(a.runtime_id, '') ELSE '' END,
 		        a.created_at, a.updated_at
 		 FROM agents a
+		 JOIN channel_members acm ON acm.member_id=a.id AND acm.member_type='agent' AND acm.channel_id=$1
+		 JOIN channels c ON c.id = acm.channel_id AND c.workspace_id = $3
 		 JOIN channel_members ucm
 		   ON ucm.channel_id = a.home_channel_id
 		  AND ucm.member_type = 'user'
 		  AND ucm.member_id = $2
-		 WHERE a.home_channel_id = $1
-		   AND a.is_active = true
+		 WHERE a.is_active = true
 		   AND a.kind = 'agent'
 		 ORDER BY a.created_at ASC`,
-		channelID, userID,
+		channelID, userID, serverworkspace.ID(r),
 	)
 	if err != nil {
 		slog.Error("failed to query agents", "error", err)
@@ -340,6 +345,51 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, agents)
+}
+
+// ListWorkspace exposes the collaboration-safe Agent directory for the active
+// Workspace. Private runtime fields are intentionally omitted.
+func (h *AgentHandler) ListWorkspace(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	rows, err := h.pool.Query(r.Context(), `
+		SELECT a.id::text,a.name,COALESCE(a.description,''),a.owner_id::text,
+		       a.home_channel_id::text,a.kind,a.model_provider,a.model_name,
+		       CASE WHEN a.owner_id=$2 THEN a.system_prompt ELSE '' END,
+		       a.is_active,COALESCE(a.avatar_url,''),
+		       CASE WHEN a.owner_id=$2 THEN a.custom_env ELSE '{}'::jsonb END,
+		       CASE WHEN a.owner_id=$2 THEN a.custom_args ELSE '[]'::jsonb END,
+		       CASE WHEN a.owner_id=$2 THEN COALESCE(a.runtime_id,'') ELSE '' END,
+		       a.created_at,a.updated_at
+		  FROM agents a
+		  JOIN channels c ON c.id=a.home_channel_id
+		 WHERE c.workspace_id=$1 AND a.is_active=true AND a.kind='agent'
+		 ORDER BY a.name,a.created_at`, serverworkspace.ID(r), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list Workspace Agents")
+		return
+	}
+	defer rows.Close()
+	items := make([]AgentResponse, 0)
+	for rows.Next() {
+		var item AgentResponse
+		var createdAt, updatedAt time.Time
+		var customEnvBytes, customArgsBytes []byte
+		if rows.Scan(&item.ID, &item.Name, &item.Description, &item.OwnerID, &item.HomeChannelID,
+			&item.Kind, &item.ModelProvider, &item.ModelName, &item.SystemPrompt, &item.IsActive,
+			&item.AvatarURL, &customEnvBytes, &customArgsBytes, &item.ComputerID, &createdAt, &updatedAt) != nil {
+			continue
+		}
+		item.CustomEnv = unmarshalStringMap(customEnvBytes)
+		item.CustomArgs = unmarshalStringSlice(customArgsBytes)
+		item.CreatedAt = createdAt.Format(time.RFC3339)
+		item.UpdatedAt = updatedAt.Format(time.RFC3339)
+		items = append(items, item)
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 // Get handles GET /api/v1/agents/{id}
@@ -710,7 +760,7 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	slog.Info("agent deactivated", "agent_id", agentID, "user_id", userID)
 
 	if h.hub != nil {
-		h.hub.Broadcast(realtime.Envelope("agent_deleted", map[string]any{
+		h.hub.BroadcastToWorkspace(serverworkspace.ID(r), realtime.Envelope("agent_deleted", map[string]any{
 			"agent_id": agentID,
 		}))
 	}

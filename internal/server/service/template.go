@@ -78,6 +78,7 @@ type TemplateRelationship struct {
 
 type TemplateProvisionRequest struct {
 	OwnerID         string
+	WorkspaceID     string
 	TemplateID      string
 	ChannelName     string
 	Description     string
@@ -422,10 +423,11 @@ func (s *TemplateService) provisionChannelTx(ctx context.Context, tx pgx.Tx, req
 			   AND owner_member.member_id = $2
 			   AND owner_member.role IN ('owner', 'admin')
 			 WHERE c.id = $1
+			   AND ($3 = '' OR c.workspace_id::text = $3)
 			   AND c.type = 'channel'
 			   AND c.is_archived = false
 			 FOR UPDATE OF c
-		`, targetChannelID, req.OwnerID).Scan(&channelName, &createdAt, &hasTeam)
+		`, targetChannelID, req.OwnerID, req.WorkspaceID).Scan(&channelName, &createdAt, &hasTeam)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrTemplateTargetUnavailable
 		}
@@ -441,7 +443,7 @@ func (s *TemplateService) provisionChannelTx(ctx context.Context, tx pgx.Tx, req
 			return nil, errors.New("channel name is required")
 		}
 		if req.AllowNameSuffix {
-			channelName, err = uniqueChannelName(ctx, tx, channelName)
+			channelName, err = uniqueChannelName(ctx, tx, channelName, req.WorkspaceID)
 			if err != nil {
 				return nil, err
 			}
@@ -453,12 +455,14 @@ func (s *TemplateService) provisionChannelTx(ctx context.Context, tx pgx.Tx, req
 
 	if req.ModelProvider == "" {
 		_ = tx.QueryRow(ctx, `
-			SELECT model_provider, model_name, COALESCE(runtime_id, '')
-			  FROM agents
-			 WHERE owner_id = $1 AND kind = 'lucy' AND is_active = true
-			 ORDER BY created_at ASC
+			SELECT a.model_provider, a.model_name, COALESCE(a.runtime_id, '')
+			  FROM agents a
+			  JOIN channels c ON c.id = a.home_channel_id
+			 WHERE a.owner_id = $1 AND a.kind = 'lucy' AND a.is_active = true
+			   AND ($2 = '' OR c.workspace_id::text = $2)
+			 ORDER BY a.created_at ASC
 			 LIMIT 1
-		`, req.OwnerID).Scan(&req.ModelProvider, &req.ModelName, &req.RuntimeID)
+		`, req.OwnerID, req.WorkspaceID).Scan(&req.ModelProvider, &req.ModelName, &req.RuntimeID)
 	}
 	req.ModelProvider = strings.TrimSpace(req.ModelProvider)
 	if req.ModelProvider == "" {
@@ -471,18 +475,26 @@ func (s *TemplateService) provisionChannelTx(ctx context.Context, tx pgx.Tx, req
 	if targetChannelID == "" {
 		channelID = uuid.New().String()
 		err = tx.QueryRow(ctx, `
-			INSERT INTO channels (
-				id, name, description, type, created_by, source_template_id
-			) VALUES ($1, $2, $3, 'channel', $4, $5)
-			RETURNING created_at
-		`, channelID, channelName, description, req.OwnerID, tmpl.ID).Scan(&createdAt)
+				INSERT INTO channels (
+					id, workspace_id, name, description, type, created_by, source_template_id
+				) VALUES ($1, COALESCE(NULLIF($2, '')::uuid, '00000000-0000-0000-0000-000000000001'), $3, $4, 'channel', $5, $6)
+				RETURNING created_at
+			`, channelID, req.WorkspaceID, channelName, description, req.OwnerID, tmpl.ID).Scan(&createdAt)
 		if err != nil {
 			return nil, err
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO channel_members (channel_id, member_type, member_id, role)
-			VALUES ($1, 'user', $2, 'owner')
-		`, channelID, req.OwnerID); err != nil {
+			SELECT $1, 'user', inherited.user_id,
+			       CASE WHEN inherited.user_id = $3::uuid THEN 'owner' ELSE 'member' END
+			  FROM (
+			       SELECT wm.user_id
+			         FROM workspace_members wm
+			         JOIN users u ON u.id=wm.user_id AND u.is_active=true
+			        WHERE wm.workspace_id=COALESCE(NULLIF($2, '')::uuid, '00000000-0000-0000-0000-000000000001')
+			       UNION SELECT $3::uuid
+			  ) inherited
+		`, channelID, req.WorkspaceID, req.OwnerID); err != nil {
 			return nil, err
 		}
 	} else if _, err := tx.Exec(ctx, `
@@ -570,7 +582,11 @@ func (s *TemplateService) generateRelationshipDocs(members []ProvisionedTemplate
 	}
 }
 
-func uniqueChannelName(ctx context.Context, tx pgx.Tx, requested string) (string, error) {
+func uniqueChannelName(ctx context.Context, tx pgx.Tx, requested string, workspaceIDs ...string) (string, error) {
+	workspaceID := "00000000-0000-0000-0000-000000000001"
+	if len(workspaceIDs) > 0 && workspaceIDs[0] != "" {
+		workspaceID = workspaceIDs[0]
+	}
 	base := slugifyChannelName(requested)
 	for suffix := 1; suffix <= 999; suffix++ {
 		candidate := base
@@ -581,9 +597,9 @@ func uniqueChannelName(ctx context.Context, tx pgx.Tx, requested string) (string
 		if err := tx.QueryRow(ctx, `
 			SELECT EXISTS(
 				SELECT 1 FROM channels
-				 WHERE name = $1 AND type = 'channel' AND is_archived = false
+				 WHERE workspace_id = $2 AND name = $1 AND type = 'channel' AND is_archived = false
 			)
-		`, candidate).Scan(&exists); err != nil {
+		`, candidate, workspaceID).Scan(&exists); err != nil {
 			return "", err
 		}
 		if !exists {

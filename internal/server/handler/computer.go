@@ -298,6 +298,10 @@ func (h *ComputerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	err := h.svc.DeleteComputer(r.Context(), computerID, userID)
 	if err != nil {
+		if err == service.ErrComputerInUse {
+			writeError(w, http.StatusConflict, "stop the Computer, move or remove bound Agents, and wait for active Runs before deleting it")
+			return
+		}
 		if err == service.ErrNotFound {
 			writeError(w, http.StatusNotFound, "computer not found")
 			return
@@ -307,6 +311,9 @@ func (h *ComputerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.dm != nil {
+		h.dm.DisconnectComputer(computerID)
+	}
 	slog.Info("computer deleted", "computer_id", computerID, "user_id", userID)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "computer deleted"})
 }

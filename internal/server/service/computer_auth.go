@@ -214,11 +214,13 @@ func (s *ComputerService) MarkConnected(ctx context.Context, computerID, reporte
 	}
 	defer tx.Rollback(ctx)
 
-	// Secure pairing supersedes the old unauthenticated local registration for
-	// the same physical daemon while preserving that row as history.
+	// Secure pairing temporarily supersedes the old unauthenticated local
+	// registration for the same process. Keep the legacy daemon_id so a later
+	// make-managed development restart reuses that row instead of inserting an
+	// orphaned duplicate.
 	if _, err := tx.Exec(ctx,
 		`UPDATE computers
-		    SET daemon_id = NULL, daemon_url = NULL, status = 'offline', updated_at = now()
+		    SET daemon_url = NULL, status = 'offline', updated_at = now()
 		  WHERE daemon_id = $1 AND id <> $2 AND credential_hash IS NULL`,
 		reportedDaemonID, computerID,
 	); err != nil {
@@ -267,6 +269,25 @@ func (s *ComputerService) UpdateRemoteHeartbeat(ctx context.Context, computerID 
 	}
 	if result.RowsAffected() != 1 {
 		return ErrInvalidComputerCredential
+	}
+	return nil
+}
+
+// MarkControlDisconnected immediately reflects the loss of the authenticated
+// control connection. A replacement connection calls UpdateRemoteHeartbeat
+// after registering itself, so it wins any reconnect race.
+func (s *ComputerService) MarkControlDisconnected(ctx context.Context, computerID string) error {
+	result, err := s.pool.Exec(ctx,
+		`UPDATE computers
+		    SET status = 'offline', updated_at = now()
+		  WHERE id = $1 AND credential_hash IS NOT NULL`,
+		computerID,
+	)
+	if err != nil {
+		return fmt.Errorf("mark computer control disconnected: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return ErrNotFound
 	}
 	return nil
 }

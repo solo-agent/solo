@@ -483,6 +483,7 @@ func (b *recordingBroadcaster) BroadcastToScope(scopeType, scopeID string, messa
 
 func (b *recordingBroadcaster) BroadcastToChannel(channelID string, message []byte) {
 	b.channelMessages[channelID] = append(b.channelMessages[channelID], string(message))
+	b.broadcastMessages = append(b.broadcastMessages, string(message))
 }
 
 func (b *recordingBroadcaster) SendToUser(string, []byte) {}
@@ -494,6 +495,7 @@ func (b *recordingBroadcaster) BroadcastToThread(threadID string, message []byte
 func (b *recordingBroadcaster) Broadcast(message []byte) {
 	b.broadcastMessages = append(b.broadcastMessages, string(message))
 }
+func (b *recordingBroadcaster) BroadcastToWorkspace(_ string, message []byte) { b.Broadcast(message) }
 
 func (b *recordingBroadcaster) hasChannelEvent(channelID, eventType, contains string) bool {
 	for _, raw := range b.channelMessages[channelID] {

@@ -1576,8 +1576,8 @@ func printUsage() {
   solo template list --json
   solo team form     -c <channel_id> -m <message_id> [--plan <file>] [--output json]
   solo thread unfollow --target <#channel:shortid>
-  solo daemon connect --server <url> --computer-id <id> --token <token>
-  solo daemon start|stop|restart|status|logs
+  solo daemon connect --server <url> --computer-id <id> --token <token> [--profile <name>]
+  solo daemon start|stop|restart|status|logs [--profile <name>]
   solo version
 
   --target formats: '#channel' | 'dm:@peer' | '#channel:shortid' | 'dm:@peer:shortid'

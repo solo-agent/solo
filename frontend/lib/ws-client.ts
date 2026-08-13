@@ -13,6 +13,7 @@ export interface WSClientConfig {
   baseUrl: string;
   /** 获取 JWT token（每次调用时读取最新值） */
   getToken: () => string | null;
+  getWorkspaceId?: () => string;
   /** 连接状态变化回调 */
   onStateChange?: (state: ConnectionState) => void;
   /**
@@ -96,7 +97,8 @@ export class WSClient {
 
     this.setState('connecting');
 
-    const url = `${this.config.baseUrl}/api/v1/ws?token=${encodeURIComponent(token)}`;
+    const workspaceId = this.config.getWorkspaceId?.();
+    const url = `${this.config.baseUrl}/api/v1/ws?token=${encodeURIComponent(token)}${workspaceId ? `&workspace_id=${encodeURIComponent(workspaceId)}` : ''}`;
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {

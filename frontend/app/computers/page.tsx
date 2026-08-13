@@ -24,6 +24,7 @@ import {
   ChevronDown,
   Plus,
   Copy,
+  Trash2,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { t } from '@/lib/i18n';
@@ -99,7 +100,7 @@ function shellQuote(value: string): string {
 
 export default function ComputersPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const { computers, isLoading, error, addComputer, updateComputer, createEnrollment, revokeCredential, refetch } = useComputers();
+  const { computers, isLoading, error, addComputer, updateComputer, deleteComputer, createEnrollment, revokeCredential, refetch } = useComputers();
   const { showToast } = useToast();
 
   // Inline edit state
@@ -110,6 +111,9 @@ export default function ComputersPage() {
   const [newComputerName, setNewComputerName] = useState('');
   const [pairingComputer, setPairingComputer] = useState<Computer | null>(null);
   const [isPairing, setIsPairing] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Computer | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
 
   // Selected computer (driven by ComputersLeftColumn)
@@ -215,6 +219,22 @@ export default function ComputersPage() {
       showToast(t('computersCommandCopyError'), 'error');
     }
   }, [showToast]);
+
+  const handleDeleteComputer = useCallback(async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteComputer(deleteTarget.id);
+      setSelectedComputerId((current) => current === deleteTarget.id ? null : current);
+      setDeleteTarget(null);
+      showToast(t('computersDeleted'), 'success');
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : t('computersDeleteError'));
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [deleteComputer, deleteTarget, showToast]);
 
   const daemonServerURL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
   const installScriptURL = process.env.NEXT_PUBLIC_INSTALL_URL ?? 'https://raw.githubusercontent.com/solo-agent/solo/master/scripts/install.sh';
@@ -334,6 +354,10 @@ export default function ComputersPage() {
                 onEditNameChange={setEditName}
                 onCreateEnrollment={showEnrollment}
                 onRevokeCredential={async (computer) => { await revokeCredential(computer.id); }}
+                onDelete={(computer) => {
+                  setDeleteError(null);
+                  setDeleteTarget(computer);
+                }}
               />
             )}
           </div>
@@ -355,7 +379,10 @@ export default function ComputersPage() {
         ) : (
           <div className="space-y-3">
             <p className="font-body text-sm">{t('computersPairInstructions')}</p>
-            <p className="font-heading text-xs font-bold uppercase">{t('computersFreshInstall')}</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-heading text-xs font-bold uppercase">{t('computersFreshInstall')}</p>
+              <Button type="button" size="sm" variant="outline" onClick={() => void copyPairingCommand(pairCommand)}><Copy className="mr-1.5 h-4 w-4" />{t('copy')}</Button>
+            </div>
             <pre className="overflow-x-auto border-2 border-black bg-black p-3 font-mono text-xs text-white">{pairCommand}</pre>
             <div className="flex items-center justify-between gap-2">
               <p className="font-heading text-xs font-bold uppercase">{t('computersAlreadyInstalled')}</p>
@@ -365,12 +392,50 @@ export default function ComputersPage() {
             <p className="font-mono text-[11px] text-brutal-danger">{t('computersPairOnce')}</p>
           </div>
         )}
-        <DialogFooter>
-          {!pairingComputer?.enrollment_token ? (
+        {!pairingComputer?.enrollment_token && (
+          <DialogFooter>
             <Button type="button" onClick={createPairing} disabled={isPairing || !newComputerName.trim()}>{isPairing ? t('saving') : t('computersCreatePairing')}</Button>
-          ) : (
-            <Button type="button" onClick={() => void copyPairingCommand(pairCommand)}><Copy className="mr-1.5 h-4 w-4" />{t('copy')}</Button>
-          )}
+          </DialogFooter>
+        )}
+      </Dialog>
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) {
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }
+        }}
+        width="md"
+      >
+        <DialogHeader>
+          <DialogTitle>{t('computersDeleteTitle')}</DialogTitle>
+          <DialogCloseButton onClick={() => {
+            if (!isDeleting) {
+              setDeleteTarget(null);
+              setDeleteError(null);
+            }
+          }} />
+        </DialogHeader>
+        {deleteTarget && (
+          <div className="space-y-4">
+            <BrutalAlert variant="warning" title={t('computersDeleteWarning')}>
+              {t('computersDeleteDescription')}
+            </BrutalAlert>
+            <div className="border-2 border-black bg-white px-3 py-2">
+              <p className="font-heading text-sm font-bold">{deleteTarget.name}</p>
+              <p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">{deleteTarget.id}</p>
+            </div>
+            {deleteError && <BrutalAlert variant="error">{deleteError}</BrutalAlert>}
+          </div>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => setDeleteTarget(null)} disabled={isDeleting}>{t('cancel')}</Button>
+          <Button type="button" variant="danger" onClick={() => void handleDeleteComputer()} disabled={isDeleting}>
+            <Trash2 className="mr-1.5 h-4 w-4" />
+            {isDeleting ? t('deleting') : t('computersDelete')}
+          </Button>
         </DialogFooter>
       </Dialog>
     </AppFrame>
@@ -392,6 +457,7 @@ interface ComputerCardProps {
   onEditNameChange: (name: string) => void;
   onCreateEnrollment: (computer: Computer) => void;
   onRevokeCredential: (computer: Computer) => void;
+  onDelete: (computer: Computer) => void;
 }
 
 function ComputerCard({
@@ -407,6 +473,7 @@ function ComputerCard({
   onEditNameChange,
   onCreateEnrollment,
   onRevokeCredential,
+  onDelete,
 }: ComputerCardProps) {
   const isOnline = computer.status === 'online';
   const osInfo = getOsIcon(computer.os);
@@ -603,6 +670,19 @@ function ComputerCard({
           <section className={detailSectionClass()}>
             <ConnectedAgents computerId={computer.id} />
           </section>
+
+          {computer.my_role === 'owner' && (
+            <section className={detailSectionClass('border-brutal-danger')}>
+              <SectionHeader label={t('computersDangerZone')} />
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="max-w-2xl font-body text-sm text-muted-foreground">{t('computersDeleteHint')}</p>
+                <Button type="button" variant="danger" onClick={() => onDelete(computer)}>
+                  <Trash2 className="mr-1.5 h-4 w-4" />
+                  {t('computersDelete')}
+                </Button>
+              </div>
+            </section>
+          )}
 
         </div>
       </div>

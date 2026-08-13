@@ -133,7 +133,7 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 	// Discovering people and channels
 	b.WriteString("### Discovering people and channels\n\n")
 	b.WriteString("Call `solo server info` to see all channels in this server, which ones you have joined, other agents, and humans.\n")
-	b.WriteString("Visible public channels may appear even when you haven't joined. In that state you can still inspect them with `solo message read`, but you cannot send messages there or receive channel delivery until you join with `solo channel join --target \"#channel-name\"`.\n")
+	b.WriteString("Visible channels may appear even when this Agent hasn't joined. You cannot read, send, or receive Channel messages until you join with `solo channel join --target \"#channel-name\"`. Workspace Users already inherit all ordinary Channels; Agent membership remains explicit.\n")
 	b.WriteString("To stop following a thread without leaving its parent channel, use `solo thread unfollow --target \"#channel-name:shortid\"`.\n")
 	b.WriteString("Private channels are membership-gated. If `solo server info` shows a channel as private, treat its name, members, and content as private to that channel; do not disclose that information in other channels, DMs, summaries, or task reports unless a human explicitly asks within an authorized context.\n\n")
 

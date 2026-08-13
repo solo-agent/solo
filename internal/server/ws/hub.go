@@ -17,6 +17,7 @@ import (
 	"github.com/solo-ai/solo/internal/realtime"
 	servermw "github.com/solo-ai/solo/internal/server/middleware"
 	"github.com/solo-ai/solo/internal/server/service"
+	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
 	"github.com/solo-ai/solo/pkg/metrics"
 )
 
@@ -170,6 +171,15 @@ func (h *Hub) Run() {
 						}
 					}
 				}
+			case realtime.ScopeWorkspace:
+				for client := range h.clients {
+					if client.workspaceID == msg.scopeID {
+						select {
+						case client.send <- msg.data:
+						default:
+						}
+					}
+				}
 			default:
 				// Global broadcast
 				for client := range h.clients {
@@ -209,6 +219,10 @@ func (h *Hub) BroadcastToThread(threadID string, message []byte) {
 	h.BroadcastToScope(realtime.ScopeThread, threadID, message)
 }
 
+func (h *Hub) BroadcastToWorkspace(workspaceID string, message []byte) {
+	h.BroadcastToScope(realtime.ScopeWorkspace, workspaceID, message)
+}
+
 // SendToUser delivers a message to every connection belonging to userID.
 func (h *Hub) SendToUser(userID string, message []byte) {
 	h.BroadcastToScope(realtime.ScopeUser, userID, message)
@@ -226,7 +240,22 @@ func (h *Hub) Broadcast(message []byte) {
 // --- Channel subscription management ---
 
 // Subscribe adds a client to a channel's subscriber set.
-func (h *Hub) Subscribe(client *Client, channelID string) {
+func (h *Hub) Subscribe(client *Client, channelID string) bool {
+	if h.pool != nil {
+		var allowed bool
+		err := h.pool.QueryRow(context.Background(), `
+			SELECT EXISTS (
+			 SELECT 1
+			   FROM channels c
+			   JOIN channel_members cm ON cm.channel_id = c.id
+			  WHERE c.id = $1 AND c.workspace_id = $2
+			    AND cm.member_type = 'user' AND cm.member_id = $3
+			    AND c.is_archived = false
+			)`, channelID, client.workspaceID, client.userID).Scan(&allowed)
+		if err != nil || !allowed {
+			return false
+		}
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -235,6 +264,7 @@ func (h *Hub) Subscribe(client *Client, channelID string) {
 	}
 	h.channels[channelID][client] = true
 	client.channels[channelID] = true
+	return true
 }
 
 // Unsubscribe removes a client from a channel's subscriber set.
@@ -254,7 +284,22 @@ func (h *Hub) Unsubscribe(client *Client, channelID string) {
 // --- Thread subscription management ---
 
 // SubscribeThread adds a client to a thread's subscriber set.
-func (h *Hub) SubscribeThread(client *Client, threadID string) {
+func (h *Hub) SubscribeThread(client *Client, threadID string) bool {
+	if h.pool != nil {
+		var allowed bool
+		err := h.pool.QueryRow(context.Background(), `
+			SELECT EXISTS (
+			 SELECT 1 FROM threads t
+			 JOIN channels c ON c.id = t.channel_id
+			 JOIN channel_members cm ON cm.channel_id = c.id
+			 WHERE t.id = $1 AND c.workspace_id = $2
+			   AND cm.member_type = 'user' AND cm.member_id = $3
+			   AND c.is_archived = false
+			)`, threadID, client.workspaceID, client.userID).Scan(&allowed)
+		if err != nil || !allowed {
+			return false
+		}
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -263,6 +308,7 @@ func (h *Hub) SubscribeThread(client *Client, threadID string) {
 	}
 	h.threads[threadID][client] = true
 	client.threads[threadID] = true
+	return true
 }
 
 // UnsubscribeThread removes a client from a thread's subscriber set.
@@ -301,6 +347,17 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
 		return
 	}
+	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+	if workspaceID == "" {
+		workspaceID = serverworkspace.PublicID
+	}
+	if h.pool != nil {
+		var allowed bool
+		if err := h.pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM workspace_members wm JOIN workspaces w ON w.id=wm.workspace_id WHERE wm.workspace_id=$1 AND wm.user_id=$2 AND w.deleted_at IS NULL)`, workspaceID, claims.Subject).Scan(&allowed); err != nil || !allowed {
+			http.Error(w, `{"error":"Workspace access denied"}`, http.StatusForbidden)
+			return
+		}
+	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -308,7 +365,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := NewClient(h, conn, claims.Subject)
+	client := NewClient(h, conn, claims.Subject, workspaceID)
 	h.register <- client
 
 	go client.WritePump()
@@ -343,10 +400,10 @@ func (h *Hub) handleMessageSend(client *Client, payload MessageSendPayload) {
 	var isArchived bool
 	err := h.pool.QueryRow(context.Background(),
 		`SELECT EXISTS(
-			SELECT 1 FROM channel_members
-			WHERE channel_id = $1 AND member_type = 'user' AND member_id = $2
+			SELECT 1 FROM channel_members cm JOIN channels c ON c.id=cm.channel_id
+			WHERE cm.channel_id = $1 AND cm.member_type = 'user' AND cm.member_id = $2 AND c.workspace_id=$3
 		)`,
-		payload.ChannelID, client.userID,
+		payload.ChannelID, client.userID, client.workspaceID,
 	).Scan(&isMember)
 	if err != nil {
 		slog.Error("ws: failed to check channel membership", "error", err, "user_id", client.userID)

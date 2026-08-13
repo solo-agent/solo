@@ -8,6 +8,10 @@ const apiOrigin = (() => {
   }
 })();
 
+const guestScriptSource = process.env.NODE_ENV === 'production'
+  ? "'self' 'unsafe-inline'"
+  : "'self' 'unsafe-inline' 'unsafe-eval'";
+
 const nextConfig: NextConfig = {
   devIndicators: false,
   turbopack: {
@@ -31,10 +35,17 @@ const nextConfig: NextConfig = {
   },
   // v1.5: Content Security Policy header (production only — dev needs inline scripts for HMR)
   async headers() {
-    if (process.env.NODE_ENV !== 'production') return [];
-    return [
+    const embedHeaders = {
+      source: '/guest/:path*',
+      headers: [
+        { key: 'Content-Security-Policy', value: `default-src 'self'; script-src ${guestScriptSource}; style-src 'self' 'unsafe-inline'; connect-src 'self' ${apiOrigin}; img-src 'self' data: blob: ${apiOrigin}; font-src 'self'; frame-ancestors *;` },
+        { key: 'Referrer-Policy', value: 'no-referrer' },
+      ],
+    };
+    if (process.env.NODE_ENV !== 'production') return [embedHeaders];
+    return [embedHeaders,
       {
-        source: '/(.*)',
+        source: '/((?!guest/).*)',
         headers: [
           {
             key: 'Content-Security-Policy',

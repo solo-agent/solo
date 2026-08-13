@@ -54,7 +54,7 @@ func TestComputerEnrollmentIsOneTimeAndRevocable(t *testing.T) {
 	}
 }
 
-func TestMarkConnectedSupersedesLegacyDaemonRegistration(t *testing.T) {
+func TestMarkConnectedPausesLegacyDaemonRegistration(t *testing.T) {
 	pool := taskSubmitTestPool(t)
 	ctx := context.Background()
 	ownerID := taskSubmitUser(t, pool)
@@ -83,7 +83,7 @@ func TestMarkConnectedSupersedesLegacyDaemonRegistration(t *testing.T) {
 	if err := svc.MarkConnected(ctx, target.Computer.ID, daemonID, "test", ComputerProtocolVersion, nil, ComputerSystemInfo{}, nil); err != nil {
 		t.Fatalf("MarkConnected: %v", err)
 	}
-	var targetDaemonID, legacyDaemonID *string
+	var targetDaemonID, legacyDaemonID string
 	var legacyStatus string
 	if err := pool.QueryRow(ctx,
 		`SELECT current.daemon_id, legacy.daemon_id, legacy.status
@@ -93,7 +93,7 @@ func TestMarkConnectedSupersedesLegacyDaemonRegistration(t *testing.T) {
 	).Scan(&targetDaemonID, &legacyDaemonID, &legacyStatus); err != nil {
 		t.Fatal(err)
 	}
-	if targetDaemonID == nil || *targetDaemonID != target.Computer.ID || legacyDaemonID != nil || legacyStatus != "offline" {
+	if targetDaemonID != target.Computer.ID || legacyDaemonID != daemonID || legacyStatus != "offline" {
 		t.Fatalf("target daemon = %v, legacy daemon/status = %v/%s", targetDaemonID, legacyDaemonID, legacyStatus)
 	}
 }
@@ -152,6 +152,52 @@ func TestMarkConnectedCanonicalizesSharedReportedDaemonIDs(t *testing.T) {
 	}
 }
 
+func TestMarkConnectedKeepsLegacyDaemonIdentityReusable(t *testing.T) {
+	pool := taskSubmitTestPool(t)
+	ctx := context.Background()
+	ownerID := taskSubmitUser(t, pool)
+	svc := NewComputerService(pool)
+	paired, err := svc.CreateComputerWithEnrollment(ctx, ownerID, "paired-mac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ExchangeEnrollment(ctx, paired.Computer.ID, paired.Token); err != nil {
+		t.Fatal(err)
+	}
+	legacyID := uuid.NewString()
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO computers (id, name, daemon_id, status) VALUES ($1, 'legacy-mac', 'daemon-test-reusable', 'online')`,
+		legacyID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM computers WHERE id IN ($1,$2)`, paired.Computer.ID, legacyID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, ownerID)
+	})
+
+	if err := svc.MarkConnected(ctx, paired.Computer.ID, "daemon-test-reusable", "test", ComputerProtocolVersion, nil, ComputerSystemInfo{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var daemonID, status string
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(daemon_id,''),status FROM computers WHERE id=$1`, legacyID).Scan(&daemonID, &status); err != nil {
+		t.Fatal(err)
+	}
+	if daemonID != "daemon-test-reusable" || status != "offline" {
+		t.Fatalf("legacy Computer daemon/status = %q/%q", daemonID, status)
+	}
+	if err := svc.UpsertComputerByDaemonID(ctx, "daemon-test-reusable", "http://127.0.0.1:8081", "", ComputerSystemInfo{}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM computers WHERE daemon_id='daemon-test-reusable'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("legacy Daemon rows = %d, want 1", count)
+	}
+}
+
 func TestClaimComputerRejectsNewMemberOnOwnedComputer(t *testing.T) {
 	pool := taskSubmitTestPool(t)
 	ctx := context.Background()
@@ -185,6 +231,40 @@ func TestClaimComputerRejectsNewMemberOnOwnedComputer(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("member rows = %d, want 0", count)
+	}
+}
+
+func TestDeleteComputerReportsBoundAgentConflict(t *testing.T) {
+	pool := taskSubmitTestPool(t)
+	ctx := context.Background()
+	ownerID := taskSubmitUser(t, pool)
+	agentID := taskSubmitAgent(t, pool, ownerID)
+	computerID := uuid.NewString()
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO computers (id, name, owner_id, status) VALUES ($1, 'in-use-mac', $2, 'offline')`,
+		computerID, ownerID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agents SET runtime_id=$2 WHERE id=$1`, agentID, computerID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `UPDATE agents SET runtime_id=NULL WHERE id=$1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM computers WHERE id=$1`, computerID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id=$1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, ownerID)
+	})
+
+	if err := NewComputerService(pool).DeleteComputer(ctx, computerID, ownerID); !errors.Is(err, ErrComputerInUse) {
+		t.Fatalf("DeleteComputer error = %v, want ErrComputerInUse", err)
+	}
+	var exists bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM computers WHERE id=$1)`, computerID).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatal("bound Computer was deleted")
 	}
 }
 
