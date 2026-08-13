@@ -394,8 +394,44 @@ func (s *ComputerService) ClaimComputer(ctx context.Context, computerID, userID 
 		return nil, fmt.Errorf("claim computer: set owner: %w", err)
 	}
 
+	// A legacy local Computer can be recreated after its row was removed while
+	// active Agents still retain the old text binding. Once the user claims the
+	// replacement, move only idle Agents from an offline, unpaired record for
+	// the same host. Paired Computers and active Runs are never moved implicitly.
+	result, err := tx.Exec(ctx, `
+		UPDATE agents a
+		   SET runtime_id = target.id::text, updated_at = now()
+		  FROM computers target, computers previous
+		 WHERE target.id = $1
+		   AND previous.id::text = a.runtime_id
+		   AND previous.id <> target.id
+		   AND a.owner_id = $2
+		   AND a.is_active = true
+		   AND previous.owner_id = $2
+		   AND previous.status = 'offline'
+		   AND previous.credential_hash IS NULL
+		   AND target.credential_hash IS NULL
+		   AND previous.hostname <> ''
+		   AND previous.hostname = target.hostname
+		   AND previous.os = target.os
+		   AND NOT EXISTS (
+		       SELECT 1 FROM agent_runs r
+		        WHERE r.agent_id = a.id AND r.finished_at IS NULL
+		   )`, computerID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("claim computer: recover agent bindings: %w", err)
+	}
+	migratedAgents := result.RowsAffected()
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("claim computer: commit: %w", err)
+	}
+	if migratedAgents > 0 {
+		slog.Info("recovered legacy agent computer bindings",
+			"computer_id", computerID,
+			"user_id", userID,
+			"agent_count", migratedAgents,
+		)
 	}
 	return s.GetComputer(ctx, computerID, userID)
 }

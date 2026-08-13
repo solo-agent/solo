@@ -28,7 +28,7 @@ const (
 
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
 // It accepts the DB pool, WebSocket hub, daemon manager, and agent service.
-func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agentSvc *service.AgentService) chi.Router {
+func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agentSvc *service.AgentService) chi.Router {
 	r := chi.NewRouter()
 
 	// ---- Global middleware (applied to all routes) ----
@@ -50,6 +50,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	workspaceRoot := defaultAgentWorkspaceRoot()
 	relationshipMD := service.NewRelationshipsMDGenerator(pool, workspaceRoot)
 	taskSvc := service.NewTaskService(pool)
+	automationSvc := service.NewAutomationService(pool, taskSvc, hub, agentSvc)
 	sendDedupe := service.NewSendDedupe(1000, 5*time.Minute)
 	taskSvc.SetAgentNotifier(service.NewAgentNotifier(pool, hub, agentSvc))
 	relationshipSvc := service.NewAgentRelationshipService(pool, relationshipMD)
@@ -96,6 +97,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	daemonControlHandler := handler.NewDaemonControlHandler(computerSvc, dm)
 	mentionSvc := service.NewMentionService(pool)
 	taskHandler := handler.NewTaskHandler(pool, hub, agentSvc, taskSvc, mentionSvc)
+	automationHandler := handler.NewAutomationHandler(automationSvc)
 	relationshipHandler := handler.NewAgentRelationshipHandler(relationshipSvc)
 	templateHandler := handler.NewTemplateHandler(templateSvc)
 	teamFormationHandler := handler.NewTeamFormationHandler(teamFormationSvc)
@@ -106,6 +108,7 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 	artifactHandler.SetTaskBroadcaster(taskSvc, hub)
 	onboardingHandler := handler.NewOnboardingHandler(pool, agentSvc)
 	workspaceHandler := handler.NewWorkspaceHandler(pool, dm)
+	go automationSvc.Start(ctx)
 
 	// Attachment handler
 	uploadDir := os.Getenv("ATTACHMENTS_DIR")
@@ -262,6 +265,20 @@ func NewRouter(pool *pgxpool.Pool, hub *ws.Hub, dm *service.DaemonManager, agent
 						r.Post("/reject", taskHandler.Reject)
 						r.Post("/close", taskHandler.Close)
 						r.Post("/reopen", taskHandler.Reopen)
+					})
+				})
+
+				// Channel automation routes.
+				r.Route("/automations", func(r chi.Router) {
+					r.Get("/", automationHandler.List)
+					r.Post("/", automationHandler.Create)
+
+					r.Route("/{automationID}", func(r chi.Router) {
+						r.Get("/", automationHandler.Get)
+						r.Patch("/", automationHandler.Update)
+						r.Delete("/", automationHandler.Delete)
+						r.Post("/run", automationHandler.RunNow)
+						r.Get("/runs", automationHandler.ListRuns)
 					})
 				})
 

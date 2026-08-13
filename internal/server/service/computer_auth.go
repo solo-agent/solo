@@ -214,15 +214,21 @@ func (s *ComputerService) MarkConnected(ctx context.Context, computerID, reporte
 	}
 	defer tx.Rollback(ctx)
 
-	// Secure pairing temporarily supersedes the old unauthenticated local
-	// registration for the same process. Keep the legacy daemon_id so a later
-	// make-managed development restart reuses that row instead of inserting an
-	// orphaned duplicate.
+	// Secure pairing pauses the old unauthenticated local registration only when
+	// both records identify the same physical host. Keep its daemon_id so a later
+	// make-managed restart reuses the row instead of inserting an orphan, while
+	// the host guard prevents a shared client label from affecting another Mac.
 	if _, err := tx.Exec(ctx,
 		`UPDATE computers
 		    SET daemon_url = NULL, status = 'offline', updated_at = now()
-		  WHERE daemon_id = $1 AND id <> $2 AND credential_hash IS NULL`,
-		reportedDaemonID, computerID,
+		  WHERE daemon_id = $1
+		    AND id <> $2
+		    AND credential_hash IS NULL
+		    AND $3 <> ''
+		    AND $4 <> ''
+		    AND hostname = $3
+		    AND os = $4`,
+		reportedDaemonID, computerID, sysinfo.Hostname, sysinfo.OS,
 	); err != nil {
 		return fmt.Errorf("mark computer connected: release legacy registration: %w", err)
 	}

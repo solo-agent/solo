@@ -66,8 +66,28 @@ function deactivateTestUsers(...auths: AuthResponse[]) {
       UPDATE agents SET is_active=false,updated_at=now()
        WHERE owner_id IN (${ids});
       DELETE FROM computers WHERE owner_id IN (${ids});
+      UPDATE channels SET is_archived=true,updated_at=now()
+       WHERE workspace_id IN (SELECT id FROM workspaces WHERE created_by IN (${ids}))
+         AND workspace_id<>'${publicWorkspaceID}';
+      UPDATE workspaces SET deleted_at=COALESCE(deleted_at,now()),updated_at=now()
+       WHERE created_by IN (${ids}) AND id<>'${publicWorkspaceID}';
       UPDATE users SET is_active=false,updated_at=now() WHERE id IN (${ids});
       COMMIT;
+    `,
+  ], { encoding: 'utf8' });
+}
+
+function finishTestRuns(...auths: AuthResponse[]) {
+  const ids = auths.map((auth) => `'${auth.user.id}'`).join(',');
+  if (!ids) return;
+  execFileSync('docker', [
+    'exec', process.env.SOLO_POSTGRES_CONTAINER ?? 'solo-postgres',
+    'psql', '-v', 'ON_ERROR_STOP=1',
+    '-U', process.env.POSTGRES_USER ?? 'solo',
+    '-d', process.env.POSTGRES_DB ?? 'solo', '-c', `
+      UPDATE agent_runs SET status='failed',updated_at=now(),finished_at=now()
+       WHERE finished_at IS NULL
+         AND agent_id IN (SELECT id FROM agents WHERE owner_id IN (${ids}));
     `,
   ], { encoding: 'utf8' });
 }
@@ -311,6 +331,13 @@ test.describe('Workspace and multi-Daemon product flow', () => {
         model_name: runtimeA.type === 'claude' ? 'sonnet' : '',
         system_prompt: `When you introduce yourself, use solo message send exactly once with ${markerA}. Do not only print it.`,
       });
+      await expect.poll(() => databaseJSON<{ completed: number; messages: number }>(`
+        SELECT json_build_object(
+          'completed', (SELECT COUNT(*) FROM agent_runs WHERE agent_id='${agentA!.id}' AND status='completed'),
+          'messages', (SELECT COUNT(*) FROM messages WHERE channel_id='${alphaGeneral!.id}' AND sender_id='${agentA!.id}')
+        )::text
+      `), { timeout: 240000, intervals: [1000, 2000, 5000] }).toEqual({ completed: 1, messages: 1 });
+
       agentB = await call<Agent>(request, userB, 'post', `/api/v1/channels/${alphaGeneral!.id}/agents`, alpha!.id, {
         name: `ProfileB${suffix}`,
         computer_id: computerB.id,
@@ -425,11 +452,12 @@ test.describe('Workspace and multi-Daemon product flow', () => {
         )::text
       `)).toEqual({ deleted: true, archived: 3 });
     } finally {
-      if (alpha) await call(request, userA, 'delete', `/api/v1/workspaces/${alpha.id}`).catch(() => undefined);
       for (const [profile, directory] of [[profileA, daemonProfileDir(profileA)], [profileB, daemonProfileDir(profileB)]] as const) {
         try { daemon(profile, ['stop']); } catch { /* test assertion reports the primary failure */ }
         rmSync(directory, { recursive: true, force: true });
       }
+      finishTestRuns(userA, userB, outsider);
+      if (alpha) await call(request, userA, 'delete', `/api/v1/workspaces/${alpha.id}`).catch(() => undefined);
       deactivateTestUsers(userA, userB, outsider);
     }
   });

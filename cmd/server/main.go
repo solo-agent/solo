@@ -37,7 +37,8 @@ func main() {
 	slog.Info("starting solo server", "port", cfg.Port)
 
 	// Connect to database
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	pool, err := db.NewPool(ctx, cfg.DBURL)
 	if err != nil {
 		slog.Error("failed to connect to database", "error", err)
@@ -72,7 +73,7 @@ func main() {
 	go startOfflineChecker(pool)
 
 	// Create router with all dependencies
-	router := server.NewRouter(pool, hub, dm, agentSvc)
+	router := server.NewRouter(ctx, pool, hub, dm, agentSvc)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
@@ -97,6 +98,7 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+	cancel()
 
 	slog.Info("shutting down server...")
 
