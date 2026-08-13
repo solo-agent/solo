@@ -693,15 +693,40 @@ func TestAgentRunVisibleMessageDelivery(t *testing.T) {
 	if _, err := runSvc.ValidateMessageDelivery(ctx, run.ID, uuid.NewString(), channelID, "", ""); err == nil {
 		t.Fatal("ValidateMessageDelivery accepted another agent")
 	}
+	rootMessageID := agentRunMessage(t, pool, channelID, ownerID)
+	threadID, _, err := NewThreadService(pool).GetOrCreateThread(ctx, channelID, rootMessageID)
+	if err != nil {
+		t.Fatalf("GetOrCreateThread: %v", err)
+	}
+	matches, err = runSvc.ValidateMessageDelivery(ctx, run.ID, agentID, channelID, threadID, "")
+	if err != nil || !matches {
+		t.Fatalf("ValidateMessageDelivery child thread = %v, %v", matches, err)
+	}
+	otherChannelID := agentRunChannel(t, pool, ownerID)
+	if otherChannelID == channelID {
+		otherChannelID = uuid.NewString()
+		if _, err := pool.Exec(ctx, `INSERT INTO channels (id, name, created_by) VALUES ($1, $2, $3)`, otherChannelID, "agent-run-other-"+otherChannelID[:8], ownerID); err != nil {
+			t.Fatalf("create other channel: %v", err)
+		}
+	}
+	otherRootMessageID := agentRunMessage(t, pool, otherChannelID, ownerID)
+	otherThreadID, _, err := NewThreadService(pool).GetOrCreateThread(ctx, otherChannelID, otherRootMessageID)
+	if err != nil {
+		t.Fatalf("GetOrCreateThread other channel: %v", err)
+	}
+	matches, err = runSvc.ValidateMessageDelivery(ctx, run.ID, agentID, channelID, otherThreadID, "")
+	if err != nil || matches {
+		t.Fatalf("ValidateMessageDelivery foreign thread = %v, %v", matches, err)
+	}
 
 	visible, err := runSvc.HasVisibleMessage(ctx, run.ID)
 	if err != nil || visible {
 		t.Fatalf("HasVisibleMessage before insert = %v, %v", visible, err)
 	}
 	_, err = pool.Exec(ctx, `
-		INSERT INTO messages (id, channel_id, sender_type, sender_id, content, metadata)
-		VALUES ($1, $2, 'agent', $3, 'delivered', jsonb_build_object('agent_run_id', $4::text, 'delivery', 'visible'))`,
-		uuid.NewString(), channelID, agentID, run.ID,
+		INSERT INTO messages (id, channel_id, thread_id, sender_type, sender_id, content, metadata)
+		VALUES ($1, $2, $3, 'agent', $4, 'delivered', jsonb_build_object('agent_run_id', $5::text, 'delivery', 'visible'))`,
+		uuid.NewString(), channelID, threadID, agentID, run.ID,
 	)
 	if err != nil {
 		t.Fatalf("insert visible message: %v", err)
