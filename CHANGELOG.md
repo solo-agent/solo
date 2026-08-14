@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.1.0 - 2026-08-14
+
+### Features
+
+- Add multi-user Workspaces, role-based membership, Guest access, and multiple independently paired Daemons across connected Computers.
+- Add scheduled Channel automations with explicit completion and review behavior, retry safety, and real end-to-end coverage.
+- Add monthly Token budgets, per-Run settlement, and accurate current-turn Claude Code and Codex usage across persistent Sessions.
+- Add remote avatar and attachment storage, authenticated downloads, Public Workspace ownership, message pinning, member muting, and posting policies.
+- Coalesce wakes for busy Agents while preserving distinct messages, deterministic routing, durable delivery, and send-time freshness checks.
+- Add explainable Task recovery and shared backend capability contracts for local Agent runtimes.
+
+### Fixes
+
+- Preserve managed Daemon pairing across restarts and canonicalize legacy remote Daemon identities without disrupting active Computers.
+- Refresh Agent-scoped credentials before template discovery and keep remote runtime permissions available to active Runs.
+- Clarify pin and mute controls with consistent human/Agent actions, visible state, loading feedback, and success notifications.
+- Refresh production web dependencies and lockfile compatibility.
+
+### Testing
+
+- Add real end-to-end coverage for Workspaces, multi-Daemon execution, automations, Token accounting, remote uploads, governance, wake coalescing, and runtime capability detection.
+
 ## 1.0.0 - 2026-08-09
 
 ### Features
