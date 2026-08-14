@@ -1,4 +1,4 @@
-.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-release-install test-e2e-agent-delivery test-e2e-agent-message-coalescing test-e2e-agent-template-credential test-e2e-automation test-e2e-budget-gate test-e2e-budget-gate-run test-e2e-agent-session-resume test-e2e-agent-idle-resume test-e2e-agent-scope-router test-e2e-send-freshness test-e2e-websocket-recovery test-e2e-m8 test-e2e-m9 test-e2e-remote-product-completeness test-e2e-token-accounting test-e2e-remote-server test-e2e-public-remote test-e2e-workspaces
+.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-release-install test-e2e-agent-delivery test-e2e-agent-target-resolution test-e2e-agent-message-coalescing test-e2e-agent-template-credential test-e2e-automation test-e2e-budget-gate test-e2e-budget-gate-run test-e2e-agent-session-resume test-e2e-agent-idle-resume test-e2e-agent-scope-router test-e2e-send-freshness test-e2e-websocket-recovery test-e2e-m8 test-e2e-m9 test-e2e-remote-product-completeness test-e2e-token-accounting test-e2e-remote-server test-e2e-public-remote test-e2e-workspaces
 .DEFAULT_GOAL := help
 
 ENV_FILE ?= .env
@@ -41,6 +41,9 @@ rebuild: stop clean-pids build start ## Rebuild binaries from a clean .pids dir 
 
 test-e2e-agent-delivery: ## Rebuild and verify the real Agent result delivery contract
 	@bash scripts/run-local-e2e.sh agent-delivery env CI=1 SOLO_E2E_REAL_AGENT_DELIVERY=1 npx playwright test e2e/agent-result-delivery.spec.ts
+
+test-e2e-agent-target-resolution: ## Verify Channel name and UUID sends with a stale provider Session token
+	@WATCHPACK_POLLING=true bash scripts/run-local-e2e.sh agent-target-resolution env CI=1 SOLO_E2E_REAL_AGENT_DELIVERY=1 npx playwright test e2e/agent-result-delivery.spec.ts --grep "sends by Channel name and UUID" --workers=1
 
 test-e2e-agent-message-coalescing: ## Rebuild and verify persisted busy-message coalescing with a real Agent
 	@bash scripts/run-local-e2e.sh agent-message-coalescing env CI=1 npx playwright test e2e/agent-message-coalescing.spec.ts --workers=1

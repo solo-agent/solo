@@ -13,7 +13,7 @@ interface AuthResponse {
 interface Workspace { id: string; name: string; role: 'owner' | 'admin' | 'member' }
 interface Channel { id: string; name: string }
 interface Message { id: string; content: string; thread_id?: string }
-interface Attachment { id: string; filename: string; url: string }
+interface Attachment { id: string; filename: string; url: string; thumbnail_url?: string }
 interface ChannelMember { member_id: string; workspace_role?: 'owner' | 'admin' | 'member' }
 
 async function register(request: APIRequestContext, name: string): Promise<AuthResponse> {
@@ -209,7 +209,19 @@ test.describe('remote product completeness', () => {
       });
       expect(avatarUpload.ok()).toBe(true);
       const avatar = await avatarUpload.json() as Attachment;
-      await call(request, member, 'patch', '/api/v1/users/me', workspace.id, { avatar_url: avatar.url });
+      const avatarURL = avatar.thumbnail_url || avatar.url;
+      await call(request, member, 'patch', '/api/v1/users/me', workspace.id, { avatar_url: avatarURL });
+
+      const avatarDownload = await request.get(`${apiBase}${avatarURL}`, { headers: headers(owner, workspace.id) });
+      expect(avatarDownload.ok()).toBe(true);
+      expect(avatarDownload.headers()['content-type']).toContain('image/png');
+      const avatarMessage = await call<Message>(request, member, 'post', `/api/v1/channels/${channel.id}/messages`, workspace.id, {
+        content: `AVATAR_VISIBLE_${suffix}`,
+      });
+      await page.reload();
+      const sharedAvatar = page.locator(`[data-message-id="${avatarMessage.id}"]`).getByLabel(member.user.display_name).locator('img');
+      await expect(sharedAvatar).toBeVisible();
+      await expect.poll(() => sharedAvatar.evaluate((image) => image.complete && image.naturalWidth > 0)).toBe(true);
 
       const persisted = databaseJSON<{ pin_count: number; mute_count: number; attachment_count: number; avatar_url: string; policy: string }>(`
         SELECT json_build_object(
@@ -220,7 +232,7 @@ test.describe('remote product completeness', () => {
           'policy',(SELECT posting_policy FROM channels WHERE id='${channel.id}')
         )::text
       `);
-      expect(persisted).toEqual({ pin_count: 0, mute_count: 0, attachment_count: 2, avatar_url: avatar.url, policy: 'everyone' });
+      expect(persisted).toEqual({ pin_count: 0, mute_count: 0, attachment_count: 2, avatar_url: avatarURL, policy: 'everyone' });
 
       await call(request, admin, 'put', `/api/v1/channels/${channel.id}/moderation/mutes/${member.user.id}`, workspace.id, { reason: 'remove cleanup' });
       await call(request, admin, 'delete', `/api/v1/workspaces/${workspace.id}/members/${member.user.id}`, workspace.id);

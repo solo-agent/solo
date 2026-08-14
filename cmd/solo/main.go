@@ -1070,11 +1070,7 @@ func handleServerInfo(args []string, baseURL, token string) {
 	fs.StringVar(&output, "output", "", "Output format: json")
 	fs.Parse(args)
 
-	statusCode, body, err := proxyOrDirect("server_info", "", "", token)
-	if err != nil && allowDirectFallback() {
-		url := fmt.Sprintf("%s/api/v1/server/info", baseURL)
-		statusCode, body, err = doHTTP(http.MethodGet, url, token, nil)
-	}
+	statusCode, body, err := requestServerInfo(baseURL, token)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
 		doExit(exitUsage)
@@ -1312,10 +1308,12 @@ func resolveTarget(baseURL, token, target string) (channelID, threadMsgID string
 }
 
 func resolveChannelName(baseURL, token, name string) (string, error) {
-	url := fmt.Sprintf("%s/api/v1/server/info", baseURL)
-	_, body, err := doHTTP(http.MethodGet, url, token, nil)
+	statusCode, body, err := requestServerInfo(baseURL, token)
 	if err != nil {
 		return "", err
+	}
+	if statusCode >= 400 {
+		return "", fmt.Errorf("server info failed (HTTP %d): %s", statusCode, extractErrorMessage(body))
 	}
 	var resp struct {
 		Channels []struct {
@@ -1334,6 +1332,14 @@ func resolveChannelName(baseURL, token, name string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("channel %q not found", name)
+}
+
+func requestServerInfo(baseURL, token string) (int, []byte, error) {
+	statusCode, body, err := proxyOrDirect("server_info", "", "", token)
+	if allowDirectFallback() && (err != nil || statusCode >= 400) {
+		return doHTTP(http.MethodGet, fmt.Sprintf("%s/api/v1/server/info", baseURL), token, nil)
+	}
+	return statusCode, body, err
 }
 
 // resolveChannelParam strips the # prefix (if present) and resolves a channel
@@ -1493,8 +1499,8 @@ func printMessageSendResult(body []byte, channelID, threadID string) {
 		fmt.Printf("Message sent to thread. Message ID: %s (to reply in this thread, use target \"%s:%s\")\n",
 			resp.ID, channelID, threadID)
 	} else {
-		fmt.Printf("Message sent to channel. Message ID: %s (to reply in this message's thread, use --target 'channel:%s')\n",
-			resp.ID, shortID)
+		fmt.Printf("Message sent to channel. Message ID: %s (to reply in this message's thread, use --target '%s:%s')\n",
+			resp.ID, channelID, shortID)
 	}
 }
 

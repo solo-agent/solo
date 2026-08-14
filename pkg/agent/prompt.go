@@ -99,7 +99,7 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 	b.WriteString("```\n\n")
 	b.WriteString("Parse this line structurally: the `@name:` immediately after `]` is the **sender label**, never a recipient or @mention. Only `@name` tokens inside the content after that sender label are @mentions. For example, `] @lili: hello` means lili sent `hello`; it does not address or @mention lili.\n\n")
 	b.WriteString("Header fields:\n")
-	b.WriteString("- `target=` — where the message came from. Reuse as the `--target` parameter when replying.\n")
+	b.WriteString("- `target=` — where the message came from. Reuse its exact value as the `--target` parameter when replying; do not translate a Channel name into an ID or probe alternate forms.\n")
 	b.WriteString("- `msg=` — message short ID (first 8 chars of UUID). Use as thread suffix to start/reply in a thread.\n")
 	b.WriteString("- `time=` — timestamp.\n")
 	b.WriteString("- `type=` — sender kind. Values are `human`, `agent`, or `system`.\n\n")
@@ -107,7 +107,7 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 
 	// Sending messages
 	b.WriteString("### Sending messages\n\n")
-	b.WriteString("- **Reply to a channel**: `solo message send --target '#channel-name' <<'EOF'` followed by the message body and `EOF`\n")
+	b.WriteString("- **Reply to a channel**: `solo message send --target '#channel-name' <<'EOF'` followed by the message body and `EOF`. A Channel UUID is also accepted in place of `#channel-name`.\n")
 	b.WriteString("- **Reply to a DM**: `solo message send --target 'dm:@peer-name' <<'EOF'` followed by the message body and `EOF`\n")
 	b.WriteString("- **Reply in a thread**: `solo message send --target '#channel-name:shortid' <<'EOF'` followed by the message body and `EOF`\n")
 	b.WriteString("- **Start a NEW DM**: `solo message send --target 'dm:@person-name' <<'EOF'` followed by the message body and `EOF`\n")
@@ -117,6 +117,7 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 	b.WriteString("Long message with \"quotes\", $vars, `backticks`, and code blocks.\n")
 	b.WriteString("EOF\n")
 	b.WriteString("```\n")
+	b.WriteString("\n`--target` is the canonical destination flag. It accepts both Channel names (`#general`) and Channel UUIDs, plus the same forms with a `:shortid` Thread suffix. The CLI resolves names inside the current Workspace; do not retry with guessed flag combinations.\n")
 	b.WriteString("\n**IMPORTANT**: To reply to any message, always reuse the exact `target=` field from the received message header as the `--target` parameter. This ensures your reply goes to the right place — whether it's a channel, DM, or thread.\n\n")
 
 	// Threads
@@ -146,7 +147,7 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 
 	// Reading history
 	b.WriteString("### Reading history\n\n")
-	b.WriteString("`solo message read --channel \"#channel-name\"` or `solo message read --channel \"#channel:shortid\"`\n")
+	b.WriteString("`solo message read --target \"#channel-name\"` or `solo message read --target \"#channel:shortid\"`\n")
 	b.WriteString("Supports `--before` / `--after` for pagination.\n\n")
 
 	// Historical references
@@ -386,7 +387,7 @@ func writeCLICommands(b *strings.Builder, channel ChannelContext) {
 	// Only commands that exist in solo CLI are listed.
 
 	fmt.Fprintf(b, "1. **%s** — Non-blocking check for new messages. Use freely during work — at natural breakpoints or after notifications.\n", bt("solo message check [-c <channel_id>]"))
-	fmt.Fprintf(b, "2. **%s** — Send a message to a channel, DM, or thread. Always use `--target` from the received message header.\n", bt("solo message send -c <content> --target <target>"))
+	fmt.Fprintf(b, "2. **%s** — Send a message to a channel, DM, or thread. `--target` accepts a Channel name or UUID; always reuse the exact target from a received message header.\n", bt("solo message send -c <content> --target <target>"))
 	fmt.Fprintf(b, "3. **%s** — Read past messages from a channel, DM, or thread. Supports `--before` / `--after` pagination.\n", bt("solo message read --target <target> [--before <id>] [--limit <n>]"))
 	fmt.Fprintf(b, "4. **%s** — List channels in this server, which ones you have joined, plus all agents and humans.\n", bt("solo server info"))
 	fmt.Fprintf(b, "5. **%s** — List the members (agents and humans) of a specific channel.\n", bt("solo channel members -c <channel_id>"))

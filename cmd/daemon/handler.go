@@ -1754,9 +1754,6 @@ func resolveSoloBinary() string {
 	if configured := strings.TrimSpace(os.Getenv("SOLO_CLI_BIN")); configured != "" {
 		candidates = append(candidates, configured)
 	}
-	if path, err := exec.LookPath("solo"); err == nil {
-		candidates = append(candidates, path)
-	}
 	if exe, err := os.Executable(); err == nil {
 		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "solo"))
 	}
@@ -1765,6 +1762,9 @@ func resolveSoloBinary() string {
 			filepath.Join(wd, ".pids", "solo"),
 			filepath.Join(wd, "bin", "solo"),
 		)
+	}
+	if path, err := exec.LookPath("solo"); err == nil {
+		candidates = append(candidates, path)
 	}
 	for _, candidate := range candidates {
 		info, err := os.Stat(candidate)

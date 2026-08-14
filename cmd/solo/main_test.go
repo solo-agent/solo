@@ -708,6 +708,107 @@ func TestHandleMessageSend(t *testing.T) {
 	}
 }
 
+func TestHandleMessageSendResolvesChannelNameThroughDaemonProxy(t *testing.T) {
+	var actions []string
+	var sentChannelID string
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/internal/daemon/proxy" {
+			t.Fatalf("unexpected daemon path %s", r.URL.Path)
+		}
+		var request struct {
+			Action    string `json:"action"`
+			ChannelID string `json:"channel_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		actions = append(actions, request.Action)
+		w.Header().Set("Content-Type", "application/json")
+		switch request.Action {
+		case "server_info":
+			fmt.Fprint(w, `{"channels":[{"id":"550e8400-e29b-41d4-a716-446655440001","name":"general"}]}`)
+		case "message_send":
+			sentChannelID = request.ChannelID
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"id":"msg-by-name","channel_id":"550e8400-e29b-41d4-a716-446655440001"}`)
+		default:
+			t.Fatalf("unexpected proxy action %q", request.Action)
+		}
+	}))
+	defer daemon.Close()
+	t.Setenv("SOLO_DAEMON_URL", daemon.URL)
+	t.Setenv("SOLO_AGENT_ID", "agent-1")
+
+	code, stdout, stderr := captureAndRun(t, func() {
+		handleMessageSend([]string{"-c", "hello", "--target", "#general"}, "http://expired-token-must-not-be-used.invalid", "expired-token")
+	})
+
+	if code != exitOK {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+	if got, want := strings.Join(actions, ","), "server_info,message_send"; got != want {
+		t.Fatalf("proxy actions = %q, want %q", got, want)
+	}
+	if sentChannelID != "550e8400-e29b-41d4-a716-446655440001" {
+		t.Fatalf("message channel = %q", sentChannelID)
+	}
+	if !strings.Contains(stdout, "550e8400-e29b-41d4-a716-446655440001:msg-by-n") {
+		t.Fatalf("send output did not contain a reusable UUID target: %q", stdout)
+	}
+}
+
+func TestHandleMessageSendUUIDSkipsChannelNameLookup(t *testing.T) {
+	var actions []string
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Action    string `json:"action"`
+			ChannelID string `json:"channel_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		actions = append(actions, request.Action)
+		if request.ChannelID != "550e8400-e29b-41d4-a716-446655440001" {
+			t.Fatalf("message channel = %q", request.ChannelID)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"id":"msg-by-id","channel_id":"550e8400-e29b-41d4-a716-446655440001"}`)
+	}))
+	defer daemon.Close()
+	t.Setenv("SOLO_DAEMON_URL", daemon.URL)
+	t.Setenv("SOLO_AGENT_ID", "agent-1")
+
+	code, _, stderr := captureAndRun(t, func() {
+		handleMessageSend([]string{"-c", "hello", "--target", "550e8400-e29b-41d4-a716-446655440001"}, "http://expired-token-must-not-be-used.invalid", "expired-token")
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+	if got, want := strings.Join(actions, ","), "message_send"; got != want {
+		t.Fatalf("proxy actions = %q, want %q", got, want)
+	}
+}
+
+func TestResolveChannelNamePreservesServerInfoError(t *testing.T) {
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"error":"unauthorized","message":"Agent Run credential is no longer active"}`)
+	}))
+	defer daemon.Close()
+	t.Setenv("SOLO_DAEMON_URL", daemon.URL)
+	t.Setenv("SOLO_AGENT_ID", "agent-1")
+
+	_, err := resolveChannelName("http://unused.invalid", "expired-token", "general")
+	if err == nil || !strings.Contains(err.Error(), "Agent Run credential is no longer active") {
+		t.Fatalf("resolve error = %v", err)
+	}
+	if strings.Contains(err.Error(), `channel "general" not found`) {
+		t.Fatalf("authentication failure was mislabeled as a missing Channel: %v", err)
+	}
+}
+
 func TestPrintMessageSendResultHeld(t *testing.T) {
 	_, stdout, _ := captureAndRun(t, func() {
 		printMessageSendResult([]byte(`{
