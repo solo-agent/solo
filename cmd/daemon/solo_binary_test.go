@@ -34,11 +34,31 @@ func TestResolveSoloBinaryPrefersBuildCompanionOverInstalledPATH(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(installedDir, "solo"), []byte("stale"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Chdir(root)
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
 	t.Setenv("PATH", installedDir)
 	t.Setenv("SOLO_CLI_BIN", "")
 
-	if got := resolveSoloBinary(); got != companion {
+	got := resolveSoloBinary()
+	gotInfo, err := os.Stat(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	companionInfo, err := os.Stat(companion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(gotInfo, companionInfo) {
 		t.Fatalf("resolveSoloBinary() = %q, want build companion %q", got, companion)
 	}
 }
