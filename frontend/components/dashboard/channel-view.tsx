@@ -189,10 +189,6 @@ export function ChannelView({
   const [mutedMembers, setMutedMembers] = useState<MutedMember[]>([]);
   const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>([]);
   const [moderationOpen, setModerationOpen] = useState(false);
-  const manageableMutedMembers = mutedMembers.filter((member) =>
-    member.user_id !== user?.id && member.workspace_role !== 'owner' && (
-      moderation?.role === 'owner' || (moderation?.role === 'admin' && member.workspace_role === 'member')
-    ));
 
   const loadModeration = useCallback(async () => {
     if (channel.type !== 'channel') return;
@@ -218,6 +214,7 @@ export function ChannelView({
       if (pinned) await apiClient.delete(`/api/v1/channels/${channel.id}/messages/${message.id}/pin`);
       else await apiClient.put(`/api/v1/channels/${channel.id}/messages/${message.id}/pin`, {});
       await loadModeration();
+      showToast(t(pinned ? 'channelUnpinned' : 'channelPinned'), 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : t('channelModerationSaveError'), 'error');
     }
@@ -228,10 +225,12 @@ export function ChannelView({
       if (muted) await apiClient.delete(`/api/v1/channels/${channel.id}/moderation/mutes/${memberId}`);
       else await apiClient.put(`/api/v1/channels/${channel.id}/moderation/mutes/${memberId}`, { reason: '' });
       await loadModeration();
+      const memberName = users.find((member) => member.member_id === memberId)?.display_name ?? t('user');
+      showToast(t(muted ? 'channelMemberUnmuted' : 'channelMemberMuted', { name: memberName }), 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : t('channelModerationSaveError'), 'error');
     }
-  }, [channel.id, loadModeration, showToast]);
+  }, [channel.id, loadModeration, showToast, users]);
   const { generateArtifact, regenerateArtifact, fetchArtifactHTML, listArtifacts, isGeneratingTask } = useTaskArtifact();
   const artifactOpenLinkRef = useRef<HTMLAnchorElement>(null);
   const artifactRegenerateButtonRef = useRef<HTMLButtonElement>(null);
@@ -1476,7 +1475,23 @@ export function ChannelView({
             </select>
           </div>
           <p className="font-body text-xs text-muted-foreground">{activeWorkspace?.is_default ? t('channelPublicNoRemoval') : t('channelPrivateMemberPolicy')}</p>
-          {manageableMutedMembers.length > 0 && <div><div className="mb-1 font-heading text-sm font-bold">{t('channelMutedMembers')}</div>{manageableMutedMembers.map((member) => <div key={member.user_id} className="flex items-center justify-between border-2 border-black p-2 text-sm"><span>{member.display_name}</span><Button size="sm" variant="outline" onClick={() => void toggleMute(member.user_id, true)}>{t('channelUnmute')}</Button></div>)}</div>}
+          <div>
+            <div className="mb-1 font-heading text-sm font-bold">{t('channelMembers')}</div>
+            <div className="max-h-[45vh] overflow-y-auto border-2 border-black bg-white p-1">
+              <MemberList
+                users={users}
+                agents={[]}
+                isLoading={membersLoading}
+                showHeader={false}
+                canAddAgent={false}
+                canModerateUsers={moderation?.can_manage}
+                moderationRole={moderation?.role}
+                currentUserId={user?.id}
+                mutedUserIds={new Set(mutedMembers.map((member) => member.user_id))}
+                onToggleMute={toggleMute}
+              />
+            </div>
+          </div>
         </div>
       </Dialog>
 

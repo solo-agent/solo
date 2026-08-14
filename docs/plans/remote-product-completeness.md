@@ -120,6 +120,16 @@ action are available in the message menu; Channel settings expose posting policy
 and active member mutes. WebSocket events invalidate message/member state after
 pin or moderation changes.
 
+Moderation controls represent actions and state separately. An unmuted Member
+has an explicit mute action; after activation the control enters a disabled
+loading state, then changes to a persistent highlighted "muted" state whose
+action is unmute. Tooltips and accessible labels name both actions. Pinning uses
+the same loading and confirmed-state feedback for both human and Agent messages.
+Success and failure toasts make the result observable even when a realtime
+refresh is delayed. These controls do not optimistically invent Server state:
+the confirmed style is derived from the refreshed pin/mute collections, while a
+per-control pending state prevents duplicate writes.
+
 ### Failure recovery
 
 All policy decisions are enforced on the Server, not only hidden in the UI.

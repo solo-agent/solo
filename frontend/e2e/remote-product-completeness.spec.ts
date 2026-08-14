@@ -140,6 +140,18 @@ test.describe('remote product completeness', () => {
       await authenticatePage(page, owner, workspace.id);
       await page.goto(`/dashboard?channel=${channel.id}`);
       await expect(page.getByText('Pinned messages', { exact: true })).toHaveCount(0);
+      const rootMessage = page.locator(`[data-message-id="${root.id}"]`);
+      await rootMessage.hover();
+      await expect(rootMessage.getByRole('button', { name: 'Pin message' })).toBeVisible();
+      await rootMessage.getByRole('button', { name: 'Pin message' }).click();
+      await expect(page.getByText('Message pinned.', { exact: true })).toBeVisible();
+      await expect(rootMessage.getByRole('button', { name: 'Unpin message' })).toBeVisible();
+      await expect(page.getByText('Pinned messages', { exact: true })).toBeVisible();
+      await expect(page.getByText(`PIN_ME_${suffix}`, { exact: true })).toBeVisible();
+
+      await page.getByRole('button', { name: 'Channel management' }).click();
+      const moderationDialog = page.getByRole('dialog');
+      await expect(moderationDialog.getByText('Who can post')).toBeVisible();
 
       const memberContext = await browser.newContext();
       const memberPage = await memberContext.newPage();
@@ -148,10 +160,11 @@ test.describe('remote product completeness', () => {
       const memberComposer = memberPage.getByPlaceholder('Type a message...');
       await expect(memberComposer).toBeEnabled();
 
-      await call(request, admin, 'put', `/api/v1/channels/${channel.id}/messages/${root.id}/pin`, workspace.id, {});
-      await expect(page.getByText('Pinned messages', { exact: true })).toBeVisible();
-      await expect(page.getByText(`PIN_ME_${suffix}`, { exact: true })).toBeVisible();
-      await call(request, admin, 'put', `/api/v1/channels/${channel.id}/moderation/mutes/${member.user.id}`, workspace.id, { reason: 'E2E moderation' });
+      const muteMember = moderationDialog.getByRole('button', { name: `Mute ${member.user.display_name}` });
+      await expect(muteMember).toHaveAttribute('data-mute-state', 'unmuted');
+      await muteMember.click();
+      await expect(page.getByText(`${member.user.display_name} is now muted.`, { exact: true })).toBeVisible();
+      await expect(moderationDialog.getByRole('button', { name: `Unmute ${member.user.display_name}` })).toHaveAttribute('data-mute-state', 'muted');
       await expect(memberComposer).toBeDisabled();
 
       expect((await raw(request, member, 'post', `/api/v1/channels/${channel.id}/messages`, workspace.id, { content: 'blocked message' })).status()).toBe(403);
@@ -165,7 +178,9 @@ test.describe('remote product completeness', () => {
         payload: { channel_id: channel.id, thread_id: threadSeed.thread_id!, content: 'blocked WebSocket reply' },
       })).code).toBe('FORBIDDEN');
 
-      await call(request, admin, 'delete', `/api/v1/channels/${channel.id}/moderation/mutes/${member.user.id}`, workspace.id);
+      await moderationDialog.getByRole('button', { name: `Unmute ${member.user.display_name}` }).click();
+      await expect(page.getByText(`${member.user.display_name} can post again.`, { exact: true })).toBeVisible();
+      await moderationDialog.getByRole('button', { name: 'Close', exact: true }).click();
       await call(request, admin, 'patch', `/api/v1/channels/${channel.id}/moderation`, workspace.id, { posting_policy: 'admins_only' });
       expect((await raw(request, member, 'post', `/api/v1/channels/${channel.id}/messages`, workspace.id, { content: 'still blocked' })).status()).toBe(403);
       await call(request, owner, 'patch', `/api/v1/channels/${channel.id}/moderation`, workspace.id, { posting_policy: 'everyone' });
@@ -206,10 +221,6 @@ test.describe('remote product completeness', () => {
         )::text
       `);
       expect(persisted).toEqual({ pin_count: 0, mute_count: 0, attachment_count: 2, avatar_url: avatar.url, policy: 'everyone' });
-
-      await page.getByRole('button', { name: 'Channel management' }).click();
-      await expect(page.getByRole('dialog').getByText('Who can post')).toBeVisible();
-      await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
 
       await call(request, admin, 'put', `/api/v1/channels/${channel.id}/moderation/mutes/${member.user.id}`, workspace.id, { reason: 'remove cleanup' });
       await call(request, admin, 'delete', `/api/v1/workspaces/${workspace.id}/members/${member.user.id}`, workspace.id);
