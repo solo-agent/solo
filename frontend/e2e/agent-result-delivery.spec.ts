@@ -6,7 +6,10 @@ import { acquireLocalComputer, type LocalComputerLease } from './support/local-c
 import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
-const credentials = { email: 'agent-result-delivery-human-e2e@solo.local', password: 'SoloE2E-2026!' };
+const credentials = {
+  email: `agent-result-delivery-${Date.now()}-${process.pid}@solo.local`,
+  password: 'SoloE2E-2026!',
+};
 const daemonLogPath = join(process.cwd(), '..', 'daemon.log');
 
 interface AuthResponse {
@@ -489,6 +492,88 @@ test.describe('real Agent result delivery contract', () => {
       const persistedMessage = page.locator(`[data-message-id="${state.message_id}"]`);
       await expect(persistedMessage).toBeVisible();
       await expect(page.locator(`[data-message-id="${second.message_id}"]`)).toContainText('SECOND_OK');
+    } finally {
+      if (agent) await api(request, auth.access_token, 'delete', `/api/v1/agents/${agent.id}`).catch(() => undefined);
+      if (channel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
+    }
+  });
+
+  test('sends by Channel name and UUID through a current Run when the provider Session token is stale', async ({ page, request }) => {
+    const auth = await authenticate(request);
+    const suffix = Date.now().toString(36);
+    let channel: Entity | null = null;
+    let agent: Entity | null = null;
+
+    try {
+      channel = await api<Entity>(request, auth.access_token, 'post', '/api/v1/channels', {
+        name: `target-resolution-${suffix}`,
+        description: 'Real Agent Channel name and UUID target resolution E2E',
+      });
+      agent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
+        name: `Target Resolution E2E ${suffix}`,
+        computer_id: localComputer.id,
+        model_provider: 'claude',
+        model_name: 'sonnet',
+        system_prompt: [
+          'When introducing yourself, use solo message send to send exactly TARGET_RESOLUTION_READY.',
+          `When a user message contains NAME_TARGET, run exactly: SOLO_AUTH_TOKEN=expired-provider-session-token solo message send -c NAME_TARGET_OK --target '#${channel.name}'`,
+          'For NAME_TARGET, do not inspect server info, use a Channel UUID, or retry with another target.',
+          `When a user message contains UUID_TARGET, run exactly: SOLO_AUTH_TOKEN=expired-provider-session-token solo message send -c UUID_TARGET_OK --target '${channel.id}'`,
+          'Do not merely print either reply. Send no other visible text.',
+        ].join(' '),
+      });
+
+      await expect.poll(() => {
+        const state = deliveryState(agent!.id);
+        return `${state.status}/${state.message_id ? 'visible' : 'missing'}`;
+      }, { timeout: 180000, intervals: [500, 1000, 2000] }).toBe('completed/visible');
+      const introduction = deliveryState(agent.id);
+
+      const nameTrigger = await api<{ id: string }>(
+        request,
+        auth.access_token,
+        'post',
+        `/api/v1/channels/${channel.id}/messages`,
+        { content: `@${agent.name} NAME_TARGET` },
+      );
+      await expect.poll(() => {
+        const state = channelSessionState(nameTrigger.id);
+        return `${state.status}/${state.external_session_id}/${state.message_content}`;
+      }, { timeout: 180000, intervals: [500, 1000, 2000] }).toBe(
+        `completed/${introduction.external_session_id}/NAME_TARGET_OK`,
+      );
+      const byName = channelSessionState(nameTrigger.id);
+
+      const uuidTrigger = await api<{ id: string }>(
+        request,
+        auth.access_token,
+        'post',
+        `/api/v1/channels/${channel.id}/messages`,
+        { content: `@${agent.name} UUID_TARGET` },
+      );
+      await expect.poll(() => {
+        const state = channelSessionState(uuidTrigger.id);
+        return `${state.status}/${state.external_session_id}/${state.message_content}`;
+      }, { timeout: 180000, intervals: [500, 1000, 2000] }).toBe(
+        `completed/${byName.external_session_id}/UUID_TARGET_OK`,
+      );
+      const byUUID = channelSessionState(uuidTrigger.id);
+
+      const persisted = databaseJSON<{ name_messages: number; uuid_messages: number; wrong_channels: number }>(`
+        SELECT json_build_object(
+          'name_messages', COUNT(*) FILTER (WHERE content = 'NAME_TARGET_OK' AND channel_id = '${channel!.id}'),
+          'uuid_messages', COUNT(*) FILTER (WHERE content = 'UUID_TARGET_OK' AND channel_id = '${channel!.id}'),
+          'wrong_channels', COUNT(*) FILTER (WHERE content IN ('NAME_TARGET_OK', 'UUID_TARGET_OK') AND channel_id <> '${channel!.id}')
+        )::text
+          FROM messages
+         WHERE sender_id = '${agent.id}'
+      `);
+      expect(persisted).toEqual({ name_messages: 1, uuid_messages: 1, wrong_channels: 0 });
+
+      await authenticatePage(page, auth);
+      await page.goto(`/dashboard?channel=${channel.id}`);
+      await expect(page.locator(`[data-message-id="${byName.message_id}"]`)).toContainText('NAME_TARGET_OK');
+      await expect(page.locator(`[data-message-id="${byUUID.message_id}"]`)).toContainText('UUID_TARGET_OK');
     } finally {
       if (agent) await api(request, auth.access_token, 'delete', `/api/v1/agents/${agent.id}`).catch(() => undefined);
       if (channel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);

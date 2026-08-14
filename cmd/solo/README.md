@@ -85,10 +85,20 @@ solo task reopen -n <number> -c <channel_id>
 ### message send -- send a message to a channel
 
 ```bash
-solo message send -c <content> -C <channel_id> [-t <thread_id>]
+solo message send -c <content> --target <target>
 ```
 
-Note the case convention: `-c` for content, `-C` for channel ID, `-t` for thread ID.
+`--target` is the canonical destination flag and accepts either a Channel name
+or UUID, with an optional message short ID for a Thread:
+
+```bash
+solo message send -c "hello" --target '#general'
+solo message send -c "hello" --target '00000000-0000-0000-0000-000000000002'
+solo message send -c "reply" --target '#general:a1b2c3d4'
+```
+
+Lowercase `-c` always means content; it never means Channel. The obsolete
+`-C`/`-t` form is not supported.
 
 ### channel members -- list members of a channel
 
@@ -144,7 +154,7 @@ solo task update -n 3 -c my-channel -s done
 **Post a threaded reply:**
 
 ```bash
-solo message send -c "I'll take this one" -C my-channel -t th-abc123
+solo message send -c "I'll take this one" --target '#my-channel:abc123'
 ```
 
 **Script-friendly task listing:**

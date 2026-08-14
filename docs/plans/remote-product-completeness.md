@@ -66,6 +66,62 @@ not deleted or moved. Local non-production deployments keep their current
 default paths but receive the same writable-directory validation when a path is
 explicitly configured.
 
+### Shared user-avatar access
+
+A custom user avatar remains an `attachments` row and Server-owned file. The
+uploading user owns its lifecycle, and `users.avatar_url` identifies which JPEG,
+PNG, or WebP attachment is currently published as that user's profile image.
+The existing upload and profile APIs, frontend blob loading, database fields,
+and file paths do not change.
+
+Authenticated attachment reads add one narrow authorization path: a human user
+may read an attachment when it is the current avatar of another active user and
+both users belong to at least one common Workspace. This matches every frontend
+surface that returns another user's profile while keeping unrelated uploads and
+avatars from isolated Workspaces private. Agent Run credentials do not gain
+this permission. Replacing or clearing an avatar immediately removes the extra
+read path because authorization is evaluated from the current `users.avatar_url`
+value on every request.
+
+No migration or URL rewrite is needed for existing profiles. Legacy avatar URLs
+using either the original attachment or thumbnail route remain valid. Missing
+files still return not found, invalid credentials still return unauthorized,
+and the frontend keeps its deterministic preset/initials fallback. Verification
+must cover two real users in one Workspace, the same attachment from an
+unrelated Workspace, the browser-visible image, and persisted profile state.
+
+### Agent CLI channel-target resolution
+
+The `solo` CLI accepts either a Workspace-scoped Channel name or its UUID for
+message targets, with an optional message short ID for Threads. UUID targets
+remain lookup-free. Name targets are resolved against `server info` in the
+currently executing Agent Run's Workspace before the message is sent.
+
+The local Daemon owns the fresh Run credential, so Agent-side name resolution
+must use the same Daemon proxy as the subsequent send. It must not call the
+remote Server with the long-lived provider Session's originally injected token:
+that token can expire while Claude or Codex remains alive. Direct authenticated
+Server lookup remains the compatibility path for a standalone human CLI that
+has no Agent/Daemon scope. Non-success lookup responses are surfaced as their
+real authentication or Server error and are never rewritten as a misleading
+`channel not found` result.
+
+No database, Server API, frontend state, or migration changes are required.
+The generated Agent prompt continues to prefer the exact `target=` header while
+explicitly documenting that both `#channel-name` and Channel UUID forms are
+valid. `--target` is the canonical message destination flag; the historical
+lowercase `-c` continues to mean message content only, and the obsolete
+`-C`/`-t` form is not revived. CLI success output must print a syntactically
+valid UUID-based Thread target rather than the unsupported placeholder
+`channel:<short-id>`. Existing name, UUID, and Thread inputs remain compatible;
+ambiguous or absent names still fail without guessing. Verification covers an
+active Daemon proxy with an intentionally stale direct token, both name and UUID
+sends, the generated prompt, and the actual persisted message destination.
+The Daemon also copies the CLI shipped beside its own executable (or the current
+development build) into the Agent Workspace before falling back to any `solo`
+found on the machine PATH, so an older globally installed CLI cannot silently
+override the Server/Daemon version under test or in a packaged installation.
+
 ## 3. Workspace governance, pinning, and muting
 
 ### Roles

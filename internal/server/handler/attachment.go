@@ -311,6 +311,21 @@ func (h *AttachmentHandler) authorize(r *http.Request) bool {
 		            AND dm.member_id = $2
 		          WHERE $1::uuid = ANY(m.attachment_ids)
 		         )
+		         OR EXISTS (
+		           SELECT 1
+		             FROM users avatar_owner
+		             JOIN workspace_members owner_membership
+		               ON owner_membership.user_id = avatar_owner.id
+		             JOIN workspace_members viewer_membership
+		               ON viewer_membership.workspace_id = owner_membership.workspace_id
+		              AND viewer_membership.user_id = $2
+		            WHERE avatar_owner.id = a.user_id
+		              AND avatar_owner.is_active = true
+		              AND avatar_owner.avatar_url IN (
+		                '/api/v1/attachments/' || a.id::text,
+		                '/api/v1/attachments/' || a.id::text || '/thumbnail'
+		              )
+		         )
 		       ))
 		     )
 		)`, chi.URLParam(r, "attachmentID"), claims.Subject, claims.ActorType, nullableClaim(claims.RunID), nullableClaim(claims.ComputerID)).Scan(&allowed)

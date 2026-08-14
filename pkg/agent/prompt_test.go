@@ -237,6 +237,9 @@ func TestBuildSystemPrompt_MessageFormat(t *testing.T) {
 	assertHas(t, p, "type=")
 	assertHas(t, p, "is the **sender label**, never a recipient or @mention")
 	assertHas(t, p, "] @lili: hello")
+	assertHas(t, p, "Reuse its exact value as the `--target` parameter")
+	assertHas(t, p, "both Channel names (`#general`) and Channel UUIDs")
+	assertNotHas(t, p, "solo message read --channel")
 }
 
 func TestBuildSystemPrompt_MessageNotifications(t *testing.T) {

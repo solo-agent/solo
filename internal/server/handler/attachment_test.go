@@ -86,6 +86,93 @@ func TestAgentRunAttachmentTokenIsLimitedToRunChannel(t *testing.T) {
 	}
 }
 
+func TestUserAvatarAttachmentIsVisibleOnlyInsideSharedWorkspace(t *testing.T) {
+	pool := attachmentTestPool(t)
+	ctx := context.Background()
+	ownerID := uuid.NewString()
+	viewerID := uuid.NewString()
+	outsiderID := uuid.NewString()
+	sharedWorkspaceID := uuid.NewString()
+	isolatedWorkspaceID := uuid.NewString()
+	attachmentID := uuid.NewString()
+	ownerEmail := fmt.Sprintf("avatar-owner-%s@example.test", ownerID)
+	viewerEmail := fmt.Sprintf("avatar-viewer-%s@example.test", viewerID)
+	outsiderEmail := fmt.Sprintf("avatar-outsider-%s@example.test", outsiderID)
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO users (id, email, display_name, password_hash) VALUES
+			($1, $2, 'Avatar Owner', 'test'),
+			($3, $4, 'Avatar Viewer', 'test'),
+			($5, $6, 'Avatar Outsider', 'test')`,
+		ownerID, ownerEmail, viewerID, viewerEmail, outsiderID, outsiderEmail); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM attachments WHERE id = $1`, attachmentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM workspaces WHERE id IN ($1, $2)`, sharedWorkspaceID, isolatedWorkspaceID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id IN ($1, $2, $3)`, ownerID, viewerID, outsiderID)
+	})
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO workspaces (id, name, visibility, created_by) VALUES
+			($1, $2, 'private', $3),
+			($4, $5, 'private', $6)`,
+		sharedWorkspaceID, "shared-avatar-"+ownerID, ownerID,
+		isolatedWorkspaceID, "isolated-avatar-"+outsiderID, outsiderID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
+			($1, $2, 'owner'),
+			($1, $3, 'member'),
+			($4, $5, 'owner')`,
+		sharedWorkspaceID, ownerID, viewerID, isolatedWorkspaceID, outsiderID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO attachments (id, user_id, filename, mime_type, size, storage_path)
+		VALUES ($1, $2, 'avatar.png', 'image/png', 1, 'avatar.png')`, attachmentID, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE users SET avatar_url = $1 WHERE id = $2`,
+		"/api/v1/attachments/"+attachmentID+"/thumbnail", ownerID); err != nil {
+		t.Fatal(err)
+	}
+
+	authorized := func(userID, email, name string) bool {
+		t.Helper()
+		token, err := auth.GenerateAccessToken(userID, email, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/attachments/"+attachmentID+"/thumbnail", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		route := chi.NewRouteContext()
+		route.URLParams.Add("attachmentID", attachmentID)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, route))
+		return (&AttachmentHandler{pool: pool}).authorize(req)
+	}
+
+	if !authorized(viewerID, viewerEmail, "Avatar Viewer") {
+		t.Fatal("shared Workspace member could not read the current user avatar")
+	}
+	if authorized(outsiderID, outsiderEmail, "Avatar Outsider") {
+		t.Fatal("user outside the avatar owner's Workspaces could read the avatar")
+	}
+	if _, err := pool.Exec(ctx, `UPDATE users SET avatar_url = $1 WHERE id = $2`,
+		"/api/v1/attachments/"+attachmentID, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if !authorized(viewerID, viewerEmail, "Avatar Viewer") {
+		t.Fatal("shared Workspace member could not read a current non-thumbnail avatar")
+	}
+	if _, err := pool.Exec(ctx, `UPDATE users SET avatar_url = NULL WHERE id = $1`, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if authorized(viewerID, viewerEmail, "Avatar Viewer") {
+		t.Fatal("shared Workspace member could still read an attachment after it stopped being the current avatar")
+	}
+}
+
 func attachmentTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("DATABASE_URL")
