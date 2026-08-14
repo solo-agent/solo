@@ -22,6 +22,7 @@ type codexPersistentState struct {
 	runner   *persistentRunner
 	client   *codexClient
 	threadID string
+	model    string
 }
 
 // Compile-time check.
@@ -54,13 +55,15 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 	msgCh := make(chan OutputChunk, 256)
 	resCh := make(chan *Result, 1)
 
+	var threadID string
+	turnStartedAt := time.Now()
 	c := &codexClient{
 		logger:  b.logger,
 		stdin:   runner.stdin,
 		pending: make(map[int]*pendingRPC),
 		onChunk: func(chunk OutputChunk) { trySend(msgCh, chunk) },
 		onTurnDone: func(aborted bool) {
-			resCh <- codexTurnResult(aborted)
+			resCh <- codexPersistentTurnResult(aborted, threadID, turnStartedAt, opts.Model)
 			close(msgCh)
 			close(resCh)
 		},
@@ -105,7 +108,7 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 	c.notify("initialized")
 
 	// Start thread.
-	threadID, err := c.startThread(ctx, opts)
+	threadID, err = c.startThread(ctx, opts)
 	if err != nil {
 		runner.close()
 		return nil, fmt.Errorf("codex persistent thread/start: %w", err)
@@ -130,6 +133,7 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 		runner:   runner,
 		client:   c,
 		threadID: threadID,
+		model:    opts.Model,
 	}
 
 	var stopOnce sync.Once
@@ -172,10 +176,11 @@ func (b *CodexBackend) Send(ctx context.Context, ps *PersistentSession, messages
 
 	// Redirect client callbacks to this turn's channels and reset terminal
 	// deduplication before starting the next turn.
+	turnStartedAt := time.Now()
 	state.client.onChunk = func(chunk OutputChunk) { trySend(msgCh, chunk) }
 	state.client.prepareTurn(
 		func(aborted bool) {
-			resCh <- codexTurnResult(aborted)
+			resCh <- codexPersistentTurnResult(aborted, state.threadID, turnStartedAt, state.model)
 			close(msgCh)
 			close(resCh)
 		},
@@ -271,6 +276,30 @@ func codexTurnResult(aborted bool) *Result {
 		return &Result{Status: "cancelled", Error: "turn was aborted"}
 	}
 	return &Result{Status: "completed"}
+}
+
+func codexPersistentTurnResult(aborted bool, threadID string, startedAt time.Time, fallbackModel string) *Result {
+	result := codexTurnResult(aborted)
+	if aborted {
+		return result
+	}
+
+	transcriptPath := TranscriptPath("codex", "", threadID)
+	scanned := parseCodexSessionFileForWindow(transcriptPath, startedAt, time.Now().Add(time.Second))
+	if scanned == nil {
+		return result
+	}
+	model := strings.TrimSpace(scanned.model)
+	if model == "" {
+		model = strings.TrimSpace(fallbackModel)
+	}
+	if model == "" {
+		model = "codex"
+	}
+	if hasTokenUsage(map[string]TokenUsage{model: scanned.usage}) {
+		result.Usage = map[string]TokenUsage{model: scanned.usage}
+	}
+	return result
 }
 
 // Execute launches the codex CLI subprocess, sends the prompt via JSON-RPC 2.0,
@@ -529,7 +558,10 @@ func (b *CodexBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *E
 		u := c.usage
 		c.usageMu.Unlock()
 
-		if u.InputTokens == 0 && u.OutputTokens == 0 {
+		transcriptPath := TranscriptPath("codex", opts.WorkspaceDir, threadID)
+		if scanned := parseCodexSessionFileForWindow(transcriptPath, startTime, time.Now().Add(time.Second)); scanned != nil {
+			u = scanned.usage
+		} else if u.InputTokens == 0 && u.OutputTokens == 0 {
 			if scanned := scanCodexSessionUsage(startTime); scanned != nil {
 				u = scanned.usage
 			}
@@ -1240,32 +1272,33 @@ func codexSessionRoot() string {
 	return ""
 }
 
+type codexRawTokenUsage struct {
+	InputTokens           int64 `json:"input_tokens"`
+	OutputTokens          int64 `json:"output_tokens"`
+	CachedInputTokens     int64 `json:"cached_input_tokens"`
+	CacheReadInputTokens  int64 `json:"cache_read_input_tokens"`
+	ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
+}
+
 type codexSessionTokenCount struct {
-	Type    string `json:"type"`
-	Payload *struct {
+	Type      string    `json:"type"`
+	Timestamp time.Time `json:"timestamp"`
+	Payload   *struct {
 		Type string `json:"type"`
 		Info *struct {
-			TotalTokenUsage *struct {
-				InputTokens           int64 `json:"input_tokens"`
-				OutputTokens          int64 `json:"output_tokens"`
-				CachedInputTokens     int64 `json:"cached_input_tokens"`
-				CacheReadInputTokens  int64 `json:"cache_read_input_tokens"`
-				ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
-			} `json:"total_token_usage"`
-			LastTokenUsage *struct {
-				InputTokens           int64 `json:"input_tokens"`
-				OutputTokens          int64 `json:"output_tokens"`
-				CachedInputTokens     int64 `json:"cached_input_tokens"`
-				CacheReadInputTokens  int64 `json:"cache_read_input_tokens"`
-				ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
-			} `json:"last_token_usage"`
-			Model string `json:"model"`
+			TotalTokenUsage *codexRawTokenUsage `json:"total_token_usage"`
+			LastTokenUsage  *codexRawTokenUsage `json:"last_token_usage"`
+			Model           string              `json:"model"`
 		} `json:"info"`
 		Model string `json:"model"`
 	} `json:"payload"`
 }
 
 func parseCodexSessionFile(path string) *codexSessionUsage {
+	return parseCodexSessionFileForWindow(path, time.Time{}, time.Time{})
+}
+
+func parseCodexSessionFileForWindow(path string, startedAt, finishedAt time.Time) *codexSessionUsage {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil
@@ -1274,6 +1307,7 @@ func parseCodexSessionFile(path string) *codexSessionUsage {
 
 	var result codexSessionUsage
 	found := false
+	var totalBefore, totalInWindow *TokenUsage
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
@@ -1296,19 +1330,27 @@ func parseCodexSessionFile(path string) *codexSessionUsage {
 		}
 
 		if evt.Payload.Type == "token_count" && evt.Payload.Info != nil {
-			usage := evt.Payload.Info.TotalTokenUsage
+			if !startedAt.IsZero() && evt.Timestamp.IsZero() {
+				continue
+			}
+			inWindow := (startedAt.IsZero() || evt.Timestamp.IsZero() || !evt.Timestamp.Before(startedAt.Add(-time.Second))) &&
+				(finishedAt.IsZero() || evt.Timestamp.IsZero() || !evt.Timestamp.After(finishedAt))
+			if !inWindow {
+				if !startedAt.IsZero() && !evt.Timestamp.IsZero() && evt.Timestamp.Before(startedAt.Add(-time.Second)) && evt.Payload.Info.TotalTokenUsage != nil {
+					u := codexTokenUsage(evt.Payload.Info.TotalTokenUsage)
+					totalBefore = &u
+				}
+				continue
+			}
+			usage := evt.Payload.Info.LastTokenUsage
 			if usage == nil {
-				usage = evt.Payload.Info.LastTokenUsage
+				usage = evt.Payload.Info.TotalTokenUsage
 			}
 			if usage != nil {
-				cachedTokens := usage.CachedInputTokens
-				if cachedTokens == 0 {
-					cachedTokens = usage.CacheReadInputTokens
-				}
-				result.usage = TokenUsage{
-					InputTokens:     usage.InputTokens,
-					OutputTokens:    usage.OutputTokens + usage.ReasoningOutputTokens,
-					CacheReadTokens: cachedTokens,
+				result.usage = codexTokenUsage(usage)
+				if evt.Payload.Info.LastTokenUsage == nil && evt.Payload.Info.TotalTokenUsage != nil {
+					u := result.usage
+					totalInWindow = &u
 				}
 				if evt.Payload.Info.Model != "" {
 					result.model = evt.Payload.Info.Model
@@ -1317,11 +1359,34 @@ func parseCodexSessionFile(path string) *codexSessionUsage {
 			}
 		}
 	}
+	if totalInWindow != nil && totalBefore != nil {
+		result.usage = subtractTokenUsage(*totalInWindow, *totalBefore)
+	}
 
 	if !found {
 		return nil
 	}
 	return &result
+}
+
+func codexTokenUsage(raw *codexRawTokenUsage) TokenUsage {
+	if raw == nil {
+		return TokenUsage{}
+	}
+	cachedTokens := raw.CachedInputTokens
+	if cachedTokens == 0 {
+		cachedTokens = raw.CacheReadInputTokens
+	}
+	return TokenUsage{InputTokens: raw.InputTokens, OutputTokens: raw.OutputTokens + raw.ReasoningOutputTokens, CacheReadTokens: cachedTokens}
+}
+
+func subtractTokenUsage(current, previous TokenUsage) TokenUsage {
+	return TokenUsage{
+		InputTokens:      max(0, current.InputTokens-previous.InputTokens),
+		OutputTokens:     max(0, current.OutputTokens-previous.OutputTokens),
+		CacheReadTokens:  max(0, current.CacheReadTokens-previous.CacheReadTokens),
+		CacheWriteTokens: max(0, current.CacheWriteTokens-previous.CacheWriteTokens),
+	}
 }
 
 func bytesContainsStr(b []byte, s string) bool {

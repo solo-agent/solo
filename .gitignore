@@ -74,6 +74,9 @@ docs/design/*
 !docs/design/remote-runtime-architecture.md
 !docs/design/public-remote-product-architecture.md
 !docs/design/workspace-multi-daemon-architecture.md
+!docs/plans/
+docs/plans/*
+!docs/plans/remote-product-completeness.md
 *.bak
 *.bak2
 .playwright-cli/

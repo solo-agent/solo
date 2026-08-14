@@ -30,6 +30,8 @@ import {
   SquareCheckBig,
   ArrowUpRight,
   CheckCircle2,
+  Pin,
+  PinOff,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { buildValidNames } from '@/lib/utils/highlight';
@@ -77,6 +79,8 @@ interface MessageListProps {
   members?: ChannelMember[];
   onOpenArtifactReference?: (ref: string) => void;
   onAgentClick?: (agent: AgentDetailTarget) => void;
+  onPin?: (message: Message) => void | Promise<void>;
+  pinnedMessageIds?: Set<string>;
 }
 
 // ---- Task header config (SOLO-225-F) ----
@@ -124,6 +128,8 @@ interface MessageItemProps {
   onDelete?: (id: string) => void;
   onAsTask?: (message: Message) => void;
   onOpenArtifactReference?: (ref: string) => void;
+  onPin?: (message: Message) => void | Promise<void>;
+  pinned?: boolean;
 }
 
 const MessageItem = memo(function MessageItem({
@@ -136,10 +142,13 @@ const MessageItem = memo(function MessageItem({
   onDelete,
   onAsTask,
   onOpenArtifactReference,
+  onPin,
+  pinned,
 }: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content || '');
   const [isSaving, setIsSaving] = useState(false);
+  const [isTogglingPin, setIsTogglingPin] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const editRef = useRef<HTMLTextAreaElement>(null);
 
@@ -529,6 +538,28 @@ const MessageItem = memo(function MessageItem({
               <Pencil className="h-3.5 w-3.5" />
             </button>
           )}
+          {onPin && (
+            <button
+              type="button"
+              onClick={async (e) => {
+                e.stopPropagation();
+                if (isTogglingPin) return;
+                setIsTogglingPin(true);
+                try {
+                  await onPin(message);
+                } finally {
+                  setIsTogglingPin(false);
+                }
+              }}
+              disabled={isTogglingPin}
+              aria-pressed={Boolean(pinned)}
+              className={`btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0 transition-transform active:translate-x-[2px] active:translate-y-[2px] active:shadow-none disabled:cursor-wait disabled:opacity-70 ${pinned ? 'bg-brutal-warning' : ''}`}
+              aria-label={pinned ? t('channelUnpin') : t('channelPin')}
+              title={pinned ? t('channelUnpin') : t('channelPin')}
+            >
+              {isTogglingPin ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+            </button>
+          )}
           {onDelete && (
             <button
               type="button"
@@ -757,6 +788,8 @@ export function MessageList({
   members = [],
   onOpenArtifactReference,
   onAgentClick,
+  onPin,
+  pinnedMessageIds = new Set(),
 }: MessageListProps) {
   const validNames = buildValidNames(members);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -966,6 +999,8 @@ export function MessageList({
                 validNames={validNames}
                 isHighlighted={highlightedMessageId === message.id}
                 onOpenArtifactReference={onOpenArtifactReference}
+                onPin={onPin}
+                pinned={pinnedMessageIds.has(message.id)}
                 onAgentClick={onAgentClick}
               />
             ) : (
@@ -979,6 +1014,8 @@ export function MessageList({
                 onEdit={onEdit}
                 onAsTask={onAsTask}
                 onOpenArtifactReference={onOpenArtifactReference}
+                onPin={onPin}
+                pinned={pinnedMessageIds.has(message.id)}
                 onDelete={
                   onDelete
                     ? (id) => {

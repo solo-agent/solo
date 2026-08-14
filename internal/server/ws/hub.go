@@ -414,6 +414,10 @@ func (h *Hub) handleMessageSend(client *Client, payload MessageSendPayload) {
 		client.sendError("FORBIDDEN", "you are not a member of this channel")
 		return
 	}
+	if err := service.CheckHumanChannelPosting(context.Background(), h.pool, payload.ChannelID, client.userID); err != nil {
+		client.sendError("FORBIDDEN", err.Error())
+		return
+	}
 
 	err = h.pool.QueryRow(context.Background(),
 		`SELECT is_archived FROM channels WHERE id = $1`, payload.ChannelID,
@@ -636,10 +640,10 @@ func (h *Hub) handleThreadReply(client *Client, payload ThreadReplyPayload) {
 	var isMember bool
 	err := h.pool.QueryRow(context.Background(),
 		`SELECT EXISTS(
-			SELECT 1 FROM channel_members
-			WHERE channel_id = $1 AND member_type = 'user' AND member_id = $2
+			SELECT 1 FROM channel_members cm JOIN channels c ON c.id=cm.channel_id
+			WHERE cm.channel_id = $1 AND cm.member_type = 'user' AND cm.member_id = $2 AND c.workspace_id=$3
 		)`,
-		payload.ChannelID, client.userID,
+		payload.ChannelID, client.userID, client.workspaceID,
 	).Scan(&isMember)
 	if err != nil {
 		slog.Error("ws: failed to check channel membership", "error", err, "user_id", client.userID)
@@ -648,6 +652,10 @@ func (h *Hub) handleThreadReply(client *Client, payload ThreadReplyPayload) {
 	}
 	if !isMember {
 		client.sendError("FORBIDDEN", "you are not a member of this channel")
+		return
+	}
+	if err := service.CheckHumanChannelPosting(context.Background(), h.pool, payload.ChannelID, client.userID); err != nil {
+		client.sendError("FORBIDDEN", err.Error())
 		return
 	}
 

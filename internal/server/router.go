@@ -108,6 +108,7 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 	artifactHandler.SetTaskBroadcaster(taskSvc, hub)
 	onboardingHandler := handler.NewOnboardingHandler(pool, agentSvc)
 	workspaceHandler := handler.NewWorkspaceHandler(pool, dm)
+	moderationHandler := handler.NewModerationHandler(pool, hub)
 	go automationSvc.Start(ctx)
 
 	// Attachment handler
@@ -233,6 +234,14 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 				r.Patch("/", channelHandler.Update)
 				r.Delete("/", channelHandler.Delete)
 				r.Post("/template", channelHandler.ApplyTemplate)
+				r.Get("/moderation", moderationHandler.Status)
+				r.Patch("/moderation", moderationHandler.Update)
+				r.Get("/moderation/mutes", moderationHandler.ListMutes)
+				r.Put("/moderation/mutes/{userID}", moderationHandler.Mute)
+				r.Delete("/moderation/mutes/{userID}", moderationHandler.Unmute)
+				r.Get("/pins", moderationHandler.ListPins)
+				r.Put("/messages/{messageID}/pin", moderationHandler.Pin)
+				r.Delete("/messages/{messageID}/pin", moderationHandler.Unpin)
 
 				// Ordinary Agents are created and listed only inside their home Channel.
 				r.Route("/agents", func(r chi.Router) {

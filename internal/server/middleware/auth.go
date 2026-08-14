@@ -20,6 +20,11 @@ func Auth(pools ...*pgxpool.Pool) func(http.Handler) http.Handler {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// These headers are internal identity derived from the verified JWT.
+			// Never trust values supplied by an external client or reverse proxy.
+			r.Header.Del("X-Solo-Run-ID")
+			r.Header.Del("X-Solo-Computer-ID")
+			r.Header.Del("X-Solo-Actor-Type")
 			tokenString := extractBearerToken(r)
 			if tokenString == "" {
 				writeAuthError(w, http.StatusUnauthorized, "unauthorized", "missing authorization header")

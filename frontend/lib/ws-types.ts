@@ -92,6 +92,7 @@ export type WSServerEvent =
   | { type: 'dm.updated'; dm_id: string; last_message?: { content: string; sender_id: string; sender_name: string; created_at: string }; last_reply_at?: string; unread_count: number }
   // ---- Inbox events (v1.5) ----
   | { type: 'inbox.updated'; }
+  | { type: 'channel.moderation.updated'; channel_id: string; change: 'policy' | 'mute' | 'pin' }
   // ---- Lucy automatic team formation ----
   | { type: 'team.formed'; formation_id: string; source_channel_id: string; source_message_id: string; channel_id: string; channel_name: string; member_count: number; relationship_count: number; template_id: string; relationship_docs_ready: boolean; warnings?: string[]; dashboard_url: string; created_at: string };
 

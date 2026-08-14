@@ -25,6 +25,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/solo-ai/solo/internal/auth"
+	"github.com/solo-ai/solo/internal/server/service"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -299,7 +300,7 @@ func (h *AuthHandler) VerifyRegistration(w http.ResponseWriter, r *http.Request)
 	}
 	if _, err := tx.Exec(r.Context(), `
 			INSERT INTO workspace_members (workspace_id, user_id, role)
-			VALUES ('00000000-0000-0000-0000-000000000001', $1, 'member')`, userID); err != nil {
+			VALUES ('00000000-0000-0000-0000-000000000001', $1, $2)`, userID, service.PublicWorkspaceRole(email)); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to join public Workspace")
 		return
 	}

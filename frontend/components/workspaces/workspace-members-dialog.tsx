@@ -68,6 +68,7 @@ export function WorkspaceSettingsCard() {
   const [ruleValue, setRuleValue] = useState('');
   const [busy, setBusy] = useState(false);
   const canAdmin = activeWorkspace?.role === 'owner' || activeWorkspace?.role === 'admin';
+  const isOwner = activeWorkspace?.role === 'owner';
 
   const load = useCallback(async () => {
     if (!activeWorkspace) return;
@@ -177,11 +178,11 @@ export function WorkspaceSettingsCard() {
                   <div className="truncate text-sm font-bold">{member.display_name}{member.user_id === user?.id ? ' (you)' : ''}</div>
                   <div className="truncate font-mono text-[10px] text-black/50">{member.email}</div>
                 </div>
-                {member.role === 'owner' || !canAdmin ? (
+                {member.role === 'owner' || !canAdmin || (!isOwner && member.role === 'admin') ? (
                   <span className="flex items-center gap-1 font-mono text-[10px] font-bold uppercase"><ShieldCheck className="h-3.5 w-3.5" />{member.role}</span>
                 ) : (
                   <>
-                    <Select
+                    {isOwner ? <Select
                       value={member.role}
                       options={roleOptions}
                       onChange={async (nextRole) => {
@@ -189,8 +190,8 @@ export function WorkspaceSettingsCard() {
                         await load();
                       }}
                       aria-label={`Role for ${member.display_name}`}
-                    />
-                    <button
+                    /> : <span className="font-mono text-[10px] font-bold uppercase">{member.role}</span>}
+                    {!activeWorkspace.is_default && (isOwner || member.role === 'member') && <button
                       type="button"
                       className={iconActionClass('hover:bg-red-200')}
                       aria-label={`Remove ${member.display_name}`}
@@ -198,7 +199,7 @@ export function WorkspaceSettingsCard() {
                         await apiClient.delete(`/api/v1/workspaces/${activeWorkspace.id}/members/${member.user_id}`);
                         await load();
                       }}
-                    ><Trash2 className="h-3.5 w-3.5" /></button>
+                    ><Trash2 className="h-3.5 w-3.5" /></button>}
                   </>
                 )}
               </div>

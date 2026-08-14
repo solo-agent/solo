@@ -132,6 +132,68 @@ func TestStreamingAgentTaskBindsSessionAndTranscript(t *testing.T) {
 	}
 }
 
+func TestStreamingAgentTaskDoesNotAddTranscriptUsageToDaemonUsage(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, ownerID)
+	channelID := agentRunChannel(t, pool, ownerID)
+	messageID := agentRunMessage(t, pool, channelID, ownerID)
+	transcriptPath := agentRunTranscriptFileWithUsage(t, "stream transcript", 30, 40)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_sessions WHERE agent_id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM messages WHERE channel_id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	var taskID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/internal/daemon/run":
+			var req daemonTaskRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("decode daemon request: %v", err)
+			}
+			taskID = req.TaskID
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = fmt.Fprintf(w, `{"task_id":%q,"status":"accepted"}`, taskID)
+		case r.URL.Path == "/internal/daemon/tasks/"+taskID+"/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprintf(w, "event: complete\ndata: {\"external_session_id\":\"provider-session-usage\",\"transcript_path\":%q,\"usage\":{\"input_tokens\":3,\"output_tokens\":4,\"cache_read_tokens\":5,\"cache_write_tokens\":6}}\n\n", transcriptPath)
+			_, _ = fmt.Fprint(w, "event: done\ndata: {}\n\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	daemon := daemonInfoForTest(t, server.URL, uuid.NewString())
+	dm := NewDaemonManager(pool, noopBroadcaster{})
+	dm.Register(daemon)
+	svc := NewAgentService(pool, dm, noopBroadcaster{}, nil)
+	svc.handleStreamingAgentTask(ctx, daemon, daemonTaskRequest{
+		AgentID: agentID, ChannelID: channelID, TriggerMessageID: messageID,
+		Messages:       []agent.Message{{Role: agent.RoleUser, Content: "hello"}},
+		ModelConfig:    agent.ModelConfig{Provider: "claude", Model: "test"},
+		ResultContract: agentResultContractNone,
+	}, agentChannelInfo{ID: agentID, Name: "Test Agent"})
+
+	var input, output, cacheRead, cacheWrite int
+	if err := pool.QueryRow(ctx, `
+		SELECT COALESCE((usage_json->>'input_tokens')::int,0), COALESCE((usage_json->>'output_tokens')::int,0),
+		       COALESCE((usage_json->>'cache_read_tokens')::int,0), COALESCE((usage_json->>'cache_write_tokens')::int,0)
+		  FROM agent_runs WHERE agent_id=$1 ORDER BY started_at DESC LIMIT 1`, agentID).
+		Scan(&input, &output, &cacheRead, &cacheWrite); err != nil {
+		t.Fatal(err)
+	}
+	if input != 3 || output != 4 || cacheRead != 5 || cacheWrite != 6 {
+		t.Fatalf("usage=(%d,%d,%d,%d), want daemon usage (3,4,5,6)", input, output, cacheRead, cacheWrite)
+	}
+}
+
 func TestStreamingAgentTaskFailsWithoutVisibleMessage(t *testing.T) {
 	pool := agentRunTestPool(t)
 	ctx := context.Background()

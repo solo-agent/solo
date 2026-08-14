@@ -21,6 +21,8 @@ const (
 	AutomationScheduleDaily    = "daily"
 	AutomationScheduleWeekdays = "weekdays"
 	AutomationScheduleWeekly   = "weekly"
+	AutomationCompletionAuto   = "auto_complete"
+	AutomationCompletionReview = "review_required"
 
 	AutomationRunRunning   = "running"
 	AutomationRunCompleted = "completed"
@@ -40,26 +42,27 @@ var (
 
 // Automation describes one recurring task definition in a Channel.
 type Automation struct {
-	ID              string         `json:"id"`
-	ChannelID       string         `json:"channel_id"`
-	CreatorID       string         `json:"creator_id"`
-	CreatorName     string         `json:"creator_name,omitempty"`
-	Name            string         `json:"name"`
-	TaskTitle       string         `json:"task_title"`
-	TaskDescription string         `json:"task_description"`
-	TargetAgentID   string         `json:"target_agent_id,omitempty"`
-	TargetAgentName string         `json:"target_agent_name,omitempty"`
-	ScheduleType    string         `json:"schedule_type"`
-	ScheduleHour    int            `json:"schedule_hour"`
-	ScheduleMinute  int            `json:"schedule_minute"`
-	ScheduleWeekday *int           `json:"schedule_weekday,omitempty"`
-	Timezone        string         `json:"timezone"`
-	Enabled         bool           `json:"enabled"`
-	NextRunAt       *time.Time     `json:"next_run_at,omitempty"`
-	LastRunAt       *time.Time     `json:"last_run_at,omitempty"`
-	LastRun         *AutomationRun `json:"last_run,omitempty"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	ID               string         `json:"id"`
+	ChannelID        string         `json:"channel_id"`
+	CreatorID        string         `json:"creator_id"`
+	CreatorName      string         `json:"creator_name,omitempty"`
+	Name             string         `json:"name"`
+	TaskTitle        string         `json:"task_title"`
+	TaskDescription  string         `json:"task_description"`
+	TargetAgentID    string         `json:"target_agent_id,omitempty"`
+	TargetAgentName  string         `json:"target_agent_name,omitempty"`
+	ScheduleType     string         `json:"schedule_type"`
+	ScheduleHour     int            `json:"schedule_hour"`
+	ScheduleMinute   int            `json:"schedule_minute"`
+	ScheduleWeekday  *int           `json:"schedule_weekday,omitempty"`
+	Timezone         string         `json:"timezone"`
+	CompletionPolicy string         `json:"completion_policy"`
+	Enabled          bool           `json:"enabled"`
+	NextRunAt        *time.Time     `json:"next_run_at,omitempty"`
+	LastRunAt        *time.Time     `json:"last_run_at,omitempty"`
+	LastRun          *AutomationRun `json:"last_run,omitempty"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
 }
 
 // AutomationRun records every scheduled or manual trigger, including skips.
@@ -80,16 +83,17 @@ type AutomationRun struct {
 
 // AutomationInput is the user-editable portion of an Automation.
 type AutomationInput struct {
-	Name            string `json:"name"`
-	TaskTitle       string `json:"task_title"`
-	TaskDescription string `json:"task_description"`
-	TargetAgentID   string `json:"target_agent_id"`
-	ScheduleType    string `json:"schedule_type"`
-	ScheduleHour    int    `json:"schedule_hour"`
-	ScheduleMinute  int    `json:"schedule_minute"`
-	ScheduleWeekday *int   `json:"schedule_weekday"`
-	Timezone        string `json:"timezone"`
-	Enabled         bool   `json:"enabled"`
+	Name             string `json:"name"`
+	TaskTitle        string `json:"task_title"`
+	TaskDescription  string `json:"task_description"`
+	TargetAgentID    string `json:"target_agent_id"`
+	ScheduleType     string `json:"schedule_type"`
+	ScheduleHour     int    `json:"schedule_hour"`
+	ScheduleMinute   int    `json:"schedule_minute"`
+	ScheduleWeekday  *int   `json:"schedule_weekday"`
+	Timezone         string `json:"timezone"`
+	CompletionPolicy string `json:"completion_policy"`
+	Enabled          bool   `json:"enabled"`
 }
 
 // AutomationService owns persistence, scheduling and task materialisation.
@@ -212,6 +216,9 @@ func (s *AutomationService) Create(ctx context.Context, channelID, userID string
 	if err := s.taskSvc.requireChannelMember(ctx, channelID, userID); err != nil {
 		return nil, err
 	}
+	if input.CompletionPolicy == "" {
+		input.CompletionPolicy = AutomationCompletionAuto
+	}
 	if err := s.validateInput(ctx, channelID, &input); err != nil {
 		return nil, err
 	}
@@ -228,11 +235,11 @@ func (s *AutomationService) Create(ctx context.Context, channelID, userID string
 		INSERT INTO automations (
 			id, channel_id, creator_id, name, task_title, task_description,
 			target_agent_id, schedule_type, schedule_hour, schedule_minute,
-			schedule_weekday, timezone, enabled, next_run_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+			schedule_weekday, timezone, completion_policy, enabled, next_run_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 		id, channelID, userID, input.Name, input.TaskTitle, input.TaskDescription,
 		input.TargetAgentID, input.ScheduleType, input.ScheduleHour, input.ScheduleMinute,
-		input.ScheduleWeekday, input.Timezone, input.Enabled, nextRun)
+		input.ScheduleWeekday, input.Timezone, input.CompletionPolicy, input.Enabled, nextRun)
 	if err != nil {
 		return nil, err
 	}
@@ -242,6 +249,13 @@ func (s *AutomationService) Create(ctx context.Context, channelID, userID string
 func (s *AutomationService) Update(ctx context.Context, channelID, automationID, userID string, input AutomationInput) (*Automation, error) {
 	if err := s.taskSvc.requireChannelMember(ctx, channelID, userID); err != nil {
 		return nil, err
+	}
+	if input.CompletionPolicy == "" {
+		if err := s.pool.QueryRow(ctx, `SELECT completion_policy FROM automations WHERE id=$1 AND channel_id=$2`, automationID, channelID).Scan(&input.CompletionPolicy); errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrAutomationNotFound
+		} else if err != nil {
+			return nil, err
+		}
 	}
 	if err := s.validateInput(ctx, channelID, &input); err != nil {
 		return nil, err
@@ -258,11 +272,11 @@ func (s *AutomationService) Update(ctx context.Context, channelID, automationID,
 		UPDATE automations SET
 			name=$1, task_title=$2, task_description=$3, target_agent_id=$4,
 			schedule_type=$5, schedule_hour=$6, schedule_minute=$7,
-			schedule_weekday=$8, timezone=$9, enabled=$10, next_run_at=$11, updated_at=now()
-		 WHERE id=$12 AND channel_id=$13`,
+			schedule_weekday=$8, timezone=$9, completion_policy=$10, enabled=$11, next_run_at=$12, updated_at=now()
+		 WHERE id=$13 AND channel_id=$14`,
 		input.Name, input.TaskTitle, input.TaskDescription, input.TargetAgentID,
 		input.ScheduleType, input.ScheduleHour, input.ScheduleMinute,
-		input.ScheduleWeekday, input.Timezone, input.Enabled, nextRun, automationID, channelID)
+		input.ScheduleWeekday, input.Timezone, input.CompletionPolicy, input.Enabled, nextRun, automationID, channelID)
 	if err != nil {
 		return nil, err
 	}
@@ -561,10 +575,7 @@ func (s *AutomationService) reconcileRuns(ctx context.Context) error {
 		return err
 	}
 	for _, taskID := range completedTaskIDs {
-		if _, err := tx.Exec(ctx, `
-			UPDATE tasks SET status=$2, updated_at=now()
-			 WHERE id=$1 AND status IN ($3,$4)`,
-			taskID, TaskStatusInReview, TaskStatusInProgress, TaskStatusTodo); err != nil {
+		if err := updateCompletedAutomationTask(ctx, tx, taskID); err != nil {
 			return err
 		}
 	}
@@ -645,10 +656,7 @@ func reconcileAutomationRunTx(ctx context.Context, tx pgx.Tx, automationID strin
 		return nil, err
 	}
 	for _, taskID := range completedTaskIDs {
-		if _, err := tx.Exec(ctx, `
-			UPDATE tasks SET status=$2, updated_at=now()
-			 WHERE id=$1 AND status IN ($3,$4)`,
-			taskID, TaskStatusInReview, TaskStatusInProgress, TaskStatusTodo); err != nil {
+		if err := updateCompletedAutomationTask(ctx, tx, taskID); err != nil {
 			return nil, err
 		}
 	}
@@ -657,6 +665,25 @@ func reconcileAutomationRunTx(ctx context.Context, tx pgx.Tx, automationID strin
 		FROM tasks t
 		WHERE r.automation_id=$1 AND r.status='running' AND r.task_id=t.id AND t.status='todo' AND t.claimer_id IS NULL`, automationID)
 	return completedTaskIDs, err
+}
+
+func updateCompletedAutomationTask(ctx context.Context, tx pgx.Tx, taskID string) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE tasks t
+		   SET status=CASE a.completion_policy
+		                WHEN $2 THEN $3
+		                ELSE $4
+		              END,
+		       updated_at=now()
+		  FROM automation_runs r
+		  JOIN automations a ON a.id=r.automation_id
+		 WHERE t.id=$1
+		   AND r.task_id=t.id
+		   AND r.status='completed'
+		   AND t.status IN ($5,$6)`,
+		taskID, AutomationCompletionAuto, TaskStatusDone, TaskStatusInReview,
+		TaskStatusInProgress, TaskStatusTodo)
+	return err
 }
 
 func collectTaskIDs(rows pgx.Rows) ([]string, error) {
@@ -733,6 +760,7 @@ func (s *AutomationService) validateInput(ctx context.Context, channelID string,
 	input.TargetAgentID = strings.TrimSpace(input.TargetAgentID)
 	input.ScheduleType = strings.TrimSpace(input.ScheduleType)
 	input.Timezone = strings.TrimSpace(input.Timezone)
+	input.CompletionPolicy = strings.TrimSpace(input.CompletionPolicy)
 	if input.Name == "" || len(input.Name) > 120 {
 		return fmt.Errorf("%w: automation name is required and must be at most 120 characters", ErrAutomationInvalidInput)
 	}
@@ -757,6 +785,9 @@ func (s *AutomationService) validateInput(ctx context.Context, channelID string,
 	}
 	if _, err := time.LoadLocation(input.Timezone); err != nil {
 		return fmt.Errorf("%w: invalid timezone", ErrAutomationInvalidInput)
+	}
+	if input.CompletionPolicy != AutomationCompletionAuto && input.CompletionPolicy != AutomationCompletionReview {
+		return fmt.Errorf("%w: invalid completion policy", ErrAutomationInvalidInput)
 	}
 	var exists bool
 	if err := s.pool.QueryRow(ctx, `
@@ -817,7 +848,7 @@ const automationSelect = `
 	       COALESCE(u.display_name,''), a.name, a.task_title, a.task_description,
 	       COALESCE(a.target_agent_id::text,''), COALESCE(ag.name,''),
 	       a.schedule_type, a.schedule_hour, a.schedule_minute, a.schedule_weekday,
-	       a.timezone, a.enabled, a.next_run_at, a.last_run_at, a.created_at, a.updated_at
+	       a.timezone, a.completion_policy, a.enabled, a.next_run_at, a.last_run_at, a.created_at, a.updated_at
 	  FROM automations a
 	  LEFT JOIN users u ON u.id=a.creator_id
 	  LEFT JOIN agents ag ON ag.id=a.target_agent_id`
@@ -841,7 +872,7 @@ func scanAutomation(row rowScanner) (*Automation, error) {
 		&item.Name, &item.TaskTitle, &item.TaskDescription,
 		&item.TargetAgentID, &item.TargetAgentName, &item.ScheduleType,
 		&item.ScheduleHour, &item.ScheduleMinute, &item.ScheduleWeekday,
-		&item.Timezone, &item.Enabled, &item.NextRunAt, &item.LastRunAt,
+		&item.Timezone, &item.CompletionPolicy, &item.Enabled, &item.NextRunAt, &item.LastRunAt,
 		&item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
 		return nil, err

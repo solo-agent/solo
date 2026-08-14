@@ -28,6 +28,10 @@ func main() {
 		slog.Error("invalid production configuration", "error", err)
 		os.Exit(1)
 	}
+	if err := validateStorageDirectories(); err != nil {
+		slog.Error("storage is not writable", "error", err)
+		os.Exit(1)
+	}
 
 	// Initialize structured JSON logger
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
@@ -45,6 +49,10 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
+	if err := service.EnsurePublicWorkspaceOwners(ctx, pool); err != nil {
+		slog.Error("failed to apply public Workspace ownership", "error", err)
+		os.Exit(1)
+	}
 
 	// Create WebSocket Hub (agentSvc is set below after it's created)
 	hub := ws.NewHub(pool, nil)
@@ -132,6 +140,9 @@ func validateProductionConfig(cfg *config.Config) error {
 	if strings.TrimSpace(cfg.PublicURL) == "" || !strings.HasPrefix(cfg.PublicURL, "https://") {
 		return fmt.Errorf("PUBLIC_URL must be an https URL")
 	}
+	if strings.TrimSpace(os.Getenv("ATTACHMENTS_DIR")) == "" || strings.TrimSpace(os.Getenv("ARTIFACTS_DIR")) == "" {
+		return fmt.Errorf("ATTACHMENTS_DIR and ARTIFACTS_DIR are required")
+	}
 	switch cfg.AuthMailTransport {
 	case "smtp":
 		if cfg.SMTPHost == "" || cfg.SMTPFrom == "" {
@@ -162,6 +173,31 @@ func validateProductionConfig(cfg *config.Config) error {
 		}
 	default:
 		return fmt.Errorf("AUTH_MAIL_TRANSPORT must be smtp or tencent_ses")
+	}
+	return nil
+}
+
+func validateStorageDirectories() error {
+	for _, name := range []string{"ATTACHMENTS_DIR", "ARTIFACTS_DIR"} {
+		dir := strings.TrimSpace(os.Getenv(name))
+		if dir == "" {
+			continue
+		}
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return fmt.Errorf("%s: create directory: %w", name, err)
+		}
+		probe, err := os.CreateTemp(dir, ".solo-write-probe-")
+		if err != nil {
+			return fmt.Errorf("%s: write probe: %w", name, err)
+		}
+		probeName := probe.Name()
+		if closeErr := probe.Close(); closeErr != nil {
+			_ = os.Remove(probeName)
+			return fmt.Errorf("%s: close write probe: %w", name, closeErr)
+		}
+		if err := os.Remove(probeName); err != nil {
+			return fmt.Errorf("%s: remove write probe: %w", name, err)
+		}
 	}
 	return nil
 }

@@ -8,7 +8,8 @@
 
 'use client';
 
-import { MessageSquare } from 'lucide-react';
+import { useState } from 'react';
+import { Loader2, MessageSquare, Pin, PinOff } from 'lucide-react';
 import type { AgentDetailTarget, Message } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
@@ -24,10 +25,13 @@ interface AgentMessageProps {
   isHighlighted?: boolean;
   onOpenArtifactReference?: (ref: string) => void;
   onAgentClick?: (agent: AgentDetailTarget) => void;
+  onPin?: (message: Message) => void | Promise<void>;
+  pinned?: boolean;
 }
 
-export function AgentMessage({ message, onReply, validNames = [], isHighlighted, onOpenArtifactReference, onAgentClick }: AgentMessageProps) {
+export function AgentMessage({ message, onReply, validNames = [], isHighlighted, onOpenArtifactReference, onAgentClick, onPin, pinned }: AgentMessageProps) {
   const time = formatMessageTimestamp(message.created_at);
+  const [isTogglingPin, setIsTogglingPin] = useState(false);
 
   const hasUnreadThread = message.has_unread_thread === true && (message.reply_count ?? 0) > 0;
   return (
@@ -95,12 +99,32 @@ export function AgentMessage({ message, onReply, validNames = [], isHighlighted,
       </div>
 
       {/* Hover reply button */}
-      {onReply && (
+      {(onReply || onPin) && (
         <div className="absolute right-3 top-2 flex items-center gap-1
                         opacity-0 group-hover:opacity-100
                         translate-x-2 group-hover:translate-x-0
                         transition-all duration-200">
-          <button
+          {onPin && <button
+            type="button"
+            onClick={async (e) => {
+              e.stopPropagation();
+              if (isTogglingPin) return;
+              setIsTogglingPin(true);
+              try {
+                await onPin(message);
+              } finally {
+                setIsTogglingPin(false);
+              }
+            }}
+            disabled={isTogglingPin}
+            aria-pressed={Boolean(pinned)}
+            className={`btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0 transition-transform active:translate-x-[2px] active:translate-y-[2px] active:shadow-none disabled:cursor-wait disabled:opacity-70 ${pinned ? 'bg-brutal-warning' : ''}`}
+            aria-label={pinned ? t('channelUnpin') : t('channelPin')}
+            title={pinned ? t('channelUnpin') : t('channelPin')}
+          >
+            {isTogglingPin ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+          </button>}
+          {onReply && <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onReply(message); }}
             className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
@@ -108,7 +132,7 @@ export function AgentMessage({ message, onReply, validNames = [], isHighlighted,
             title="Reply"
           >
             <MessageSquare className="h-3.5 w-3.5" />
-          </button>
+          </button>}
         </div>
       )}
     </div>

@@ -215,8 +215,7 @@ type claudePersistentState struct {
 	// completes. Set once on the first init event, never mutated after.
 	initInfo *claudeInitInfo
 
-	totalUsage map[string]TokenUsage
-	usageMu    sync.Mutex
+	workspaceDir string
 
 	// exitErr captures the error from cmd.Wait() after the process exits.
 	exitErr error
@@ -231,6 +230,8 @@ type turnState struct {
 	output     strings.Builder
 	startedAt  time.Time
 	finishOnce sync.Once
+	usage      map[string]TokenUsage
+	usageIDs   map[string]bool
 }
 
 func newClaudeTurn() *turnState {
@@ -239,6 +240,8 @@ func newClaudeTurn() *turnState {
 		msgCh:     make(chan OutputChunk, 256),
 		resCh:     make(chan *Result, 1),
 		startedAt: time.Now(),
+		usage:     make(map[string]TokenUsage),
+		usageIDs:  make(map[string]bool),
 	}
 }
 
@@ -370,14 +373,14 @@ func (b *ClaudeBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Ex
 	b.logger.Info("claude: persistent session started", "pid", cmd.Process.Pid, "cwd", cmd.Dir)
 
 	state := &claudePersistentState{
-		cmd:        cmd,
-		stdin:      stdin,
-		stdout:     stdout,
-		stderrTail: stderrTail,
-		cancel:     cancel,
-		logger:     b.logger,
-		done:       make(chan struct{}),
-		totalUsage: make(map[string]TokenUsage),
+		cmd:          cmd,
+		stdin:        stdin,
+		stdout:       stdout,
+		stderrTail:   stderrTail,
+		cancel:       cancel,
+		logger:       b.logger,
+		done:         make(chan struct{}),
+		workspaceDir: opts.WorkspaceDir,
 	}
 
 	// Register the initial turn before writing the prompt so even a very fast
@@ -503,7 +506,7 @@ func (b *ClaudeBackend) persistentStreamLoop(
 				res := &Result{
 					Status: "completed",
 					Output: turn.output.String(),
-					Usage:  b.snapshotUsage(state),
+					Usage:  b.turnUsage(state, turn),
 				}
 				if msg.ResultText != "" && turn.output.Len() == 0 {
 					res.Output = msg.ResultText
@@ -523,7 +526,7 @@ func (b *ClaudeBackend) persistentStreamLoop(
 				res := &Result{
 					Status: "failed",
 					Error:  msg.ErrorText,
-					Usage:  b.snapshotUsage(state),
+					Usage:  b.turnUsage(state, turn),
 				}
 				res.DurationMs = time.Since(turn.startedAt).Milliseconds()
 				res.InitInfo = state.initInfoMap()
@@ -557,7 +560,7 @@ func (b *ClaudeBackend) persistentStreamLoop(
 			Status:     status,
 			Error:      errMsg,
 			DurationMs: time.Since(turn.startedAt).Milliseconds(),
-			Usage:      b.snapshotUsage(state),
+			Usage:      b.turnUsage(state, turn),
 			InitInfo:   state.initInfoMap(),
 		})
 	}
@@ -580,16 +583,26 @@ func (b *ClaudeBackend) handleAssistantPersistent(msg claudeSDKMessage, turn *tu
 		return
 	}
 
-	state.usageMu.Lock()
 	if content.Usage != nil && content.Model != "" {
-		u := state.totalUsage[content.Model]
-		u.InputTokens += content.Usage.InputTokens
-		u.OutputTokens += content.Usage.OutputTokens
-		u.CacheReadTokens += content.Usage.CacheReadInputTokens
-		u.CacheWriteTokens += content.Usage.CacheCreationInputTokens
-		state.totalUsage[content.Model] = u
+		// Claude can persist the same assistant message in more than one SDK
+		// envelope. Prefer the stable model message ID so retries are not billed
+		// twice; the envelope UUID is only a fallback for older events.
+		usageID := content.ID
+		if usageID == "" {
+			usageID = msg.UUID
+		}
+		if usageID == "" || !turn.usageIDs[usageID] {
+			u := turn.usage[content.Model]
+			u.InputTokens += content.Usage.InputTokens
+			u.OutputTokens += content.Usage.OutputTokens
+			u.CacheReadTokens += content.Usage.CacheReadInputTokens
+			u.CacheWriteTokens += content.Usage.CacheCreationInputTokens
+			turn.usage[content.Model] = u
+			if usageID != "" {
+				turn.usageIDs[usageID] = true
+			}
+		}
 	}
-	state.usageMu.Unlock()
 
 	for _, block := range content.Content {
 		switch block.Type {
@@ -623,14 +636,73 @@ func (b *ClaudeBackend) handleAssistantPersistent(msg claudeSDKMessage, turn *tu
 	}
 }
 
-func (b *ClaudeBackend) snapshotUsage(state *claudePersistentState) map[string]TokenUsage {
-	state.usageMu.Lock()
-	defer state.usageMu.Unlock()
-	out := make(map[string]TokenUsage, len(state.totalUsage))
-	for k, v := range state.totalUsage {
+func (b *ClaudeBackend) turnUsage(state *claudePersistentState, turn *turnState) map[string]TokenUsage {
+	path := ClaudeTranscriptPath(state.workspaceDir, state.sessionIDValue())
+	if scanned := scanClaudeTranscriptUsage(path, turn.startedAt, time.Now().Add(time.Second)); hasTokenUsage(scanned) {
+		return scanned
+	}
+	out := make(map[string]TokenUsage, len(turn.usage))
+	for k, v := range turn.usage {
 		out[k] = v
 	}
 	return out
+}
+
+func hasTokenUsage(usage map[string]TokenUsage) bool {
+	for _, item := range usage {
+		if item.InputTokens > 0 || item.OutputTokens > 0 || item.CacheReadTokens > 0 || item.CacheWriteTokens > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func scanClaudeTranscriptUsage(path string, startedAt, finishedAt time.Time) map[string]TokenUsage {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+	result := make(map[string]TokenUsage)
+	seen := make(map[string]bool)
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 256*1024), 10*1024*1024)
+	for scanner.Scan() {
+		var entry struct {
+			Type      string               `json:"type"`
+			UUID      string               `json:"uuid"`
+			Timestamp time.Time            `json:"timestamp"`
+			Message   claudeMessageContent `json:"message"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &entry) != nil || entry.Type != "assistant" || entry.Message.Usage == nil {
+			continue
+		}
+		if !startedAt.IsZero() && entry.Timestamp.IsZero() {
+			continue
+		}
+		if !entry.Timestamp.IsZero() && (entry.Timestamp.Before(startedAt.Add(-time.Second)) || entry.Timestamp.After(finishedAt)) {
+			continue
+		}
+		id := entry.Message.ID
+		if id == "" {
+			id = entry.UUID
+		}
+		if id != "" && seen[id] {
+			continue
+		}
+		seen[id] = true
+		model := entry.Message.Model
+		if model == "" {
+			model = "claude"
+		}
+		u := result[model]
+		u.InputTokens += entry.Message.Usage.InputTokens
+		u.OutputTokens += entry.Message.Usage.OutputTokens
+		u.CacheReadTokens += entry.Message.Usage.CacheReadInputTokens
+		u.CacheWriteTokens += entry.Message.Usage.CacheCreationInputTokens
+		result[model] = u
+	}
+	return result
 }
 
 // ── Persistent Backend: Send ─────────────────────────────────────────────────
@@ -1207,6 +1279,7 @@ type claudeSDKMessage struct {
 	ResultText string          `json:"result,omitempty"`
 	IsError    bool            `json:"is_error,omitempty"`
 	ErrorText  string          `json:"error,omitempty"`
+	UUID       string          `json:"uuid,omitempty"`
 }
 
 // claudeInitEvent is the payload of the Claude Code `system/init` event —
@@ -1393,6 +1466,7 @@ func (b *ClaudeBackend) handleSystemApiRetry(evt claudeApiRetryEvent, msgCh chan
 }
 
 type claudeMessageContent struct {
+	ID      string               `json:"id"`
 	Role    string               `json:"role"`
 	Model   string               `json:"model"`
 	Content []claudeContentBlock `json:"content"`

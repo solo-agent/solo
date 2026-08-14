@@ -2,8 +2,10 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -329,6 +331,44 @@ func TestCodexExecute_ExtraArgsPath(t *testing.T) {
 	}
 	if !foundCustom {
 		t.Error("CustomArgs not found in result")
+	}
+}
+
+func TestParseCodexSessionFileForWindowUsesLastTurnUsage(t *testing.T) {
+	path := t.TempDir() + "/rollout.jsonl"
+	data := strings.Join([]string{
+		`{"timestamp":"2026-08-13T10:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":20,"cached_input_tokens":50},"last_token_usage":{"input_tokens":10,"output_tokens":2,"cached_input_tokens":5},"model":"gpt-5"}}}`,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":500,"output_tokens":50},"model":"gpt-5"}}}`,
+		`{"timestamp":"2026-08-13T11:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":130,"output_tokens":27,"cached_input_tokens":59},"last_token_usage":{"input_tokens":30,"output_tokens":5,"reasoning_output_tokens":2,"cached_input_tokens":9},"model":"gpt-5"}}}`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Date(2026, 8, 13, 11, 0, 0, 0, time.UTC)
+	result := parseCodexSessionFileForWindow(path, started, started.Add(time.Minute))
+	if result == nil || result.usage.InputTokens != 30 || result.usage.OutputTokens != 7 || result.usage.CacheReadTokens != 9 {
+		t.Fatalf("usage=%+v, want last usage for current turn", result)
+	}
+}
+
+func TestCodexPersistentTurnResultUsesExactThreadUsage(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	sessionID := "019c-session-token-test"
+	path := filepath.Join(codexHome, "sessions", "2026", "08", "13", "rollout-"+sessionID+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now().Add(-time.Second)
+	line := fmt.Sprintf(`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":21,"output_tokens":4,"reasoning_output_tokens":2,"cached_input_tokens":7},"model":"gpt-5.6"}}}`+"\n", time.Now().UTC().Format(time.RFC3339Nano))
+	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result := codexPersistentTurnResult(false, sessionID, started, "")
+	usage := result.Usage["gpt-5.6"]
+	if usage.InputTokens != 21 || usage.OutputTokens != 6 || usage.CacheReadTokens != 7 {
+		t.Fatalf("usage=%+v, want exact persistent turn usage", usage)
 	}
 }
 

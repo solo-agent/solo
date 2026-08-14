@@ -132,7 +132,8 @@ func TestAutomationCompletesAfterAgentFinishesWhileTaskWaitsForReview(t *testing
 	svc := NewAutomationService(pool, NewTaskService(pool), nil, nil)
 	item, err := svc.Create(ctx, channelID, userID, AutomationInput{
 		Name: "daily review", TaskTitle: "prepare report", TargetAgentID: agentID,
-		ScheduleType: AutomationScheduleDaily, ScheduleHour: 9, Timezone: "UTC", Enabled: true,
+		ScheduleType: AutomationScheduleDaily, ScheduleHour: 9, Timezone: "UTC",
+		CompletionPolicy: AutomationCompletionReview, Enabled: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -164,6 +165,48 @@ func TestAutomationCompletesAfterAgentFinishesWhileTaskWaitsForReview(t *testing
 	}
 	if automationStatus != AutomationRunCompleted || taskStatus != TaskStatusInReview {
 		t.Fatalf("automation=%q task=%q, want completed/in_review", automationStatus, taskStatus)
+	}
+}
+
+func TestAutomationCompletesTaskAutomaticallyByDefault(t *testing.T) {
+	pool := automationTestPool(t)
+	userID, channelID, agentID := automationTestFixture(t, pool)
+	ctx := context.Background()
+	svc := NewAutomationService(pool, NewTaskService(pool), nil, nil)
+	item, err := svc.Create(ctx, channelID, userID, AutomationInput{
+		Name: "daily automatic", TaskTitle: "prepare report", TargetAgentID: agentID,
+		ScheduleType: AutomationScheduleDaily, ScheduleHour: 9, Timezone: "UTC", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.CompletionPolicy != AutomationCompletionAuto {
+		t.Fatalf("completion policy=%q, want auto_complete", item.CompletionPolicy)
+	}
+	taskID := automationRunFixture(t, pool, item.ID, channelID, userID, agentID)
+	runSvc := NewAgentRunService(pool)
+	agentRun, err := runSvc.StartRun(ctx, StartRunInput{
+		AgentID: agentID, TriggerType: AgentRunTriggerTask, ChannelID: channelID,
+		Status: AgentRunStatusRunning,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runSvc.LinkTask(ctx, LinkRunTaskInput{RunID: agentRun.ID, TaskID: taskID, Role: AgentRunTaskRolePrimary, Confidence: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runSvc.FinishRun(ctx, FinishRunInput{RunID: agentRun.ID, Status: AgentRunStatusCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.reconcileRuns(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var taskStatus string
+	if err := pool.QueryRow(ctx, `SELECT status FROM tasks WHERE id=$1`, taskID).Scan(&taskStatus); err != nil {
+		t.Fatal(err)
+	}
+	if taskStatus != TaskStatusDone {
+		t.Fatalf("task status=%q, want done", taskStatus)
 	}
 }
 
@@ -224,7 +267,8 @@ func TestAutomationAllowsNextTriggerAfterCompletedAgentBeforeReview(t *testing.T
 	svc := NewAutomationService(pool, NewTaskService(pool), nil, nil)
 	item, err := svc.Create(ctx, channelID, userID, AutomationInput{
 		Name: "next report", TaskTitle: "prepare report", TargetAgentID: agentID,
-		ScheduleType: AutomationScheduleDaily, ScheduleHour: 9, Timezone: "UTC", Enabled: true,
+		ScheduleType: AutomationScheduleDaily, ScheduleHour: 9, Timezone: "UTC",
+		CompletionPolicy: AutomationCompletionReview, Enabled: true,
 	})
 	if err != nil {
 		t.Fatal(err)
