@@ -1227,14 +1227,6 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		slog.Info("task: suppressing text output (not sent via CLI)", "agent_id", req.AgentID, "length", len(fullContent))
 	}
 
-	slog.Info("task backend completed",
-		"task_id", req.TaskID,
-		"agent_id", req.AgentID,
-		"status", result.Status,
-		"content_length", len(result.Output),
-		"duration_ms", result.DurationMs,
-	)
-
 	// Extract usage from result
 	var inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int
 	if result.Usage != nil {
@@ -1245,6 +1237,17 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 			cacheWriteTokens += int(u.CacheWriteTokens)
 		}
 	}
+	slog.Info("task backend completed",
+		"task_id", req.TaskID,
+		"agent_id", req.AgentID,
+		"status", result.Status,
+		"content_length", len(result.Output),
+		"duration_ms", result.DurationMs,
+		"input_tokens", inputTokens,
+		"output_tokens", outputTokens,
+		"cache_read_tokens", cacheReadTokens,
+		"cache_write_tokens", cacheWriteTokens,
+	)
 
 	if finalStatus != "completed" {
 		errMsg := backendErrorMessage(result)

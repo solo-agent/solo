@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { acquireLocalComputer, type LocalComputerLease } from './support/local-computer';
 import { registerVerified } from './support/auth';
 
@@ -14,6 +14,7 @@ interface AutomationState {
   id: string;
   next_run_at: string;
   target_agent_id: string;
+  completion_policy: string;
   run_count: number;
   task_count: number;
 }
@@ -25,6 +26,7 @@ interface RunState {
   task_number: number;
   task_status: string;
   agent_runs: number;
+  agent_run_id: string;
   agent_status: string;
   replies: number;
 }
@@ -62,7 +64,7 @@ async function authenticatePage(page: Page, auth: AuthResponse) {
   }, { accessToken: auth.access_token, refreshToken: auth.refresh_token });
 }
 
-async function api<T>(request: APIRequestContext, token: string, method: 'post' | 'delete', path: string, data?: unknown): Promise<T> {
+async function api<T>(request: APIRequestContext, token: string, method: 'post' | 'patch' | 'delete', path: string, data?: unknown): Promise<T> {
   const response = await request[method](`${apiBase}${path}`, {
     headers: { authorization: `Bearer ${token}` }, data,
   });
@@ -78,6 +80,7 @@ function automationState(channelID: string, name: string): AutomationState {
         'id', a.id::text,
         'next_run_at', COALESCE(a.next_run_at::text, ''),
         'target_agent_id', COALESCE(a.target_agent_id::text, ''),
+        'completion_policy', a.completion_policy,
         'run_count', (SELECT count(*) FROM automation_runs r WHERE r.automation_id=a.id),
         'task_count', (SELECT count(*) FROM automation_runs r WHERE r.automation_id=a.id AND r.task_id IS NOT NULL)
       )::text FROM automations a WHERE a.channel_id='${channelID}' AND a.name='${name}' LIMIT 1
@@ -97,6 +100,10 @@ function latestRun(automationID: string, source?: 'manual' | 'scheduled'): RunSt
         'task_number', COALESCE(t.task_number, 0),
         'task_status', COALESCE(t.status, ''),
         'agent_runs', (SELECT count(*) FROM agent_run_task_links l WHERE l.task_id=r.task_id),
+        'agent_run_id', COALESCE((
+          SELECT ar.id::text FROM agent_run_task_links l JOIN agent_runs ar ON ar.id=l.run_id
+          WHERE l.task_id=r.task_id ORDER BY ar.started_at DESC LIMIT 1
+        ), ''),
         'agent_status', COALESCE((
           SELECT ar.status FROM agent_run_task_links l JOIN agent_runs ar ON ar.id=l.run_id
           WHERE l.task_id=r.task_id ORDER BY ar.started_at DESC LIMIT 1
@@ -109,8 +116,22 @@ function latestRun(automationID: string, source?: 'manual' | 'scheduled'): RunSt
       FROM automation_runs r LEFT JOIN tasks t ON t.id=r.task_id
       WHERE r.automation_id='${automationID}' AND r.task_id IS NOT NULL ${sourceFilter}
       ORDER BY r.created_at DESC LIMIT 1
-    ), '{"id":"","source":"","status":"","task_id":"","task_number":0,"task_status":"","agent_runs":0,"agent_status":"","replies":0}')
+    ), '{"id":"","source":"","status":"","task_id":"","task_number":0,"task_status":"","agent_runs":0,"agent_run_id":"","agent_status":"","replies":0}')
   `);
+}
+
+function daemonReportedTokens(runID: string): number {
+  const lines = readFileSync('../daemon.log', 'utf8').trim().split('\n');
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    try {
+      const entry = JSON.parse(lines[index]) as Record<string, unknown>;
+      if (entry.msg === 'task backend completed' && entry.task_id === runID) {
+        return Number(entry.input_tokens ?? 0) + Number(entry.output_tokens ?? 0)
+          + Number(entry.cache_read_tokens ?? 0) + Number(entry.cache_write_tokens ?? 0);
+      }
+    } catch { /* ignore non-JSON process output */ }
+  }
+  return 0;
 }
 
 function agentGreetingFinished(agentID: string): boolean {
@@ -192,7 +213,7 @@ test.describe('real Channel automations', () => {
   test.afterAll(async ({ request }) => {
     if (createdAgent) await api(request, auth.access_token, 'delete', `/api/v1/agents/${createdAgent.id}`).catch(() => undefined);
     if (createdChannel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${createdChannel.id}`).catch(() => undefined);
-    await localComputer?.release(request);
+    await localComputer?.release(request).catch(() => undefined);
   });
 
   test('creates from the real UI, avoids duplicate work, runs the Agent, and resumes a missed schedule once', async ({ page, request }, testInfo) => {
@@ -287,7 +308,7 @@ test.describe('real Channel automations', () => {
           task_id: state.task_id,
           automation_finished: state.status === 'completed',
           agent_finished: state.agent_runs >= 1 && state.agent_status === 'completed',
-          task_waiting_review: state.task_status === 'in_review',
+          task_completed: state.task_status === 'done',
           replies: state.replies,
         };
       }, {
@@ -296,9 +317,10 @@ test.describe('real Channel automations', () => {
         task_id: manual.task_id,
         automation_finished: true,
         agent_finished: true,
-        task_waiting_review: true,
+        task_completed: true,
         replies: 1,
       });
+      expect(daemonReportedTokens(latestRun(stored.id, 'manual').agent_run_id)).toBeGreaterThan(0);
       await page.getByRole('button', { name: new RegExp(taskTitle) }).first().click();
       await expect(page.getByText(reply, { exact: true })).toBeVisible();
 
@@ -324,12 +346,42 @@ test.describe('real Channel automations', () => {
         return {
           automation_finished: state.status === 'completed',
           agent_finished: state.agent_runs >= 1 && state.agent_status === 'completed',
-          task_waiting_review: state.task_status === 'in_review',
+          task_completed: state.task_status === 'done',
           replies: state.replies,
         };
       }, {
         timeout: 180_000, intervals: [500, 1000, 2000],
-      }).toMatchObject({ automation_finished: true, agent_finished: true, task_waiting_review: true, replies: 1 });
+      }).toMatchObject({ automation_finished: true, agent_finished: true, task_completed: true, replies: 1 });
+      expect(daemonReportedTokens(latestRun(stored.id, 'scheduled').agent_run_id)).toBeGreaterThan(0);
+
+      await api(request, auth.access_token, 'patch', `/api/v1/channels/${channel.id}/automations/${stored.id}`, {
+        name: automationName,
+        task_title: taskTitle,
+        task_description: '检查一次并把结果回复到任务讨论中。',
+        target_agent_id: agent.id,
+        schedule_type: 'daily',
+        schedule_hour: 23,
+        schedule_minute: 59,
+        schedule_weekday: null,
+        timezone: 'Asia/Shanghai',
+        completion_policy: 'review_required',
+        enabled: true,
+      });
+      expect(automationState(channel.id, automationName).completion_policy).toBe('review_required');
+      await api(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/automations/${stored.id}/run`);
+      await expect.poll(() => {
+        const state = latestRun(stored.id, 'manual');
+        return {
+          distinct_task: state.task_id !== manual.task_id && state.task_id !== scheduled.task_id,
+          automation_finished: state.status === 'completed',
+          agent_finished: state.agent_runs >= 1 && state.agent_status === 'completed',
+          task_waits_for_review: state.task_status === 'in_review',
+          replies: state.replies,
+        };
+      }, {
+        timeout: 180_000, intervals: [500, 1000, 2000],
+      }).toMatchObject({ distinct_task: true, automation_finished: true, agent_finished: true, task_waits_for_review: true, replies: 1 });
+      expect(daemonReportedTokens(latestRun(stored.id, 'manual').agent_run_id)).toBeGreaterThan(0);
 
       const databaseStatePath = testInfo.outputPath('automation-database-final-state.json');
       writeFileSync(databaseStatePath, JSON.stringify({

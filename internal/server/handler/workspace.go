@@ -735,7 +735,8 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := chi.URLParam(r, "workspaceID")
-	if !h.hasRole(r, workspaceID, adminID, "owner", "admin") {
+	actorRole := h.role(r, workspaceID, adminID)
+	if actorRole != "owner" && actorRole != "admin" {
 		writeError(w, http.StatusForbidden, "Workspace admin required")
 		return
 	}
@@ -754,6 +755,10 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	}
 	if role != "member" && role != "admin" {
 		writeError(w, http.StatusBadRequest, "role must be member or admin")
+		return
+	}
+	if actorRole != "owner" && role == "admin" {
+		writeError(w, http.StatusForbidden, "only the Workspace owner can add an admin")
 		return
 	}
 	userID := strings.TrimSpace(req.UserID)
@@ -964,8 +969,8 @@ func (h *WorkspaceHandler) UpdateMember(w http.ResponseWriter, r *http.Request) 
 	}
 	workspaceID := chi.URLParam(r, "workspaceID")
 	targetID := chi.URLParam(r, "userID")
-	if !h.hasRole(r, workspaceID, adminID, "owner", "admin") {
-		writeError(w, http.StatusForbidden, "Workspace admin required")
+	if !h.hasRole(r, workspaceID, adminID, "owner") {
+		writeError(w, http.StatusForbidden, "Workspace owner required")
 		return
 	}
 	var req struct {
@@ -995,7 +1000,8 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "public Workspace members cannot be removed")
 		return
 	}
-	if !h.hasRole(r, workspaceID, adminID, "owner", "admin") {
+	actorRole := h.role(r, workspaceID, adminID)
+	if actorRole != "owner" && actorRole != "admin" {
 		writeError(w, http.StatusForbidden, "Workspace admin required")
 		return
 	}
@@ -1006,6 +1012,10 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 	}
 	if targetRole == "owner" {
 		writeError(w, http.StatusBadRequest, "Workspace owner cannot be removed")
+		return
+	}
+	if actorRole == "admin" && targetRole != "member" {
+		writeError(w, http.StatusForbidden, "Workspace admins can remove members only")
 		return
 	}
 	var ownedAgentCount int
@@ -1023,6 +1033,11 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer tx.Rollback(r.Context())
+	_, err = tx.Exec(r.Context(), `DELETE FROM channel_member_mutes mute USING channels c WHERE mute.channel_id=c.id AND c.workspace_id=$1 AND mute.user_id=$2`, workspaceID, targetID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to remove member")
+		return
+	}
 	_, err = tx.Exec(r.Context(), `DELETE FROM channel_members cm USING channels c WHERE cm.channel_id=c.id AND c.workspace_id=$1 AND cm.member_type='user' AND cm.member_id=$2`, workspaceID, targetID)
 	if err == nil {
 		_, err = tx.Exec(r.Context(), `DELETE FROM workspace_members WHERE workspace_id=$1 AND user_id=$2 AND role<>'owner'`, workspaceID, targetID)
@@ -1035,8 +1050,8 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *WorkspaceHandler) hasRole(r *http.Request, workspaceID, userID string, roles ...string) bool {
-	var role string
-	if h.pool.QueryRow(r.Context(), `SELECT wm.role FROM workspace_members wm JOIN workspaces w ON w.id=wm.workspace_id AND w.deleted_at IS NULL WHERE wm.workspace_id=$1 AND wm.user_id=$2`, workspaceID, userID).Scan(&role) != nil {
+	role := h.role(r, workspaceID, userID)
+	if role == "" {
 		return false
 	}
 	for _, allowed := range roles {
@@ -1045,4 +1060,10 @@ func (h *WorkspaceHandler) hasRole(r *http.Request, workspaceID, userID string, 
 		}
 	}
 	return false
+}
+
+func (h *WorkspaceHandler) role(r *http.Request, workspaceID, userID string) string {
+	var role string
+	_ = h.pool.QueryRow(r.Context(), `SELECT wm.role FROM workspace_members wm JOIN workspaces w ON w.id=wm.workspace_id AND w.deleted_at IS NULL WHERE wm.workspace_id=$1 AND wm.user_id=$2`, workspaceID, userID).Scan(&role)
+	return role
 }

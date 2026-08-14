@@ -70,7 +70,8 @@ const (
 	EventTaskDeleted = "task.deleted"
 
 	// Inbox events (v1.5)
-	EventInboxUpdated = "inbox.updated"
+	EventInboxUpdated             = "inbox.updated"
+	EventChannelModerationUpdated = "channel.moderation.updated"
 
 	// Lucy automatic team formation events.
 	EventTeamFormed = "team.formed"

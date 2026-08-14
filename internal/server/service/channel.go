@@ -33,14 +33,15 @@ func NewChannelService(pool *pgxpool.Pool) *ChannelService {
 
 // Member represents a channel member with user details for list responses.
 type Member struct {
-	ChannelID   string    `json:"channel_id"`
-	MemberType  string    `json:"member_type"`
-	MemberID    string    `json:"member_id"`
-	DisplayName string    `json:"display_name,omitempty"`
-	AvatarURL   string    `json:"avatar_url,omitempty"`
-	Email       string    `json:"email,omitempty"`
-	Role        string    `json:"role"`
-	JoinedAt    time.Time `json:"joined_at"`
+	ChannelID     string    `json:"channel_id"`
+	MemberType    string    `json:"member_type"`
+	MemberID      string    `json:"member_id"`
+	DisplayName   string    `json:"display_name,omitempty"`
+	AvatarURL     string    `json:"avatar_url,omitempty"`
+	Email         string    `json:"email,omitempty"`
+	Role          string    `json:"role"`
+	WorkspaceRole string    `json:"workspace_role,omitempty"`
+	JoinedAt      time.Time `json:"joined_at"`
 }
 
 // CreateChannel creates a new channel and adds the creator as an owner member.
@@ -400,10 +401,12 @@ func (s *ChannelService) ListMembers(ctx context.Context, channelID, requesterID
 		`SELECT cm.channel_id, cm.member_type, cm.member_id,
 				COALESCE(u.display_name, a.name, 'Unknown'), COALESCE(u.email, ''),
 				COALESCE(u.avatar_url, a.avatar_url, ''),
-				cm.role, cm.joined_at
+				cm.role, COALESCE(wm.role,''), cm.joined_at
 		 FROM channel_members cm
+		 JOIN channels c ON c.id=cm.channel_id
 		 LEFT JOIN users u ON cm.member_type = 'user' AND cm.member_id = u.id
 		 LEFT JOIN agents a ON cm.member_type = 'agent' AND cm.member_id = a.id
+		 LEFT JOIN workspace_members wm ON cm.member_type='user' AND wm.workspace_id=c.workspace_id AND wm.user_id=cm.member_id
 		 WHERE cm.channel_id = $1
 		   AND (cm.member_type != 'agent' OR COALESCE(a.is_active, false) = true)
 		 ORDER BY cm.joined_at ASC`,
@@ -418,7 +421,7 @@ func (s *ChannelService) ListMembers(ctx context.Context, channelID, requesterID
 	for rows.Next() {
 		var m Member
 		if err := rows.Scan(&m.ChannelID, &m.MemberType, &m.MemberID,
-			&m.DisplayName, &m.Email, &m.AvatarURL, &m.Role, &m.JoinedAt); err != nil {
+			&m.DisplayName, &m.Email, &m.AvatarURL, &m.Role, &m.WorkspaceRole, &m.JoinedAt); err != nil {
 			return nil, err
 		}
 		members = append(members, m)

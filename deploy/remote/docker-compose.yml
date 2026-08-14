@@ -28,6 +28,17 @@ services:
         condition: service_healthy
     restart: "no"
 
+  storage-init:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    user: root
+    command: ["sh", "-c", "chown -R solo:solo /var/lib/solo/attachments /var/lib/solo/artifacts"]
+    volumes:
+      - attachments:/var/lib/solo/attachments
+      - artifacts:/var/lib/solo/artifacts
+    restart: "no"
+
   server:
     build:
       context: ../..
@@ -56,6 +67,7 @@ services:
       ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
       ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
+      SOLO_PUBLIC_OWNER_EMAILS: ${SOLO_PUBLIC_OWNER_EMAILS:-}
       ATTACHMENTS_DIR: /var/lib/solo/attachments
       ARTIFACTS_DIR: /var/lib/solo/artifacts
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -64,6 +76,8 @@ services:
       - artifacts:/var/lib/solo/artifacts
     depends_on:
       migrate:
+        condition: service_completed_successfully
+      storage-init:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/readyz"]

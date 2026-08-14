@@ -137,6 +137,7 @@ export function WorkspacePeople() {
           <legend className="font-mono text-xs font-bold uppercase tracking-wider">Role</legend>
           <div className="mt-2 grid grid-cols-2 gap-2">
             {(['member', 'admin'] as const).map((value) => (
+              activeWorkspace.role === 'owner' || value === 'member' ?
               <button
                 key={value}
                 type="button"
@@ -152,6 +153,7 @@ export function WorkspacePeople() {
                   {value === 'admin' ? 'Can manage people and Workspace settings.' : 'Can collaborate in shared Channels.'}
                 </span>
               </button>
+              : null
             ))}
           </div>
         </fieldset>

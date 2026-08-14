@@ -888,45 +888,65 @@ func (s *AgentRunService) ListEvents(ctx context.Context, runID string) ([]Agent
 	return events, rows.Err()
 }
 
-func (s *AgentRunService) ValidateMessageDelivery(ctx context.Context, runID, agentID, channelID, threadID, thinkingNodeID string) (bool, error) {
-	var runChannelID, runThreadID, runThinkingNodeID string
+type AgentMessageDeliveryScope struct {
+	ThreadID string
+}
+
+// ResolveMessageDeliveryScope accepts the Run's own conversation scope and
+// one intentional child case: a top-level Run may reply in the Thread rooted
+// at its trigger message. The returned ThreadID is the Run scope whose
+// freshness lock/cursor must still be used for that child reply.
+func (s *AgentRunService) ResolveMessageDeliveryScope(ctx context.Context, runID, agentID, channelID, threadID, thinkingNodeID string) (*AgentMessageDeliveryScope, error) {
+	var runChannelID, runThreadID, runThinkingNodeID, triggerMessageID string
+	var wakeFirstSeq, wakeLatestSeq int64
 	err := s.pool.QueryRow(ctx, `
 		SELECT COALESCE(channel_id::text, ''),
 		       COALESCE(thread_id::text, ''),
-		       COALESCE(thinking_node_id::text, '')
+		       COALESCE(thinking_node_id::text, ''),
+		       COALESCE(trigger_message_id::text, ''),
+		       COALESCE(wake_first_message_seq, 0),
+		       COALESCE(wake_latest_message_seq, 0)
 		  FROM agent_runs
 		 WHERE id = $1
 		   AND agent_id = $2
 		   AND finished_at IS NULL`,
 		runID, agentID,
-	).Scan(&runChannelID, &runThreadID, &runThinkingNodeID)
+	).Scan(&runChannelID, &runThreadID, &runThinkingNodeID, &triggerMessageID, &wakeFirstSeq, &wakeLatestSeq)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return false, fmt.Errorf("agent run is missing, finished, or owned by another agent")
+			return nil, fmt.Errorf("agent run is missing, finished, or owned by another agent")
 		}
-		return false, err
+		return nil, err
 	}
-	if runChannelID != channelID {
-		return false, nil
+	if runChannelID != channelID || runThinkingNodeID != thinkingNodeID {
+		return nil, nil
 	}
-	if runThinkingNodeID != "" || thinkingNodeID != "" {
-		return runThreadID == threadID && runThinkingNodeID == thinkingNodeID, nil
+	if runThreadID == threadID {
+		return &AgentMessageDeliveryScope{ThreadID: runThreadID}, nil
 	}
-	if runThreadID != "" {
-		return runThreadID == threadID, nil
+	if runThreadID == "" && threadID != "" {
+		var eligibleWakeThread bool
+		err = s.pool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				  FROM threads t
+				  JOIN messages root ON root.id = t.root_message_id
+				 WHERE t.id = $1
+				   AND t.channel_id = $2
+				   AND (
+					t.root_message_id = NULLIF($3, '')::uuid
+					OR ($4 > 0 AND root.seq BETWEEN $4 AND $5)
+				   )
+			)`, threadID, channelID, triggerMessageID, wakeFirstSeq, wakeLatestSeq,
+		).Scan(&eligibleWakeThread)
+		if err != nil {
+			return nil, err
+		}
+		if eligibleWakeThread {
+			return &AgentMessageDeliveryScope{ThreadID: runThreadID}, nil
+		}
 	}
-	if threadID == "" {
-		return true, nil
-	}
-
-	var belongsToChannel bool
-	if err := s.pool.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM threads WHERE id = $1 AND channel_id = $2)`,
-		threadID, channelID,
-	).Scan(&belongsToChannel); err != nil {
-		return false, err
-	}
-	return belongsToChannel, nil
+	return nil, nil
 }
 
 func (s *AgentRunService) HasVisibleMessage(ctx context.Context, runID string) (bool, error) {
@@ -939,8 +959,25 @@ func (s *AgentRunService) HasVisibleMessage(ctx context.Context, runID string) (
 			    ON m.sender_type = 'agent'
 			   AND m.sender_id = r.agent_id
 			   AND m.channel_id = r.channel_id
+			   AND COALESCE(m.thinking_node_id::text, '') = COALESCE(r.thinking_node_id::text, '')
 			   AND m.metadata->>'agent_run_id' = r.id::text
+			  LEFT JOIN threads t ON t.id = m.thread_id
+			  LEFT JOIN messages root ON root.id = t.root_message_id
 			 WHERE r.id = $1
+			   AND (
+				COALESCE(m.thread_id::text, '') = COALESCE(r.thread_id::text, '')
+				OR (
+					r.thread_id IS NULL
+					AND m.thread_id IS NOT NULL
+					AND (
+						t.root_message_id = r.trigger_message_id
+						OR (
+							r.wake_first_message_seq IS NOT NULL
+							AND root.seq BETWEEN r.wake_first_message_seq AND r.wake_latest_message_seq
+						)
+					)
+				)
+			   )
 		)`, runID,
 	).Scan(&visible)
 	return visible, err

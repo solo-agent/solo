@@ -8,6 +8,24 @@ const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
 const repoRoot = join(process.cwd(), '..');
 const credentialFile = `/tmp/solo-remote-e2e-${process.pid}.json`;
 const pairedDaemonID = `remote-e2e-${process.pid}`;
+const serverPort = process.env.SERVER_PORT ?? '8080';
+const daemonPort = process.env.DAEMON_PORT ?? '8081';
+const frontendPort = process.env.FRONTEND_PORT ?? '3000';
+const corsOrigins = `http://localhost:${frontendPort},http://127.0.0.1:${frontendPort}`;
+
+function lifecycleArgs(...extra: string[]) {
+  const args = [
+    'rebuild',
+    `SERVER_PORT=${serverPort}`,
+    `DAEMON_PORT=${daemonPort}`,
+    `FRONTEND_PORT=${frontendPort}`,
+    `DAEMON_SERVER_URL=http://127.0.0.1:${serverPort}`,
+    `NEXT_PUBLIC_API_URL=http://127.0.0.1:${serverPort}`,
+    `CORS_ALLOWED_ORIGINS=${corsOrigins}`,
+  ];
+  if (process.env.GOCACHE) args.push(`GOCACHE=${process.env.GOCACHE}`);
+  return [...args, ...extra];
+}
 
 interface AuthResponse {
   access_token: string;
@@ -48,17 +66,23 @@ function databaseJSON<T>(query: string): T {
 }
 
 function rebuildPaired(computerID: string, enrollmentToken: string) {
-  execFileSync('make', [
-    'rebuild',
+  execFileSync('make', lifecycleArgs(
     `SOLO_COMPUTER_ID=${computerID}`,
     `SOLO_ENROLLMENT_TOKEN=${enrollmentToken}`,
     `SOLO_DAEMON_CREDENTIAL_FILE=${credentialFile}`,
+    `SOLO_DAEMON_STATE_DIR=${process.env.SOLO_E2E_DAEMON_STATE_DIR ?? '/tmp/solo-remote-e2e-state'}`,
     `DAEMON_ID=${pairedDaemonID}`,
-  ], { cwd: repoRoot, stdio: 'inherit', timeout: 240000 });
+  ), { cwd: repoRoot, stdio: 'inherit', timeout: 240000 });
 }
 
 function rebuildDefault() {
-  execFileSync('make', ['rebuild'], { cwd: repoRoot, stdio: 'inherit', timeout: 240000 });
+  execFileSync('make', lifecycleArgs(
+    `DAEMON_ID=${process.env.SOLO_E2E_ORDINARY_DAEMON_ID ?? 'daemon-01'}`,
+    `SOLO_DAEMON_STATE_DIR=${process.env.SOLO_E2E_RESTORE_STATE_DIR ?? '/tmp/solo-remote-e2e-default'}`,
+    'SOLO_DAEMON_CREDENTIAL_FILE=',
+    'SOLO_COMPUTER_ID=',
+    'SOLO_ENROLLMENT_TOKEN=',
+  ), { cwd: repoRoot, stdio: 'inherit', timeout: 240000 });
 }
 
 function deactivateTestUsers(...auths: AuthResponse[]) {

@@ -21,6 +21,12 @@ E2E_TMP_ROOT="${TMPDIR:-/tmp}"
 E2E_TMP_ROOT="${E2E_TMP_ROOT%/}"
 E2E_STATE_DIR="$(mktemp -d "$E2E_TMP_ROOT/solo-e2e-daemon.XXXXXX")"
 E2E_DAEMON_ID="daemon-e2e-${SCENARIO}-$(date +%s)-$$"
+E2E_SERVER_PORT="${SERVER_PORT:-8080}"
+E2E_DAEMON_PORT="${DAEMON_PORT:-8081}"
+E2E_FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+E2E_GOCACHE="${GOCACHE:-$E2E_TMP_ROOT/solo-e2e-go-cache}"
+E2E_CORS_ORIGINS="http://localhost:$E2E_FRONTEND_PORT,http://127.0.0.1:$E2E_FRONTEND_PORT"
+RESTORE_STATE_DIR="$E2E_TMP_ROOT/solo-restored-daemon-$E2E_SERVER_PORT"
 ORDINARY_DAEMON_ID="$(sed -n 's/^DAEMON_ID=//p' "$REPO_ROOT/.env" 2>/dev/null | tail -1 | tr -d '"'"'"'[:space:]')"
 ORDINARY_DAEMON_ID="${ORDINARY_DAEMON_ID:-daemon-01}"
 case "$ORDINARY_DAEMON_ID" in
@@ -41,7 +47,7 @@ restore_local_stack() {
     RESTORED=1
     echo "=== Restoring ordinary local Daemon ==="
     set +e
-    (cd "$REPO_ROOT" && make stop)
+    (cd "$REPO_ROOT" && make SERVER_PORT="$E2E_SERVER_PORT" DAEMON_PORT="$E2E_DAEMON_PORT" FRONTEND_PORT="$E2E_FRONTEND_PORT" stop)
     cleanup_status=$?
     docker exec "${SOLO_POSTGRES_CONTAINER:-solo-postgres}" \
       psql -U "${POSTGRES_USER:-solo}" -d "${POSTGRES_DB:-solo}" \
@@ -66,11 +72,14 @@ restore_local_stack() {
         AGENT_CASCADE_THRESHOLD \
         AGENT_CASCADE_WINDOW \
         AGENT_CASCADE_COOLDOWN
-      cd "$REPO_ROOT" && make rebuild
+      cd "$REPO_ROOT" && make \
+        SERVER_PORT="$E2E_SERVER_PORT" DAEMON_PORT="$E2E_DAEMON_PORT" FRONTEND_PORT="$E2E_FRONTEND_PORT" \
+        DAEMON_SERVER_URL="http://127.0.0.1:$E2E_SERVER_PORT" SOLO_DAEMON_STATE_DIR="$RESTORE_STATE_DIR" \
+        CORS_ALLOWED_ORIGINS="$E2E_CORS_ORIGINS" GOCACHE="$E2E_GOCACHE" rebuild
     )
     restore_status=$?
     if [ "$restore_status" -eq 0 ]; then
-      ordinary_health="$(curl -sf "http://127.0.0.1:${DAEMON_PORT:-8081}/health" 2>/dev/null || true)"
+      ordinary_health="$(curl -sf "http://127.0.0.1:$E2E_DAEMON_PORT/health" 2>/dev/null || true)"
       ordinary_online="$(docker exec "${SOLO_POSTGRES_CONTAINER:-solo-postgres}" \
         psql -U "${POSTGRES_USER:-solo}" -d "${POSTGRES_DB:-solo}" -tA \
         -c "SELECT count(*) FROM computers WHERE daemon_id = '$ORDINARY_DAEMON_ID' AND status = 'online';" 2>/dev/null | tr -d '[:space:]')"
@@ -109,7 +118,7 @@ trap 'exit 129' HUP
 echo "=== Starting isolated E2E Daemon: $E2E_DAEMON_ID ==="
 (
   export DAEMON_ID="$E2E_DAEMON_ID"
-  export DAEMON_SERVER_URL="http://127.0.0.1:8080"
+  export DAEMON_SERVER_URL="http://127.0.0.1:$E2E_SERVER_PORT"
   export SOLO_DAEMON_CREDENTIAL_FILE="$E2E_STATE_DIR/credentials.json"
   export SOLO_E2E_DAEMON_ID="$E2E_DAEMON_ID"
   unset SOLO_COMPUTER_ID SOLO_COMPUTER_CREDENTIAL SOLO_ENROLLMENT_TOKEN
@@ -119,10 +128,17 @@ echo "=== Starting isolated E2E Daemon: $E2E_DAEMON_ID ==="
     rebuild
     "DAEMON_ID=$DAEMON_ID"
     "DAEMON_SERVER_URL=$DAEMON_SERVER_URL"
+    "SERVER_PORT=$E2E_SERVER_PORT"
+    "DAEMON_PORT=$E2E_DAEMON_PORT"
+    "FRONTEND_PORT=$E2E_FRONTEND_PORT"
+    "NEXT_PUBLIC_API_URL=http://127.0.0.1:$E2E_SERVER_PORT"
+    "CORS_ALLOWED_ORIGINS=$E2E_CORS_ORIGINS"
+    "SOLO_DAEMON_STATE_DIR=$E2E_STATE_DIR"
     "SOLO_DAEMON_CREDENTIAL_FILE=$SOLO_DAEMON_CREDENTIAL_FILE"
     "SOLO_COMPUTER_ID="
     "SOLO_COMPUTER_CREDENTIAL="
     "SOLO_ENROLLMENT_TOKEN="
+    "GOCACHE=$E2E_GOCACHE"
   )
   for key in \
     INTERNAL_TOKEN_SECRET \
@@ -140,5 +156,12 @@ echo "=== Starting isolated E2E Daemon: $E2E_DAEMON_ID ==="
   done
   make "${MAKE_ARGS[@]}"
   cd frontend
+  export SERVER_PORT="$E2E_SERVER_PORT"
+  export DAEMON_PORT="$E2E_DAEMON_PORT"
+  export FRONTEND_PORT="$E2E_FRONTEND_PORT"
+  export SOLO_E2E_API_URL="http://127.0.0.1:$E2E_SERVER_PORT"
+  export SOLO_E2E_DAEMON_STATE_DIR="$E2E_STATE_DIR"
+  export SOLO_E2E_RESTORE_STATE_DIR="$RESTORE_STATE_DIR"
+  export SOLO_E2E_ORDINARY_DAEMON_ID="$ORDINARY_DAEMON_ID"
   "$@"
 )

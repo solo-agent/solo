@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/solo-ai/solo/internal/server/service"
@@ -199,6 +200,14 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runID := strings.TrimSpace(req.RunID)
+	credentialRunID := strings.TrimSpace(r.Header.Get("X-Solo-Run-ID"))
+	if credentialRunID != "" {
+		if runID != "" && runID != credentialRunID {
+			writeError(w, http.StatusConflict, "run ID conflicts with the authenticated Agent Run")
+			return
+		}
+		runID = credentialRunID
+	}
 	if runID != "" {
 		if _, err := uuid.Parse(runID); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid run ID")
@@ -278,6 +287,9 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeThinkingScopeError(w, err)
 			return
 		}
+	} else if err := service.CheckHumanChannelPosting(r.Context(), h.pool, channelID, userID); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
 	}
 	if runID != "" && !isAgent {
 		writeError(w, http.StatusBadRequest, "run ID is only valid for agent messages")
@@ -361,14 +373,16 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	deliveryRunID := ""
+	deliveryFreshnessThreadID := threadID
 	if runID != "" {
-		scopeMatches, err := service.NewAgentRunService(h.pool).ValidateMessageDelivery(r.Context(), runID, userID, channelID, threadID, thinkingNodeID)
+		deliveryScope, err := service.NewAgentRunService(h.pool).ResolveMessageDeliveryScope(r.Context(), runID, userID, channelID, threadID, thinkingNodeID)
 		if err != nil {
 			writeError(w, http.StatusConflict, "invalid agent run")
 			return
 		}
-		if scopeMatches {
+		if deliveryScope != nil {
 			deliveryRunID = runID
+			deliveryFreshnessThreadID = deliveryScope.ThreadID
 		}
 	}
 
@@ -477,7 +491,11 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
-	if err := service.LockMessageScope(r.Context(), tx, channelID, threadID, thinkingNodeID); err != nil {
+	lockThreadID := threadID
+	if deliveryRunID != "" && thinkingNodeID == "" {
+		lockThreadID = deliveryFreshnessThreadID
+	}
+	if err := service.LockMessageScope(r.Context(), tx, channelID, lockThreadID, thinkingNodeID); err != nil {
 		slog.Error("failed to lock message scope", "error", err, "channel_id", channelID, "thread_id", threadID)
 		writeError(w, http.StatusInternalServerError, "failed to send message")
 		return
@@ -485,7 +503,7 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	if deliveryRunID != "" && thinkingNodeID == "" {
 		hold, freshnessErr := service.CheckAndHoldAgentSend(r.Context(), tx, service.AgentSendFreshnessInput{
-			RunID: deliveryRunID, AgentID: userID, ChannelID: channelID, ThreadID: threadID,
+			RunID: deliveryRunID, AgentID: userID, ChannelID: channelID, ThreadID: deliveryFreshnessThreadID,
 		})
 		if freshnessErr != nil {
 			if errors.Is(freshnessErr, service.ErrFreshnessRunUnavailable) {
@@ -1173,10 +1191,25 @@ func (h *MessageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	// Soft delete
 	now := time.Now()
-	_, err = h.pool.Exec(r.Context(),
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete message")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	pinRemoved := false
+	_, err = tx.Exec(r.Context(),
 		`UPDATE messages SET is_deleted = true, updated_at = $1 WHERE id = $2`,
 		now, messageID,
 	)
+	if err == nil {
+		var tag pgconn.CommandTag
+		tag, err = tx.Exec(r.Context(), `DELETE FROM channel_message_pins WHERE channel_id=$1 AND message_id=$2`, channelID, messageID)
+		pinRemoved = err == nil && tag.RowsAffected() > 0
+	}
+	if err == nil {
+		err = tx.Commit(r.Context())
+	}
 	if err != nil {
 		slog.Error("failed to soft-delete message", "message_id", messageID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to delete message")
@@ -1192,6 +1225,12 @@ func (h *MessageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			ChannelID: channelID,
 		})
 		h.hub.BroadcastToChannel(channelID, msgPayload)
+		if pinRemoved {
+			h.hub.BroadcastToChannel(channelID, ws.Envelope(ws.EventChannelModerationUpdated, map[string]string{
+				"channel_id": channelID,
+				"change":     "pin",
+			}))
+		}
 	}
 
 	w.WriteHeader(http.StatusNoContent)

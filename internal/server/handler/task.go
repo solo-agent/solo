@@ -180,6 +180,14 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "task title exceeds maximum length of 500 characters")
 		return
 	}
+	var isAgent bool
+	_ = h.pool.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM agents WHERE id=$1)`, userID).Scan(&isAgent)
+	if !isAgent {
+		if err := service.CheckHumanChannelPosting(r.Context(), h.pool, channelID, userID); err != nil {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+	}
 
 	svcReq := service.TaskCreateRequest{
 		Title:        req.Title,
@@ -1153,6 +1161,9 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 	_ = h.pool.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM agents WHERE id = $1)`, userID).Scan(&isAgent)
 	if isAgent {
 		senderType = "agent"
+	} else if err := service.CheckHumanChannelPosting(r.Context(), h.pool, req.ChannelID, userID); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
 	}
 	tx, msgErr := h.pool.Begin(r.Context())
 	if msgErr != nil {

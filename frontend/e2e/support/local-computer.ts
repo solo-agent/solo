@@ -52,18 +52,32 @@ export async function acquireLocalComputer(
       if (computer.daemon_id !== expectedDaemonID) {
         throw new Error(`Refusing to delete non-E2E Computer ${computer.id}`);
       }
-      const deletion = await releaseRequest.delete(`${apiBase}/api/v1/computers/${computer.id}`, { headers });
-      if (deletion.ok()) return;
-      if (deletion.status() === 404) {
-        const list = await releaseRequest.get(`${apiBase}/api/v1/computers`, { headers });
-        if (list.ok()) {
-          const remaining = await list.json() as Computer[];
-          if (!remaining.some((item) => item.id === computer.id)) return;
+      // run-local-e2e.sh owns this live, unpaired Daemon's lifecycle. It stops
+      // the make-managed stack and deletes the exact daemon-e2e-* row after
+      // Playwright exits; deleting an online Computer here must correctly fail
+      // with 409 and would turn a passing product flow into a cleanup failure.
+      if (computer.pairing_status === 'unpaired') return;
+      const revoke = await releaseRequest.post(`${apiBase}/api/v1/computers/${computer.id}/credential/revoke`, { headers });
+      if (!revoke.ok() && revoke.status() !== 404) {
+        throw new Error(`Revoke Computer: ${revoke.status()} ${await revoke.text()}`);
+      }
+      const deadline = Date.now() + 10_000;
+      let lastFailure = '';
+      do {
+        const deletion = await releaseRequest.delete(`${apiBase}/api/v1/computers/${computer.id}`, { headers });
+        if (deletion.ok()) return;
+        lastFailure = `${deletion.status()} ${await deletion.text()}`;
+        if (deletion.status() === 404) {
+          const list = await releaseRequest.get(`${apiBase}/api/v1/computers`, { headers });
+          if (list.ok()) {
+            const remaining = await list.json() as Computer[];
+            if (!remaining.some((item) => item.id === computer.id)) return;
+          }
         }
-      }
-      if (!deletion.ok()) {
-        throw new Error(`Release Computer: ${deletion.status()} ${await deletion.text()}`);
-      }
+        if (deletion.status() !== 409 || Date.now() >= deadline) break;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      } while (Date.now() < deadline);
+      throw new Error(`Release Computer: ${lastFailure}`);
     },
   };
 }

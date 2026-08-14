@@ -682,25 +682,16 @@ func TestAgentRunVisibleMessageDelivery(t *testing.T) {
 		t.Fatalf("StartRun: %v", err)
 	}
 
-	matches, err := runSvc.ValidateMessageDelivery(ctx, run.ID, agentID, channelID, "", "")
-	if err != nil || !matches {
-		t.Fatalf("ValidateMessageDelivery correct scope = %v, %v", matches, err)
+	scope, err := runSvc.ResolveMessageDeliveryScope(ctx, run.ID, agentID, channelID, "", "")
+	if err != nil || scope == nil || scope.ThreadID != "" {
+		t.Fatalf("ResolveMessageDeliveryScope correct scope = %+v, %v", scope, err)
 	}
-	matches, err = runSvc.ValidateMessageDelivery(ctx, run.ID, agentID, uuid.NewString(), "", "")
-	if err != nil || matches {
-		t.Fatalf("ValidateMessageDelivery other scope = %v, %v", matches, err)
+	scope, err = runSvc.ResolveMessageDeliveryScope(ctx, run.ID, agentID, uuid.NewString(), "", "")
+	if err != nil || scope != nil {
+		t.Fatalf("ResolveMessageDeliveryScope other scope = %+v, %v", scope, err)
 	}
-	if _, err := runSvc.ValidateMessageDelivery(ctx, run.ID, uuid.NewString(), channelID, "", ""); err == nil {
-		t.Fatal("ValidateMessageDelivery accepted another agent")
-	}
-	rootMessageID := agentRunMessage(t, pool, channelID, ownerID)
-	threadID, _, err := NewThreadService(pool).GetOrCreateThread(ctx, channelID, rootMessageID)
-	if err != nil {
-		t.Fatalf("GetOrCreateThread: %v", err)
-	}
-	matches, err = runSvc.ValidateMessageDelivery(ctx, run.ID, agentID, channelID, threadID, "")
-	if err != nil || !matches {
-		t.Fatalf("ValidateMessageDelivery child thread = %v, %v", matches, err)
+	if _, err := runSvc.ResolveMessageDeliveryScope(ctx, run.ID, uuid.NewString(), channelID, "", ""); err == nil {
+		t.Fatal("ResolveMessageDeliveryScope accepted another agent")
 	}
 	otherChannelID := agentRunChannel(t, pool, ownerID)
 	if otherChannelID == channelID {
@@ -714,9 +705,9 @@ func TestAgentRunVisibleMessageDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrCreateThread other channel: %v", err)
 	}
-	matches, err = runSvc.ValidateMessageDelivery(ctx, run.ID, agentID, channelID, otherThreadID, "")
-	if err != nil || matches {
-		t.Fatalf("ValidateMessageDelivery foreign thread = %v, %v", matches, err)
+	scope, err = runSvc.ResolveMessageDeliveryScope(ctx, run.ID, agentID, channelID, otherThreadID, "")
+	if err != nil || scope != nil {
+		t.Fatalf("ResolveMessageDeliveryScope foreign thread = %+v, %v", scope, err)
 	}
 
 	visible, err := runSvc.HasVisibleMessage(ctx, run.ID)
@@ -724,9 +715,9 @@ func TestAgentRunVisibleMessageDelivery(t *testing.T) {
 		t.Fatalf("HasVisibleMessage before insert = %v, %v", visible, err)
 	}
 	_, err = pool.Exec(ctx, `
-		INSERT INTO messages (id, channel_id, thread_id, sender_type, sender_id, content, metadata)
-		VALUES ($1, $2, $3, 'agent', $4, 'delivered', jsonb_build_object('agent_run_id', $5::text, 'delivery', 'visible'))`,
-		uuid.NewString(), channelID, threadID, agentID, run.ID,
+		INSERT INTO messages (id, channel_id, sender_type, sender_id, content, metadata)
+		VALUES ($1, $2, 'agent', $3, 'delivered', jsonb_build_object('agent_run_id', $4::text, 'delivery', 'visible'))`,
+		uuid.NewString(), channelID, agentID, run.ID,
 	)
 	if err != nil {
 		t.Fatalf("insert visible message: %v", err)
@@ -734,6 +725,118 @@ func TestAgentRunVisibleMessageDelivery(t *testing.T) {
 	visible, err = runSvc.HasVisibleMessage(ctx, run.ID)
 	if err != nil || !visible {
 		t.Fatalf("HasVisibleMessage after insert = %v, %v", visible, err)
+	}
+}
+
+func TestAgentRunCoalescedWakeThreadCountsAsVisibleDelivery(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, ownerID)
+	channelID := agentRunChannel(t, pool, ownerID)
+	firstID := agentRunMessage(t, pool, channelID, ownerID)
+	latestID := agentRunMessage(t, pool, channelID, ownerID)
+	unrelatedID := agentRunMessage(t, pool, channelID, ownerID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM messages WHERE channel_id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE created_by = $1`, ownerID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	var firstSeq, latestSeq int64
+	if err := pool.QueryRow(ctx, `SELECT min(seq), max(seq) FROM messages WHERE id = ANY($1::uuid[])`, []string{firstID, latestID}).Scan(&firstSeq, &latestSeq); err != nil {
+		t.Fatalf("load wake range: %v", err)
+	}
+	runSvc := NewAgentRunService(pool)
+	run, err := runSvc.StartRun(ctx, StartRunInput{
+		AgentID: agentID, TriggerType: AgentRunTriggerMessage, TriggerMessageID: latestID,
+		ChannelID: channelID, Status: AgentRunStatusRunning, WakeFirstSeq: firstSeq, WakeLatestSeq: latestSeq,
+	})
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+	firstThreadID, _, err := NewThreadService(pool).GetOrCreateThread(ctx, channelID, firstID)
+	if err != nil {
+		t.Fatalf("create first wake Thread: %v", err)
+	}
+	unrelatedThreadID, _, err := NewThreadService(pool).GetOrCreateThread(ctx, channelID, unrelatedID)
+	if err != nil {
+		t.Fatalf("create unrelated Thread: %v", err)
+	}
+
+	scope, err := runSvc.ResolveMessageDeliveryScope(ctx, run.ID, agentID, channelID, firstThreadID, "")
+	if err != nil || scope == nil || scope.ThreadID != "" {
+		t.Fatalf("coalesced wake Thread scope = %+v, %v", scope, err)
+	}
+	scope, err = runSvc.ResolveMessageDeliveryScope(ctx, run.ID, agentID, channelID, unrelatedThreadID, "")
+	if err != nil || scope != nil {
+		t.Fatalf("unrelated Thread scope = %+v, %v", scope, err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO messages (id, channel_id, thread_id, sender_type, sender_id, content, metadata)
+		VALUES ($1, $2, $3, 'agent', $4, 'coalesced delivery', jsonb_build_object('agent_run_id', $5::text))`,
+		uuid.NewString(), channelID, firstThreadID, agentID, run.ID,
+	); err != nil {
+		t.Fatalf("insert coalesced delivery: %v", err)
+	}
+	visible, err := runSvc.HasVisibleMessage(ctx, run.ID)
+	if err != nil || !visible {
+		t.Fatalf("HasVisibleMessage for coalesced wake Thread = %v, %v", visible, err)
+	}
+}
+
+func TestAgentRunDirectTriggerThreadCountsAsVisibleDelivery(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, ownerID)
+	channelID := agentRunChannel(t, pool, ownerID)
+	triggerID := agentRunMessage(t, pool, channelID, ownerID)
+	otherRootID := agentRunMessage(t, pool, channelID, ownerID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM messages WHERE channel_id = $1`, channelID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE created_by = $1`, ownerID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	runSvc := NewAgentRunService(pool)
+	run, err := runSvc.StartRun(ctx, StartRunInput{
+		AgentID: agentID, TriggerType: AgentRunTriggerMessage, TriggerMessageID: triggerID,
+		ChannelID: channelID, Status: AgentRunStatusRunning, ActivityText: "执行中",
+	})
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+	var triggerThreadID, unrelatedThreadID string
+	if err := pool.QueryRow(ctx, `INSERT INTO threads (channel_id, root_message_id) VALUES ($1, $2) RETURNING id`, channelID, triggerID).Scan(&triggerThreadID); err != nil {
+		t.Fatalf("create trigger thread: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO threads (channel_id, root_message_id) VALUES ($1, $2) RETURNING id`, channelID, otherRootID).Scan(&unrelatedThreadID); err != nil {
+		t.Fatalf("create unrelated thread: %v", err)
+	}
+
+	scope, err := runSvc.ResolveMessageDeliveryScope(ctx, run.ID, agentID, channelID, triggerThreadID, "")
+	if err != nil || scope == nil || scope.ThreadID != "" {
+		t.Fatalf("direct trigger Thread scope = %+v, %v", scope, err)
+	}
+	scope, err = runSvc.ResolveMessageDeliveryScope(ctx, run.ID, agentID, channelID, unrelatedThreadID, "")
+	if err != nil || scope != nil {
+		t.Fatalf("unrelated Thread scope = %+v, %v", scope, err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO messages (id, channel_id, thread_id, sender_type, sender_id, content, metadata)
+		VALUES ($1, $2, $3, 'agent', $4, 'thread delivery', jsonb_build_object('agent_run_id', $5::text))`,
+		uuid.NewString(), channelID, triggerThreadID, agentID, run.ID,
+	); err != nil {
+		t.Fatalf("insert Thread delivery: %v", err)
+	}
+	visible, err := runSvc.HasVisibleMessage(ctx, run.ID)
+	if err != nil || !visible {
+		t.Fatalf("HasVisibleMessage for direct trigger Thread = %v, %v", visible, err)
 	}
 }
 

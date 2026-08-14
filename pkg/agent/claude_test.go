@@ -3,9 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -334,8 +337,8 @@ func TestExecLookPathNotFound(t *testing.T) {
 func TestClaudeAssistantThinkingField(t *testing.T) {
 	b := NewClaudeBackend("/bin/true", slog.Default())
 	msgCh := make(chan OutputChunk, 1)
-	turn := &turnState{msgCh: msgCh}
-	state := &claudePersistentState{totalUsage: make(map[string]TokenUsage)}
+	turn := &turnState{msgCh: msgCh, usage: make(map[string]TokenUsage), usageIDs: make(map[string]bool)}
+	state := &claudePersistentState{}
 	msg := claudeSDKMessage{
 		Message: json.RawMessage(`{"role":"assistant","content":[{"type":"thinking","thinking":"checking files"}]}`),
 	}
@@ -352,6 +355,71 @@ func TestClaudeAssistantThinkingField(t *testing.T) {
 	}
 }
 
+func TestClaudeAssistantUsageDeduplicatesStableMessageID(t *testing.T) {
+	b := NewClaudeBackend("/bin/true", slog.Default())
+	turn := &turnState{msgCh: make(chan OutputChunk, 2), usage: make(map[string]TokenUsage), usageIDs: make(map[string]bool)}
+	state := &claudePersistentState{}
+	message := json.RawMessage(`{"id":"msg-stable","role":"assistant","model":"sonnet","content":[],"usage":{"input_tokens":12,"output_tokens":3}}`)
+
+	b.handleAssistantPersistent(claudeSDKMessage{UUID: "envelope-one", Message: message}, turn, state)
+	b.handleAssistantPersistent(claudeSDKMessage{UUID: "envelope-two", Message: message}, turn, state)
+
+	usage := turn.usage["sonnet"]
+	if usage.InputTokens != 12 || usage.OutputTokens != 3 {
+		t.Fatalf("usage=%+v, want stable message counted once", usage)
+	}
+}
+
+func TestClaudeTurnUsageFallsBackWhenStreamUsageIsPresentButZero(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workspace := filepath.Join("/tmp", "solo-claude-zero-stream-workspace")
+	sessionID := "session-zero-stream"
+	path := ClaudeTranscriptPath(workspace, sessionID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now().Add(-time.Second)
+	line := fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"id":"message-1","model":"sonnet","usage":{"input_tokens":12,"output_tokens":3}}}`+"\n", time.Now().UTC().Format(time.RFC3339Nano))
+	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := &claudePersistentState{workspaceDir: workspace, sessionID: sessionID}
+	turn := newClaudeTurn()
+	turn.startedAt = started
+	turn.usage["sonnet"] = TokenUsage{}
+
+	usage := (&ClaudeBackend{}).turnUsage(state, turn)["sonnet"]
+	if usage.InputTokens != 12 || usage.OutputTokens != 3 {
+		t.Fatalf("usage=%+v, want transcript fallback for zero stream usage", usage)
+	}
+}
+
+func TestClaudeTurnUsagePrefersCompleteTranscriptOverPartialStream(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workspace := filepath.Join("/tmp", "solo-claude-partial-stream-workspace")
+	sessionID := "session-partial-stream"
+	path := ClaudeTranscriptPath(workspace, sessionID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now().Add(-time.Second)
+	line := fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"id":"message-1","model":"sonnet","usage":{"input_tokens":12,"output_tokens":3,"cache_read_input_tokens":4}}}`+"\n", time.Now().UTC().Format(time.RFC3339Nano))
+	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := &claudePersistentState{workspaceDir: workspace, sessionID: sessionID}
+	turn := newClaudeTurn()
+	turn.startedAt = started
+	turn.usage["sonnet"] = TokenUsage{InputTokens: 12}
+
+	usage := (&ClaudeBackend{}).turnUsage(state, turn)["sonnet"]
+	if usage.InputTokens != 12 || usage.OutputTokens != 3 || usage.CacheReadTokens != 4 {
+		t.Fatalf("usage=%+v, want complete transcript usage", usage)
+	}
+}
+
 func TestUpdateClaudeSessionIDReplacesOldValue(t *testing.T) {
 	state := &claudePersistentState{sessionID: "old-session"}
 	updateClaudeSessionID(state, "new-session")
@@ -361,6 +429,24 @@ func TestUpdateClaudeSessionIDReplacesOldValue(t *testing.T) {
 	updateClaudeSessionID(state, "")
 	if state.sessionID != "new-session" {
 		t.Fatalf("empty session update changed sessionID to %q", state.sessionID)
+	}
+}
+
+func TestScanClaudeTranscriptUsageUsesTurnWindowAndDeduplicatesMessage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	data := strings.Join([]string{
+		`{"type":"assistant","uuid":"old","timestamp":"2026-08-13T10:00:00Z","message":{"id":"old-message","model":"sonnet","usage":{"input_tokens":100,"output_tokens":10}}}`,
+		`{"type":"assistant","uuid":"untimed","message":{"id":"untimed-message","model":"sonnet","usage":{"input_tokens":500,"output_tokens":50}}}`,
+		`{"type":"assistant","uuid":"one","timestamp":"2026-08-13T11:00:01Z","message":{"id":"message-1","model":"sonnet","usage":{"input_tokens":12,"output_tokens":3,"cache_read_input_tokens":4}}}`,
+		`{"type":"assistant","uuid":"duplicate-envelope","timestamp":"2026-08-13T11:00:02Z","message":{"id":"message-1","model":"sonnet","usage":{"input_tokens":12,"output_tokens":3,"cache_read_input_tokens":4}}}`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Date(2026, 8, 13, 11, 0, 0, 0, time.UTC)
+	usage := scanClaudeTranscriptUsage(path, started, started.Add(time.Minute))["sonnet"]
+	if usage.InputTokens != 12 || usage.OutputTokens != 3 || usage.CacheReadTokens != 4 {
+		t.Fatalf("usage=%+v, want one in-window assistant message", usage)
 	}
 }
 
@@ -377,11 +463,10 @@ func TestClaudePersistentSystemChunkCarriesSessionID(t *testing.T) {
 	msgCh := make(chan OutputChunk, 1)
 	turn := &turnState{msgCh: msgCh, resCh: make(chan *Result, 1)}
 	state := &claudePersistentState{
-		cmd:        cmd,
-		stdout:     io.NopCloser(strings.NewReader(`{"type":"system","subtype":"init","session_id":"provider-session-1"}` + "\n")),
-		cancel:     func() {},
-		done:       make(chan struct{}),
-		totalUsage: make(map[string]TokenUsage),
+		cmd:    cmd,
+		stdout: io.NopCloser(strings.NewReader(`{"type":"system","subtype":"init","session_id":"provider-session-1"}` + "\n")),
+		cancel: func() {},
+		done:   make(chan struct{}),
 	}
 	state.turn.Store(turn)
 

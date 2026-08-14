@@ -192,6 +192,7 @@ export interface ChannelMember {
   member_type: 'user' | 'agent';
   member_id: string;
   role: 'owner' | 'admin' | 'member';
+  workspace_role?: 'owner' | 'admin' | 'member';
   display_name: string;
   avatar_url?: string | null;
   status: 'online' | 'offline' | 'thinking' | 'typing';
@@ -298,6 +299,7 @@ export interface UpdateTaskInput {
 // ---- Channel automations ----
 
 export type AutomationScheduleType = 'daily' | 'weekdays' | 'weekly';
+export type AutomationCompletionPolicy = 'auto_complete' | 'review_required';
 export type AutomationRunStatus = 'running' | 'completed' | 'skipped' | 'failed';
 
 export interface AutomationRun {
@@ -330,6 +332,7 @@ export interface Automation {
   schedule_minute: number;
   schedule_weekday?: number;
   timezone: string;
+  completion_policy: AutomationCompletionPolicy;
   enabled: boolean;
   next_run_at?: string;
   last_run_at?: string;
@@ -348,6 +351,7 @@ export interface AutomationInput {
   schedule_minute: number;
   schedule_weekday?: number;
   timezone: string;
+  completion_policy: AutomationCompletionPolicy;
   enabled: boolean;
 }
 

@@ -5,7 +5,7 @@ import { ArrowLeft, Bot, CalendarClock, History, Loader2, Pause, Pencil, Play, P
 import { ApiError } from '@/lib/api-client';
 import { getLocale, t } from '@/lib/i18n';
 import { useAutomations } from '@/lib/hooks/use-automations';
-import type { Automation, AutomationInput, AutomationRun, AutomationRunStatus, AutomationScheduleType, ChannelMember } from '@/lib/types';
+import type { Automation, AutomationCompletionPolicy, AutomationInput, AutomationRun, AutomationRunStatus, AutomationScheduleType, ChannelMember } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -44,7 +44,7 @@ function emptyInput(): AutomationInput {
   return {
     name: '', task_title: '', task_description: '', target_agent_id: '',
     schedule_type: 'daily', schedule_hour: 9, schedule_minute: 0,
-    timezone: browserTimezone(), enabled: true,
+    timezone: browserTimezone(), completion_policy: 'auto_complete', enabled: true,
   };
 }
 
@@ -59,6 +59,7 @@ function toInput(item: Automation): AutomationInput {
     schedule_minute: item.schedule_minute,
     schedule_weekday: item.schedule_weekday,
     timezone: item.timezone,
+    completion_policy: item.completion_policy,
     enabled: item.enabled,
   };
 }
@@ -273,6 +274,14 @@ export function AutomationWorkspace({ channelId, agents, onTaskCreated }: Automa
               <Label className="mb-1.5 block">{t('automationTimezone')}</Label>
               <Select aria-label={t('automationTimezone')} size="md" value={form.timezone} onChange={(value) => setForm((current) => ({ ...current, timezone: value }))} options={timezoneOptions} />
             </div>
+            <div>
+              <Label className="mb-1.5 block">{t('automationCompletionPolicy')}</Label>
+              <Select aria-label={t('automationCompletionPolicy')} size="md" value={form.completion_policy} onChange={(value) => setForm((current) => ({ ...current, completion_policy: value as AutomationCompletionPolicy }))} options={[
+                { value: 'auto_complete', label: t('automationCompletionAuto') },
+                { value: 'review_required', label: t('automationCompletionReview') },
+              ]} />
+              <p className="mt-1 font-body text-xs text-muted-foreground">{form.completion_policy === 'auto_complete' ? t('automationCompletionAutoHint') : t('automationCompletionReviewHint')}</p>
+            </div>
           </div>
           <label className="flex cursor-pointer items-start gap-3 border-2 border-black bg-brutal-cream p-3 shadow-brutal-sm">
             <input type="checkbox" checked={form.enabled} onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))} className="mt-0.5 h-4 w-4 accent-black" />
@@ -298,7 +307,7 @@ export function AutomationWorkspace({ channelId, agents, onTaskCreated }: Automa
         <div>
           {automation.isLoading ? <div className="flex justify-center py-12"><Loader2 className="h-7 w-7 animate-spin" /></div> : automation.error ? <div className="border-2 border-brutal-danger bg-brutal-danger-light p-4 font-body text-sm text-foreground">{automation.error}</div> : automation.automations.length === 0 ? <div className="border-2 border-dashed border-black/40 p-10 text-center"><CalendarClock className="mx-auto mb-3 h-8 w-8" /><div className="font-heading font-bold">{t('automationEmpty')}</div><div className="mt-1 font-body text-sm text-muted-foreground">{t('automationEmptyHint')}</div></div> : <div className="space-y-3">{automation.automations.map((item) => (
             <div key={item.id} data-automation-id={item.id} className="border-2 border-black bg-white p-4 shadow-brutal-sm">
-              <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="font-heading font-bold">{item.name}</h3><span className={`border border-black px-1.5 py-0.5 font-mono text-[10px] uppercase ${item.enabled ? 'bg-brutal-success-light' : 'bg-brutal-cream'}`}>{item.enabled ? t('enabled') : t('disabled')}</span></div><div className="mt-1 truncate font-body text-sm">{item.task_title}</div><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-muted-foreground"><span className="flex items-center gap-1"><CalendarClock className="h-3 w-3" />{scheduleLabel(item)}</span><span className="flex items-center gap-1"><Bot className="h-3 w-3" />{item.target_agent_name || t('unknown')}</span></div></div></div>
+              <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="font-heading font-bold">{item.name}</h3><span className={`border border-black px-1.5 py-0.5 font-mono text-[10px] uppercase ${item.enabled ? 'bg-brutal-success-light' : 'bg-brutal-cream'}`}>{item.enabled ? t('enabled') : t('disabled')}</span><span className="border border-black bg-brutal-primary-light px-1.5 py-0.5 font-mono text-[10px] uppercase">{item.completion_policy === 'auto_complete' ? t('automationCompletionAuto') : t('automationCompletionReview')}</span></div><div className="mt-1 truncate font-body text-sm">{item.task_title}</div><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-muted-foreground"><span className="flex items-center gap-1"><CalendarClock className="h-3 w-3" />{scheduleLabel(item)}</span><span className="flex items-center gap-1"><Bot className="h-3 w-3" />{item.target_agent_name || t('unknown')}</span></div></div></div>
               <div className="mt-3 grid gap-2 border-t-2 border-black/20 pt-3 text-xs sm:grid-cols-2"><div><span className="font-heading font-bold">{t('automationNextRun')}:</span> <span className="font-body">{item.enabled ? formatDate(item.next_run_at) : t('disabled')}</span></div><div><span className="font-heading font-bold">{t('automationLastResult')}:</span> <span className="font-body">{runStatusLabel(item.last_run?.status)}</span></div></div>
               {confirmDeleteId === item.id ? <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-2 border-brutal-danger bg-brutal-danger-light p-2"><span className="font-body text-xs text-foreground">{t('automationDeleteConfirm')}</span><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => setConfirmDeleteId(null)}>{t('cancel')}</Button><Button size="sm" variant="danger" onClick={() => void remove(item)} disabled={busyId === item.id}>{t('delete')}</Button></div></div> : <div className="mt-3 flex flex-wrap gap-2"><Button type="button" size="sm" onClick={() => void runNow(item)} disabled={busyId === item.id}>{busyId === item.id ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Play className="mr-1.5 h-3.5 w-3.5" />}{busyId === item.id ? t('automationRunning') : t('automationRunNow')}</Button><Button type="button" size="sm" variant="outline" onClick={() => void toggle(item)} disabled={busyId === item.id}><Pause className="mr-1.5 h-3.5 w-3.5" />{item.enabled ? t('automationPause') : t('automationResume')}</Button><Button type="button" size="sm" variant="outline" onClick={() => startEdit(item)}><Pencil className="mr-1.5 h-3.5 w-3.5" />{t('edit')}</Button><Button type="button" size="sm" variant="outline" onClick={() => void showHistory(item)}><History className="mr-1.5 h-3.5 w-3.5" />{t('automationHistory')}</Button><Button type="button" size="sm" variant="outline" onClick={() => setConfirmDeleteId(item.id)} aria-label={t('delete')}><Trash2 className="h-3.5 w-3.5" /></Button></div>}
             </div>

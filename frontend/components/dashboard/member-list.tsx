@@ -5,7 +5,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Users, Bot, Circle, Plus, User as UserIcon, X } from 'lucide-react';
+import { Users, Bot, Circle, Plus, User as UserIcon, Volume2, VolumeX, X } from 'lucide-react';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { UserAvatar } from '@/components/ui/user-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -30,18 +30,36 @@ interface MemberListProps {
   onAgentClick?: (agent: AgentDetailTarget) => void;
   showHeader?: boolean;
   canAddAgent?: boolean;
+  canModerateUsers?: boolean;
+  moderationRole?: 'owner' | 'admin' | 'member';
+  currentUserId?: string;
+  mutedUserIds?: Set<string>;
+  onToggleMute?: (memberId: string, muted: boolean) => Promise<void>;
 }
 
 function MemberItem({
   member,
   onRemove,
   onAgentClick,
+  canModerateUsers,
+  moderationRole,
+  currentUserId,
+  muted,
+  onToggleMute,
 }: {
   member: ChannelMember;
   onRemove?: (id: string) => Promise<void>;
   onAgentClick?: (agent: AgentDetailTarget) => void;
+  canModerateUsers?: boolean;
+  moderationRole?: 'owner' | 'admin' | 'member';
+  currentUserId?: string;
+  muted?: boolean;
+  onToggleMute?: (id: string, muted: boolean) => Promise<void>;
 }) {
   const isAgent = member.member_type === 'agent';
+  const canModerateTarget = !isAgent && member.member_id !== currentUserId && member.workspace_role !== 'owner' && (
+    moderationRole === 'owner' || (moderationRole === 'admin' && member.workspace_role === 'member')
+  );
   const [confirming, setConfirming] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -115,6 +133,17 @@ function MemberItem({
 
       {/* Remove */}
       <div className="flex flex-shrink-0 items-center">
+        {canModerateUsers && canModerateTarget && onToggleMute && (
+          <button
+            type="button"
+            onClick={(event) => { event.stopPropagation(); void onToggleMute(member.member_id, Boolean(muted)); }}
+            className="flex-shrink-0 border-2 border-black bg-white px-1.5 py-0.5 shadow-brutal-sm hover:bg-brutal-warning-light"
+            aria-label={muted ? t('channelUnmuteMember', { name: member.display_name }) : t('channelMuteMember', { name: member.display_name })}
+            title={muted ? t('channelUnmute') : t('channelMute')}
+          >
+            {muted ? <Volume2 className="h-3 w-3" /> : <VolumeX className="h-3 w-3" />}
+          </button>
+        )}
         {isAgent && (
           onRemove && (
             <button
@@ -188,7 +217,7 @@ function MemberListSkeleton() {
   );
 }
 
-export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent, onAgentClick, showHeader = true, canAddAgent = true }: MemberListProps) {
+export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent, onAgentClick, showHeader = true, canAddAgent = true, canModerateUsers = false, moderationRole, currentUserId, mutedUserIds = new Set(), onToggleMute }: MemberListProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Section header */}
@@ -232,7 +261,7 @@ export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent
                   </span>
                 </div>
                 {users.map((member) => (
-                  <MemberItem key={`user-${member.member_id}`} member={member} />
+                  <MemberItem key={`user-${member.member_id}`} member={member} canModerateUsers={canModerateUsers} moderationRole={moderationRole} currentUserId={currentUserId} muted={mutedUserIds.has(member.member_id)} onToggleMute={onToggleMute} />
                 ))}
               </div>
             )}

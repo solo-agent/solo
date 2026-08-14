@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Users, Loader2, SquareCheckBig, Plus, Network, Maximize2, Minimize2, BrainCircuit, Sparkles, CalendarClock } from 'lucide-react';
+import { Users, Loader2, SquareCheckBig, Plus, Network, Maximize2, Minimize2, BrainCircuit, Sparkles, CalendarClock, Pin, Settings2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
 import { useThinkingSpace } from '@/lib/hooks/use-thinking-space';
@@ -40,10 +40,15 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { WizardCard } from '@/components/onboarding/wizard-card';
 import { t } from '@/lib/i18n';
+import { useWorkspace } from '@/lib/workspace-context';
+import { useAuth } from '@/lib/auth-context';
 import type { AgentDetailTarget, AgentRelationship, Channel, Message, Task, TaskArtifact, TaskStatus } from '@/lib/types';
 
 type ArtifactPreview = TaskArtifact & { previewUrl: string };
 type WorkspaceDetail = { relationship: AgentRelationship | null; agent: AgentDetailTarget | null };
+type ModerationStatus = { posting_policy: 'everyone' | 'admins_only'; role: 'owner' | 'admin' | 'member'; muted: boolean; can_manage: boolean; can_post: boolean };
+type MutedMember = { user_id: string; display_name: string; workspace_role: 'owner' | 'admin' | 'member' };
+type PinnedMessage = { message_id: string; content: string; sender_name: string; pinned_at: string };
 const TEAM_TASK_VISIBLE_STATUSES = new Set<TaskStatus>(['in_progress', 'in_review']);
 const MIN_SPLIT_PANE_WIDTH = 320;
 const SPLIT_KEYBOARD_STEP = 2;
@@ -178,6 +183,55 @@ export function ChannelView({
   });
 
   const { showToast } = useToast();
+  const { activeWorkspace } = useWorkspace();
+  const { user } = useAuth();
+  const [moderation, setModeration] = useState<ModerationStatus | null>(null);
+  const [mutedMembers, setMutedMembers] = useState<MutedMember[]>([]);
+  const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>([]);
+  const [moderationOpen, setModerationOpen] = useState(false);
+  const manageableMutedMembers = mutedMembers.filter((member) =>
+    member.user_id !== user?.id && member.workspace_role !== 'owner' && (
+      moderation?.role === 'owner' || (moderation?.role === 'admin' && member.workspace_role === 'member')
+    ));
+
+  const loadModeration = useCallback(async () => {
+    if (channel.type !== 'channel') return;
+    try {
+      const status = await apiClient.get<ModerationStatus>(`/api/v1/channels/${channel.id}/moderation`);
+      setModeration(status);
+      const [pins, mutes] = await Promise.all([
+        apiClient.get<PinnedMessage[]>(`/api/v1/channels/${channel.id}/pins`),
+        status.can_manage ? apiClient.get<MutedMember[]>(`/api/v1/channels/${channel.id}/moderation/mutes`) : Promise.resolve([]),
+      ]);
+      setPinnedMessages(pins);
+      setMutedMembers(mutes);
+    } catch {
+      setModeration(null);
+    }
+  }, [channel.id, channel.type]);
+
+  useEffect(() => { void loadModeration(); }, [loadModeration]);
+
+  const togglePin = useCallback(async (message: Message) => {
+    const pinned = pinnedMessages.some((item) => item.message_id === message.id);
+    try {
+      if (pinned) await apiClient.delete(`/api/v1/channels/${channel.id}/messages/${message.id}/pin`);
+      else await apiClient.put(`/api/v1/channels/${channel.id}/messages/${message.id}/pin`, {});
+      await loadModeration();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : t('channelModerationSaveError'), 'error');
+    }
+  }, [channel.id, loadModeration, pinnedMessages, showToast]);
+
+  const toggleMute = useCallback(async (memberId: string, muted: boolean) => {
+    try {
+      if (muted) await apiClient.delete(`/api/v1/channels/${channel.id}/moderation/mutes/${memberId}`);
+      else await apiClient.put(`/api/v1/channels/${channel.id}/moderation/mutes/${memberId}`, { reason: '' });
+      await loadModeration();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : t('channelModerationSaveError'), 'error');
+    }
+  }, [channel.id, loadModeration, showToast]);
   const { generateArtifact, regenerateArtifact, fetchArtifactHTML, listArtifacts, isGeneratingTask } = useTaskArtifact();
   const artifactOpenLinkRef = useRef<HTMLAnchorElement>(null);
   const artifactRegenerateButtonRef = useRef<HTMLButtonElement>(null);
@@ -526,6 +580,10 @@ export function ChannelView({
         cancelMemberStatusRevert(event.sender_id);
         updateMemberStatus(event.sender_id, 'online');
       }
+
+      if (event.type === 'channel.moderation.updated' && event.channel_id === channel.id) {
+        void loadModeration();
+      }
     });
 
     return () => {
@@ -535,7 +593,7 @@ export function ChannelView({
       }
       memberStatusTimersRef.current.clear();
     };
-  }, [channel.id, onEvent, showToast, updateMemberStatus]);
+  }, [channel.id, loadModeration, onEvent, showToast, updateMemberStatus]);
 
   // ---- Handle thread deep links: watch messages list for the target ----
   useEffect(() => {
@@ -975,6 +1033,11 @@ export function ChannelView({
                   <span className="truncate border border-black bg-brutal-info-light px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase">{selectedThinkingNode.agent_name}</span>
                 )}
               </div>
+              {moderation?.can_manage && !isThinking && (
+                <button type="button" className="btn-brutal btn-brutal-sm flex h-8 w-8 items-center justify-center p-0" onClick={() => setModerationOpen(true)} aria-label={t('channelModeration')} title={t('channelModeration')}>
+                  <Settings2 className="h-4 w-4" />
+                </button>
+              )}
             </div>
             <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream">
             {isThinking && selectedThinkingNode && thinking.space && (
@@ -989,6 +1052,12 @@ export function ChannelView({
             {showOnboardingWizard && !isThinking && (
               <div className="px-4 pt-4">
                 <WizardCard channelId={channel.id} />
+              </div>
+            )}
+            {!isThinking && pinnedMessages.length > 0 && (
+              <div className="border-b-2 border-black bg-brutal-warning-light px-4 py-2">
+                <div className="mb-1 flex items-center gap-1 font-mono text-[10px] font-bold uppercase"><Pin className="h-3 w-3" />{t('channelPinnedMessages')}</div>
+                {pinnedMessages.slice(0, 3).map((item) => <button key={item.message_id} type="button" className="block w-full truncate text-left font-body text-xs hover:underline" onClick={() => { setScrollToMessageId(item.message_id); setScrollMsgKey((key) => key + 1); }}>{item.sender_name}: {item.content}</button>)}
               </div>
             )}
             <MessageList
@@ -1008,6 +1077,8 @@ export function ChannelView({
               members={members}
               onOpenArtifactReference={handleOpenArtifactReference}
               onAgentClick={openAgentDetail}
+              onPin={moderation?.can_manage ? togglePin : undefined}
+              pinnedMessageIds={new Set(pinnedMessages.map((item) => item.message_id))}
             />
             {channel.type === 'lucy' && !isThinking && (
               <div className="border-t-2 border-black bg-brutal-cream px-4 py-2">
@@ -1059,7 +1130,7 @@ export function ChannelView({
               showAsTaskToggle
               thinkingMode={isThinking}
               onThinkingModeChange={handleThinkingModeChange}
-              disabled={Boolean(selectedThinkingNode?.fork_handoff_pending || selectedThinkingNode?.returning_at || selectedThinkingNode?.returned_at)}
+              disabled={!isThinking && moderation?.can_post === false || Boolean(selectedThinkingNode?.fork_handoff_pending || selectedThinkingNode?.returning_at || selectedThinkingNode?.returned_at)}
               suggestedContent={messageSuggestion}
               onSuggestedContentApplied={() => setMessageSuggestion(null)}
             />
@@ -1371,7 +1442,41 @@ export function ChannelView({
             onAgentClick={openAgentDetail}
             showHeader={false}
             canAddAgent={false}
+            canModerateUsers={moderation?.can_manage}
+            moderationRole={moderation?.role}
+            currentUserId={user?.id}
+            mutedUserIds={new Set(mutedMembers.map((member) => member.user_id))}
+            onToggleMute={toggleMute}
           />
+        </div>
+      </Dialog>
+
+      <Dialog open={moderationOpen} onOpenChange={setModerationOpen}>
+        <DialogHeader>
+          <DialogTitle>{t('channelModeration')}</DialogTitle>
+          <DialogCloseButton onClick={() => setModerationOpen(false)} />
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <label className="mb-1 block font-heading text-sm font-bold">{t('channelWhoCanPost')}</label>
+            <select
+              className="w-full border-2 border-black bg-white p-2 font-body text-sm"
+              value={moderation?.posting_policy ?? 'everyone'}
+              onChange={async (event) => {
+                try {
+                  await apiClient.patch(`/api/v1/channels/${channel.id}/moderation`, { posting_policy: event.target.value });
+                  await loadModeration();
+                } catch (error) {
+                  showToast(error instanceof Error ? error.message : t('channelModerationSaveError'), 'error');
+                }
+              }}
+            >
+              <option value="everyone">{t('channelPostEveryone')}</option>
+              <option value="admins_only">{t('channelPostAdminsOnly')}</option>
+            </select>
+          </div>
+          <p className="font-body text-xs text-muted-foreground">{activeWorkspace?.is_default ? t('channelPublicNoRemoval') : t('channelPrivateMemberPolicy')}</p>
+          {manageableMutedMembers.length > 0 && <div><div className="mb-1 font-heading text-sm font-bold">{t('channelMutedMembers')}</div>{manageableMutedMembers.map((member) => <div key={member.user_id} className="flex items-center justify-between border-2 border-black p-2 text-sm"><span>{member.display_name}</span><Button size="sm" variant="outline" onClick={() => void toggleMute(member.user_id, true)}>{t('channelUnmute')}</Button></div>)}</div>}
         </div>
       </Dialog>
 

@@ -8,7 +8,7 @@
 
 'use client';
 
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, Pin } from 'lucide-react';
 import type { AgentDetailTarget, Message } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
@@ -24,9 +24,11 @@ interface AgentMessageProps {
   isHighlighted?: boolean;
   onOpenArtifactReference?: (ref: string) => void;
   onAgentClick?: (agent: AgentDetailTarget) => void;
+  onPin?: (message: Message) => void;
+  pinned?: boolean;
 }
 
-export function AgentMessage({ message, onReply, validNames = [], isHighlighted, onOpenArtifactReference, onAgentClick }: AgentMessageProps) {
+export function AgentMessage({ message, onReply, validNames = [], isHighlighted, onOpenArtifactReference, onAgentClick, onPin, pinned }: AgentMessageProps) {
   const time = formatMessageTimestamp(message.created_at);
 
   const hasUnreadThread = message.has_unread_thread === true && (message.reply_count ?? 0) > 0;
@@ -95,12 +97,21 @@ export function AgentMessage({ message, onReply, validNames = [], isHighlighted,
       </div>
 
       {/* Hover reply button */}
-      {onReply && (
+      {(onReply || onPin) && (
         <div className="absolute right-3 top-2 flex items-center gap-1
                         opacity-0 group-hover:opacity-100
                         translate-x-2 group-hover:translate-x-0
                         transition-all duration-200">
-          <button
+          {onPin && <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onPin(message); }}
+            className={`btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0 ${pinned ? 'bg-brutal-warning' : ''}`}
+            aria-label={pinned ? t('channelUnpin') : t('channelPin')}
+            title={pinned ? t('channelUnpin') : t('channelPin')}
+          >
+            <Pin className="h-3.5 w-3.5" />
+          </button>}
+          {onReply && <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onReply(message); }}
             className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
@@ -108,7 +119,7 @@ export function AgentMessage({ message, onReply, validNames = [], isHighlighted,
             title="Reply"
           >
             <MessageSquare className="h-3.5 w-3.5" />
-          </button>
+          </button>}
         </div>
       )}
     </div>

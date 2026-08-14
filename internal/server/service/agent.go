@@ -798,7 +798,8 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 			run = current
 			return
 		}
-		if daemon.ComputerID == "" && run.TranscriptPath != "" {
+		if daemon.ComputerID == "" && run.TranscriptPath != "" &&
+			inputTokens == 0 && outputTokens == 0 && cacheReadTokens == 0 && cacheWriteTokens == 0 {
 			entries, transcriptErr := ReadAgentTranscriptWindow(run.TranscriptPath, run.StartedAt.Add(-time.Second), time.Now().UTC().Add(time.Second), 10000)
 			if transcriptErr != nil {
 				slog.Warn("failed to read agent usage from transcript", "run_id", run.ID, "error", transcriptErr)

@@ -505,21 +505,21 @@ func (h *ChannelHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check user is a member (any role can update for MVP; could restrict to owner later)
-	var isMember bool
+	// Channel metadata is governed by Workspace roles, not inherited Channel membership.
+	var canManage bool
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT EXISTS(
-			SELECT 1 FROM channel_members cm JOIN channels c ON c.id = cm.channel_id
-			WHERE cm.channel_id = $1 AND cm.member_type = 'user' AND cm.member_id = $2 AND c.workspace_id = $3
+			SELECT 1 FROM channels c JOIN workspace_members wm ON wm.workspace_id=c.workspace_id
+			WHERE c.id=$1 AND c.workspace_id=$3 AND wm.user_id=$2 AND wm.role IN ('owner','admin')
 		)`, channelID, userID, serverworkspace.ID(r),
-	).Scan(&isMember)
+	).Scan(&canManage)
 	if err != nil {
 		slog.Error("failed to check membership", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	if !isMember {
-		writeError(w, http.StatusNotFound, "channel not found")
+	if !canManage {
+		writeError(w, http.StatusForbidden, "Workspace admin required")
 		return
 	}
 
@@ -620,14 +620,13 @@ func (h *ChannelHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		SELECT EXISTS(
 			SELECT 1
 			  FROM channels c
-			  JOIN channel_members cm ON cm.channel_id = c.id
+			  JOIN workspace_members wm ON wm.workspace_id = c.workspace_id
 			 WHERE c.id = $1
 			   AND c.workspace_id = $3
 			   AND c.type = 'channel'
 			   AND c.is_archived = false
-			   AND cm.member_type = 'user'
-			   AND cm.member_id = $2
-			   AND cm.role IN ('owner', 'admin')
+			   AND wm.user_id = $2
+			   AND wm.role IN ('owner', 'admin')
 		)
 	`, channelID, userID, serverworkspace.ID(r)).Scan(&canDelete)
 	if err != nil || !canDelete {

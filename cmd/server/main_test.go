@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/solo-ai/solo/pkg/config"
@@ -10,6 +12,8 @@ func TestValidateProductionConfig(t *testing.T) {
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://solo.example.com")
 	t.Setenv("DATABASE_URL", "postgres://solo:secret@postgres/solo")
+	t.Setenv("ATTACHMENTS_DIR", t.TempDir())
+	t.Setenv("ARTIFACTS_DIR", t.TempDir())
 	valid := &config.Config{
 		JWTSecret:         "0123456789abcdef0123456789abcdef",
 		DBURL:             "postgres://solo:secret@postgres/solo",
@@ -55,5 +59,30 @@ func TestValidateProductionConfig(t *testing.T) {
 	tencent.TencentSESTemplateID = 0
 	if err := validateProductionConfig(&tencent); err == nil {
 		t.Fatal("missing Tencent SES template accepted")
+	}
+}
+
+func TestValidateStorageDirectories(t *testing.T) {
+	root := t.TempDir()
+	attachments := filepath.Join(root, "attachments")
+	artifacts := filepath.Join(root, "artifacts")
+	t.Setenv("ATTACHMENTS_DIR", attachments)
+	t.Setenv("ARTIFACTS_DIR", artifacts)
+	if err := validateStorageDirectories(); err != nil {
+		t.Fatalf("writable storage rejected: %v", err)
+	}
+	for _, dir := range []string{attachments, artifacts} {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			t.Fatalf("storage directory %q was not created", dir)
+		}
+	}
+
+	notDirectory := filepath.Join(root, "file")
+	if err := os.WriteFile(notDirectory, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ATTACHMENTS_DIR", notDirectory)
+	if err := validateStorageDirectories(); err == nil {
+		t.Fatal("non-directory storage path accepted")
 	}
 }
