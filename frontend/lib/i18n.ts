@@ -47,8 +47,8 @@ const en = {
   days: '{n} day',
 
   // ── Layout / Nav / App Shell ──
-  appTitle: 'Solo — Channel-based Multi-Agent Collaboration Platform',
-  appDescription: 'A collaboration space for humans and AI, organized like a team chat',
+  appTitle: 'Solo Agent — Open-Source Multi-Agent Workspace',
+  appDescription: 'An open-source, local-first workspace where humans and AI coding agents collaborate through channels, tasks, teams, and persistent memory.',
   navChannels: 'Channels',
   navTasks: 'Task Board',
   navTeams: 'Teams',
