@@ -178,6 +178,19 @@ function DashboardContent() {
     router.push(`/dashboard?channel=${channelId}`);
   }, [router]);
 
+  // A dashboard without a selected conversation is not a useful first screen.
+  // Once the current Workspace is loaded, open Lucy first and otherwise fall
+  // back to the newest visible Channel.
+  useEffect(() => {
+    if (authLoading || !isAuthenticated || channelsLoading) return;
+    if (channelFromUrl || dmFromUrl || inboxFromUrl || lucyFromUrl) return;
+    if (lucyChannel) {
+      router.replace('/dashboard?lucy=1');
+    } else if (channels.length > 0) {
+      router.replace(`/dashboard?channel=${encodeURIComponent(channels[0].id)}`);
+    }
+  }, [authLoading, channelFromUrl, channels, channelsLoading, dmFromUrl, inboxFromUrl, isAuthenticated, lucyChannel, lucyFromUrl, router]);
+
   // ---- URL-driven DM selection ----
   const handleSelectDM = useCallback((dmId: string) => {
     router.push(`/dashboard?dm=${dmId}`);

@@ -59,6 +59,8 @@ const ACTIVITY_TEXT_KEYS: Record<string, TranslationKey> = {
 const AGENT_ERROR_KEYS: Record<string, TranslationKey> = {
   'agent.error.no_available_daemon': 'agentErrorNoAvailableDaemon',
   'agent.error.missing_visible_result': 'agentErrorMissingVisibleResult',
+  'agent.error.project_computer_mismatch': 'agentErrorProjectComputerMismatch',
+  'agent.error.project_folder_unavailable': 'agentErrorProjectFolderUnavailable',
   'agent.error.user_monthly_token_budget_exhausted': 'agentErrorUserMonthlyTokenBudgetExhausted',
   'agent.error.agent_monthly_token_budget_exhausted': 'agentErrorAgentMonthlyTokenBudgetExhausted',
   'No available daemon to run this agent.': 'agentErrorNoAvailableDaemon',

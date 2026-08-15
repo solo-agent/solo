@@ -27,8 +27,7 @@ const createChannelSchema = z.object({
   name: z
     .string()
     .min(1, t('channelNameRequired'))
-    .max(80, t('channelNameMaxLen'))
-    .regex(/^[a-z0-9_-]+$/, t('channelNamePattern')),
+    .max(80, t('channelNameMaxLen')),
   description: z.string().max(200, t('channelDescMaxLen')).optional(),
 });
 

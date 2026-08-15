@@ -39,7 +39,10 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 		fmt.Fprintf(&b, "- OS: %s\n", agent.OS)
 	}
 	if agent.WorkspacePath != "" {
-		fmt.Fprintf(&b, "- Workspace: %s\n", agent.WorkspacePath)
+		fmt.Fprintf(&b, "- Workspace: %s (Agent memory and Solo files)\n", agent.WorkspacePath)
+	}
+	if agent.ProjectPath != "" {
+		fmt.Fprintf(&b, "- Project folder (current working directory): %s\n", agent.ProjectPath)
 	}
 	if agent.Name != "" {
 		fmt.Fprintf(&b, "- Handle: @%s\n", agent.Name)
@@ -68,7 +71,11 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 	b.WriteString("## Startup sequence\n\n")
 	b.WriteString("1. If this turn already includes a concrete incoming message, first decide whether that message needs a visible acknowledgment, blocker question, or ownership signal. If it does, send it early with `solo message send` before deep context gathering.\n")
 	b.WriteString("2. Read RELATIONSHIPS.md to check your colleagues and their delegation criteria.\n")
-	b.WriteString("3. Read MEMORY.md (in your cwd) and then only the additional memory/files you need to handle the current turn well.\n")
+	if agent.WorkspacePath != "" {
+		fmt.Fprintf(&b, "3. Read %s/MEMORY.md and then only the additional memory/files you need to handle the current turn well.\n", agent.WorkspacePath)
+	} else {
+		b.WriteString("3. Read MEMORY.md and then only the additional memory/files you need to handle the current turn well.\n")
+	}
 	b.WriteString("4. If there is no concrete incoming message to handle, stop and wait. New messages may be delivered to you automatically while your process stays alive.\n")
 	b.WriteString("5. When you receive a message, process it and reply with `solo message send`.\n")
 	b.WriteString("6. **Complete ALL your work before stopping.** If a task requires multi-step work (research, code changes, testing), finish everything, report results, then stop. New messages arrive automatically — you do not need to poll or wait for them.\n\n")

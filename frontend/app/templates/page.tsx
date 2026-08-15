@@ -18,6 +18,7 @@ export default function TemplatesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [targetChannelID, setTargetChannelID] = useState('');
+  const [showProfessional, setShowProfessional] = useState(false);
 
   useEffect(() => {
     setTargetChannelID(new URLSearchParams(window.location.search).get('channel') ?? '');
@@ -44,6 +45,10 @@ export default function TemplatesPage() {
       ].some((value) => value.toLowerCase().includes(needle));
     });
   }, [category, query, templates]);
+  const isDefaultBrowse = category === 'All' && query.trim() === '';
+  const visibleTemplates = isDefaultBrowse && !showProfessional
+    ? filtered.filter((template) => template.id.startsWith('starter-'))
+    : filtered;
 
   return (
     <AppFrame>
@@ -80,6 +85,22 @@ export default function TemplatesPage() {
         <div className="mx-auto max-w-[1480px] px-5 py-4 lg:px-8">
           <LucyTeamComposer templates={templates} targetChannelID={targetChannelID} />
 
+          {isDefaultBrowse && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-2 border-black bg-brutal-success-light p-3 shadow-brutal-sm">
+              <div>
+                <h2 className="font-heading text-lg font-black">{t('templatesBeginnerTitle')}</h2>
+                <p className="font-body text-xs text-black/65">{t('templatesBeginnerDesc')}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowProfessional((value) => !value)}
+                className="border-2 border-black bg-white px-3 py-2 font-mono text-xs font-bold uppercase shadow-brutal-sm hover:bg-brutal-primary-light"
+              >
+                {showProfessional ? t('templatesHideProfessional') : t('templatesShowProfessional')}
+              </button>
+            </div>
+          )}
+
           <div className="mb-4 flex flex-col gap-2 border-2 border-black bg-white p-2 shadow-brutal md:flex-row md:items-center">
             <div className="min-w-0 flex-1 md:w-80 md:flex-none">
               <Input
@@ -108,14 +129,14 @@ export default function TemplatesPage() {
             <div className="flex justify-center py-24"><Spinner size="md" /></div>
           ) : error ? (
             <div className="border-4 border-black bg-brutal-danger-light p-6 font-mono text-sm shadow-brutal">{error}</div>
-          ) : filtered.length === 0 ? (
+          ) : visibleTemplates.length === 0 ? (
             <div className="border-4 border-dashed border-black bg-white p-12 text-center">
               <p className="font-heading text-xl font-black">{t('templatesNoMatch')}</p>
               <p className="mt-1 font-body text-sm text-muted-foreground">{t('templatesNoMatchHint')}</p>
             </div>
           ) : (
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {filtered.map((template, index) => (
+              {visibleTemplates.map((template, index) => (
                 <Link
                   key={template.id}
                   href={`/templates/${encodeURIComponent(template.id)}${targetChannelID ? `?channel=${encodeURIComponent(targetChannelID)}` : ''}`}

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRef, useState, type MutableRefObject } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, LayoutTemplate, Sparkles, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,27 +10,14 @@ import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Textarea } from '@/components/ui/textarea';
 import { apiClient } from '@/lib/api-client';
 import { getLocale, t } from '@/lib/i18n';
+import { recommendTemplate } from '@/lib/recommend-template';
 import type { Template } from '@/lib/templates-api';
 import type { Channel } from '@/lib/types';
-
-interface MessageResponse {
-  id: string;
-  sender_type: 'user' | 'agent' | 'system';
-  content: string;
-  created_at: string;
-}
-
-interface MessageListResponse {
-  messages: MessageResponse[];
-}
 
 interface LucyRecommendation {
   reply: string;
   template: Template;
 }
-
-const POLL_INTERVAL_MS = 1500;
-const POLL_TIMEOUT_MS = 120000;
 
 export function LucyTeamComposer({
   templates,
@@ -40,7 +27,6 @@ export function LucyTeamComposer({
   targetChannelID: string;
 }) {
   const router = useRouter();
-  const requestIDRef = useRef(0);
   const [goal, setGoal] = useState('');
   const [channelName, setChannelName] = useState('');
   const [recommendation, setRecommendation] = useState<LucyRecommendation | null>(null);
@@ -49,39 +35,23 @@ export function LucyTeamComposer({
   const [createdChannelID, setCreatedChannelID] = useState('');
   const [error, setError] = useState('');
 
-  const askLucy = async () => {
+  const askLucy = () => {
     const trimmedGoal = goal.trim();
     if (!trimmedGoal || isMatching || templates.length === 0) return;
 
-    const requestID = ++requestIDRef.current;
     setIsMatching(true);
     setRecommendation(null);
     setCreatedChannelID('');
     setError('');
 
-    try {
-      const lucyChannel = await apiClient.get<Channel>('/api/v1/channels/lucy');
-      const source = await apiClient.post<MessageResponse>(
-        `/api/v1/channels/${encodeURIComponent(lucyChannel.id)}/messages`,
-        { content: recommendationPrompt(trimmedGoal) },
-      );
-      const reply = await waitForLucyReply(lucyChannel.id, source.id, requestID, requestIDRef);
-      if (requestID !== requestIDRef.current) return;
-
-      const template = matchTemplate(reply.content, templates);
-      if (!template) {
-        setError(t('templatesLucyUnrecognized'));
-        return;
-      }
-      setRecommendation({ reply: reply.content, template });
-      setChannelName(slugify(template.name));
-    } catch (err) {
-      if (requestID === requestIDRef.current) {
-        setError(err instanceof Error ? err.message : t('templatesLucyRecommendError'));
-      }
-    } finally {
-      if (requestID === requestIDRef.current) setIsMatching(false);
+    const result = recommendTemplate(trimmedGoal, templates);
+    if (!result) {
+      setError(t('templatesLucyRecommendError'));
+    } else {
+      setRecommendation({ reply: result.reason, template: result.template });
+      setChannelName(slugify(trimmedGoal) || slugify(result.template.name));
     }
+    setIsMatching(false);
   };
 
   const createAndStart = async () => {
@@ -260,50 +230,6 @@ export function LucyTeamComposer({
       )}
     </section>
   );
-}
-
-async function waitForLucyReply(
-  channelID: string,
-  sourceMessageID: string,
-  requestID: number,
-  requestIDRef: MutableRefObject<number>,
-): Promise<MessageResponse> {
-  const deadline = Date.now() + POLL_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => window.setTimeout(resolve, POLL_INTERVAL_MS));
-    if (requestID !== requestIDRef.current) throw new Error(t('templatesLucyRecommendCancelled'));
-
-    const result = await apiClient.get<MessageListResponse>(
-      `/api/v1/channels/${encodeURIComponent(channelID)}/messages`,
-      { limit: '100' },
-    );
-    const sourceIndex = result.messages.findIndex((message) => message.id === sourceMessageID);
-    if (sourceIndex >= 0) {
-      const reply = result.messages.slice(sourceIndex + 1).find((message) => message.sender_type === 'agent');
-      if (reply) return reply;
-    }
-  }
-  throw new Error(t('templatesLucyTimeout'));
-}
-
-function matchTemplate(content: string, templates: Template[]): Template | undefined {
-  const normalized = content.toLocaleLowerCase();
-  return templates
-    .map((template) => {
-      const positions = [template.id, template.name]
-        .map((value) => normalized.indexOf(value.toLocaleLowerCase()))
-        .filter((position) => position >= 0);
-      return { template, position: positions.length > 0 ? Math.min(...positions) : -1 };
-    })
-    .filter(({ position }) => position >= 0)
-    .sort((a, b) => a.position - b.position)[0]?.template;
-}
-
-function recommendationPrompt(goal: string): string {
-  if (getLocale().startsWith('zh')) {
-    return `请根据下面的目标，从 Solo 内置模板中只推荐一个最合适的团队。现在只推荐，不要创建频道或团队。请简短说明理由，并在回答中明确写出模板 ID。\n\n目标：${goal}`;
-  }
-  return `Recommend exactly one team from Solo's built-in templates for the goal below. Recommend only; do not create a Channel or team yet. Briefly explain why and include the exact template ID in your answer.\n\nGoal: ${goal}`;
 }
 
 function slugify(value: string): string {

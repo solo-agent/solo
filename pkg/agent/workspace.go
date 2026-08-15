@@ -25,6 +25,7 @@ type AgentConfig struct {
 	CustomArgs            []string          `json:"custom_args,omitempty"`
 	// Runtime context for system prompt.
 	WorkspacePath string `json:"workspace_path,omitempty"`
+	ProjectPath   string `json:"project_path,omitempty"`
 	ServerID      string `json:"server_id,omitempty"`
 	Hostname      string `json:"hostname,omitempty"`
 	OS            string `json:"os,omitempty"`

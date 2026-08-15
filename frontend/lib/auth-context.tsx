@@ -19,7 +19,7 @@ import {
   useReducer,
   type ReactNode,
 } from 'react';
-import { ApiError, apiClient, defaultTokenStorage, setAuthTokens, clearAuthTokens, setStoredActiveWorkspaceId } from './api-client';
+import { ApiError, apiClient, defaultTokenStorage, setAuthTokens, clearAuthTokens, setStoredActiveWorkspaceId, setStoredAuthenticatedUserId } from './api-client';
 import { cancelAllReliableSends } from './reliable-send';
 
 // ---- 类型定义 ----
@@ -152,6 +152,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // 有 access_token，尝试获取用户信息
     fetchCurrentUser()
       .then((user) => {
+        setStoredAuthenticatedUserId(user.id);
         dispatch({ type: 'AUTH_SUCCESS', user });
       })
       .catch((err: unknown) => {
@@ -159,7 +160,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
           // Token 过期，尝试刷新
           refreshAndFetchUser(dispatch);
         } else {
-    clearAuthTokens();
           dispatch({
             type: 'AUTH_FAILURE',
             error: err instanceof Error ? err.message : t('authInitError'),
@@ -174,7 +174,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     dispatch({ type: 'AUTH_START' });
     try {
       const data = await apiClient.post<AuthResponse>('/api/v1/auth/login', req);
-      setAuthTokens(data.access_token, data.refresh_token);
+      setAuthTokens(data.access_token, data.refresh_token, data.user.id);
       dispatch({ type: 'AUTH_SUCCESS', user: data.user });
     } catch (err: unknown) {
       const message =
@@ -204,8 +204,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     dispatch({ type: 'AUTH_START' });
     try {
       const data = await apiClient.post<AuthResponse>('/api/v1/auth/register/verify', req);
-      setAuthTokens(data.access_token, data.refresh_token);
-      if (data.workspace_id) setStoredActiveWorkspaceId(data.workspace_id);
+      setAuthTokens(data.access_token, data.refresh_token, data.user.id);
+      if (data.workspace_id) setStoredActiveWorkspaceId(data.workspace_id, data.user.id);
       dispatch({ type: 'AUTH_SUCCESS', user: data.user });
       return data.onboarding_channel_id;
     } catch (err: unknown) {
@@ -303,9 +303,14 @@ async function refreshAndFetchUser(
     }
 
     const user = await fetchCurrentUser();
+    setStoredAuthenticatedUserId(user.id);
     dispatch({ type: 'AUTH_SUCCESS', user });
-  } catch {
-    clearAuthTokens();
-    dispatch({ type: 'AUTH_FAILURE', error: '' });
+  } catch (err) {
+    const tokenIsInvalid = err instanceof ApiError && err.status >= 400 && err.status < 500;
+    if (tokenIsInvalid) clearAuthTokens();
+    dispatch({
+      type: 'AUTH_FAILURE',
+      error: tokenIsInvalid ? '' : err instanceof Error ? err.message : t('authInitError'),
+    });
   }
 }

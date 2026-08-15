@@ -107,7 +107,7 @@ export function Dialog({ open, onOpenChange, children, width = 'md' }: DialogPro
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center overscroll-contain bg-black/60"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-black/60 p-4 sm:items-center"
       onClick={(e) => {
         if (e.target === overlayRef.current) onOpenChange(false);
       }}
@@ -117,9 +117,10 @@ export function Dialog({ open, onOpenChange, children, width = 'md' }: DialogPro
         <div
           ref={dialogRef}
           className={cn(
-            'mx-4 max-h-[90vh] w-full overflow-y-auto overscroll-contain border-4 border-black bg-card p-6 shadow-brutal-2xl',
+            'my-auto max-h-[calc(100dvh-2rem)] w-full overflow-y-auto overscroll-contain border-4 border-black bg-card p-4 shadow-brutal-2xl sm:p-6',
             DIALOG_WIDTHS[width],
           )}
+          data-dialog-scroll
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}

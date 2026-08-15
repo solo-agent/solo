@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { apiClient, getActiveWorkspaceId, PUBLIC_WORKSPACE_ID, setStoredActiveWorkspaceId } from './api-client';
+import { apiClient, getStoredActiveWorkspaceIdForUser, PUBLIC_WORKSPACE_ID, setStoredActiveWorkspaceId } from './api-client';
 import { useAuth } from './auth-context';
 
 export type WorkspaceRole = 'owner' | 'admin' | 'member';
@@ -42,7 +42,7 @@ interface WorkspaceContextValue {
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeId, setActiveId] = useState(PUBLIC_WORKSPACE_ID);
   const [isLoading, setIsLoading] = useState(true);
@@ -57,13 +57,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     try {
       const items = await apiClient.get<Workspace[]>('/api/v1/workspaces');
-      const remembered = getActiveWorkspaceId();
+      const remembered = user ? getStoredActiveWorkspaceIdForUser(user.id) : null;
       const next = items.find((item) => item.id === remembered)
         ?? items.find((item) => item.is_personal)
         ?? items.find((item) => item.is_default)
         ?? items[0]
         ?? null;
-      if (next) setStoredActiveWorkspaceId(next.id);
+      if (next) setStoredActiveWorkspaceId(next.id, user?.id);
       setActiveId(next?.id ?? PUBLIC_WORKSPACE_ID);
       setWorkspaces(items);
       setError(null);
@@ -72,7 +72,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, user]);
 
   useEffect(() => {
     if (!authLoading) void load();
@@ -80,17 +80,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const switchWorkspace = useCallback((workspaceId: string) => {
     if (!workspaces.some((item) => item.id === workspaceId)) return;
-    setStoredActiveWorkspaceId(workspaceId);
+    setStoredActiveWorkspaceId(workspaceId, user?.id);
     setActiveId(workspaceId);
-  }, [workspaces]);
+  }, [user?.id, workspaces]);
 
   const createWorkspace = useCallback(async (name: string, icon?: string) => {
     const workspace = await apiClient.post<Workspace>('/api/v1/workspaces', { name, icon });
     setWorkspaces((current) => [...current, workspace]);
-    setStoredActiveWorkspaceId(workspace.id);
+    setStoredActiveWorkspaceId(workspace.id, user?.id);
     setActiveId(workspace.id);
     return workspace;
-  }, []);
+  }, [user?.id]);
 
   const deleteWorkspace = useCallback(async (workspaceId: string) => {
     await apiClient.delete(`/api/v1/workspaces/${workspaceId}`);
@@ -98,10 +98,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (activeId === workspaceId) {
       const fallback = workspaces.find((item) => item.id !== workspaceId && item.is_personal)
         ?? workspaces.find((item) => item.id !== workspaceId && item.is_default);
-      setStoredActiveWorkspaceId(fallback?.id ?? PUBLIC_WORKSPACE_ID);
+      setStoredActiveWorkspaceId(fallback?.id ?? PUBLIC_WORKSPACE_ID, user?.id);
       setActiveId(fallback?.id ?? PUBLIC_WORKSPACE_ID);
     }
-  }, [activeId, workspaces]);
+  }, [activeId, user?.id, workspaces]);
 
   const activeWorkspace = workspaces.find((item) => item.id === activeId) ?? null;
   const value = useMemo(() => ({ workspaces, activeWorkspace, isLoading, error, switchWorkspace, createWorkspace, deleteWorkspace, refetch: load }), [workspaces, activeWorkspace, isLoading, error, switchWorkspace, createWorkspace, deleteWorkspace, load]);

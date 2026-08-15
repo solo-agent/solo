@@ -52,6 +52,7 @@ const (
 
 	agentErrorNoAvailableDaemon    = "agent.error.no_available_daemon"
 	agentErrorMissingVisibleResult = "agent.error.missing_visible_result"
+	agentErrorProjectComputer      = "agent.error.project_computer_mismatch"
 
 	agentResultContractVisibleMessage = "visible_message"
 	agentResultContractHandoff        = "handoff"
@@ -611,7 +612,48 @@ func (s *AgentService) broadcastAgentError(threadID, channelID, agentID, agentNa
 // handleStreamingAgentTask dispatches a task to a daemon via SSE streaming
 // and forwards events to WebSocket subscribers.
 func (s *AgentService) handleStreamingAgentTask(ctx context.Context, daemon *DaemonInfo, taskReq daemonTaskRequest, ag agentChannelInfo) {
+	if err := s.applyChannelProjectBinding(ctx, daemon, &taskReq); err != nil {
+		s.broadcastAgentError(taskReq.ThreadID, taskReq.ChannelID, ag.ID, ag.Name, err.Error())
+		return
+	}
 	s.runStreamingAgentTask(ctx, daemon, taskReq, ag, nil)
+}
+
+func (s *AgentService) applyChannelProjectBinding(ctx context.Context, daemon *DaemonInfo, taskReq *daemonTaskRequest) error {
+	if taskReq == nil || taskReq.ChannelID == "" {
+		return nil
+	}
+	var computerID, projectPath string
+	if err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(project_computer_id::text, ''), COALESCE(project_path, '')
+		  FROM channels
+		 WHERE id = $1`, taskReq.ChannelID).Scan(&computerID, &projectPath); err != nil {
+		return fmt.Errorf("could not load the Channel project folder: %w", err)
+	}
+	if projectPath == "" {
+		taskReq.ProjectComputerID = ""
+		taskReq.ProjectPath = ""
+		return nil
+	}
+	effectiveComputerID := ""
+	if daemon != nil {
+		effectiveComputerID = daemon.ComputerID
+	}
+	if effectiveComputerID == "" && taskReq.AgentID != "" {
+		// The local compatibility connection is registered by daemon ID instead
+		// of computer ID. ResolveDaemonForAgent has already persisted the Agent's
+		// actual computer binding, so use that binding for the same safety check.
+		_ = s.pool.QueryRow(ctx,
+			`SELECT COALESCE(runtime_id, '') FROM agents WHERE id = $1`,
+			taskReq.AgentID,
+		).Scan(&effectiveComputerID)
+	}
+	if effectiveComputerID == "" || effectiveComputerID != computerID {
+		return errors.New(agentErrorProjectComputer)
+	}
+	taskReq.ProjectComputerID = computerID
+	taskReq.ProjectPath = projectPath
+	return nil
 }
 
 func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *DaemonInfo, taskReq daemonTaskRequest, ag agentChannelInfo, existingRun *AgentRun) {
@@ -2902,6 +2944,8 @@ type daemonTaskRequest struct {
 	ModelSeenSeq                int64             `json:"-"`
 	AgentName                   string            `json:"agent_name,omitempty"`
 	ChannelName                 string            `json:"channel_name,omitempty"`
+	ProjectComputerID           string            `json:"project_computer_id,omitempty"`
+	ProjectPath                 string            `json:"project_path,omitempty"`
 	CustomEnv                   map[string]string `json:"custom_env,omitempty"`
 	CustomArgs                  []string          `json:"custom_args,omitempty"`
 	AgentToken                  string            `json:"agent_token,omitempty"`
