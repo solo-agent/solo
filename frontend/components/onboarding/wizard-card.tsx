@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { Check, Monitor, Cpu, Sparkles, AlertCircle, RefreshCw } from 'lucide-react';
 import { useCliDetection } from '@/lib/hooks/use-cli-detection';
@@ -9,6 +9,10 @@ import { useOnboarding } from '@/lib/hooks/use-onboarding';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Select, type SelectOption } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { listTemplates, type Template } from '@/lib/templates-api';
+import { recommendTemplate, type TemplateRecommendation } from '@/lib/recommend-template';
+import { t } from '@/lib/i18n';
 
 interface WizardCardProps {
   channelId: string;
@@ -29,6 +33,13 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
   const [selectedRuntime, setSelectedRuntime] = useState<string>('');
   const [done, setDone] = useState(false);
   const [claimingId, setClaimingId] = useState<string | null>(null);
+  const [goal, setGoal] = useState('');
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [recommendation, setRecommendation] = useState<TemplateRecommendation | null>(null);
+
+  useEffect(() => {
+    listTemplates().then(setTemplates).catch(() => setTemplates([]));
+  }, []);
 
   const joinableComputers = computers.filter((c) => c.status === 'online' && !isMember(c));
 
@@ -79,11 +90,49 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
       <div className="flex items-center gap-2 border-b-2 border-black px-5 py-3">
         <Sparkles className="h-4 w-4 text-brutal-primary" />
         <h3 className="font-heading font-bold text-base text-foreground">
-          Set Up Your Workspace
+          {t('onboardingWelcomeTitle')}
         </h3>
       </div>
 
       <div className="space-y-1 px-5 py-4">
+        <div className="mb-4 border-2 border-black bg-brutal-accent-light p-3 shadow-brutal-sm">
+          <p className="font-heading text-base font-black">{t('onboardingGoalTitle')}</p>
+          <p className="mt-1 font-body text-xs text-black/65">{t('onboardingGoalDesc')}</p>
+          <Textarea
+            value={goal}
+            onChange={(event) => {
+              setGoal(event.target.value);
+              setRecommendation(null);
+            }}
+            rows={2}
+            className="mt-3 min-h-16 resize-none bg-white"
+            placeholder={t('onboardingGoalPlaceholder')}
+          />
+          <Button
+            type="button"
+            size="sm"
+            className="mt-2"
+            disabled={!goal.trim() || templates.length === 0}
+            onClick={() => setRecommendation(recommendTemplate(goal, templates))}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            {t('onboardingGoalRecommend')}
+          </Button>
+          {recommendation && (
+            <div className="mt-3 border-2 border-black bg-white p-3">
+              <div className="font-mono text-[10px] font-bold uppercase tracking-widest text-black/50">{t('onboardingGoalResult')}</div>
+              <div className="mt-1 font-heading text-base font-black">{recommendation.template.icon} {recommendation.template.name}</div>
+              <p className="mt-1 font-body text-xs leading-relaxed text-black/65">{recommendation.reason}</p>
+              <p className="mt-2 font-body text-xs font-semibold">{t('onboardingGoalNext')}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="mb-2 border-b-2 border-black pb-2">
+          <p className="font-heading text-sm font-black">{t('onboardingSetupTitle')}</p>
+          <p className="font-body text-xs text-muted-foreground">{t('onboardingSetupDesc')}</p>
+        </div>
+
         {/* Step 1: Computer */}
         <div className="flex items-start gap-3 py-2">
           <div
@@ -101,15 +150,15 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
           </div>
           <div className="min-w-0">
             <p className="font-heading text-sm font-bold text-foreground">
-              {myComputer ? 'Computer Connected' : 'Connect Computer'}
+              {myComputer ? t('onboardingComputerConnected') : t('onboardingConnectComputer')}
             </p>
             <div className="font-sans text-xs text-muted-foreground">
               {computersLoading ? (
-                'Detecting...'
+                t('onboardingDetecting')
               ) : myComputer ? (
                 <span>
                   <Monitor className="mr-1 inline h-3 w-3" />
-                  {myComputer.name} — online
+                  {myComputer.name} — {t('online')}
                 </span>
               ) : joinableComputers.length > 0 ? (
                 <div className="mt-1 space-y-1">
@@ -126,25 +175,25 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
                       {claimingId === c.id ? (
                         <Spinner size="sm" />
                       ) : (
-                        <span className="text-brutal-primary font-bold">Connect</span>
+                        <span className="text-brutal-primary font-bold">{t('onboardingConnect')}</span>
                       )}
                     </button>
                   ))}
                 </div>
               ) : (
                 <span className="text-brutal-danger">
-                  No computer detected.{' '}
+                  {t('onboardingNoComputer')}{' '}
                   <button
                     type="button"
                     onClick={() => refetch()}
                     className="inline-flex items-center gap-0.5 font-bold underline hover:text-brutal-primary"
                   >
                     <RefreshCw className="h-3 w-3" />
-                    Retry
+                    {t('retry')}
                   </button>
                   {' · '}
                   <Link href="/computers" className="font-bold underline hover:text-brutal-primary">
-                    Add Computer
+                    {t('onboardingAddComputer')}
                   </Link>
                 </span>
               )}
@@ -159,28 +208,27 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
           </div>
           <div className="min-w-0 flex-1">
             <p className="font-heading text-sm font-bold text-foreground">
-              Select Runtime CLI
+              {t('onboardingSelectTool')}
             </p>
             <p className="mb-2 font-sans text-xs text-muted-foreground">
-              Pick the AI CLI tool installed on your computer.
+              {t('onboardingSelectToolDesc')}
             </p>
             {!cliLoaded ? (
               <Spinner size="sm" />
             ) : cliError ? (
               <p className="font-mono text-xs text-brutal-danger">
-                Could not detect CLI status. Check that the runtime daemon is online.
+                {t('onboardingToolDetectError')}
               </p>
             ) : hasAvailableRuntime ? (
               <Select
                 options={runtimeOptions}
                 value={selectedRuntime}
                 onChange={setSelectedRuntime}
-                placeholder="Choose a CLI backend..."
+                placeholder={t('onboardingChooseTool')}
               />
             ) : (
               <p className="font-mono text-xs text-brutal-danger">
-                No supported CLI runtime detected. Install Claude Code, Codex, or
-                another supported tool.
+                {t('onboardingNoTool')}
               </p>
             )}
           </div>
@@ -203,12 +251,12 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
           </div>
           <div className="min-w-0">
             <p className="font-heading text-sm font-bold text-foreground">
-              {done ? 'Lucy is Ready!' : 'Create Lucy'}
+              {done ? t('onboardingLucyReady') : t('onboardingCreateLucy')}
             </p>
             <p className="font-sans text-xs text-muted-foreground">
               {done
-                ? 'Lucy has joined the channel. Start chatting below!'
-                : 'Create your onboarding agent to help you get set up.'}
+                ? t('onboardingLucyReadyDesc')
+                : t('onboardingCreateLucyDesc')}
             </p>
 
             {!done && (
@@ -223,12 +271,12 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
                   {isCreating ? (
                     <>
                       <Spinner size="sm" />
-                      Creating Lucy...
+                      {t('onboardingCreatingLucy')}
                     </>
                   ) : (
                     <>
                       <Sparkles className="h-3.5 w-3.5" />
-                      Create Lucy
+                      {t('onboardingCreateLucy')}
                     </>
                   )}
                 </Button>

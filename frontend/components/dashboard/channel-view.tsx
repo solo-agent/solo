@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Users, Loader2, SquareCheckBig, Plus, Network, Maximize2, Minimize2, BrainCircuit, Sparkles, CalendarClock, Pin, Settings2 } from 'lucide-react';
+import { Users, Loader2, SquareCheckBig, Plus, Network, Maximize2, Minimize2, BrainCircuit, Sparkles, CalendarClock, Pin, Settings2, FolderOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
 import { useThinkingSpace } from '@/lib/hooks/use-thinking-space';
@@ -42,6 +42,7 @@ import { WizardCard } from '@/components/onboarding/wizard-card';
 import { t } from '@/lib/i18n';
 import { useWorkspace } from '@/lib/workspace-context';
 import { useAuth } from '@/lib/auth-context';
+import { useComputers } from '@/lib/hooks/use-computers';
 import type { AgentDetailTarget, AgentRelationship, Channel, Message, Task, TaskArtifact, TaskStatus } from '@/lib/types';
 
 type ArtifactPreview = TaskArtifact & { previewUrl: string };
@@ -185,10 +186,39 @@ export function ChannelView({
   const { showToast } = useToast();
   const { activeWorkspace } = useWorkspace();
   const { user } = useAuth();
+  const { computers } = useComputers();
   const [moderation, setModeration] = useState<ModerationStatus | null>(null);
   const [mutedMembers, setMutedMembers] = useState<MutedMember[]>([]);
   const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>([]);
   const [moderationOpen, setModerationOpen] = useState(false);
+  const [projectComputerId, setProjectComputerId] = useState(channel.project_computer_id ?? '');
+  const [projectPath, setProjectPath] = useState(channel.project_path ?? '');
+  const [boundProjectPath, setBoundProjectPath] = useState(channel.project_path ?? '');
+  const [projectBindingBusy, setProjectBindingBusy] = useState(false);
+
+  useEffect(() => {
+    setProjectComputerId(channel.project_computer_id ?? '');
+    setProjectPath(channel.project_path ?? '');
+    setBoundProjectPath(channel.project_path ?? '');
+  }, [channel.id, channel.project_computer_id, channel.project_path]);
+
+  const saveProjectBinding = useCallback(async (clear = false) => {
+    setProjectBindingBusy(true);
+    try {
+      const updated = await apiClient.patch<Channel>(`/api/v1/channels/${channel.id}`, {
+        project_computer_id: clear ? '' : projectComputerId,
+        project_path: clear ? '' : projectPath.trim(),
+      });
+      setProjectComputerId(updated.project_computer_id ?? '');
+      setProjectPath(updated.project_path ?? '');
+      setBoundProjectPath(updated.project_path ?? '');
+      showToast(t(clear ? 'channelProjectCleared' : 'channelProjectSaved'), 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : t('channelProjectSaveError'), 'error');
+    } finally {
+      setProjectBindingBusy(false);
+    }
+  }, [channel.id, projectComputerId, projectPath, showToast]);
 
   const loadModeration = useCallback(async () => {
     if (channel.type !== 'channel') return;
@@ -1028,6 +1058,12 @@ export function ChannelView({
                   {isThinking ? t('thinkingCurrentBranch') : t('taskChannel')}
                 </span>
                 <h2 className="truncate font-heading text-lg font-bold text-foreground">{isThinking ? selectedThinkingNode?.title ?? channel.name : channel.name}</h2>
+                {!isThinking && boundProjectPath && (
+                  <span className="hidden max-w-56 items-center gap-1 truncate border border-black bg-brutal-info-light px-1.5 py-0.5 font-mono text-[9px] font-bold sm:flex" title={boundProjectPath}>
+                    <FolderOpen className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{boundProjectPath}</span>
+                  </span>
+                )}
                 {isThinking && selectedThinkingNode?.agent_name && (
                   <span className="truncate border border-black bg-brutal-info-light px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase">{selectedThinkingNode.agent_name}</span>
                 )}
@@ -1456,6 +1492,47 @@ export function ChannelView({
           <DialogCloseButton onClick={() => setModerationOpen(false)} />
         </DialogHeader>
         <div className="space-y-4">
+          <section className="border-2 border-black bg-brutal-info-light p-3 shadow-brutal-sm">
+            <div className="mb-1 flex items-center gap-2 font-heading text-sm font-bold">
+              <FolderOpen className="h-4 w-4" />
+              {t('channelProjectFolder')}
+            </div>
+            <p className="mb-3 font-body text-xs text-muted-foreground">{t('channelProjectFolderDesc')}</p>
+            <div className="space-y-2">
+              <label className="block font-heading text-xs font-bold" htmlFor="channel-project-computer">{t('channelProjectComputer')}</label>
+              <select
+                id="channel-project-computer"
+                className="w-full border-2 border-black bg-white p-2 font-body text-sm"
+                value={projectComputerId}
+                onChange={(event) => setProjectComputerId(event.target.value)}
+              >
+                <option value="">{t('channelProjectChooseComputer')}</option>
+                {computers
+                  .filter((computer) => computer.pairing_status === 'paired' || computer.status === 'online' || computer.id === projectComputerId)
+                  .map((computer) => (
+                    <option key={computer.id} value={computer.id}>{computer.status === 'online' ? '●' : '○'} {computer.name}</option>
+                  ))}
+              </select>
+              <label className="block font-heading text-xs font-bold" htmlFor="channel-project-path">{t('channelProjectPath')}</label>
+              <input
+                id="channel-project-path"
+                className="w-full border-2 border-black bg-white p-2 font-mono text-sm"
+                value={projectPath}
+                onChange={(event) => setProjectPath(event.target.value)}
+                placeholder={t('channelProjectPathPlaceholder')}
+                maxLength={2048}
+              />
+              <p className="font-body text-[11px] text-muted-foreground">{t('channelProjectPathHint')}</p>
+              <div className="flex justify-end gap-2 pt-1">
+                {boundProjectPath && (
+                  <Button type="button" variant="outline" size="sm" disabled={projectBindingBusy} onClick={() => void saveProjectBinding(true)}>{t('channelProjectClear')}</Button>
+                )}
+                <Button type="button" size="sm" disabled={projectBindingBusy || !projectComputerId || !projectPath.trim()} onClick={() => void saveProjectBinding()}>
+                  {projectBindingBusy ? t('saving') : t('channelProjectSave')}
+                </Button>
+              </div>
+            </div>
+          </section>
           <div>
             <label className="mb-1 block font-heading text-sm font-bold">{t('channelWhoCanPost')}</label>
             <select

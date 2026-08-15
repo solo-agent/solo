@@ -78,15 +78,35 @@ export interface ApiResponseBody<T = unknown> {
 const STORAGE_KEY_ACCESS_TOKEN = 'access_token';
 const STORAGE_KEY_REFRESH_TOKEN = 'refresh_token';
 const STORAGE_KEY_ACTIVE_WORKSPACE = 'solo_active_workspace_id';
+const STORAGE_KEY_AUTH_USER = 'solo_authenticated_user_id';
+const STORAGE_KEY_USER_WORKSPACE_PREFIX = 'solo_active_workspace_id:';
 export const PUBLIC_WORKSPACE_ID = '00000000-0000-0000-0000-000000000001';
 
 export function getActiveWorkspaceId(): string {
   if (typeof window === 'undefined') return PUBLIC_WORKSPACE_ID;
+  const userId = localStorage.getItem(STORAGE_KEY_AUTH_USER);
+  if (userId) {
+    return localStorage.getItem(`${STORAGE_KEY_USER_WORKSPACE_PREFIX}${userId}`) || PUBLIC_WORKSPACE_ID;
+  }
   return localStorage.getItem(STORAGE_KEY_ACTIVE_WORKSPACE) || PUBLIC_WORKSPACE_ID;
 }
 
-export function setStoredActiveWorkspaceId(workspaceId: string): void {
+export function getStoredActiveWorkspaceIdForUser(userId: string): string | null {
+  if (typeof window === 'undefined' || !userId) return null;
+  return localStorage.getItem(`${STORAGE_KEY_USER_WORKSPACE_PREFIX}${userId}`);
+}
+
+export function setStoredActiveWorkspaceId(workspaceId: string, userId?: string): void {
   localStorage.setItem(STORAGE_KEY_ACTIVE_WORKSPACE, workspaceId);
+  const resolvedUserId = userId || localStorage.getItem(STORAGE_KEY_AUTH_USER);
+  if (resolvedUserId) {
+    localStorage.setItem(`${STORAGE_KEY_USER_WORKSPACE_PREFIX}${resolvedUserId}`, workspaceId);
+  }
+}
+
+export function setStoredAuthenticatedUserId(userId: string): void {
+  if (typeof window === 'undefined' || !userId) return;
+  localStorage.setItem(STORAGE_KEY_AUTH_USER, userId);
 }
 
 /** 默认的 localStorage token 读取/写入函数 */
@@ -238,7 +258,7 @@ export class ApiClient {
 
     try {
       response = await fetch(url, { ...options, headers });
-    } catch (err) {
+    } catch {
       // 网络错误（断网、DNS 解析失败等）
       throw new ApiError(
         t('apiNetworkError'),
@@ -248,7 +268,8 @@ export class ApiClient {
     }
 
     // ---- 401 处理：自动 refresh token 并重试 ----
-    if (response.status === 401 && retryCount === 0) {
+    const isAuthEndpoint = path.startsWith('/api/v1/auth/');
+    if (response.status === 401 && retryCount === 0 && !!accessToken && !isAuthEndpoint) {
       const newToken = await this.refreshAccessToken();
 
       if (newToken) {
@@ -337,6 +358,13 @@ export class ApiClient {
       });
 
       if (!response.ok) {
+        if (response.status >= 500) {
+          throw new ApiError(
+            this.defaultErrorMessage(response.status),
+            response.status,
+            this.defaultErrorCode(response.status),
+          );
+        }
         return null;
       }
 
@@ -356,9 +384,12 @@ export class ApiClient {
       }
 
       return null;
-    } catch {
-      // 网络错误时不抛异常，让调用方处理
-      return null;
+    } catch (err) {
+      // A temporary network/server failure must not erase a valid seven-day
+      // login. Only an explicit 4xx response from the refresh endpoint means
+      // the refresh token is no longer usable.
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(t('apiNetworkError'), 0, 'NETWORK_ERROR');
     }
   }
 
@@ -433,9 +464,10 @@ export function createApiClient(config?: Partial<ApiClientConfig>): ApiClient {
  * 同时写入 access_token 和 refresh_token。
  * 所有 token 写入都应通过此函数，避免各处直接操作 localStorage。
  */
-export function setAuthTokens(access: string, refresh: string): void {
+export function setAuthTokens(access: string, refresh: string, userId?: string): void {
   defaultTokenStorage.setAccessToken(access);
   defaultTokenStorage.setRefreshToken(refresh);
+  if (userId) setStoredAuthenticatedUserId(userId);
 }
 
 /**
@@ -443,6 +475,7 @@ export function setAuthTokens(access: string, refresh: string): void {
  */
 export function clearAuthTokens(): void {
   defaultTokenStorage.removeTokens();
+  localStorage.removeItem(STORAGE_KEY_AUTH_USER);
 }
 
 // ---- 全局单例 ----

@@ -100,6 +100,10 @@ func (s *AgentService) dispatchOrQueueMessageWake(ctx context.Context, daemon *D
 	taskReq.WakeFirstMessageSeq = firstSeq
 	taskReq.WakeLatestMessageSeq = latestSeq
 	taskReq.WakeMessageCount = positiveMessageSeqCount(taskReq.Messages)
+	if err := s.applyChannelProjectBinding(ctx, daemon, &taskReq); err != nil {
+		s.broadcastAgentError(taskReq.ThreadID, taskReq.ChannelID, ag.ID, ag.Name, err.Error())
+		return
+	}
 
 	run, queued, err := s.claimMessageWake(ctx, daemon, taskReq, ag, firstSeq, latestSeq)
 	if err != nil {

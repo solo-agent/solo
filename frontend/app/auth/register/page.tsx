@@ -83,8 +83,10 @@ export default function RegisterPage() {
         display_name: data.displayName || data.email.split("@")[0],
       });
       if (localVerificationCode) {
-        await verifyRegistration({ email: data.email, code: localVerificationCode });
-        router.push('/dashboard?lucy=1');
+        const onboardingChannelId = await verifyRegistration({ email: data.email, code: localVerificationCode });
+        router.replace(onboardingChannelId
+          ? `/dashboard?channel=${encodeURIComponent(onboardingChannelId)}&onboarding=1`
+          : '/dashboard?lucy=1');
         return;
       }
       setPending(data);
@@ -108,8 +110,10 @@ export default function RegisterPage() {
     clearError();
     submittingRef.current = true;
     try {
-      await verifyRegistration({ email: pending.email, code: verificationCode.trim() });
-      router.push('/dashboard?lucy=1');
+      const onboardingChannelId = await verifyRegistration({ email: pending.email, code: verificationCode.trim() });
+      router.replace(onboardingChannelId
+        ? `/dashboard?channel=${encodeURIComponent(onboardingChannelId)}&onboarding=1`
+        : '/dashboard?lucy=1');
     } catch {
       submittingRef.current = false;
     }

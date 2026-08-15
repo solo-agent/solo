@@ -389,45 +389,6 @@ export function AgentForm({
         </div>
       )}
 
-      {/* Role Template Selector (SOLO-210-F) */}
-      <div className="space-y-3">
-        <Label>{t('agentFormRoleTemplate')}</Label>
-        <div className="flex flex-wrap gap-2">
-          {ROLE_TEMPLATES.map((template) => {
-            const isSelected = selectedTemplateKey === template.key;
-            return (
-              <button
-                key={template.key}
-                type="button"
-                onClick={() => handleTemplateSelect(template)}
-                className={cn(
-                  'border-2 border-black px-3 py-2 text-left transition-all',
-                  isSelected
-                    ? 'bg-brutal-primary shadow-brutal-sm translate-x-0.5 translate-y-0.5'
-                    : 'bg-white shadow-brutal-sm hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal',
-                )}
-              >
-                <span className="font-heading text-xs font-bold leading-tight whitespace-nowrap">
-                  {template.name}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* System Prompt */}
-      <div className="space-y-2">
-        <Label htmlFor="system_prompt">{t('agentFormSystemPrompt')}</Label>
-        <Textarea
-          id="system_prompt"
-          placeholder={t('agentFormSystemPromptPlaceholder')}
-          className="min-h-24 resize-y"
-          aria-label={t('agentFormSystemPrompt')}
-          {...register('system_prompt')}
-        />
-      </div>
-
       <div className="border-y-2 border-black py-3">
         <button
           type="button"
@@ -447,6 +408,39 @@ export function AgentForm({
 
         {showAdvanced && (
           <div className="mt-5 space-y-6">
+            <div className="space-y-3">
+              <Label>{t('agentFormRoleTemplate')}</Label>
+              <div className="flex flex-wrap gap-2">
+                {ROLE_TEMPLATES.map((template) => {
+                  const isSelected = selectedTemplateKey === template.key;
+                  return (
+                    <button
+                      key={template.key}
+                      type="button"
+                      onClick={() => handleTemplateSelect(template)}
+                      className={cn(
+                        'border-2 border-black px-3 py-2 text-left transition-all',
+                        isSelected
+                          ? 'translate-x-0.5 translate-y-0.5 bg-brutal-primary shadow-brutal-sm'
+                          : 'bg-white shadow-brutal-sm hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal',
+                      )}
+                    >
+                      <span className="whitespace-nowrap font-heading text-xs font-bold leading-tight">{template.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="system_prompt">{t('agentFormSystemPrompt')}</Label>
+              <Textarea
+                id="system_prompt"
+                placeholder={t('agentFormSystemPromptPlaceholder')}
+                className="min-h-24 resize-y"
+                aria-label={t('agentFormSystemPrompt')}
+                {...register('system_prompt')}
+              />
+            </div>
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <Terminal className="h-4 w-4" />
@@ -474,7 +468,7 @@ export function AgentForm({
       </div>
 
       {/* Submit */}
-      <div className="flex items-center justify-end border-t-2 border-black pt-3">
+      <div className="sticky bottom-0 z-10 -mx-2 flex items-center justify-end border-t-2 border-black bg-card px-2 py-3">
         <Button
           type="submit"
           variant="success"

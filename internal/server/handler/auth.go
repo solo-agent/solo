@@ -282,11 +282,10 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete old session (single-use refresh token)
-	_, _ = h.pool.Exec(r.Context(),
-		`DELETE FROM sessions WHERE token_hash = $1`, tokenHash)
-
-	// Issue new tokens
+	// Keep the refresh token stable for the lifetime of this database session.
+	// Rotating it here made concurrent browser requests race: the first refresh
+	// deleted the token while another tab/request was still using it, which
+	// forced an otherwise valid user back to the login page.
 	newAccessToken, err := auth.GenerateAccessToken(userID, email, displayName)
 	if err != nil {
 		slog.Error("failed to generate access token", "error", err)
@@ -294,26 +293,9 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newRefreshToken, err := auth.GenerateRefreshToken()
-	if err != nil {
-		slog.Error("failed to generate refresh token", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to generate token")
-		return
-	}
-
-	// Store new session
-	_, err = h.pool.Exec(r.Context(),
-		`INSERT INTO sessions (user_id, token_hash, expires_at)
-		 VALUES ($1, $2, $3)`,
-		userID, auth.HashToken(newRefreshToken), time.Now().Add(auth.RefreshTokenDuration),
-	)
-	if err != nil {
-		slog.Error("failed to store new session", "error", err)
-	}
-
 	writeJSON(w, http.StatusOK, AuthResponse{
 		AccessToken:  newAccessToken,
-		RefreshToken: newRefreshToken,
+		RefreshToken: refreshToken,
 		ExpiresIn:    int64(auth.AccessTokenDuration.Seconds()),
 	})
 }

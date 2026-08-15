@@ -1,10 +1,15 @@
+"use client";
+
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Decoration } from "@/components/ui/decoration";
+import { LanguageSwitcher } from "@/components/language-switcher";
+import { t } from "@/lib/i18n";
 
 export default function HomePage() {
   return (
     <div className="relative min-h-screen flex flex-col items-center justify-center bg-brutal-cream px-4 overflow-hidden">
+      <div className="absolute right-4 top-4 z-20"><LanguageSwitcher /></div>
       {/* v3.2 (Phase 2): grid texture behind the hero gives the page
           a faint engineering-paper feel. Low contrast (6% black lines)
           so the foreground still wins. */}
@@ -57,7 +62,7 @@ export default function HomePage() {
           Solo
         </h1>
         <p className="font-sans text-lg text-muted-foreground mb-8 max-w-sm mx-auto">
-          <strong className="text-foreground">Solo Agent</strong> is an open-source workspace where you and AI coding agents collaborate as a real team.
+          {t('homeTagline')}
         </p>
 
         {/* Feature highlights — v3.1: use border-brutal-4 + shadow-brutal-2xl
@@ -69,27 +74,27 @@ export default function HomePage() {
             className="border-brutal-4 p-3.5 bg-white shadow-brutal-2xl"
             style={{ transform: 'rotate(-0.6deg)' }}
           >
-            <div className="font-heading font-black text-sm mb-1">Agents</div>
+            <div className="font-heading font-black text-sm mb-1">{t('homeAgentsTitle')}</div>
             <p className="font-sans text-xs text-muted-foreground">
-              Persistent AI teammates with memory, roles, and skills.
+              {t('homeAgentsDesc')}
             </p>
           </div>
           <div
             className="border-brutal-4 p-3.5 bg-white shadow-brutal-2xl"
             style={{ transform: 'rotate(0.4deg)' }}
           >
-            <div className="font-heading font-black text-sm mb-1">Channels</div>
+            <div className="font-heading font-black text-sm mb-1">{t('homeChannelsTitle')}</div>
             <p className="font-sans text-xs text-muted-foreground">
-              Organize work in channels — chat, coordinate, ship.
+              {t('homeChannelsDesc')}
             </p>
           </div>
           <div
             className="border-brutal-4 p-3.5 bg-white shadow-brutal-2xl"
             style={{ transform: 'rotate(-0.3deg)' }}
           >
-            <div className="font-heading font-black text-sm mb-1">Tasks</div>
+            <div className="font-heading font-black text-sm mb-1">{t('homeTasksTitle')}</div>
             <p className="font-sans text-xs text-muted-foreground">
-              Track work from message to completion with clear ownership.
+              {t('homeTasksDesc')}
             </p>
           </div>
         </div>
@@ -107,17 +112,17 @@ export default function HomePage() {
                 className="w-full text-base py-3 animate-pulse-brutal"
                 style={{ boxShadow: '7px 7px 0 0 var(--color-brutal-primary)' }}
               >
-                Get Started
+                {t('homeGetStarted')}
               </Button>
             </Link>
           </div>
           <p className="font-sans text-sm text-muted-foreground">
-            Already have an account?{" "}
+            {t('homeExistingAccount')}{" "}
             <Link
               href="/auth/login"
               className="font-heading font-bold text-black hover:text-brutal-primary transition-colors"
             >
-              Sign In
+              {t('homeSignIn')}
             </Link>
           </p>
           <p className="font-sans text-sm text-muted-foreground">

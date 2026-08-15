@@ -101,11 +101,18 @@ func TestOfficialTemplateCatalogContainsDocumentedAgencyWorkflows(t *testing.T) 
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(templates) != 32 {
-		t.Fatalf("official template count = %d, want 32", len(templates))
+	if len(templates) != 35 {
+		t.Fatalf("official template count = %d, want 35", len(templates))
 	}
 	collaborationCount := 0
+	starterCount := 0
 	for _, template := range templates {
+		if strings.HasPrefix(template.ID, "starter-") {
+			starterCount++
+			if template.MemberCount != 1 {
+				t.Fatalf("starter template %q member count = %d, want 1", template.ID, template.MemberCount)
+			}
+		}
 		loaded, err := svc.Get(context.Background(), template.ID)
 		if err != nil {
 			t.Fatalf("Get(%q): %v", template.ID, err)
@@ -130,11 +137,14 @@ func TestOfficialTemplateCatalogContainsDocumentedAgencyWorkflows(t *testing.T) 
 	if collaborationCount == 0 {
 		t.Fatal("official templates contain no collaboration relationships")
 	}
+	if starterCount != 3 {
+		t.Fatalf("starter template count = %d, want 3", starterCount)
+	}
 	englishTemplates, err := svc.List(context.Background(), "en")
 	if err != nil {
 		t.Fatalf("List(en): %v", err)
 	}
-	if len(englishTemplates) != 32 || englishTemplates[0].Name == templates[0].Name {
+	if len(englishTemplates) != 35 || englishTemplates[0].Name == templates[0].Name {
 		t.Fatalf("English template catalog was not localized")
 	}
 }

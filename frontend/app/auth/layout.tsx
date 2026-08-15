@@ -1,3 +1,5 @@
+import { LanguageSwitcher } from '@/components/language-switcher';
+
 export default function AuthLayout({
   children,
 }: {
@@ -5,6 +7,7 @@ export default function AuthLayout({
 }) {
   return (
     <div className="relative min-h-screen flex items-center justify-center bg-brutal-cream px-4 overflow-hidden">
+      <div className="absolute right-4 top-4 z-20"><LanguageSwitcher /></div>
       <div
         className="absolute inset-0 bg-halftone pointer-events-none opacity-60"
         aria-hidden

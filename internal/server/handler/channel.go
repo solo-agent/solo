@@ -46,21 +46,25 @@ type ApplyChannelTemplateRequest struct {
 }
 
 type UpdateChannelRequest struct {
-	Name        *string `json:"name,omitempty"`
-	Description *string `json:"description,omitempty"`
+	Name              *string `json:"name,omitempty"`
+	Description       *string `json:"description,omitempty"`
+	ProjectComputerID *string `json:"project_computer_id,omitempty"`
+	ProjectPath       *string `json:"project_path,omitempty"`
 }
 
 type ChannelResponse struct {
-	ID               string `json:"id"`
-	WorkspaceID      string `json:"workspace_id"`
-	Name             string `json:"name"`
-	Description      string `json:"description,omitempty"`
-	Type             string `json:"type"`
-	CreatedBy        string `json:"created_by"`
-	IsArchived       bool   `json:"is_archived"`
-	SourceTemplateID string `json:"source_template_id,omitempty"`
-	CreatedAt        string `json:"created_at"`
-	UpdatedAt        string `json:"updated_at"`
+	ID                string `json:"id"`
+	WorkspaceID       string `json:"workspace_id"`
+	Name              string `json:"name"`
+	Description       string `json:"description,omitempty"`
+	Type              string `json:"type"`
+	CreatedBy         string `json:"created_by"`
+	IsArchived        bool   `json:"is_archived"`
+	SourceTemplateID  string `json:"source_template_id,omitempty"`
+	ProjectComputerID string `json:"project_computer_id,omitempty"`
+	ProjectPath       string `json:"project_path,omitempty"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
 }
 
 // Create handles POST /api/v1/channels
@@ -353,7 +357,8 @@ func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.pool.Query(r.Context(),
 		`SELECT c.id, c.workspace_id::text, c.name, COALESCE(c.description, ''), c.type, c.created_by,
-		        c.is_archived, COALESCE(c.source_template_id, ''), c.created_at, c.updated_at
+		        c.is_archived, COALESCE(c.source_template_id, ''), COALESCE(c.project_computer_id::text, ''),
+		        COALESCE(c.project_path, ''), c.created_at, c.updated_at
 		 FROM channels c
 		 JOIN channel_members cm ON cm.channel_id = c.id
 		 WHERE cm.member_type = 'user' AND cm.member_id = $1 AND c.workspace_id = $2 AND c.is_archived = false AND c.type = 'channel'
@@ -372,7 +377,7 @@ func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 		var ch ChannelResponse
 		var createdAt, updatedAt time.Time
 		err := rows.Scan(&ch.ID, &ch.WorkspaceID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
-			&ch.IsArchived, &ch.SourceTemplateID, &createdAt, &updatedAt)
+			&ch.IsArchived, &ch.SourceTemplateID, &ch.ProjectComputerID, &ch.ProjectPath, &createdAt, &updatedAt)
 		if err != nil {
 			slog.Error("failed to scan channel row", "error", err)
 			continue
@@ -398,7 +403,8 @@ func (h *ChannelHandler) GetLucy(w http.ResponseWriter, r *http.Request) {
 	var createdAt, updatedAt time.Time
 	err := h.pool.QueryRow(r.Context(), `
 		SELECT c.id, c.workspace_id::text, c.name, COALESCE(c.description, ''), c.type, c.created_by,
-		       c.is_archived, COALESCE(c.source_template_id, ''), c.created_at, c.updated_at
+		       c.is_archived, COALESCE(c.source_template_id, ''), COALESCE(c.project_computer_id::text, ''),
+		       COALESCE(c.project_path, ''), c.created_at, c.updated_at
 		  FROM channels c
 		  JOIN channel_members cm
 		    ON cm.channel_id = c.id
@@ -419,7 +425,7 @@ func (h *ChannelHandler) GetLucy(w http.ResponseWriter, r *http.Request) {
 	 LIMIT 1
 	`, userID, serverworkspace.ID(r)).Scan(
 		&ch.ID, &ch.WorkspaceID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
-		&ch.IsArchived, &ch.SourceTemplateID, &createdAt, &updatedAt,
+		&ch.IsArchived, &ch.SourceTemplateID, &ch.ProjectComputerID, &ch.ProjectPath, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		if isNotFound(err) {
@@ -470,11 +476,12 @@ func (h *ChannelHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var createdAt, updatedAt time.Time
 	err = h.pool.QueryRow(r.Context(),
 		`SELECT id, workspace_id::text, name, COALESCE(description, ''), type, created_by,
-		        is_archived, COALESCE(source_template_id, ''), created_at, updated_at
+		        is_archived, COALESCE(source_template_id, ''), COALESCE(project_computer_id::text, ''),
+		        COALESCE(project_path, ''), created_at, updated_at
 		 FROM channels WHERE id = $1 AND workspace_id = $2 AND is_archived = false`,
 		channelID, serverworkspace.ID(r),
 	).Scan(&ch.ID, &ch.WorkspaceID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
-		&ch.IsArchived, &ch.SourceTemplateID, &createdAt, &updatedAt)
+		&ch.IsArchived, &ch.SourceTemplateID, &ch.ProjectComputerID, &ch.ProjectPath, &createdAt, &updatedAt)
 	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "channel not found")
@@ -558,6 +565,45 @@ func (h *ChannelHandler) Update(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "a channel with this name already exists")
 			return
 		}
+		*req.Name = name
+	}
+
+	bindingProvided := req.ProjectComputerID != nil || req.ProjectPath != nil
+	if bindingProvided {
+		if req.ProjectComputerID == nil || req.ProjectPath == nil {
+			writeError(w, http.StatusBadRequest, "project computer and project path must be updated together")
+			return
+		}
+		computerID := strings.TrimSpace(*req.ProjectComputerID)
+		projectPath := strings.TrimSpace(*req.ProjectPath)
+		if (computerID == "") != (projectPath == "") {
+			writeError(w, http.StatusBadRequest, "project computer and project path must both be set or both be cleared")
+			return
+		}
+		if len(projectPath) > 2048 {
+			writeError(w, http.StatusBadRequest, "project path must be 2048 characters or less")
+			return
+		}
+		if computerID != "" {
+			var canUseComputer bool
+			if err := h.pool.QueryRow(r.Context(), `
+				SELECT EXISTS(
+					SELECT 1
+					  FROM computers c
+					  LEFT JOIN computer_members cm ON cm.computer_id = c.id AND cm.user_id = $2
+					 WHERE c.id = $1 AND (c.owner_id = $2 OR cm.user_id IS NOT NULL)
+				)`, computerID, userID).Scan(&canUseComputer); err != nil {
+				slog.Error("failed to validate project computer", "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to update channel")
+				return
+			}
+			if !canUseComputer {
+				writeError(w, http.StatusBadRequest, "project computer is not available to this user")
+				return
+			}
+		}
+		*req.ProjectComputerID = computerID
+		*req.ProjectPath = projectPath
 	}
 
 	// Build dynamic update query
@@ -567,13 +613,16 @@ func (h *ChannelHandler) Update(w http.ResponseWriter, r *http.Request) {
 		`UPDATE channels SET
 			name = COALESCE($1, name),
 			description = COALESCE($2, description),
+			project_computer_id = CASE WHEN $5 THEN NULLIF($3, '')::uuid ELSE project_computer_id END,
+			project_path = CASE WHEN $5 THEN NULLIF($4, '') ELSE project_path END,
 			updated_at = now()
-			 WHERE id = $3 AND workspace_id = $4 AND is_archived = false
+			 WHERE id = $6 AND workspace_id = $7 AND is_archived = false
 			 RETURNING id, workspace_id::text, name, COALESCE(description, ''), type, created_by,
-			           is_archived, COALESCE(source_template_id, ''), created_at, updated_at`,
-		req.Name, req.Description, channelID, serverworkspace.ID(r),
+			           is_archived, COALESCE(source_template_id, ''), COALESCE(project_computer_id::text, ''),
+			           COALESCE(project_path, ''), created_at, updated_at`,
+		req.Name, req.Description, req.ProjectComputerID, req.ProjectPath, bindingProvided, channelID, serverworkspace.ID(r),
 	).Scan(&ch.ID, &ch.WorkspaceID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
-		&ch.IsArchived, &ch.SourceTemplateID, &createdAt, &updatedAt)
+		&ch.IsArchived, &ch.SourceTemplateID, &ch.ProjectComputerID, &ch.ProjectPath, &createdAt, &updatedAt)
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "a channel with this name already exists")
