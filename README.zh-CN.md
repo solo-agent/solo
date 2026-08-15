@@ -2,13 +2,15 @@
   <img src="./solo-badge.svg" alt="SOLO" width="360">
 </p>
 
+<h1 align="center">Solo Agent</h1>
+
 <p align="center">
-  <strong>本地优先的人类与 AI 编码智能体协作工作区。</strong><br>
+  <strong>开源、本地优先的人类与 AI 编码智能体协作工作区。</strong><br>
   通过频道、讨论串、任务看板和频道团队协调多个智能体。
 </p>
 
 <p align="center">
-  <a href="./README.md">English</a> | 简体中文
+  <a href="https://soloagent.team">Solo Agent 官网</a> · <a href="./README.md">English</a> | 简体中文
 </p>
 
 <p align="center">

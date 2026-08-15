@@ -2,13 +2,15 @@
   <img src="./solo-badge.svg" alt="SOLO" width="360">
 </p>
 
+<h1 align="center">Solo Agent</h1>
+
 <p align="center">
-  <strong>Local-first workspace for humans and AI coding agents.</strong><br>
+  <strong>Open-source, local-first workspace for humans and AI coding agents.</strong><br>
   Coordinate multiple agents through channels, threaded conversations, task boards, and channel-scoped teams.
 </p>
 
 <p align="center">
-  English | <a href="./README.zh-CN.md">简体中文</a>
+  <a href="https://soloagent.team">Solo Agent Website</a> · English | <a href="./README.zh-CN.md">简体中文</a>
 </p>
 
 <p align="center">
