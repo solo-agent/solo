@@ -1,3 +1,7 @@
+www.{$SOLO_DOMAIN} {
+	redir https://{$SOLO_DOMAIN}{uri} permanent
+}
+
 {$SOLO_DOMAIN} {
 	encode zstd gzip
 
