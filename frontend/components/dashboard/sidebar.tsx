@@ -10,12 +10,10 @@ import { usePathname } from 'next/navigation';
 import { ChevronDown, Plus, Sparkles } from 'lucide-react';
 import { ChannelList } from './channel-list';
 import { NAV_ITEMS } from '@/components/ui/navbar';
-import { UserAvatar } from '@/components/ui/user-avatar';
 import { PanelToggleIcon, panelToggleButtonClass } from '@/components/ui/button';
 import { selectableRowClass, selectableRowIconClass } from '@/components/ui/selectable-row';
 import { t } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/lib/auth-context';
 import type { Channel, DMChannel } from '@/lib/types';
 import { WorkspaceSwitcher } from '@/components/workspaces/workspace-switcher';
 import { WorkspacePeople } from '@/components/workspaces/workspace-people';
@@ -53,9 +51,7 @@ export function Sidebar({
   onToggleCollapsed,
 }: SidebarProps) {
   const pathname = usePathname();
-  const { user } = useAuth();
   const [channelsExpanded, setChannelsExpanded] = useState(true);
-  const userName = user?.display_name || user?.email || t('navSettings');
 
   if (isCollapsed) {
     return (
@@ -190,42 +186,6 @@ export function Sidebar({
           </div>
         )}
         <WorkspacePeople />
-      </div>
-
-      <div className="flex flex-col gap-0.5 border-t-2 border-black pt-1">
-        <Link
-          href="/settings"
-          className={selectableRowClass(
-            pathname.startsWith('/settings'),
-            cn(
-              'w-full text-left',
-              pathname.startsWith('/settings') ? 'bg-white' : 'hover:bg-white/50',
-            ),
-          )}
-          aria-label={t('navSettings')}
-          aria-current={pathname.startsWith('/settings') ? 'page' : undefined}
-        >
-          {user ? (
-            <UserAvatar
-              userId={user.id || 'user'}
-              name={user.display_name}
-              avatarUrl={user.avatar_url}
-              size="sm"
-            />
-          ) : (
-            <span className={selectableRowIconClass('bg-white font-heading text-sm font-black')}>
-              S
-            </span>
-          )}
-          <span className="min-w-0">
-            <span className="block truncate font-heading text-sm font-black text-black">
-              {t('navSettings')}
-            </span>
-            <span className="block truncate font-mono text-[10px] font-bold text-black/55">
-              {userName}
-            </span>
-          </span>
-        </Link>
       </div>
     </aside>
   );

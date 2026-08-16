@@ -43,8 +43,7 @@ import {
   detailSectionClass,
   detailSectionTitleClass,
 } from '@/components/ui/detail-section';
-import { AppFrame } from '@/components/layout/app-frame';
-import { ComputersLeftColumn } from '@/components/computers/computers-left-column';
+import { PersonalFrame } from '@/components/layout/personal-frame';
 import { relativeTime, formatDateTime } from '@/lib/utils/time';
 import { cn } from '@/lib/utils';
 import type { Computer } from '@/lib/types';
@@ -258,26 +257,17 @@ export default function ComputersPage() {
   }
 
   return (
-    <AppFrame>
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-      <div className="w-[220px] flex-shrink-0">
-        <ComputersLeftColumn
-          computers={computers}
-          isLoading={isLoading}
-          error={error}
-          onRetry={refetch}
-          selectedComputerId={selectedComputerId}
-          onComputerClick={handleComputerClick}
-        />
-      </div>
-
-      <main className="flex flex-1 flex-col overflow-hidden bg-white">
-        {/* Top bar (page label lives in the left column) */}
-        <div className="flex flex-shrink-0 items-center justify-end h-14 border-b-2 border-black bg-brutal-cream px-4">
+    <PersonalFrame>
+      <div className="flex h-full flex-col overflow-hidden">
+        <div className="flex flex-shrink-0 items-center justify-between gap-4 border-b-2 border-black bg-brutal-cream px-8 py-6">
+          <div>
+            <h1 className="font-heading text-2xl font-black">{t('personalComputers')}</h1>
+            <p className="mt-1 font-body text-sm text-muted-foreground">{t('personalComputerDesc')}</p>
+          </div>
           <Button type="button" size="sm" onClick={openPairDialog}><Plus className="mr-1.5 h-4 w-4" />{t('computersAddComputer')}</Button>
         </div>
         <div className="flex-1 overflow-y-auto bg-white">
-          <div className={cn('w-full', selectedComputer ? '' : 'px-6 py-6')}>
+          <div className="mx-auto w-full max-w-5xl px-8 py-6">
             {/* Error state */}
             {error && (
               <div className="mb-6 space-y-2">
@@ -292,11 +282,11 @@ export default function ComputersPage() {
 
             {/* Loading skeleton */}
             {isLoading && (
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                {[1, 2, 3, 4].map((i) => (
+              <div className="space-y-3">
+                {[1, 2].map((i) => (
                   <div
                     key={i}
-                    className="border-2 border-black bg-white p-6 shadow-brutal"
+                    className="border-2 border-black bg-white p-5 shadow-brutal"
                   >
                     <div className="flex items-center gap-3">
                       <Skeleton className="h-10 w-10 rounded-none" />
@@ -305,10 +295,6 @@ export default function ComputersPage() {
                         <Skeleton className="h-3 w-20 rounded-none" />
                       </div>
                       <Skeleton className="h-3 w-3 rounded-full" />
-                    </div>
-                    <div className="mt-4 space-y-2">
-                      <Skeleton className="h-3 w-40 rounded-none" />
-                      <Skeleton className="h-3 w-32 rounded-none" />
                     </div>
                   </div>
                 ))}
@@ -330,40 +316,69 @@ export default function ComputersPage() {
               />
             )}
 
-            {/* Empty state — computers exist, none selected */}
-            {!isLoading && !error && computers.length > 0 && !selectedComputer && (
-              <EmptyState
-                variant="dashed"
-                title={t('computersSelectOne')}
-              />
+            {!isLoading && !error && computers.length > 0 && (
+              <div className="space-y-3">
+                {computers.map((computer) => {
+                  const isOnline = computer.status === 'online';
+                  const osInfo = getOsIcon(computer.os);
+                  return (
+                    <button
+                      key={computer.id}
+                      type="button"
+                      onClick={() => handleComputerClick(computer.id)}
+                      aria-current={computer.id === selectedComputerId ? 'true' : undefined}
+                      className={cn(
+                        'flex w-full items-center gap-4 border-2 border-black bg-white px-5 py-4 text-left shadow-brutal-sm transition-[transform,box-shadow]',
+                        computer.id === selectedComputerId
+                          ? 'bg-brutal-info-light shadow-brutal'
+                          : 'hover:-translate-y-px hover:shadow-brutal',
+                      )}
+                    >
+                      <span className="flex h-12 w-12 shrink-0 items-center justify-center border-2 border-black bg-brutal-cream shadow-brutal-sm">
+                        {osInfo.icon}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2">
+                          <span className="truncate font-heading text-base font-black">{computer.name}</span>
+                          <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full border border-black', isOnline ? 'bg-brutal-success' : 'bg-brutal-muted')} aria-hidden="true" />
+                        </span>
+                        <span className="mt-1 block truncate font-mono text-[11px] text-muted-foreground">
+                          {[osInfo.label, computer.hostname, isOnline ? t('online') : t('offline')].filter(Boolean).join(' · ')}
+                        </span>
+                      </span>
+                      <ChevronDown className={cn('h-4 w-4 shrink-0 transition-transform', computer.id === selectedComputerId && 'rotate-180')} aria-hidden="true" />
+                    </button>
+                  );
+                })}
+              </div>
             )}
 
             {/* Computer detail card */}
             {!isLoading && !error && selectedComputer && (
-              <ComputerCard
-                key={selectedComputer.id}
-                computer={selectedComputer}
-                editingId={editingId}
-                editName={editName}
-                isSaving={isSaving}
-                editInputRef={editInputRef}
-                onStartEdit={handleStartEdit}
-                onCancelEdit={handleCancelEdit}
-                onSaveName={handleSaveName}
-                onEditKeyDown={handleEditKeyDown}
-                onEditNameChange={setEditName}
-                onCreateEnrollment={showEnrollment}
-                onRevokeCredential={async (computer) => { await revokeCredential(computer.id); }}
-                onDelete={(computer) => {
-                  setDeleteError(null);
-                  setDeleteTarget(computer);
-                }}
-              />
+              <div className="card-brutal-heavy mt-6 overflow-hidden">
+                <ComputerCard
+                  key={selectedComputer.id}
+                  computer={selectedComputer}
+                  editingId={editingId}
+                  editName={editName}
+                  isSaving={isSaving}
+                  editInputRef={editInputRef}
+                  onStartEdit={handleStartEdit}
+                  onCancelEdit={handleCancelEdit}
+                  onSaveName={handleSaveName}
+                  onEditKeyDown={handleEditKeyDown}
+                  onEditNameChange={setEditName}
+                  onCreateEnrollment={showEnrollment}
+                  onRevokeCredential={async (computer) => { await revokeCredential(computer.id); }}
+                  onDelete={(computer) => {
+                    setDeleteError(null);
+                    setDeleteTarget(computer);
+                  }}
+                />
+              </div>
             )}
           </div>
         </div>
-      </main>
-
       </div>
 
       <Dialog open={pairDialogOpen} onOpenChange={setPairDialogOpen} width="lg">
@@ -438,7 +453,7 @@ export default function ComputersPage() {
           </Button>
         </DialogFooter>
       </Dialog>
-    </AppFrame>
+    </PersonalFrame>
   );
 }
 

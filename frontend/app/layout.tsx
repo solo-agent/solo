@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { Inter, Literata, Space_Grotesk, Space_Mono } from "next/font/google";
 import { AuthProvider } from "@/lib/auth-context";
 import { t } from '@/lib/i18n';
@@ -57,7 +58,7 @@ export default function RootLayout({
       className={`${inter.variable} ${spaceGrotesk.variable} ${spaceMono.variable} ${literata.variable}`}
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <Script id="solo-theme-init" strategy="beforeInteractive">{themeScript}</Script>
       </head>
       <body className="min-h-screen antialiased">
         <AuthProvider>

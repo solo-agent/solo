@@ -174,6 +174,13 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 		r.Get("/embed", workspaceHandler.GuestEmbed)
 		r.Get("/channels/{channelID}/messages", workspaceHandler.GuestMessages)
 	})
+	// Member invite links expose only a small preview before authentication;
+	// accepting one requires a normal user session but no active Workspace scope.
+	r.Route("/api/v1/workspace-invite-links", func(r chi.Router) {
+		r.Use(middleware.RateLimiter(60.0/60.0, 30))
+		r.Get("/{token}", workspaceHandler.InviteLinkInfo)
+		r.With(middleware.Auth(pool)).Post("/{token}/accept", workspaceHandler.AcceptInviteLink)
+	})
 
 	// ---- Protected routes (rate-limited: 100 req/s) ----
 	r.Group(func(r chi.Router) {
@@ -202,6 +209,11 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 				r.Route("/invitations", func(r chi.Router) {
 					r.Get("/", workspaceHandler.Invitations)
 					r.Delete("/{invitationID}", workspaceHandler.DeleteInvitation)
+				})
+				r.Route("/invite-links", func(r chi.Router) {
+					r.Get("/", workspaceHandler.InviteLinks)
+					r.Post("/", workspaceHandler.CreateInviteLink)
+					r.Delete("/{linkID}", workspaceHandler.RevokeInviteLink)
 				})
 				r.Route("/join-rules", func(r chi.Router) {
 					r.Get("/", workspaceHandler.JoinRules)

@@ -6,6 +6,8 @@ import { Sidebar } from '@/components/dashboard/sidebar';
 import { useChannels } from '@/lib/hooks/use-channels';
 import { useDM } from '@/lib/hooks/use-dm';
 import { CreateChannelModal } from '@/components/dashboard/create-channel-modal';
+import { WorkspaceManageDialog } from '@/components/workspaces/workspace-manage-dialog';
+import { WorkspaceRail } from '@/components/workspaces/workspace-rail';
 import type { CreateChannelInput } from '@/lib/types';
 
 /**
@@ -40,6 +42,7 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen min-w-[1024px] overflow-hidden bg-brutal-cream">
+      <WorkspaceRail />
       <Sidebar
         channels={channels}
         lucyChannel={lucyChannel}
@@ -67,6 +70,7 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
         onChooseTemplate={() => router.push('/templates?create=1')}
         onAskLucy={() => router.push('/dashboard?lucy=1')}
       />
+      <WorkspaceManageDialog />
     </div>
   );
 }

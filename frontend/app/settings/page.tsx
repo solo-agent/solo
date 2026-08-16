@@ -9,7 +9,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Mail, ArrowLeft, LogOut, Globe2, Palette, Check, Upload, RotateCcw } from 'lucide-react';
+import { User, Mail, LogOut, Globe2, Palette, Check, Upload, RotateCcw } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { getLocale, languageOptions, setLocale, t, type Locale } from '@/lib/i18n';
 import { defaultThemeId, getStoredTheme, setTheme, themeOptions, type ThemeId } from '@/lib/theme';
@@ -27,7 +27,7 @@ import {
   userAvatarPresetValue,
 } from '@/components/ui/user-avatar';
 import { BudgetSettingsCard } from '@/components/budget/budget-settings-card';
-import { WorkspaceSettingsCard } from '@/components/workspaces/workspace-members-dialog';
+import { PersonalFrame } from '@/components/layout/personal-frame';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -131,20 +131,9 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-8">
-      {/* Back button */}
-      <div className="mb-6">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.push('/dashboard')}
-          className="gap-1.5"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          {t('backToDashboard')}
-        </Button>
-      </div>
-
+    <PersonalFrame>
+      <div className="h-full overflow-y-auto bg-white">
+      <div className="mx-auto max-w-4xl px-6 py-8">
       {/* Page header — v3.2 (Phase 2): h1 gets sticker rotation +
           the title container uses card-brutal-heavy for hero weight. */}
       <div className="mb-8">
@@ -380,7 +369,6 @@ export default function SettingsPage() {
           </div>
 
           <BudgetSettingsCard />
-          <WorkspaceSettingsCard />
 
           {/* Logout */}
           <div className="mt-6">
@@ -396,6 +384,8 @@ export default function SettingsPage() {
           </div>
         </>
       )}
-    </div>
+      </div>
+      </div>
+    </PersonalFrame>
   );
 }
