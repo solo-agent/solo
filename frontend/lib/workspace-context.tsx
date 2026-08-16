@@ -28,6 +28,13 @@ export interface Workspace {
   updated_at: string;
 }
 
+export type ManageTabKey = 'overview' | 'members' | 'invites';
+
+interface ManageDialogState {
+  open: boolean;
+  tab: ManageTabKey;
+}
+
 interface WorkspaceContextValue {
   workspaces: Workspace[];
   activeWorkspace: Workspace | null;
@@ -37,6 +44,9 @@ interface WorkspaceContextValue {
   createWorkspace: (name: string, icon?: string) => Promise<Workspace>;
   deleteWorkspace: (workspaceId: string) => Promise<void>;
   refetch: () => Promise<void>;
+  manageDialog: ManageDialogState;
+  openManage: (tab?: ManageTabKey) => void;
+  closeManage: () => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -47,6 +57,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [activeId, setActiveId] = useState(PUBLIC_WORKSPACE_ID);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [manageDialog, setManageDialog] = useState<ManageDialogState>({ open: false, tab: 'overview' });
 
   const load = useCallback(async () => {
     if (!isAuthenticated) {
@@ -79,10 +90,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [authLoading, load]);
 
   const switchWorkspace = useCallback((workspaceId: string) => {
-    if (!workspaces.some((item) => item.id === workspaceId)) return;
     setStoredActiveWorkspaceId(workspaceId, user?.id);
     setActiveId(workspaceId);
-  }, [user?.id, workspaces]);
+  }, [user?.id]);
 
   const createWorkspace = useCallback(async (name: string, icon?: string) => {
     const workspace = await apiClient.post<Workspace>('/api/v1/workspaces', { name, icon });
@@ -104,7 +114,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [activeId, user?.id, workspaces]);
 
   const activeWorkspace = workspaces.find((item) => item.id === activeId) ?? null;
-  const value = useMemo(() => ({ workspaces, activeWorkspace, isLoading, error, switchWorkspace, createWorkspace, deleteWorkspace, refetch: load }), [workspaces, activeWorkspace, isLoading, error, switchWorkspace, createWorkspace, deleteWorkspace, load]);
+  const openManage = useCallback((tab: ManageTabKey = 'overview') => {
+    setManageDialog({ open: true, tab });
+  }, []);
+  const closeManage = useCallback(() => {
+    setManageDialog((prev) => ({ ...prev, open: false }));
+  }, []);
+  const value = useMemo(() => ({
+    workspaces, activeWorkspace, isLoading, error,
+    switchWorkspace, createWorkspace, deleteWorkspace, refetch: load,
+    manageDialog, openManage, closeManage,
+  }), [workspaces, activeWorkspace, isLoading, error, switchWorkspace, createWorkspace, deleteWorkspace, load, manageDialog, openManage, closeManage]);
 
   return (
     <WorkspaceContext.Provider value={value}>

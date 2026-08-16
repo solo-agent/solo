@@ -6,7 +6,6 @@ import { usePathname } from 'next/navigation';
 import {
   Gauge,
   LayoutTemplate,
-  Monitor,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
@@ -15,7 +14,6 @@ import { UserAvatar } from '@/components/ui/user-avatar';
 export const NAV_ITEMS = [
   { href: '/templates', icon: LayoutTemplate, labelKey: 'navTemplates', key: 'templates' },
   { href: '/observability/live', icon: Gauge, labelKey: 'observabilityDashboard', key: 'dashboard' },
-  { href: '/computers', icon: Monitor, labelKey: 'navComputers', key: 'computers' },
 ] as const;
 
 interface NavBarProps {

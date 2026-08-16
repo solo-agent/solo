@@ -31,6 +31,7 @@ export default function LoginPage() {
   const router = useRouter();
   const { login, isAuthenticated, isLoading, error, clearError } = useAuth();
   const [signupAvailable, setSignupAvailable] = useState(true);
+  const [returnTo, setReturnTo] = useState('/dashboard');
 
   const {
     register,
@@ -46,10 +47,15 @@ export default function LoginPage() {
 
   // If already authenticated, redirect to dashboard
   useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('return_to');
+    if (requested && requested.startsWith('/') && !requested.startsWith('//')) setReturnTo(requested);
+  }, []);
+
+  useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      router.push("/dashboard");
+      router.push(returnTo);
     }
-  }, [isAuthenticated, isLoading, router]);
+  }, [isAuthenticated, isLoading, returnTo, router]);
 
   useEffect(() => {
     apiClient.get<{ signup_available: boolean }>('/api/v1/auth/config')
@@ -61,7 +67,7 @@ export default function LoginPage() {
     clearError();
     try {
       await login({ email: data.email, password: data.password });
-      router.push("/dashboard");
+      router.push(returnTo);
     } catch {
       // Error is set in auth context, displayed below
     }
@@ -185,7 +191,7 @@ export default function LoginPage() {
         <p className="font-sans text-sm text-muted-foreground">
           {t('noAccount')}{" "}
           <Link
-            href="/auth/register"
+            href={returnTo === '/dashboard' ? '/auth/register' : `/auth/register?return_to=${encodeURIComponent(returnTo)}`}
             className="font-heading font-bold text-black hover:text-brutal-primary transition-colors"
           >
             {t('register')}

@@ -11,6 +11,8 @@ import { useChannelMembers } from "@/lib/hooks/use-channel-members";
 import { useDM } from "@/lib/hooks/use-dm";
 import { useDMTasks } from "@/lib/hooks/use-tasks";
 import { Sidebar } from "@/components/dashboard/sidebar";
+import { WorkspaceRail } from "@/components/workspaces/workspace-rail";
+import { WorkspaceManageDialog } from "@/components/workspaces/workspace-manage-dialog";
 import { CreateChannelModal } from "@/components/dashboard/create-channel-modal";
 import { CreateDMModal } from "@/components/dashboard/create-dm-modal";
 import { DeleteChannelDialog } from "@/components/dashboard/delete-channel-dialog";
@@ -387,6 +389,7 @@ function DashboardContent() {
 
   return (
     <div className="flex h-screen min-w-[1024px] overflow-hidden bg-brutal-cream">
+      <WorkspaceRail />
       <Sidebar
         isCollapsed={isSidebarCollapsed}
         onToggleCollapsed={() => setIsSidebarCollapsed((value) => !value)}
@@ -413,6 +416,7 @@ function DashboardContent() {
       </main>
 
       {/* Modals */}
+      <WorkspaceManageDialog />
       <CreateChannelModal
         open={isCreateModalOpen}
         onOpenChange={setIsCreateModalOpen}

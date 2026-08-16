@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { ChevronDown, UserPlus } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
@@ -11,6 +10,7 @@ import { selectableRowClass } from '@/components/ui/selectable-row';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
+import { t } from '@/lib/i18n';
 import {
   Dialog,
   DialogCloseButton,
@@ -31,7 +31,7 @@ interface WorkspaceMember {
 
 export function WorkspacePeople() {
   const { user } = useAuth();
-  const { activeWorkspace, refetch } = useWorkspace();
+  const { activeWorkspace, refetch, openManage } = useWorkspace();
   const { showToast } = useToast();
   const [expanded, setExpanded] = useState(true);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -47,7 +47,7 @@ export function WorkspacePeople() {
     try {
       setMembers(await apiClient.get<WorkspaceMember[]>(`/api/v1/workspaces/${activeWorkspace.id}/members?limit=5`));
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Failed to load People', 'error');
+      showToast(error instanceof Error ? error.message : t('workspacePeopleLoadFailed'), 'error');
     }
   }, [activeWorkspace, showToast]);
 
@@ -62,9 +62,9 @@ export function WorkspacePeople() {
       setInviteOpen(false);
       await load();
       await refetch();
-      showToast('Person added or pre-invited', 'success');
+      showToast(t('workspacePersonAdded'), 'success');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Failed to invite person', 'error');
+      showToast(error instanceof Error ? error.message : t('workspaceInviteFailed'), 'error');
     } finally {
       setBusy(false);
     }
@@ -77,11 +77,11 @@ export function WorkspacePeople() {
       <div className="flex items-center gap-2 px-3 py-2">
         <button type="button" onClick={() => setExpanded((value) => !value)} className="flex min-w-0 flex-1 items-center gap-2 text-left" aria-expanded={expanded}>
           <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 transition-transform', !expanded && '-rotate-90')} />
-          <span className="min-w-0 flex-1 font-heading text-xs font-black uppercase tracking-wider text-black/70">People</span>
+          <span className="min-w-0 flex-1 font-heading text-xs font-black uppercase tracking-wider text-black/70">{t('workspacePeopleHeading')}</span>
           <span className="font-mono text-xs font-bold tabular-nums text-black/45">{memberCount}</span>
         </button>
         {canAdmin && (
-          <button type="button" onClick={() => { setExpanded(true); setInviteOpen(true); }} className="flex h-7 w-7 shrink-0 items-center justify-center border-2 border-black bg-white shadow-brutal-sm transition-[transform,box-shadow] hover:-translate-y-px hover:shadow-brutal" aria-label="Invite a person" title="Invite a person">
+          <button type="button" onClick={() => { setExpanded(true); setInviteOpen(true); }} className="flex h-7 w-7 shrink-0 items-center justify-center border-2 border-black bg-white shadow-brutal-sm transition-[transform,box-shadow] hover:-translate-y-px hover:shadow-brutal" aria-label={t('workspaceInviteAria')} title={t('workspaceInviteAria')}>
             <UserPlus className="h-3.5 w-3.5" />
           </button>
         )}
@@ -94,19 +94,19 @@ export function WorkspacePeople() {
               <div key={member.user_id} data-testid="workspace-person" className={selectableRowClass(false, 'cursor-default bg-transparent hover:bg-white/50')}>
                 <UserAvatar userId={member.user_id} name={member.display_name} avatarUrl={member.avatar_url} size="sm" />
                 <span className="min-w-0 flex-1 truncate font-body text-sm">{member.display_name}</span>
-                <span className="font-mono text-[9px] font-bold uppercase text-black/55">{member.role}</span>
-                {member.user_id === user?.id && <span className="font-mono text-[9px] text-black/50">(you)</span>}
+                <span className="font-mono text-[9px] font-bold uppercase text-black/55">{t(`workspaceRole${member.role.charAt(0).toUpperCase()}${member.role.slice(1)}` as 'workspaceRoleOwner' | 'workspaceRoleAdmin' | 'workspaceRoleMember')}</span>
+                {member.user_id === user?.id && <span className="font-mono text-[9px] text-black/50">{t('workspaceYouSuffix')}</span>}
               </div>
             ))}
           </div>
           {memberCount > members.length && (
             canAdmin ? (
-              <Link href="/settings#workspace" className="mx-3 mt-1 block py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-black/50 hover:text-black hover:underline">
-                Manage all {memberCount} in Settings →
-              </Link>
+              <button type="button" onClick={() => openManage('members')} className="mx-3 mt-1 block py-1 text-left font-mono text-[10px] font-bold uppercase tracking-wider text-black/50 hover:text-black hover:underline">
+                {t('workspaceManageAllLink', { count: memberCount })}
+              </button>
             ) : (
               <p className="mx-3 mt-1 py-1 font-mono text-[10px] font-bold uppercase tracking-wider text-black/45">
-                +{memberCount - members.length} more people
+                {t('workspaceMorePeople', { count: memberCount - members.length })}
               </p>
             )
           )}
@@ -115,26 +115,26 @@ export function WorkspacePeople() {
 
       <Dialog open={inviteOpen} onOpenChange={(open) => { if (!busy) setInviteOpen(open); }} width="sm">
         <DialogHeader>
-          <DialogTitle>Invite to {activeWorkspace.name}</DialogTitle>
+          <DialogTitle>{t('workspaceInviteTitle', { name: activeWorkspace.name })}</DialogTitle>
           <DialogCloseButton onClick={() => setInviteOpen(false)} />
         </DialogHeader>
         <DialogDescription>
-          Existing Solo users join immediately. New email addresses receive a pending invitation.
+          {t('workspaceInviteDesc')}
         </DialogDescription>
-        <label htmlFor="workspace-invite-email" className="mt-5 block font-mono text-xs font-bold uppercase tracking-wider">Email</label>
+        <label htmlFor="workspace-invite-email" className="mt-5 block font-mono text-xs font-bold uppercase tracking-wider">{t('workspaceInviteEmailLabel')}</label>
         <Input
           id="workspace-invite-email"
           type="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           onKeyDown={(event) => { if (event.key === 'Enter') void invite(); }}
-          placeholder="user@example.com"
-          aria-label="Invite email"
+          placeholder={t('workspaceInviteEmailPlaceholder')}
+          aria-label={t('workspaceInviteEmailAria')}
           className="mt-2"
           autoFocus
         />
         <fieldset className="mt-5">
-          <legend className="font-mono text-xs font-bold uppercase tracking-wider">Role</legend>
+          <legend className="font-mono text-xs font-bold uppercase tracking-wider">{t('workspaceInviteRoleLegend')}</legend>
           <div className="mt-2 grid grid-cols-2 gap-2">
             {(['member', 'admin'] as const).map((value) => (
               activeWorkspace.role === 'owner' || value === 'member' ?
@@ -148,9 +148,9 @@ export function WorkspacePeople() {
                 )}
                 aria-pressed={role === value}
               >
-                <span className="block font-heading text-sm font-black capitalize">{value}</span>
+                <span className="block font-heading text-sm font-black">{t(`workspaceRole${value.charAt(0).toUpperCase()}${value.slice(1)}` as 'workspaceRoleAdmin' | 'workspaceRoleMember')}</span>
                 <span className="mt-1 block font-body text-xs text-black/60">
-                  {value === 'admin' ? 'Can manage people and Workspace settings.' : 'Can collaborate in shared Channels.'}
+                  {t(value === 'admin' ? 'workspaceRoleAdminDesc' : 'workspaceRoleMemberDesc')}
                 </span>
               </button>
               : null
@@ -158,9 +158,9 @@ export function WorkspacePeople() {
           </div>
         </fieldset>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setInviteOpen(false)} disabled={busy}>Cancel</Button>
+          <Button variant="outline" onClick={() => setInviteOpen(false)} disabled={busy}>{t('cancel')}</Button>
           <Button onClick={() => void invite()} disabled={busy || !email.trim()}>
-            {busy ? 'Inviting…' : 'Invite person'}
+            {busy ? t('workspaceInvitingButton') : t('workspaceInvitePersonButton')}
           </Button>
         </DialogFooter>
       </Dialog>

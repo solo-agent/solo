@@ -45,6 +45,7 @@ export default function RegisterPage() {
   const [verificationCode, setVerificationCode] = useState('');
   const [resendIn, setResendIn] = useState(0);
   const [signupAvailable, setSignupAvailable] = useState(true);
+  const [returnTo, setReturnTo] = useState('/dashboard');
 
   const {
     register,
@@ -62,10 +63,15 @@ export default function RegisterPage() {
 
   // If already authenticated, redirect to dashboard
   useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('return_to');
+    if (requested && requested.startsWith('/') && !requested.startsWith('//')) setReturnTo(requested);
+  }, []);
+
+  useEffect(() => {
     if (!isLoading && isAuthenticated && !submittingRef.current) {
-      router.push("/dashboard");
+      router.push(returnTo);
     }
-  }, [isAuthenticated, isLoading, router]);
+  }, [isAuthenticated, isLoading, returnTo, router]);
 
   useEffect(() => {
     apiClient.get<{ signup_available: boolean }>('/api/v1/auth/config')
@@ -84,7 +90,7 @@ export default function RegisterPage() {
       });
       if (localVerificationCode) {
         const onboardingChannelId = await verifyRegistration({ email: data.email, code: localVerificationCode });
-        router.replace(onboardingChannelId
+        router.replace(returnTo !== '/dashboard' ? returnTo : onboardingChannelId
           ? `/dashboard?channel=${encodeURIComponent(onboardingChannelId)}&onboarding=1`
           : '/dashboard?lucy=1');
         return;
@@ -111,7 +117,7 @@ export default function RegisterPage() {
     submittingRef.current = true;
     try {
       const onboardingChannelId = await verifyRegistration({ email: pending.email, code: verificationCode.trim() });
-      router.replace(onboardingChannelId
+      router.replace(returnTo !== '/dashboard' ? returnTo : onboardingChannelId
         ? `/dashboard?channel=${encodeURIComponent(onboardingChannelId)}&onboarding=1`
         : '/dashboard?lucy=1');
     } catch {
@@ -192,7 +198,7 @@ export default function RegisterPage() {
       <div className="card-brutal-heavy p-8 w-full space-y-5">
         <h1 className="font-heading text-3xl font-bold">{t('registrationClosed')}</h1>
         <p className="font-sans text-sm text-muted-foreground">{t('registrationClosedHint')}</p>
-        <Link href="/auth/login" className="btn-brutal inline-flex w-full items-center justify-center">{t('backToLogin')}</Link>
+        <Link href={returnTo === '/dashboard' ? '/auth/login' : `/auth/login?return_to=${encodeURIComponent(returnTo)}`} className="btn-brutal inline-flex w-full items-center justify-center">{t('backToLogin')}</Link>
       </div>
     );
   }
@@ -347,7 +353,7 @@ export default function RegisterPage() {
         <p className="font-sans text-sm text-muted-foreground">
           {t('hasAccount')}{" "}
           <Link
-            href="/auth/login"
+            href={returnTo === '/dashboard' ? '/auth/login' : `/auth/login?return_to=${encodeURIComponent(returnTo)}`}
             className="font-heading font-bold text-black hover:text-brutal-primary transition-colors"
           >
             {t('login')}

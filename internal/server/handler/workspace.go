@@ -64,6 +64,27 @@ type WorkspaceInvitationResponse struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type WorkspaceInviteLinkResponse struct {
+	ID        string  `json:"id"`
+	Role      string  `json:"role"`
+	ExpiresAt string  `json:"expires_at"`
+	RevokedAt *string `json:"revoked_at,omitempty"`
+	UseCount  int     `json:"use_count"`
+	CreatedAt string  `json:"created_at"`
+	URL       string  `json:"url,omitempty"`
+}
+
+type WorkspaceInviteLinkInfoResponse struct {
+	WorkspaceID       string `json:"workspace_id"`
+	WorkspaceName     string `json:"workspace_name"`
+	WorkspaceIcon     string `json:"workspace_icon"`
+	InvitedBy         string `json:"invited_by"`
+	ExpiresAt         string `json:"expires_at"`
+	TargetChannelID   string `json:"target_channel_id,omitempty"`
+	TargetChannelName string `json:"target_channel_name,omitempty"`
+	MemberCount       int    `json:"member_count"`
+}
+
 type WorkspaceJoinRuleResponse struct {
 	ID        string `json:"id"`
 	RuleType  string `json:"rule_type"`
@@ -863,6 +884,217 @@ func (h *WorkspaceHandler) DeleteInvitation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *WorkspaceHandler) CreateInviteLink(w http.ResponseWriter, r *http.Request) {
+	adminID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	workspaceID := chi.URLParam(r, "workspaceID")
+	if !h.hasRole(r, workspaceID, adminID, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "Workspace admin required")
+		return
+	}
+	var req struct {
+		ExpiresInDays int `json:"expires_in_days"`
+	}
+	if r.Body != nil && json.NewDecoder(r.Body).Decode(&req) != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.ExpiresInDays == 0 {
+		req.ExpiresInDays = 7
+	}
+	if req.ExpiresInDays < 1 || req.ExpiresInDays > 30 {
+		writeError(w, http.StatusBadRequest, "invite link expiry must be between 1 and 30 days")
+		return
+	}
+	var targetChannelID string
+	if err := h.pool.QueryRow(r.Context(), `
+		SELECT COALESCE((
+			SELECT id::text FROM channels
+			 WHERE workspace_id=$1 AND type='channel' AND is_archived=false
+			 ORDER BY CASE WHEN name='general' THEN 0 ELSE 1 END, created_at
+			 LIMIT 1
+		), '')`, workspaceID).Scan(&targetChannelID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to find invite destination")
+		return
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create invite link")
+		return
+	}
+	token := base64.RawURLEncoding.EncodeToString(raw)
+	hash := sha256.Sum256([]byte(token))
+	var item WorkspaceInviteLinkResponse
+	var expiresAt, createdAt time.Time
+	err := h.pool.QueryRow(r.Context(), `
+		INSERT INTO workspace_invite_links(workspace_id,token_hash,created_by,target_channel_id,expires_at)
+		VALUES($1,$2,$3,NULLIF($4,'')::uuid,now()+($5*interval '1 day'))
+		RETURNING id::text,role,expires_at,created_at,use_count`, workspaceID, hash[:], adminID, targetChannelID, req.ExpiresInDays).
+		Scan(&item.ID, &item.Role, &expiresAt, &createdAt, &item.UseCount)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create invite link")
+		return
+	}
+	item.ExpiresAt = expiresAt.Format(time.RFC3339)
+	item.CreatedAt = createdAt.Format(time.RFC3339)
+	item.URL = "/invite/" + token
+	writeJSON(w, http.StatusCreated, item)
+}
+
+func (h *WorkspaceHandler) InviteLinks(w http.ResponseWriter, r *http.Request) {
+	adminID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	workspaceID := chi.URLParam(r, "workspaceID")
+	if !h.hasRole(r, workspaceID, adminID, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "Workspace admin required")
+		return
+	}
+	rows, err := h.pool.Query(r.Context(), `
+		SELECT id::text,role,expires_at,revoked_at,use_count,created_at
+		  FROM workspace_invite_links
+		 WHERE workspace_id=$1 AND revoked_at IS NULL AND expires_at>now()
+		 ORDER BY created_at DESC`, workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list invite links")
+		return
+	}
+	defer rows.Close()
+	items := make([]WorkspaceInviteLinkResponse, 0)
+	for rows.Next() {
+		var item WorkspaceInviteLinkResponse
+		var expiresAt, createdAt time.Time
+		var revokedAt *time.Time
+		if rows.Scan(&item.ID, &item.Role, &expiresAt, &revokedAt, &item.UseCount, &createdAt) == nil {
+			item.ExpiresAt, item.CreatedAt = expiresAt.Format(time.RFC3339), createdAt.Format(time.RFC3339)
+			if revokedAt != nil {
+				formatted := revokedAt.Format(time.RFC3339)
+				item.RevokedAt = &formatted
+			}
+			items = append(items, item)
+		}
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (h *WorkspaceHandler) RevokeInviteLink(w http.ResponseWriter, r *http.Request) {
+	adminID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	workspaceID := chi.URLParam(r, "workspaceID")
+	if !h.hasRole(r, workspaceID, adminID, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "Workspace admin required")
+		return
+	}
+	result, err := h.pool.Exec(r.Context(), `
+		UPDATE workspace_invite_links SET revoked_at=COALESCE(revoked_at,now())
+		 WHERE id=$1 AND workspace_id=$2 AND revoked_at IS NULL`, chi.URLParam(r, "linkID"), workspaceID)
+	if err != nil || result.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "invite link not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *WorkspaceHandler) InviteLinkInfo(w http.ResponseWriter, r *http.Request) {
+	token := strings.TrimSpace(chi.URLParam(r, "token"))
+	hash := sha256.Sum256([]byte(token))
+	var item WorkspaceInviteLinkInfoResponse
+	var expiresAt time.Time
+	err := h.pool.QueryRow(r.Context(), `
+		SELECT l.workspace_id::text,w.name,w.icon,
+		       COALESCE(NULLIF(u.display_name,''),u.email),l.expires_at,
+		       COALESCE(l.target_channel_id::text,''),COALESCE(tc.name,''),
+		       (SELECT count(*) FROM workspace_members wm WHERE wm.workspace_id=l.workspace_id)
+		  FROM workspace_invite_links l
+		  JOIN workspaces w ON w.id=l.workspace_id AND w.deleted_at IS NULL
+		  JOIN users u ON u.id=l.created_by
+		  LEFT JOIN channels tc ON tc.id=l.target_channel_id AND tc.is_archived=false AND tc.type='channel'
+		 WHERE l.token_hash=$1 AND l.revoked_at IS NULL AND l.expires_at>now()`, hash[:]).
+		Scan(&item.WorkspaceID, &item.WorkspaceName, &item.WorkspaceIcon, &item.InvitedBy, &expiresAt,
+			&item.TargetChannelID, &item.TargetChannelName, &item.MemberCount)
+	if err != nil {
+		writeError(w, http.StatusGone, "invite link is invalid or expired")
+		return
+	}
+	item.ExpiresAt = expiresAt.Format(time.RFC3339)
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (h *WorkspaceHandler) AcceptInviteLink(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	token := strings.TrimSpace(chi.URLParam(r, "token"))
+	hash := sha256.Sum256([]byte(token))
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to join Workspace")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var workspaceID, role, workspaceName, channelID, channelName string
+	var alreadyMember bool
+	err = tx.QueryRow(r.Context(), `
+		SELECT l.workspace_id::text,l.role,w.name,
+		       COALESCE(l.target_channel_id::text,''),COALESCE(tc.name,''),
+		       EXISTS(SELECT 1 FROM workspace_members wm WHERE wm.workspace_id=l.workspace_id AND wm.user_id=$2)
+		  FROM workspace_invite_links l
+		  JOIN workspaces w ON w.id=l.workspace_id AND w.deleted_at IS NULL
+		  LEFT JOIN channels tc ON tc.id=l.target_channel_id AND tc.is_archived=false AND tc.type='channel'
+		 WHERE l.token_hash=$1 AND l.revoked_at IS NULL AND l.expires_at>now()
+		 FOR UPDATE OF l`, hash[:], userID).Scan(&workspaceID, &role, &workspaceName, &channelID, &channelName, &alreadyMember)
+	if err != nil {
+		writeError(w, http.StatusGone, "invite link is invalid or expired")
+		return
+	}
+	if channelID == "" {
+		_ = tx.QueryRow(r.Context(), `
+			SELECT id::text,name FROM channels
+			 WHERE workspace_id=$1 AND type='channel' AND is_archived=false
+			 ORDER BY CASE WHEN name='general' THEN 0 ELSE 1 END, created_at
+			 LIMIT 1`, workspaceID).Scan(&channelID, &channelName)
+	}
+	if _, err = tx.Exec(r.Context(), `
+		INSERT INTO workspace_members(workspace_id,user_id,role)
+		VALUES($1,$2,$3) ON CONFLICT (workspace_id,user_id) DO NOTHING`, workspaceID, userID, role); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to join Workspace")
+		return
+	}
+	if _, err = tx.Exec(r.Context(), `
+		INSERT INTO channel_members(channel_id,member_type,member_id,role)
+		SELECT id,'user',$2,'member' FROM channels
+		 WHERE workspace_id=$1 AND type='channel' AND is_archived=false
+		ON CONFLICT DO NOTHING`, workspaceID, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to join Workspace channels")
+		return
+	}
+	if !alreadyMember {
+		if _, err = tx.Exec(r.Context(), `
+			UPDATE workspace_invite_links SET use_count=use_count+1,last_used_at=now() WHERE token_hash=$1`, hash[:]); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to record invite link use")
+			return
+		}
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to join Workspace")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"workspace_id": workspaceID, "workspace_name": workspaceName, "already_member": alreadyMember,
+		"channel_id": channelID, "channel_name": channelName,
+	})
 }
 
 func (h *WorkspaceHandler) JoinRules(w http.ResponseWriter, r *http.Request) {
