@@ -152,12 +152,12 @@ export function AgentForm({
           <div className="space-y-1.5">
             <Label htmlFor="name">{t('agentFormName')}</Label>
             <Input id="name" placeholder={t('agentFormNamePlaceholder')} autoFocus {...register('name')} aria-invalid={!!errors.name} />
-            {errors.name && <p className="font-mono text-[11px] text-brutal-danger">{errors.name.message}</p>}
+            {errors.name && <p className="font-body text-[11px] text-brutal-danger">{errors.name.message}</p>}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="description">{t('agentFormDesc')}</Label>
             <Input id="description" placeholder={t('agentFormDescPlaceholder')} {...register('description')} aria-invalid={!!errors.description} />
-            {errors.description && <p className="font-mono text-[11px] text-brutal-danger">{errors.description.message}</p>}
+            {errors.description && <p className="font-body text-[11px] text-brutal-danger">{errors.description.message}</p>}
           </div>
         </div>
       </div>
@@ -193,7 +193,7 @@ export function AgentForm({
             </span>
           </label>
         ))}
-        {errors.computer_id && <p className="font-mono text-[11px] text-brutal-danger">{errors.computer_id.message}</p>}
+        {errors.computer_id && <p className="font-body text-[11px] text-brutal-danger">{errors.computer_id.message}</p>}
         {!computersLoading && selectableComputers.length === 0 && <p className="font-body text-sm text-brutal-danger">{t('agentFormNoPairedComputer')}</p>}
       </fieldset>
 
@@ -222,7 +222,7 @@ export function AgentForm({
             {!item.available && <span className="font-body text-xs text-muted-foreground">{t('computersRuntimeUnavailable')}</span>}
           </label>
         ))}
-        {errors.model_provider && <p className="font-mono text-[11px] text-brutal-danger">{errors.model_provider.message}</p>}
+        {errors.model_provider && <p className="font-body text-[11px] text-brutal-danger">{errors.model_provider.message}</p>}
       </fieldset>
 
       {!detectionLoading && selectedProvider && (

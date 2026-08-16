@@ -134,7 +134,7 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
         <div className="text-center">
           <FolderOpen className="mx-auto h-10 w-10 text-muted-foreground" />
           <p className="mt-2 font-heading text-sm font-bold">{t('agentWorkspaceNoFiles')}</p>
-          <p className="mt-1 font-mono text-xs text-muted-foreground">
+          <p className="mt-1 font-body text-xs text-muted-foreground">
             {t('agentWorkspaceHint')}
           </p>
         </div>
@@ -236,7 +236,7 @@ export function TeamsAgentWorkspace({ agentId }: TeamsAgentWorkspaceProps) {
               <div className="flex h-full items-center justify-center">
                 <div className="border-2 border-black bg-white p-4 text-center shadow-brutal-sm">
                   <FileText className="mx-auto h-6 w-6 text-muted-foreground" />
-                  <p className="mt-2 font-mono text-xs text-muted-foreground">
+                  <p className="mt-2 font-body text-xs text-muted-foreground">
                     Select a file to preview its content
                   </p>
                 </div>

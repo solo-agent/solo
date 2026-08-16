@@ -103,7 +103,7 @@ export function ImageLightbox({ attachment, onClose }: ImageLightboxProps) {
         {loadState === 'error' && (
           <div className="flex flex-col items-center gap-3 p-12 text-white">
             <ImageOff className="h-10 w-10 text-brutal-danger" />
-            <p className="font-mono text-sm">{t('attachmentImageError')}</p>
+            <p className="font-body text-sm">{t('attachmentImageError')}</p>
           </div>
         )}
 

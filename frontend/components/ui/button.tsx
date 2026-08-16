@@ -51,7 +51,7 @@ export interface ButtonProps
 
 export function iconActionClass(className?: string) {
   return cn(
-    "flex h-7 w-7 items-center justify-center border-2 border-black bg-white hover:bg-brutal-primary-light active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all disabled:opacity-50",
+    "flex h-7 w-7 items-center justify-center border-2 border-black bg-white transition-[transform,box-shadow,background-color,opacity] hover:bg-brutal-primary-light active:translate-x-0.5 active:translate-y-0.5 active:shadow-none disabled:opacity-50",
     className,
   );
 }

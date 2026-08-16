@@ -61,7 +61,7 @@ export default function PersonalHomePage() {
               </div>
               <div>
                 {workspacesLoading ? (
-                  <p className="p-5 font-mono text-xs text-muted-foreground">{t('loading')}</p>
+                  <p className="p-5 font-body text-sm text-muted-foreground">{t('loading')}</p>
                 ) : workspaces.length === 0 ? (
                   <p className="p-5 font-body text-sm text-muted-foreground">{t('personalNoWorkspaces')}</p>
                 ) : (
@@ -91,7 +91,7 @@ export default function PersonalHomePage() {
 
             <div className="space-y-6">
               <section className="card-brutal-heavy overflow-hidden">
-                <div className="flex items-center gap-3 border-b-2 border-black bg-brutal-info-light px-5 py-4">
+                <div className="flex items-center gap-3 border-b-2 border-black bg-brutal-primary px-5 py-4">
                   <Monitor className="h-5 w-5" aria-hidden="true" />
                   <h2 className="font-heading text-base font-black">{t('personalComputerTitle')}</h2>
                 </div>
@@ -118,7 +118,7 @@ export default function PersonalHomePage() {
                   ) : !computersLoading ? (
                     <p className="mt-4 font-heading text-base font-bold">{t('personalComputerEmpty')}</p>
                   ) : (
-                    <p className="mt-4 font-mono text-xs text-muted-foreground">{t('loading')}</p>
+                    <p className="mt-4 font-body text-sm text-muted-foreground">{t('loading')}</p>
                   )}
                   <Link href="/computers" className={buttonVariants({ variant: 'outline', size: 'sm', className: 'mt-5' })}>
                     {t('personalOpenComputers')}

@@ -235,7 +235,7 @@ export default function ComputersPage() {
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
           <Spinner size="md" />
-          <p className="font-mono text-sm text-muted-foreground">{t('loading')}</p>
+          <p className="font-body text-sm text-muted-foreground">{t('loading')}</p>
         </div>
       </div>
     );
@@ -410,7 +410,7 @@ export default function ComputersPage() {
               <Button type="button" size="sm" variant="outline" onClick={() => void copyPairingCommand(pairingCommands.installed)}><Copy className="mr-1.5 h-4 w-4" />{t('copy')}</Button>
             </div>
             <pre className="overflow-x-auto border-2 border-black bg-black p-3 font-mono text-xs text-white">{pairingCommands.installed}</pre>
-            <p className="font-mono text-[11px] text-brutal-danger">{t('computersPairOnce')}</p>
+            <p className="font-body text-xs text-brutal-danger">{t('computersPairOnce')}</p>
           </div>
         )}
       </Dialog>

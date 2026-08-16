@@ -99,7 +99,7 @@ export default function TemplateDetailPage() {
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <div className="min-w-0 flex-1">
-            <div className="font-mono text-[10px] font-bold uppercase tracking-widest text-black/50">{t('templateOfficial')}</div>
+            <div className="font-body text-[11px] font-semibold uppercase tracking-wider text-black/50">{t('templateOfficial')}</div>
             <h1 className="truncate font-heading text-xl font-black">{template?.name ?? t('templateLoading')}</h1>
           </div>
           {template && (
@@ -122,7 +122,7 @@ export default function TemplateDetailPage() {
                     <Network className="h-4 w-4" />
                     {t('templatePreviewTitle')}
                   </h2>
-                  <p className="mt-0.5 font-mono text-[10px] text-black/55">{t('templatePreviewDesc')}</p>
+                  <p className="mt-0.5 font-body text-xs text-black/55">{t('templatePreviewDesc')}</p>
                 </div>
                 <div className="flex items-center gap-3">
                     <span className="flex items-center gap-1.5 rounded-md border border-[var(--skin-rule)] bg-[var(--skin-surface)] px-2 py-1 font-mono text-[9px] font-bold uppercase text-black/65 shadow-[var(--archive-shadow-sm)]">
@@ -175,7 +175,7 @@ export default function TemplateDetailPage() {
                       </div>
                     </div>
                     <div className="border-l-2 border-black pl-4">
-                      <div className="font-mono text-[10px] font-bold uppercase tracking-wider text-black/50">{t('templateRoleInstructions')}</div>
+                      <div className="font-body text-[11px] font-semibold uppercase tracking-wider text-black/50">{t('templateRoleInstructions')}</div>
                       <p className="mt-1 font-body text-sm leading-relaxed">{selectedMember.instructions}</p>
                     </div>
                   </div>
@@ -236,7 +236,7 @@ export default function TemplateDetailPage() {
               <p className="mt-2 font-body text-sm leading-relaxed text-black/65">{template.description}</p>
 
               <div className="my-5 border-y-2 border-black py-4">
-                <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-black/50">{t('templateIncludedRoles')}</p>
+                <p className="font-body text-[11px] font-semibold uppercase tracking-wider text-black/50">{t('templateIncludedRoles')}</p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {(template.roles ?? []).map((role) => (
                     <span key={role} className="border-2 border-black bg-brutal-cream px-2 py-1 font-mono text-[10px] font-bold">{role}</span>
@@ -267,7 +267,7 @@ export default function TemplateDetailPage() {
                     </label>
                   </>
                 )}
-                {error && <p className="border-2 border-black bg-brutal-danger-light p-2 font-mono text-xs">{error}</p>}
+                {error && <p className="border-2 border-black bg-brutal-danger-light p-2 font-body text-xs">{error}</p>}
                 <Button
                   type="button"
                   variant="success"
@@ -280,7 +280,7 @@ export default function TemplateDetailPage() {
                     : t(targetChannelID ? 'templateApplyTeam' : 'templateCreateChannelTeam')}
                   {!isCreating && <ArrowRight className="h-4 w-4" />}
                 </Button>
-                <p className="font-mono text-[10px] leading-relaxed text-black/45">
+                <p className="font-body text-[10px] leading-relaxed text-black/45">
                   {t(targetChannelID ? 'templateApplyHint' : 'templateFineTuneHint')}
                 </p>
               </div>

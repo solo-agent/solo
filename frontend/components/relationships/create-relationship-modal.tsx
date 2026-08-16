@@ -216,7 +216,7 @@ export function CreateRelationshipModal({
             className="min-h-[100px] resize-y font-body text-sm"
             rows={4}
           />
-          <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+          <p className="mt-1 font-body text-[10px] text-muted-foreground">
             {t('relationshipCriteriaExportHint', {
               marker: relType === 'assigns_to' ? 'DELEGATE when' : 'COLLABORATES when',
             })}
@@ -225,7 +225,7 @@ export function CreateRelationshipModal({
 
         {/* Submit error */}
         {error && (
-          <p className="font-mono text-xs text-brutal-danger" role="alert">{error}</p>
+          <p className="font-body text-xs text-brutal-danger" role="alert">{error}</p>
         )}
       </div>
 

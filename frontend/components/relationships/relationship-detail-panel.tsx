@@ -445,7 +445,7 @@ export function RelationshipDetailPanel({
                   ? t('relationshipDelegationPlaceholder')
                   : t('relationshipCollaborationPlaceholder')
                 }
-                className="input-brutal min-h-[80px] w-full resize-y px-3 py-2 font-mono text-xs"
+                className="input-brutal min-h-[80px] w-full resize-y px-3 py-2 font-body text-xs"
                 rows={4}
               />
               <div className="flex items-center gap-2">
@@ -591,7 +591,7 @@ export function RelationshipDetailPanel({
 
         {/* Error */}
         {error && (
-          <p className="font-mono text-xs text-brutal-danger">{error}</p>
+          <p className="font-body text-xs text-brutal-danger">{error}</p>
         )}
       </div>
 

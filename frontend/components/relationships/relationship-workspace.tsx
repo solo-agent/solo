@@ -913,7 +913,7 @@ export function RelationshipWorkspace({
   if (workspaceError) {
     const content = (
       <div className="flex flex-1 flex-col items-center justify-center gap-4">
-        <p className="font-mono text-sm text-brutal-danger">{workspaceError}</p>
+        <p className="font-body text-sm text-brutal-danger">{workspaceError}</p>
         <button
           type="button"
           onClick={() => {

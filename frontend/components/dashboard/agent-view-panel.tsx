@@ -133,7 +133,7 @@ export function AgentViewPanel({
         {!hasContent && (
           <div className="flex flex-col items-center justify-center h-full text-center px-4 py-8">
             <EyeOff className="h-8 w-8 text-muted-foreground/30 mb-2" />
-            <p className="font-mono text-xs text-muted-foreground">{t('agentNoActive')}</p>
+            <p className="font-body text-sm text-muted-foreground">{t('agentNoActive')}</p>
             <p className="font-mono text-[10px] text-muted-foreground/50 mt-1">
               {t('agentPanelEmptyDesc')}
             </p>

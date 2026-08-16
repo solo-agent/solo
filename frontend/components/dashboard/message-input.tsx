@@ -25,6 +25,7 @@ import {
   SquareCheckBig,
   Upload,
   Paperclip,
+  SmilePlus,
   X,
   Check,
   AlertTriangle,
@@ -134,8 +135,10 @@ export function MessageInput({
   const [isSending, setIsSending] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
   const [asTask, setAsTask] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
   const isSendingRef = useRef(false);
 
   useEffect(() => {
@@ -160,6 +163,15 @@ export function MessageInput({
   } = useMentions(members, content, cursorPosition);
 
   const mentionActive = showSuggestions || searchQuery !== '';
+
+  useEffect(() => {
+    if (!emojiOpen) return;
+    const close = (event: MouseEvent) => {
+      if (!emojiPickerRef.current?.contains(event.target as Node)) setEmojiOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [emojiOpen]);
 
   // ---- Dropdown anchor calculation ----
 
@@ -458,6 +470,18 @@ export function MessageInput({
     }
   }, []);
 
+  const insertEmoji = useCallback((emoji: string) => {
+    const position = textareaRef.current?.selectionStart ?? content.length;
+    const next = `${content.slice(0, position)}${emoji}${content.slice(position)}`;
+    setContent(next);
+    setCursorPosition(position + emoji.length);
+    setEmojiOpen(false);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(position + emoji.length, position + emoji.length);
+    });
+  }, [content]);
+
   const handleInput = useCallback(
     (value: string) => {
       setContent(value);
@@ -694,13 +718,55 @@ export function MessageInput({
             aria-expanded={mentionActive}
             aria-haspopup="listbox"
             className={cn(
-              'input-brutal min-h-[44px] resize-none font-mono text-sm leading-relaxed',
-              'placeholder:font-mono placeholder:text-muted-foreground/60',
+              'input-brutal min-h-[44px] resize-none font-body text-sm leading-relaxed',
+              'placeholder:font-body placeholder:text-muted-foreground/60',
               'disabled:opacity-50',
-              asTask ? 'pr-36' : 'pr-24',
+              asTask ? 'pr-48' : 'pr-32',
               asTask && 'border-brutal-primary',
             )}
           />
+          <div ref={emojiPickerRef}>
+            {emojiOpen && (
+              <div
+                role="dialog"
+                aria-label={t('emojiPicker')}
+                className={cn(
+                  'absolute bottom-12 z-20 grid grid-cols-4 gap-1 border-2 border-black',
+                  'bg-brutal-cream p-2 shadow-brutal-sm',
+                  asTask ? 'right-[152px]' : 'right-[88px]',
+                )}
+              >
+                {['\u{1F600}', '\u{1F602}', '\u{1F44D}', '\u2764\uFE0F', '\u{1F389}', '\u{1F440}', '\u{1F64F}', '\u{1F914}'].map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => insertEmoji(emoji)}
+                    className="flex h-9 w-9 items-center justify-center text-xl hover:bg-brutal-primary-light focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-black"
+                    aria-label={t('insertEmoji', { emoji })}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setEmojiOpen((open) => !open)}
+              disabled={isSending || disabled}
+              className={cn(
+                'absolute bottom-2 flex h-8 w-8 items-center justify-center',
+                'btn-brutal bg-white text-foreground hover:bg-brutal-primary-light',
+                'disabled:pointer-events-none disabled:opacity-40',
+                asTask ? 'right-[152px]' : 'right-[88px]',
+              )}
+              aria-label={t('emojiPicker')}
+              aria-expanded={emojiOpen}
+              aria-haspopup="dialog"
+              title={t('emojiPicker')}
+            >
+              <SmilePlus className="h-4 w-4" />
+            </button>
+          </div>
           <button
             type="button"
             onClick={openFilePicker}
@@ -735,7 +801,7 @@ export function MessageInput({
             aria-label={asTask ? t('createTask') : t('sendMessage')}
           >
             {asTask ? (
-              <span className="font-mono text-[11px] font-bold whitespace-nowrap">{t('createTask')}</span>
+              <span className="font-heading text-xs font-bold whitespace-nowrap">{t('createTask')}</span>
             ) : (
               <Send className="h-4 w-4" />
             )}

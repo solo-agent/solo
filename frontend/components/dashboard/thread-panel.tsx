@@ -14,6 +14,7 @@
 
 import {
   Children,
+  Fragment,
   useEffect,
   useRef,
   useState,
@@ -40,8 +41,9 @@ import { useWebSocket } from '@/lib/ws-context';
 import { useToast } from '@/components/ui/toast';
 import { MentionDropdown, type DropdownAnchor } from './mention-dropdown';
 import { t } from '@/lib/i18n';
-import { formatMessageTimestamp } from '@/lib/utils/time';
+import { formatMessageTime, formatMessageTimestamp, messageDateKey } from '@/lib/utils/time';
 import type { AgentDetailTarget, Message, ChannelMember, Task, TaskStatus } from '@/lib/types';
+import { canGroupMessages, MessageDateSeparator } from './message-layout';
 
 interface ThreadPanelProps {
   parentMessage: Message;
@@ -78,7 +80,7 @@ function ParentMessageBlock({
   const time = formatMessageTimestamp(message.created_at);
 
   return (
-    <div className={`flex gap-3 px-6 py-4 border-b-2 border-black ${isAgent ? 'border-l-2 border-l-brutal-primary' : ''}`}>
+    <div className={`flex gap-3 border-b border-brutal-muted px-6 py-4 ${isAgent ? 'border-l-2 border-l-brutal-primary' : ''}`}>
       {isAgent ? (
         <PixelAvatar
           agentId={message.user_id || message.id}
@@ -275,12 +277,14 @@ function createMdComponents(onOpenArtifactReference?: (ref: string) => void) {
 
 function ReplyItem({
   message,
+  isGrouped,
   validNames = [],
   isHighlighted,
   onOpenArtifactReference,
   onAgentClick,
 }: {
   message: { id: string; display_name?: string; sender_id?: string; sender_avatar?: string | null; sender_active?: boolean; content: string; created_at: string; status?: string; sender_type?: string };
+  isGrouped?: boolean;
   validNames?: string[];
   isHighlighted?: boolean;
   onOpenArtifactReference?: (ref: string) => void;
@@ -292,17 +296,30 @@ function ReplyItem({
   const isAgent = message.sender_type === 'agent';
 
   const time = formatMessageTimestamp(message.created_at);
+  const compactTime = formatMessageTime(message.created_at);
 
   return (
     <div
       data-message-id={message.id}
+      data-thread-reply
+      data-grouped={isGrouped ? 'true' : 'false'}
       className={cn(
-        'flex gap-3 px-6 py-2 border-b-2 border-black',
+        'group flex gap-3 px-6',
+        isGrouped ? 'py-1' : 'pb-1.5 pt-3',
         isAgent && 'border-l-2 border-l-brutal-primary',
         isHighlighted && 'bg-brutal-info-light ring-2 ring-black',
       )}
     >
-      {isAgent ? (
+      {isGrouped ? (
+        <div className="mt-0.5 flex w-7 flex-shrink-0 justify-center">
+          <time
+            dateTime={message.created_at}
+            className="invisible pt-0.5 font-mono text-[9px] text-muted-foreground group-hover:visible"
+          >
+            {compactTime}
+          </time>
+        </div>
+      ) : isAgent ? (
         <PixelAvatar
           agentId={message.sender_id || message.id}
           avatarUrl={message.sender_avatar}
@@ -329,7 +346,7 @@ function ReplyItem({
         />
       )}
       <div className="min-w-0 flex-1">
-        <div className="mb-1.5 flex items-baseline gap-2">
+        <div className={cn('mb-1.5 flex items-baseline gap-2', isGrouped && 'sr-only')}>
           <span className="font-heading text-sm font-bold text-foreground">
             {message.display_name}
           </span>
@@ -373,12 +390,12 @@ function ReplyItem({
         {isFailed && (
           <div className="mt-2 flex items-center gap-1">
             <AlertCircle className="h-3.5 w-3.5 text-brutal-danger" />
-            <span className="font-mono text-[11px] text-brutal-danger">{t('sendFailed')}</span>
+            <span className="font-body text-xs text-brutal-danger">{t('sendFailed')}</span>
           </div>
         )}
         {isSending && (
           <div className="mt-1.5">
-            <span className="font-mono text-[11px] text-muted-foreground">{t('sending')}</span>
+            <span className="font-body text-xs text-muted-foreground">{t('sending')}</span>
           </div>
         )}
       </div>
@@ -439,7 +456,7 @@ function ThreadError({
     <div className="flex flex-1 items-center justify-center px-6">
       <div className="text-center space-y-3">
         <AlertCircle className="mx-auto h-8 w-8 text-brutal-danger" />
-        <p className="font-mono text-sm text-brutal-danger">{message}</p>
+        <p className="font-body text-sm text-brutal-danger">{message}</p>
         <button
           type="button"
           onClick={onRetry}
@@ -580,8 +597,8 @@ function ThreadReplyInput({
             disabled={isSending || disabled}
             aria-label={t('threadReplyInput')}
             className={cn(
-              'input-brutal min-h-[44px] resize-none pr-12 font-mono text-sm leading-relaxed',
-              'placeholder:font-mono placeholder:text-muted-foreground/60',
+              'input-brutal min-h-[44px] resize-none pr-12 font-body text-sm leading-relaxed',
+              'placeholder:font-body placeholder:text-muted-foreground/60',
               'disabled:opacity-50',
             )}
           />
@@ -704,7 +721,7 @@ function TaskMetaBar({ task }: { task: Task }) {
           <span className="font-bold text-foreground">{priorityLabel}</span>
         </span>
         <span className="font-mono text-muted-foreground">|</span>
-        <span className="font-mono text-muted-foreground">{t('claimerLabel')}:</span>
+        <span className="font-body text-muted-foreground">{t('claimerLabel')}:</span>
         {isClaimed ? (
           <span className="flex items-center gap-1">
             <span className="flex h-4 w-4 items-center justify-center border-2 border-black bg-brutal-success font-heading text-[9px] font-bold text-black">
@@ -854,6 +871,7 @@ export function ThreadPanel({
 
   return (
     <div
+      data-thread-panel
       className={cn(
         'flex h-full flex-col bg-brutal-cream border-l-2 border-r-2 border-b-2 border-black shadow-brutal-sm',
         'animate-slide-in-from-right',
@@ -920,16 +938,23 @@ export function ThreadPanel({
             }
             return (
               <div className="space-y-0 py-2">
-                {messages.map((reply) => (
-                  <ReplyItem
-                    key={reply.id}
-                    message={reply}
-                    validNames={validNames}
-                    isHighlighted={highlightedMessageId === reply.id}
-                    onOpenArtifactReference={onOpenArtifactReference}
-                    onAgentClick={onAgentClick}
-                  />
-                ))}
+                {messages.map((reply, index) => {
+                  const previous = messages[index - 1];
+                  const startsDay = !previous || messageDateKey(previous.created_at) !== messageDateKey(reply.created_at);
+                  return (
+                    <Fragment key={reply.id}>
+                      {startsDay && <MessageDateSeparator createdAt={reply.created_at} />}
+                      <ReplyItem
+                        message={reply}
+                        isGrouped={!startsDay && canGroupMessages(previous, reply)}
+                        validNames={validNames}
+                        isHighlighted={highlightedMessageId === reply.id}
+                        onOpenArtifactReference={onOpenArtifactReference}
+                        onAgentClick={onAgentClick}
+                      />
+                    </Fragment>
+                  );
+                })}
               </div>
             );
           })()}

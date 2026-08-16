@@ -9,7 +9,6 @@ import { useWorkspace } from '@/lib/workspace-context';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
-import { BrutalAlert } from '@/components/ui/brutal-alert';
 
 interface InviteLinkInfo {
   workspace_id: string;
@@ -50,7 +49,7 @@ export default function WorkspaceInvitePage() {
     setError(null);
     apiClient.get<InviteLinkInfo>(`/api/v1/workspace-invite-links/${encodeURIComponent(token)}`)
       .then(setInfo)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : t('workspaceInviteUnavailable')))
+      .catch(() => setError(t('workspaceInviteUnavailableDescription')))
       .finally(() => setLoading(false));
   }, [token]);
 
@@ -73,34 +72,38 @@ export default function WorkspaceInvitePage() {
       router.replace(result.channel_id
         ? `/dashboard?channel=${encodeURIComponent(result.channel_id)}`
         : '/dashboard');
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : t('workspaceInviteAcceptFailed'));
+    } catch {
+      setError(t('workspaceInviteAcceptFailed'));
       setBusy(false);
     }
   };
 
   if (loading || authLoading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-brutal-cream px-4">
+      <main id="main-content" className="flex min-h-screen items-center justify-center bg-brutal-cream px-4">
         <Spinner size="md" />
       </main>
     );
   }
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-brutal-cream px-4 py-12">
-      <div className="pointer-events-none absolute inset-0 opacity-30 [background-image:linear-gradient(135deg,transparent_0,transparent_49%,rgba(0,0,0,0.06)_50%,transparent_51%)] [background-size:18px_18px]" />
-      <section className="relative w-full max-w-[520px] border-2 border-black bg-white px-6 py-8 shadow-brutal-heavy sm:px-12 sm:py-12">
+    <main id="main-content" className="relative flex min-h-screen items-center justify-center bg-brutal-cream px-4 py-12">
+      <div className="pointer-events-none absolute inset-0 bg-grid opacity-20" aria-hidden />
+      <section className="relative w-full max-w-[520px] rounded-2xl border border-black bg-white px-6 py-8 shadow-brutal-lg sm:px-12 sm:py-12">
         {error ? (
-          <BrutalAlert variant="error" title={t('workspaceInviteUnavailable')}>
-            <p>{error}</p>
-            <Button className="mt-4" variant="outline" onClick={() => router.replace('/dashboard')}>
+          <div className="text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-black bg-brutal-danger-light shadow-brutal-sm">
+              <Link2 className="h-7 w-7" aria-hidden="true" />
+            </div>
+            <h1 className="mt-6 font-heading text-3xl font-bold">{t('workspaceInviteUnavailable')}</h1>
+            <p className="mt-3 font-body text-sm leading-6 text-muted-foreground">{error}</p>
+            <Button className="mt-7 w-full" variant="outline" onClick={() => router.replace('/home')}>
               {t('backToDashboard')}
             </Button>
-          </BrutalAlert>
+          </div>
         ) : info ? (
           <div className="text-center">
-            <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-[28px] border-2 border-black bg-gradient-to-br from-brutal-primary via-brutal-info to-brutal-accent text-4xl font-black text-black shadow-brutal">
+            <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-[28px] border border-black bg-brutal-success-light font-heading text-4xl font-bold shadow-brutal-sm">
               {info.workspace_icon?.slice(0, 2) || 'S'}
             </div>
             <p className="mt-7 font-mono text-[11px] font-bold uppercase tracking-[0.22em] text-black/55">
@@ -116,11 +119,11 @@ export default function WorkspaceInvitePage() {
               {t('workspaceInviteFrom', { name: info.invited_by })}
             </p>
 
-            <div className="mt-8 flex items-center justify-center gap-3 border-y-2 border-black/15 py-5 text-black/70">
+            <div className="mt-8 flex items-center justify-center gap-3 border-y border-black py-5 text-black/70">
               <div className="flex -space-x-2" aria-hidden="true">
-                <span className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-brutal-primary font-heading text-sm font-black">S</span>
-                <span className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-brutal-info font-heading text-sm font-black">+</span>
-                <span className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-brutal-accent font-heading text-sm font-black">•</span>
+                <span className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-brutal-primary font-heading text-sm font-bold">S</span>
+                <span className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-brutal-info-light font-heading text-sm font-bold">+</span>
+                <span className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-brutal-accent-light font-heading text-sm font-bold">•</span>
               </div>
               <span className="font-body text-sm">
                 {t('workspaceInviteMemberCount', { count: info.member_count })}

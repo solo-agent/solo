@@ -95,7 +95,7 @@ export function AddAgentModal({
                 <div className="flex h-8 w-8 items-center justify-center border-2 border-black bg-[#DBEAFE]"><Bot className="h-4 w-4" /></div>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-bold">{agent.name}</div>
-                  <div className="truncate font-mono text-[10px] text-black/50">{agent.description || t('agentAddWorkspaceAgent')}</div>
+                  <div className="truncate font-body text-xs text-black/50">{agent.description || t('agentAddWorkspaceAgent')}</div>
                 </div>
                 <Button size="sm" variant="outline" onClick={async () => {
                   setIsCreating(true);
@@ -121,7 +121,7 @@ export function AddAgentModal({
       {error && (
         <div className="mb-4 flex items-center gap-2 border-2 border-brutal-danger bg-brutal-danger-light/30 px-3 py-2">
           <AlertCircle className="h-4 w-4 flex-shrink-0 text-brutal-danger" />
-          <span className="flex-1 font-mono text-xs text-brutal-danger">{error}</span>
+          <span className="flex-1 font-body text-xs text-brutal-danger">{error}</span>
         </div>
       )}
 

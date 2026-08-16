@@ -116,7 +116,7 @@ export function InsightDashboard() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="font-heading text-2xl font-black">{t('observabilityInsight')}</h1>
-            <p className="mt-1 font-mono text-xs text-muted-foreground">{t('observabilityInsightDesc')}</p>
+            <p className="mt-1 font-body text-sm text-muted-foreground">{t('observabilityInsightDesc')}</p>
           </div>
           <TimeRangeSelector value={windowDays} onChange={setWindowDays} />
         </div>
@@ -133,7 +133,7 @@ export function InsightDashboard() {
           <Spinner size="md" />
         </div>
       ) : !data ? (
-        <div className="flex h-64 items-center justify-center font-mono text-sm text-muted-foreground">{t('observabilityNoStats')}</div>
+        <div className="flex h-64 items-center justify-center font-body text-sm text-muted-foreground">{t('observabilityNoStats')}</div>
       ) : (
         <div className="space-y-5 p-5">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -260,7 +260,7 @@ function TrendChart({ points }: { points: DashboardSeriesPoint[] }) {
               aria-pressed={visible[key]}
               onClick={() => setVisible((current) => ({ ...current, [key]: !current[key] }))}
               className={cn(
-                'tab-button inline-flex items-center gap-2 border-2 border-black bg-white px-2 py-1 font-mono text-xs shadow-brutal-sm transition-all hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
+                'tab-button inline-flex items-center gap-2 border-2 border-black bg-white px-2 py-1 font-mono text-xs shadow-brutal-sm transition-[transform,box-shadow,opacity] hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
                 !visible[key] && 'opacity-40',
               )}
             >

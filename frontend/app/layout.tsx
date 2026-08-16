@@ -1,6 +1,13 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
-import { Inter, Literata, Space_Grotesk, Space_Mono } from "next/font/google";
+import {
+  Inter,
+  Literata,
+  Noto_Sans_SC,
+  Noto_Serif_SC,
+  Space_Grotesk,
+  Space_Mono,
+} from "next/font/google";
 import { AuthProvider } from "@/lib/auth-context";
 import { t } from '@/lib/i18n';
 import { WSProvider } from "@/lib/ws-context";
@@ -36,7 +43,21 @@ const literata = Literata({
   variable: "--font-literata",
 });
 
-const themeScript = `try{const skin=localStorage.getItem("solo.skin");document.documentElement.dataset.skin=["archive","classic"].includes(skin)?skin:"archive"}catch{document.documentElement.dataset.skin="archive"}`;
+const notoSansSC = Noto_Sans_SC({
+  weight: "variable",
+  display: "swap",
+  preload: false,
+  variable: "--font-noto-sans-sc",
+});
+
+const notoSerifSC = Noto_Serif_SC({
+  weight: "variable",
+  display: "swap",
+  preload: false,
+  variable: "--font-noto-serif-sc",
+});
+
+const bootstrapScript = `try{const skin=localStorage.getItem("solo.skin");document.documentElement.dataset.skin=["archive","classic"].includes(skin)?skin:"archive";const storedLocale=localStorage.getItem("solo.locale");document.documentElement.lang=storedLocale==="zh-CN"||(!storedLocale&&navigator.language.toLowerCase().startsWith("zh"))?"zh-CN":"en"}catch{document.documentElement.dataset.skin="archive"}`;
 
 export const metadata: Metadata = {
   title: t('appTitle'),
@@ -44,6 +65,10 @@ export const metadata: Metadata = {
   icons: {
     icon: "/favicon.svg",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#f8f5ef',
 };
 
 export default function RootLayout({
@@ -56,10 +81,10 @@ export default function RootLayout({
       lang="en"
       data-skin="archive"
       suppressHydrationWarning
-      className={`${inter.variable} ${spaceGrotesk.variable} ${spaceMono.variable} ${literata.variable}`}
+      className={`${inter.variable} ${spaceGrotesk.variable} ${spaceMono.variable} ${literata.variable} ${notoSansSC.variable} ${notoSerifSC.variable}`}
     >
       <head>
-        <Script id="solo-theme-init" strategy="beforeInteractive">{themeScript}</Script>
+        <Script id="solo-bootstrap" strategy="beforeInteractive">{bootstrapScript}</Script>
       </head>
       <body className="min-h-screen antialiased">
         <AuthProvider>

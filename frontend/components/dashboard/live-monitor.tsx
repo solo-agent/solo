@@ -142,9 +142,9 @@ interface AgentTranscriptEntry {
 }
 
 const GROUP_HEADER_CLASSES: Record<string, string> = {
-  working: 'bg-brutal-info',
-  needs_attention: 'bg-brutal-violet',
-  idle_recent: 'bg-brutal-success',
+  working: 'border-l-4 border-l-brutal-info bg-brutal-info-light',
+  needs_attention: 'border-l-4 border-l-brutal-violet bg-brutal-violet-light',
+  idle_recent: 'border-l-4 border-l-brutal-success bg-brutal-success-light',
 };
 
 function groupLabel(key: string, fallback: string) {
@@ -235,7 +235,7 @@ export function LiveMonitor({ selectedRunId }: { selectedRunId?: string | null }
           <div className="flex items-center justify-between gap-4">
             <div>
               <h1 className="font-heading text-2xl font-black">{t('observabilityLiveTitle')}</h1>
-              <p className="mt-1 font-mono text-xs text-muted-foreground">{t('observabilityLiveDesc')}</p>
+              <p className="mt-1 font-body text-sm text-muted-foreground">{t('observabilityLiveDesc')}</p>
             </div>
             <Button variant="outline" size="sm" onClick={() => loadLive().catch(() => undefined)}>
               <RefreshCw className="mr-2 h-4 w-4" />
@@ -340,7 +340,7 @@ function AgentLiveCard({ agent, selected, onClick }: { agent: DashboardLiveAgent
       onClick={onClick}
       aria-label={`${agent.agent_name} ${agentRunStatusText(agent.status)} ${activity}`}
       className={cn(
-        'group block w-full border-2 border-black p-3 text-left shadow-brutal-sm transition-all hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
+        'group block w-full border-2 border-black p-3 text-left shadow-brutal-sm transition-[transform,box-shadow,background-color,border-color] hover:-translate-y-px hover:shadow-brutal active:translate-x-0.5 active:translate-y-0.5 active:shadow-none',
         selected
           ? 'bg-brutal-primary hover:bg-brutal-primary'
           : 'bg-brutal-cream hover:bg-brutal-accent-light',
@@ -662,7 +662,7 @@ function TimelineViewer({ timeline }: { timeline: AgentTimeline }) {
       <div ref={transcriptScrollRef} className="min-h-0 overflow-auto bg-brutal-cream">
         <div className="sticky top-0 z-10 flex h-24 flex-col justify-center border-b-2 border-black bg-brutal-cream px-4">
           <div className="truncate font-heading text-lg font-black">{title}</div>
-          <div className="mt-1 font-mono text-xs text-muted-foreground">{t('observabilityTranscriptViewer')}</div>
+          <div className="mt-1 font-body text-xs text-muted-foreground">{t('observabilityTranscriptViewer')}</div>
         </div>
         <div className="space-y-4 p-5">
           {timeline.entries.length === 0 ? (

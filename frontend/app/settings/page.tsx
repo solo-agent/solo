@@ -124,7 +124,7 @@ export default function SettingsPage() {
       <div className="flex h-screen items-center justify-center bg-brutal-cream">
         <div className="flex flex-col items-center gap-3">
           <Spinner size="md" />
-          <p className="font-mono text-sm text-muted-foreground">{t('loading')}</p>
+          <p className="font-body text-sm text-muted-foreground">{t('loading')}</p>
         </div>
       </div>
     );
@@ -183,7 +183,7 @@ export default function SettingsPage() {
           <div className="card-brutal-heavy">
             {/* Avatar contact sheet */}
             <div className="border-b-2 border-black bg-brutal-cream px-6 py-5">
-              <Label className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+              <Label className="font-heading text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                 {t('settingsAvatar')}
               </Label>
               <div className="mt-3 grid gap-5 md:grid-cols-[auto_1fr] md:items-start">
@@ -196,7 +196,7 @@ export default function SettingsPage() {
                   />
                   <div>
                     <div className="font-heading text-sm font-black">{user.display_name}</div>
-                    <div className="font-mono text-[10px] font-bold uppercase tracking-wider text-black/45">
+                    <div className="font-heading text-[10px] font-bold uppercase tracking-wider text-black/45">
                       {user.avatar_url && !user.avatar_url.startsWith(USER_AVATAR_PRESET_PREFIX)
                         ? t('settingsAvatarCustom')
                         : t('settingsAvatarPixel')}
@@ -277,7 +277,7 @@ export default function SettingsPage() {
                     </Button>
                   </div>
                   {avatarError && (
-                    <p role="alert" className="mt-3 font-mono text-xs font-bold text-brutal-danger">
+                    <p role="alert" className="mt-3 font-body text-xs font-bold text-brutal-danger">
                       {avatarError}
                     </p>
                   )}
@@ -287,31 +287,31 @@ export default function SettingsPage() {
 
             {/* Email (read-only) */}
             <div className="border-b-2 border-black px-6 py-5">
-              <Label className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+              <Label className="font-heading text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                 {t('email')}
               </Label>
               <div className="mt-2 flex items-center gap-2">
                 <Mail className="h-4 w-4 text-muted-foreground" />
                 <span className="font-body text-sm text-foreground">{user.email}</span>
               </div>
-              <p className="mt-1 font-mono text-[11px] text-muted-foreground">{t('settingsEmailUnmodifiable')}</p>
+              <p className="mt-1 font-body text-xs text-muted-foreground">{t('settingsEmailUnmodifiable')}</p>
             </div>
 
             {/* Display name (read-only) */}
             <div className="px-6 py-5">
-              <Label className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+              <Label className="font-heading text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                 {t('settingsDisplayName')}
               </Label>
               <div className="mt-2 flex items-center gap-2">
                 <User className="h-4 w-4 text-muted-foreground" />
                 <span className="font-body text-sm text-foreground">{user.display_name}</span>
               </div>
-              <p className="mt-1 font-mono text-[11px] text-muted-foreground">{t('settingsDisplayNameHint')}</p>
+              <p className="mt-1 font-body text-xs text-muted-foreground">{t('settingsDisplayNameHint')}</p>
             </div>
 
             {/* Language */}
             <div className="border-t-2 border-black px-6 py-5">
-              <Label className="font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+              <Label className="font-heading text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                 {t('settingsLanguage')}
               </Label>
               <div className="mt-2 flex items-center gap-2">
@@ -325,16 +325,16 @@ export default function SettingsPage() {
                   aria-label={t('settingsLanguage')}
                 />
               </div>
-              <p className="mt-1 font-mono text-[11px] text-muted-foreground">{t('settingsLanguageHint')}</p>
+              <p className="mt-1 font-body text-xs text-muted-foreground">{t('settingsLanguageHint')}</p>
             </div>
 
             {/* Skin */}
             <div className="border-t-2 border-black px-6 py-5">
-              <Label className="flex items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+              <Label className="flex items-center gap-2 font-heading text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
                 <Palette className="h-4 w-4" aria-hidden="true" />
                 {t('settingsTheme')}
               </Label>
-              <p className="mt-1 font-mono text-[11px] text-muted-foreground">{t('settingsThemeHint')}</p>
+              <p className="mt-1 font-body text-xs text-muted-foreground">{t('settingsThemeHint')}</p>
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {themeOptions.map((option) => {
                   const selected = theme === option.id;

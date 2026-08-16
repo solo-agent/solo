@@ -34,7 +34,7 @@ function kindLabel(kind: string): string {
 
 function SkillList({ skills, emptyText }: { skills: SkillListItem[]; emptyText: string }) {
   if (skills.length === 0) {
-    return <p className="font-mono text-xs italic text-muted-foreground px-4 py-3">{emptyText}</p>;
+    return <p className="font-body text-xs italic text-muted-foreground px-4 py-3">{emptyText}</p>;
   }
   return (
     <div className="divide-y-2 divide-black">
@@ -52,7 +52,7 @@ function SkillList({ skills, emptyText }: { skills: SkillListItem[]; emptyText: 
               </span>
             </div>
             {s.description && (
-              <p className="mt-0.5 font-mono text-[11px] text-muted-foreground leading-relaxed line-clamp-2">
+              <p className="mt-0.5 font-body text-[11px] text-muted-foreground leading-relaxed line-clamp-2">
                 {s.description}
               </p>
             )}
@@ -148,8 +148,8 @@ export function AgentSkillsTab({ agentId }: AgentSkillsTabProps) {
 
       {!isOpen ? null : skills.length === 0 ? (
         <div className="card-brutal bg-brutal-cream p-6 text-center">
-          <p className="font-mono text-sm text-foreground">{t('agentSkillEmpty')}</p>
-          <p className="mt-2 font-mono text-[11px] text-muted-foreground">
+          <p className="font-body text-sm text-foreground">{t('agentSkillEmpty')}</p>
+          <p className="mt-2 font-body text-[11px] text-muted-foreground">
             {t('agentSkillEmptyHint')}
           </p>
         </div>

@@ -300,10 +300,10 @@ export function ThinkingWorkspace({
     return <div className="flex flex-1 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin" aria-label={t('thinkingSpaceLoading')} /></div>;
   }
   if ((error || actionError) && !space) {
-    return <div className="m-4 border-2 border-black bg-brutal-danger-light p-3 font-mono text-xs">{error || actionError}</div>;
+    return <div className="m-4 border-2 border-black bg-brutal-danger-light p-3 font-body text-xs">{error || actionError}</div>;
   }
   if (!space || space.nodes.length === 0) {
-    return <div className="flex flex-1 items-center justify-center font-mono text-xs text-muted-foreground">{t('thinkingEmpty')}</div>;
+    return <div className="flex flex-1 items-center justify-center font-body text-sm text-muted-foreground">{t('thinkingEmpty')}</div>;
   }
 
   return (
@@ -354,7 +354,7 @@ export function ThinkingWorkspace({
             </Button>
           </div>
         </div>
-        {(error || actionError) && <p className="mt-2 font-mono text-[10px] text-brutal-danger">{actionError || error}</p>}
+        {(error || actionError) && <p className="mt-2 font-body text-[10px] text-brutal-danger">{actionError || error}</p>}
       </div>
       <div className={cn('min-h-0 flex-1 bg-brutal-cream', busy && 'cursor-progress')}>
         <ThinkingActivityContext.Provider value={liveByThinkingNode}>
@@ -400,7 +400,7 @@ export function ThinkingWorkspace({
               disabled={busy}
             />
           </div>
-          {actionError && <p className="font-mono text-xs text-brutal-danger" role="alert">{actionError}</p>}
+          {actionError && <p className="font-body text-xs text-brutal-danger" role="alert">{actionError}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setShowSplit(false)} disabled={busy}>{t('cancel')}</Button>
             <Button type="submit" variant="success" disabled={!title.trim() || busy}>

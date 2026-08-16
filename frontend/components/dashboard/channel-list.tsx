@@ -4,7 +4,8 @@
 
 'use client';
 
-import { Plus, ChevronDown, X } from 'lucide-react';
+import { useState } from 'react';
+import { Plus, ChevronDown, Search, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 import { selectableRowClass, selectableRowIconClass } from '@/components/ui/selectable-row';
@@ -132,13 +133,41 @@ export function ChannelList({
   showHeader = true,
   railSurface = false,
 }: ChannelListProps) {
+  const [query, setQuery] = useState('');
+  const [showAll, setShowAll] = useState(false);
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filteredChannels = normalizedQuery
+    ? channels.filter((channel) => channel.name.toLocaleLowerCase().includes(normalizedQuery))
+    : channels;
+  let visibleChannels = filteredChannels;
+  if (!normalizedQuery && !showAll && channels.length > 12) {
+    visibleChannels = channels.slice(0, 12);
+    const selected = channels.find((channel) => channel.id === selectedChannelId);
+    if (selected && !visibleChannels.some((channel) => channel.id === selected.id)) {
+      visibleChannels = [...visibleChannels.slice(0, 11), selected];
+    }
+  }
+
   const content = isLoading ? (
     <ChannelListSkeleton />
   ) : channels.length === 0 ? (
     <ChannelListEmpty onCreateChannel={onCreateChannel} />
   ) : (
     <div className="space-y-0.5">
-      {channels.map((channel) => (
+      {channels.length > 12 && (
+        <label className="relative mb-2 block px-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-black/45" />
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t('channelListSearchPlaceholder')}
+            aria-label={t('channelListSearchPlaceholder')}
+            className="input-brutal h-8 w-full pl-8 pr-2 text-xs"
+          />
+        </label>
+      )}
+      {visibleChannels.map((channel) => (
         <ChannelItem
           key={channel.id}
           channel={channel}
@@ -149,6 +178,18 @@ export function ChannelList({
           railSurface={railSurface}
         />
       ))}
+      {!normalizedQuery && channels.length > 12 && (
+        <button
+          type="button"
+          onClick={() => setShowAll((value) => !value)}
+          className="mt-1 w-full px-3 py-2 text-left font-mono text-[10px] font-bold uppercase tracking-wider text-black/55 hover:bg-white/50 hover:text-black"
+        >
+          {showAll ? t('showFewerChannels') : t('showAllChannels', { count: channels.length })}
+        </button>
+      )}
+      {normalizedQuery && visibleChannels.length === 0 && (
+        <p className="px-3 py-4 text-center text-xs text-black/45">{t('channelSearchEmpty')}</p>
+      )}
     </div>
   );
 
