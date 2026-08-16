@@ -31,7 +31,7 @@ export default function LoginPage() {
   const router = useRouter();
   const { login, isAuthenticated, isLoading, error, clearError } = useAuth();
   const [signupAvailable, setSignupAvailable] = useState(true);
-  const [returnTo, setReturnTo] = useState('/dashboard');
+  const [returnTo, setReturnTo] = useState('/home');
 
   const {
     register,

@@ -21,6 +21,7 @@ export interface Workspace {
   visibility: 'public' | 'private';
   is_default: boolean;
   is_personal: boolean;
+  lucy_channel_id?: string;
   member_count: number;
   role: WorkspaceRole;
   created_by?: string;

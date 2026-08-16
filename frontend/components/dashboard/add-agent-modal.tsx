@@ -86,10 +86,6 @@ export function AddAgentModal({
         <DialogCloseButton onClick={() => handleOpenChange(false)} />
       </DialogHeader>
 
-      <p className="mb-4 border-2 border-black bg-brutal-primary-light px-3 py-2 font-body text-xs">
-        {t('agentAddIntro')}
-      </p>
-
       {workspaceAgents.length > 0 && (
         <section className="mb-5">
           <h3 className="mb-2 flex items-center gap-2 font-heading text-sm font-black uppercase"><Link2 className="h-4 w-4" /> {t('agentAddConnectExisting')}</h3>
@@ -120,7 +116,7 @@ export function AddAgentModal({
         </section>
       )}
 
-      <h3 className="mb-2 font-heading text-sm font-black uppercase">{t('agentAddCreateNew')}</h3>
+      {workspaceAgents.length > 0 && <h3 className="mb-2 font-heading text-sm font-black uppercase">{t('agentAddCreateNew')}</h3>}
 
       {error && (
         <div className="mb-4 flex items-center gap-2 border-2 border-brutal-danger bg-brutal-danger-light/30 px-3 py-2">
@@ -132,6 +128,7 @@ export function AddAgentModal({
       <AgentForm
         key={formKey}
         onSubmit={handleCreate}
+        onCancel={() => handleOpenChange(false)}
         isSubmitting={isCreating}
         submitLabel={t('teamsCreateAgent')}
       />

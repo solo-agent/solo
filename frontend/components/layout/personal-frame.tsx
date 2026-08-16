@@ -48,6 +48,7 @@ export function PersonalFrame({ children }: { children: React.ReactNode }) {
               <Link
                 key={item.href}
                 href={item.href}
+                data-onboarding={item.href === '/computers' ? 'computers-nav' : undefined}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
                   'flex items-center gap-3 border-2 px-3 py-3 font-body text-sm font-bold transition-colors',

@@ -56,7 +56,7 @@ Solo should let a first-time non-programmer understand the product, register, re
     - expect: The Chinese name is accepted and persisted.
   2. Open “Add Agent” at a 1366×768 viewport.
     - expect: The dialog stays inside the viewport and its primary action remains reachable.
-    - expect: Advanced role instructions, system prompt, environment variables, and CLI arguments are collapsed by default.
+    - expect: System prompt is directly available; environment variables and CLI arguments are collapsed by default.
   3. Open Channel management and bind an existing folder on an accessible online Computer.
     - expect: The selected Computer and full path persist in PostgreSQL and appear in the Channel header.
   4. Create a real Codex Agent on that Computer and ask it to create a proof file.

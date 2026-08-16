@@ -22,7 +22,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/solo-ai/solo/internal/auth"
 	"github.com/solo-ai/solo/internal/server/service"
@@ -304,37 +303,6 @@ func (h *AuthHandler) VerifyRegistration(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to join public Workspace")
 		return
 	}
-	personalWorkspaceID := uuid.NewString()
-	personalName := strings.TrimSpace(*challenge.DisplayName) + "'s Workspace"
-	if len([]rune(personalName)) > 100 {
-		personalName = string([]rune(personalName)[:100])
-	}
-	personalIcon := strings.ToUpper(string([]rune(strings.TrimSpace(*challenge.DisplayName))[0]))
-	if _, err := tx.Exec(r.Context(), `
-			INSERT INTO workspaces (id,name,icon,visibility,is_personal,created_by)
-			VALUES ($1,$2,$3,'private',true,$4)`, personalWorkspaceID, personalName, personalIcon, userID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create personal Workspace")
-		return
-	}
-	if _, err := tx.Exec(r.Context(), `
-			INSERT INTO workspace_members (workspace_id,user_id,role)
-			VALUES ($1,$2,'owner')`, personalWorkspaceID, userID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create personal Workspace")
-		return
-	}
-	personalGeneralID := uuid.NewString()
-	if _, err := tx.Exec(r.Context(), `
-			INSERT INTO channels (id,workspace_id,name,description,type,created_by)
-			VALUES ($1,$2,'general','Personal Workspace lobby','channel',$3)`, personalGeneralID, personalWorkspaceID, userID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to initialize personal Workspace")
-		return
-	}
-	if _, err := tx.Exec(r.Context(), `
-			INSERT INTO channel_members (channel_id,member_type,member_id,role)
-			VALUES ($1,'user',$2,'owner')`, personalGeneralID, userID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to initialize personal Workspace")
-		return
-	}
 	if _, err := tx.Exec(r.Context(), `
 			INSERT INTO channels (id, workspace_id, name, description, type, created_by)
 			SELECT '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001',
@@ -392,11 +360,21 @@ func (h *AuthHandler) VerifyRegistration(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to accept Workspace invitations")
 		return
 	}
+	if _, err := tx.Exec(r.Context(), `
+		UPDATE users SET onboarding_completed_at=now()
+		 WHERE id=$1 AND EXISTS (
+			SELECT 1 FROM workspace_members wm
+			JOIN workspaces w ON w.id=wm.workspace_id
+			WHERE wm.user_id=$1 AND w.is_default=false AND w.deleted_at IS NULL
+		)`, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to finish invited registration")
+		return
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to verify email")
 		return
 	}
-	response, err := h.newUserAuthResponse(r.Context(), userID, email, *challenge.DisplayName, createdAt, personalWorkspaceID)
+	response, err := h.newUserAuthResponse(r.Context(), userID, email, *challenge.DisplayName, createdAt, "")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to generate token")
 		return
@@ -417,7 +395,10 @@ func (h *AuthHandler) newUserAuthResponse(ctx context.Context, userID, email, di
 	if _, err := h.pool.Exec(ctx, `INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`, userID, auth.HashToken(refreshToken), time.Now().Add(auth.RefreshTokenDuration)); err != nil {
 		return AuthResponse{}, err
 	}
-	channelID := h.bootstrapOnboarding(ctx, userID, displayName, email, workspaceID)
+	var channelID string
+	if workspaceID != "" {
+		channelID = h.bootstrapOnboarding(ctx, userID, displayName, email, workspaceID)
+	}
 	return AuthResponse{
 		AccessToken: accessToken, RefreshToken: refreshToken, ExpiresIn: int64(auth.AccessTokenDuration.Seconds()), OnboardingChannelID: channelID, WorkspaceID: workspaceID,
 		User: UserResponse{ID: userID, Email: email, DisplayName: displayName, Role: "member", CreatedAt: createdAt.Format(time.RFC3339)},

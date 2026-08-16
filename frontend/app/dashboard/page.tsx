@@ -74,6 +74,7 @@ function DashboardContent() {
   const messageFromUrl = searchParams.get('message');
   const inboxFromUrl = searchParams.has('inbox');
   const lucyFromUrl = searchParams.has('lucy');
+  const firstRunFromUrl = searchParams.has('onboarding');
 
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const {
@@ -169,7 +170,7 @@ function DashboardContent() {
 
   const isOnboardingChannel = selectedChannel?.name?.startsWith('welcome-')
     || (selectedChannel?.type === 'lucy' && channelAgents.length === 0);
-  const showOnboardingWizard = isOnboardingChannel && channelAgents.length === 0;
+  const showOnboardingWizard = !firstRunFromUrl && isOnboardingChannel && channelAgents.length === 0;
 
   const selectedDM: DMChannel | undefined = dmChannels.find(
     (dm) => dm.id === selectedDmId,

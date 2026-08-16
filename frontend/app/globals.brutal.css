@@ -159,6 +159,43 @@
   --motion-ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
   --default-transition-duration: var(--motion-duration-fast);
   --default-transition-timing-function: var(--motion-ease-standard);
+  --scrollbar-thumb: var(--color-brutal-primary);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--color-brutal-primary) 75%, var(--color-brutal-muted));
+}
+
+/* Native scroll containers keep browser behavior, with one quiet Solo skin. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-muted-foreground) 22%, transparent);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-button {
+  width: 0;
+  height: 0;
 }
 
 @keyframes slide-in-from-right {

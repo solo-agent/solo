@@ -1139,6 +1139,7 @@ export function ChannelView({
                 </div>
               </div>
             )}
+            <div data-onboarding="message-composer">
             <MessageInput
               onSend={async (content, _mentionedAgentIds, asTask, taskTitle, attachmentIds) => {
                 if (asTask) {
@@ -1169,6 +1170,7 @@ export function ChannelView({
               suggestedContent={messageSuggestion}
               onSuggestedContentApplied={() => setMessageSuggestion(null)}
             />
+            </div>
           </div>
           </div>
         )}
@@ -1311,6 +1313,8 @@ export function ChannelView({
             embedded
             isFullscreen={isWorkspaceFullscreen}
             title={t('navTeams')}
+            emptyTitle={channel.type === 'lucy' ? t('firstRunLucyEntryTitle') : undefined}
+            emptyDescription={channel.type === 'lucy' ? t('firstRunLucyEntryDesc') : undefined}
             channelFilterId={channel.id}
             channelTeam={channelTeam}
             refreshKey={teamRefreshKey}

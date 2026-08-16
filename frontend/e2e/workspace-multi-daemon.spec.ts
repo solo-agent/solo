@@ -658,10 +658,8 @@ test.describe('Workspace and multi-Daemon product flow', () => {
       await page.goto('/computers');
       const computerButton = page.getByRole('button').filter({ hasText: computer.name }).first();
       await expect(computerButton).toBeVisible();
-      if (await computerButton.getAttribute('aria-current') !== 'true') {
-        await computerButton.click();
-      }
-      await expect(computerButton).toHaveAttribute('aria-current', 'true');
+      await computerButton.click();
+      await expect(computerButton).toHaveAttribute('aria-expanded', 'true');
       const deleteButton = page.getByRole('button', { name: 'Delete Computer', exact: true });
       await expect(deleteButton).toBeVisible({ timeout: 15_000 });
       await deleteButton.click();
@@ -682,7 +680,6 @@ test.describe('Workspace and multi-Daemon product flow', () => {
 
   test('copies the pairing command next to each equal-sized Copy button', async ({ page, request }) => {
     const owner = await register(request, 'ComputerPairCopyOwner');
-    const computerName = `Copy target ${Date.now().toString(36)}`;
     let computer: Computer | undefined;
 
     try {
@@ -691,8 +688,6 @@ test.describe('Workspace and multi-Daemon product flow', () => {
       await page.goto('/computers');
       await page.getByRole('button', { name: 'Add Computer', exact: true }).click();
       const dialog = page.getByRole('dialog');
-      await dialog.getByLabel('Name').fill(computerName);
-      await dialog.getByRole('button', { name: 'Create pairing', exact: true }).click();
 
       const copyButtons = dialog.getByRole('button', { name: 'Copy', exact: true });
       const commands = dialog.locator('pre');
@@ -714,7 +709,7 @@ test.describe('Workspace and multi-Daemon product flow', () => {
       await copyButtons.nth(1).click();
       expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(secondCommand);
 
-      computer = (await call<Computer[]>(request, owner, 'get', '/api/v1/computers')).find((item) => item.name === computerName);
+      computer = (await call<Computer[]>(request, owner, 'get', '/api/v1/computers'))[0];
       expect(computer).toBeTruthy();
     } finally {
       if (computer) await call(request, owner, 'delete', `/api/v1/computers/${computer.id}`).catch(() => undefined);

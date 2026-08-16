@@ -11,6 +11,7 @@ import { NetworkStatus } from "@/components/network-status";
 import { ToastProvider } from "@/components/ui/toast";
 import { GlobalSearchTrigger } from "@/components/search/global-search-trigger";
 import { LocaleHydrator } from "@/components/locale-hydrator";
+import { FirstRunWizard } from "@/components/onboarding/first-run-wizard";
 import "./globals.brutal.css";
 
 const inter = Inter({
@@ -67,6 +68,7 @@ export default function RootLayout({
               <ToastProvider>
                 <WSAuthBridge />
                 <LocaleHydrator>
+                  <FirstRunWizard />
                   <ConnectionBanner />
                   <NetworkStatus />
                   <GlobalSearchTrigger />

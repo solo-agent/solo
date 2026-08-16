@@ -122,6 +122,8 @@ type AgentRunListItem = { id: string };
 
 interface RelationshipWorkspaceProps {
   title?: string;
+  emptyTitle?: string;
+  emptyDescription?: string;
   embedded?: boolean;
   isFullscreen?: boolean;
   channelFilterId?: string;
@@ -140,6 +142,8 @@ interface RelationshipWorkspaceProps {
 
 export function RelationshipWorkspace({
   title = t('relationshipEditor'),
+  emptyTitle = t('relationshipEditorEmptyTitle'),
+  emptyDescription = t('relationshipEditorEmpty'),
   embedded = false,
   isFullscreen = false,
   channelFilterId,
@@ -1070,6 +1074,7 @@ export function RelationshipWorkspace({
             </DialogHeader>
             <AgentForm
               onSubmit={handleCreateAgent}
+              onCancel={() => setShowCreateAgentModal(false)}
               isSubmitting={isCreatingAgent}
               submitLabel={t('teamsCreateAgent')}
             />
@@ -1078,15 +1083,15 @@ export function RelationshipWorkspace({
           {/* Empty state overlay */}
           {visibleAgents.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-              <div className="pointer-events-auto flex max-w-sm flex-col items-center gap-3 border-4 border-black bg-brutal-cream p-8 text-center shadow-brutal-xl">
+              <div data-onboarding="create-agent" className="pointer-events-auto flex max-w-sm flex-col items-center gap-3 border-4 border-black bg-brutal-cream p-8 text-center shadow-brutal-xl">
                 <span className="flex h-12 w-12 items-center justify-center border-2 border-black bg-white shadow-brutal-sm">
                   <Plus className="h-6 w-6" />
                 </span>
                 <h3 className="font-heading text-lg font-black">
-                  {t('relationshipEditorEmptyTitle')}
+                  {emptyTitle}
                 </h3>
                 <p className="max-w-xs font-body text-sm text-muted-foreground">
-                  {t('relationshipEditorEmpty')}
+                  {emptyDescription}
                 </p>
                 <div className="flex flex-wrap justify-center gap-2">
                   {onAddAgent && (

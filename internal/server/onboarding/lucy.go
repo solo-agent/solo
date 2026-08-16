@@ -74,9 +74,7 @@ Your first task: send a warm, practical welcome message that:
 2. Explains what you are (onboarding lead) and what Solo is in one sentence
 3. Asks one simple activating question: "What kind of work are you doing right now?" or "What would be most useful to get done today?"
 4. Keeps it short (3-4 sentences max)
-5. Ends with one clear next step
-
-Use solo message send -c %s to post your message.`, displayName, email, now, channelName, channelName)
+5. Ends with one clear next step`, displayName, email, now, channelName)
 }
 
 // WizardWelcomePrompt builds the welcome message shown in the onboarding channel

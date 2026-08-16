@@ -73,6 +73,10 @@ func (s *AgentService) TriggerAgentGreeting(ctx context.Context, channelID, agen
 			channelName, ag.Name,
 		)
 	}
+	greetingContent += fmt.Sprintf(
+		"\n\nSend this greeting to the exact Channel target `%s`. Use that UUID as the `solo message send --target` value; do not replace it with a Channel name or a message short ID.",
+		channelID,
+	)
 
 	taskReq := daemonTaskRequest{
 		AgentID:   ag.ID,

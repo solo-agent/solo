@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -386,7 +387,13 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 		b.WriteString("\n\n")
 	}
 
-	return strings.TrimSpace(b.String())
+	prompt := strings.TrimSpace(b.String())
+	if agent.WorkspacePath != "" {
+		soloCLI := filepath.Join(agent.WorkspacePath, "solo")
+		prompt = strings.ReplaceAll(prompt, "`solo`", "`"+soloCLI+"`")
+		prompt = strings.ReplaceAll(prompt, "solo ", soloCLI+" ")
+	}
+	return prompt
 }
 
 func writeCLICommands(b *strings.Builder, channel ChannelContext) {

@@ -1,34 +1,21 @@
 // ============================================================================
-// AgentForm — create/edit Agent form with brutalist styling
-// - input-brutal, textarea-brutal
-// - radio-brutal for Provider selection
-// - CLI detection display next to provider
-// - EnvEditor for custom_env key-value pairs (v1.4)
-// - ArgsEditor for custom_args tags (v1.4)
-// - ROLE_TEMPLATES for role template selector (SOLO-210-F)
+// AgentForm — shared daily Agent creation form.
 // ============================================================================
 
 'use client';
 
-import { useState, useCallback } from 'react';
-import { useForm, Controller } from 'react-hook-form';
+import { useState, useCallback, useEffect } from 'react';
+import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Bot, ChevronDown, Wrench, Terminal } from 'lucide-react';
+import { ChevronDown, Monitor, Wrench, Terminal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogCloseButton,
-} from '@/components/ui/dialog';
+import { DialogFooter } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select } from '@/components/ui/select';
 import { EnvEditor } from '@/components/agents/env-editor';
@@ -36,55 +23,7 @@ import { ArgsEditor } from '@/components/agents/args-editor';
 import { useCliDetection } from '@/lib/hooks/use-cli-detection';
 import { MODEL_PRESETS } from '@/lib/agent-models';
 import { useComputers } from '@/lib/hooks/use-computers';
-
-// ============================================================================
-// Role Templates (SOLO-210-F) — frontend-defined preset system prompts
-// ============================================================================
-
-interface RoleTemplate {
-  key: string;
-  name: string;
-  desc: string;
-  prompt: string;
-}
-
-const ROLE_TEMPLATES: RoleTemplate[] = [
-  {
-    key: 'leader',
-    name: 'Orchestrator',
-    desc: 'Monitor progress, assign tasks, approve deliverables',
-    prompt:
-      'You are the team orchestrator. Your responsibility is to monitor overall progress, break down large tasks into sub-tasks, and assign them to the appropriate agents. You do not write code directly — you focus on task assignment and decision approval. When a task is marked in_review, review the quality of completion and move it to done. If you detect blockers or schedule delays, coordinate and resolve them promptly.',
-  },
-  {
-    key: 'pm',
-    name: 'Project Manager',
-    desc: 'Requirements analysis, task planning, priority management',
-    prompt:
-      'You are the product/project manager. Your responsibility is to convert requirements into executable tasks, write clear task descriptions and acceptance criteria. Set priorities (P0-P3) to ensure the team focuses on high-priority items. Track task progress, identify risks, and communicate proactively. You do not write code directly, but you ensure every task has clear deliverable standards.',
-  },
-  {
-    key: 'rd',
-    name: 'Backend Developer',
-    desc: 'Backend coding, architecture implementation, code review',
-    prompt:
-      'You are a backend/architecture developer. Your responsibility is to take on backend coding and architecture implementation tasks, updating progress in the task thread. Communicate promptly when encountering technical blockers, mark tasks as in_review when implementation is complete, and briefly describe your approach. You focus on the backend tech stack (Go, PostgreSQL, distributed systems, etc.) and can help review other agents\' code.',
-  },
-  {
-    key: 'fe',
-    name: 'Frontend Developer',
-    desc: 'Frontend UI, responsive design, interactions',
-    prompt:
-      'You are a frontend developer. Your responsibility is to take on frontend UI and interaction implementation tasks, focusing on interface consistency, responsive design, and user experience. Use React, Next.js, Tailwind CSS, and related tech stacks. Update progress in the task thread, mark tasks as in_review when implementation is complete, and briefly describe your approach. You can help review frontend code.',
-  },
-  {
-    key: 'qa',
-    name: 'QA Engineer',
-    desc: 'Write tests, find bugs, quality verification',
-    prompt:
-      'You are a QA/test engineer. Your responsibility is to take on test writing and verification tasks, writing test cases for critical functional paths. When you discover bugs, create new tasks to document the issues and @mention relevant people. Verify tasks in in_review status, and move them to done once you confirm they meet acceptance criteria. You do not fix code directly, but you ensure delivery quality.',
-  },
-];
+import { RuntimeLogo } from '@/components/agents/runtime-logo';
 
 const agentFormSchema = z.object({
   name: z
@@ -107,6 +46,7 @@ export type AgentFormValues = z.infer<typeof agentFormSchema>;
 interface AgentFormProps {
   defaultValues?: Partial<AgentFormValues>;
   onSubmit: (values: AgentFormValues) => Promise<void>;
+  onCancel?: () => void;
   isSubmitting: boolean;
   submitLabel: string;
 }
@@ -114,13 +54,13 @@ interface AgentFormProps {
 export function AgentForm({
   defaultValues,
   onSubmit,
+  onCancel,
   isSubmitting,
   submitLabel,
 }: AgentFormProps) {
   const {
     register,
     handleSubmit,
-    control,
     watch,
     setValue,
     formState: { errors },
@@ -140,9 +80,9 @@ export function AgentForm({
     mode: 'onChange',
   });
 
-  const currentSystemPrompt = watch('system_prompt') || '';
   const selectedProvider = watch('model_provider') || '';
   const selectedComputerId = watch('computer_id') || '';
+  const selectedModel = watch('model_name') || '';
 
   const { computers, isLoading: computersLoading } = useComputers();
   const selectableComputers = computers.filter(
@@ -157,9 +97,7 @@ export function AgentForm({
     error: detectionError,
   } = useCliDetection(selectedComputerId || undefined, selectedComputer?.runtime_inventory ?? []);
 
-  // Role template selection state (SOLO-210-F)
-  const [selectedTemplateKey, setSelectedTemplateKey] = useState<string | null>(null);
-  const [pendingTemplate, setPendingTemplate] = useState<RoleTemplate | null>(null);
+  const [customModel, setCustomModel] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // v1.4: separate local state for complex editors, synced to form values
@@ -170,32 +108,11 @@ export function AgentForm({
     defaultValues?.custom_args || [],
   );
 
-  const applyTemplate = useCallback(
-    (template: RoleTemplate) => {
-      setValue('system_prompt', template.prompt);
-      setSelectedTemplateKey(template.key);
-      setPendingTemplate(null);
-    },
-    [setValue],
-  );
-
-  const handleTemplateSelect = useCallback(
-    (template: RoleTemplate) => {
-      const isTextareaDirty =
-        selectedTemplateKey !== template.key &&
-        currentSystemPrompt.trim() !== '' &&
-        currentSystemPrompt !==
-          ROLE_TEMPLATES.find((t) => t.key === selectedTemplateKey)?.prompt;
-
-      if (isTextareaDirty) {
-        setPendingTemplate(template);
-        return;
-      }
-
-      applyTemplate(template);
-    },
-    [applyTemplate, currentSystemPrompt, selectedTemplateKey],
-  );
+  useEffect(() => {
+    if (!selectedComputerId && selectableComputers.length === 1) {
+      setValue('computer_id', selectableComputers[0].id, { shouldValidate: true });
+    }
+  }, [selectableComputers, selectedComputerId, setValue]);
 
   const handleEnvChange = useCallback(
     (env: Record<string, string>) => {
@@ -224,179 +141,136 @@ export function AgentForm({
     [onSubmit, envValues, argsValues],
   );
 
+  const runtimes = Object.values(detection);
+  const models = MODEL_PRESETS[selectedProvider] ?? [];
+  const supportsCustomModel = ['opencode', 'hermes', 'openclaw'].includes(selectedProvider);
+
   return (
-    <>
-    <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4">
-      {/* Name */}
-      <div className="space-y-2">
-        <Label htmlFor="name">
-          {t('agentFormName')}
-        </Label>
-        <Input
-          id="name"
-          placeholder={t('agentFormNamePlaceholder')}
-          autoFocus
-          {...register('name')}
-          aria-invalid={!!errors.name}
-        />
-        {errors.name && (
-          <p className="font-mono text-[11px] text-brutal-danger">
-            {errors.name.message}
-          </p>
-        )}
+    <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-5">
+      <div className="-mx-4 grid gap-3 border-y border-border bg-brutal-cream/40 px-4 py-4 sm:-mx-6 sm:px-6">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="name">{t('agentFormName')}</Label>
+            <Input id="name" placeholder={t('agentFormNamePlaceholder')} autoFocus {...register('name')} aria-invalid={!!errors.name} />
+            {errors.name && <p className="font-mono text-[11px] text-brutal-danger">{errors.name.message}</p>}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="description">{t('agentFormDesc')}</Label>
+            <Input id="description" placeholder={t('agentFormDescPlaceholder')} {...register('description')} aria-invalid={!!errors.description} />
+            {errors.description && <p className="font-mono text-[11px] text-brutal-danger">{errors.description.message}</p>}
+          </div>
+        </div>
       </div>
 
-      {/* Description */}
-      <div className="space-y-2">
-        <Label htmlFor="description">{t('agentFormDesc')}</Label>
-        <Input
-          id="description"
-          placeholder={t('agentFormDescPlaceholder')}
-          {...register('description')}
-          aria-invalid={!!errors.description}
-        />
-        {errors.description && (
-          <p className="font-mono text-[11px] text-brutal-danger">
-            {errors.description.message}
-          </p>
-        )}
-      </div>
-
-      {/* Runtime Selection (v1.4: dynamic, based on CLI detection) */}
-      <div className="space-y-2">
-        <Label>{t('agentFormComputer')} <span className="text-brutal-danger">*</span></Label>
-        {computersLoading ? <Skeleton className="h-10 w-full rounded-none" /> : (
-          <Controller
-            name="computer_id"
-            control={control}
-            render={({ field }) => (
-              <Select
-                name={field.name}
-                value={field.value ?? ''}
-                onChange={(value) => {
-                  if (value !== field.value) setValue('model_provider', '');
-                  field.onChange(value);
-                }}
-                onBlur={field.onBlur}
-                options={selectableComputers.map((computer) => ({
-                  value: computer.id,
-                  label: `${computer.status === 'online' ? '●' : '○'} ${computer.name}`,
-                }))}
-                placeholder={t('agentFormSelectComputer')}
-                size="md"
-                className="w-full font-body"
-              />
-            )}
-          />
-        )}
+      <fieldset className="space-y-2">
+        <legend className="mb-2 font-body text-sm font-medium text-muted-foreground">{t('agentFormComputer')}</legend>
+        {computersLoading && <Skeleton className="h-16 w-full rounded-lg" />}
+        {!computersLoading && selectableComputers.map((computer) => (
+          <label key={computer.id} className={cn('flex min-h-16 cursor-pointer items-center gap-3 rounded-lg border bg-white px-3 py-2.5 transition-colors hover:bg-brutal-cream/40', selectedComputerId === computer.id ? 'border-muted-foreground bg-muted ring-1 ring-muted-foreground' : 'border-border')}>
+            <input
+              type="radio"
+              name="computer_id"
+              value={computer.id}
+              checked={selectedComputerId === computer.id}
+              onChange={() => {
+                if (selectedComputerId !== computer.id) {
+                  setValue('model_provider', '');
+                  setValue('model_name', '');
+                  setCustomModel(false);
+                }
+                setValue('computer_id', computer.id, { shouldValidate: true });
+              }}
+              className="h-4 w-4"
+              style={{ accentColor: 'var(--color-muted-foreground)' }}
+            />
+            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-brutal-cream"><Monitor className="h-4 w-4" /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-body text-sm font-semibold">{computer.name}</span>
+              <span className="mt-0.5 flex items-center gap-1.5 font-body text-xs text-muted-foreground">
+                <span className={cn('h-2 w-2 rounded-full', computer.status === 'online' ? 'bg-brutal-success' : 'bg-brutal-muted')} />
+                {computer.status === 'online' ? t('online') : t('offline')}
+              </span>
+            </span>
+          </label>
+        ))}
         {errors.computer_id && <p className="font-mono text-[11px] text-brutal-danger">{errors.computer_id.message}</p>}
-        {!computersLoading && selectableComputers.length === 0 && (
-          <p className="font-mono text-[11px] text-brutal-danger">{t('agentFormNoPairedComputer')}</p>
-        )}
-      </div>
+        {!computersLoading && selectableComputers.length === 0 && <p className="font-body text-sm text-brutal-danger">{t('agentFormNoPairedComputer')}</p>}
+      </fieldset>
 
-      <div className="space-y-3">
-        <Label>
-          {t('agentFormRuntimeLabel')} <span className="text-brutal-danger">*</span>
-        </Label>
+      <fieldset className="space-y-2">
+        <legend className="mb-2 font-body text-sm font-medium text-muted-foreground">{t('agentFormRuntimeLabel')}</legend>
+        {selectedComputerId && detectionLoading && <Skeleton className="h-14 w-full rounded-lg" />}
+        {selectedComputerId && detectionError && <p className="font-body text-sm text-brutal-danger">{t('cliCheckFailed')}</p>}
+        {selectedComputerId && !detectionLoading && !detectionError && runtimes.map((item) => (
+          <label key={item.type} className={cn('flex min-h-14 items-center gap-3 rounded-lg border bg-white px-3 py-2 transition-colors', item.available ? 'cursor-pointer hover:bg-brutal-cream/40' : 'cursor-not-allowed opacity-40', selectedProvider === item.type ? 'border-muted-foreground bg-muted ring-1 ring-muted-foreground' : 'border-border')}>
+            <input
+              type="radio"
+              name="model_provider"
+              value={item.type}
+              checked={selectedProvider === item.type}
+              disabled={!item.available}
+              onChange={() => {
+                setValue('model_provider', item.type, { shouldValidate: true });
+                setValue('model_name', '');
+                setCustomModel(false);
+              }}
+              className="h-4 w-4"
+              style={{ accentColor: 'var(--color-muted-foreground)' }}
+            />
+            <span className="flex h-7 w-7 items-center justify-center"><RuntimeLogo runtime={item.type} className="h-5 w-5" /></span>
+            <span className="min-w-0 flex-1 truncate font-body text-sm font-semibold">{item.display_name || item.type}</span>
+            {!item.available && <span className="font-body text-xs text-muted-foreground">{t('computersRuntimeUnavailable')}</span>}
+          </label>
+        ))}
+        {errors.model_provider && <p className="font-mono text-[11px] text-brutal-danger">{errors.model_provider.message}</p>}
+      </fieldset>
 
-        {/* Loading state */}
-        {selectedComputerId && detectionLoading && (
-          <Skeleton className="h-10 w-full rounded-none" />
-        )}
-        {selectedComputerId && detectionError && (
-          <p className="font-mono text-[11px] text-brutal-danger">
-            {t('cliCheckFailed')}
-          </p>
-        )}
-
-        {/* Runtime dropdown — only show available runtimes */}
-        {selectedComputerId && !detectionLoading && !detectionError && (
-          <Controller
-            name="model_provider"
-            control={control}
-            render={({ field }) => (
-              <Select
-                name={field.name}
-                value={field.value ?? ''}
-                onChange={(value) => {
-                  // Reset model when switching runtime — a model alias valid
-                  // for one runtime (e.g. "opus") is meaningless for another.
-                  if (value !== field.value) {
-                    setValue('model_name', '');
-                  }
-                  field.onChange(value);
-                }}
-                onBlur={field.onBlur}
-                options={Object.values(detection).map((rt) => ({
-                  value: rt.type,
-                  label: `${rt.available ? '●' : '○'} ${rt.display_name}${rt.version ? ` (${rt.version})` : ''}`,
-                  disabled: !rt.available,
-                }))}
-                placeholder={t('agentFormSelectRuntime')}
-                size="md"
-                className="w-full font-body"
-              />
-            )}
-          />
-        )}
-        {errors.model_provider && (
-          <p className="font-mono text-[11px] text-brutal-danger">
-            {errors.model_provider.message}
-          </p>
-        )}
-
-        {/* Unavailable runtimes shown below with install hint */}
-        {!detectionLoading &&
-          Object.values(detection)
-            .filter((rt) => !rt.available)
-            .map((rt) => (
-              <div
-                key={rt.type}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground"
-              >
-                <span className="font-mono text-[11px]">
-                  {t('agentFormNotInstalled', { name: rt.display_name })}
-                  {rt.error ? ` (${rt.error})` : ` (${rt.binary})`}
-                </span>
-              </div>
-            ))}
-
-      </div>
-
-      {/* Model Selection (v1.5) — known models are suggestions, not a closed
-          list. Empty value = let the CLI choose its default model. */}
       {!detectionLoading && selectedProvider && (
-        <div className="space-y-2">
-          <Label htmlFor="model_name">{t('agentFormModel')}</Label>
-          <Input
+        <div>
+          <Label htmlFor="model_name" className="font-body text-sm font-medium text-muted-foreground">{t('agentFormModel')}</Label>
+          <Select
             id="model_name"
-            list={MODEL_PRESETS[selectedProvider] ? `model-presets-${selectedProvider}` : undefined}
-            placeholder={t('agentRuntimeDefault')}
-            maxLength={100}
-            {...register('model_name')}
+            value={customModel ? '__custom__' : selectedModel}
+            onChange={(value) => {
+              const nextCustom = value === '__custom__';
+              setCustomModel(nextCustom);
+              setValue('model_name', nextCustom ? '' : value);
+            }}
+            options={[
+              { value: '', label: t('firstRunDefaultModel') },
+              ...models,
+              ...(supportsCustomModel ? [{ value: '__custom__', label: t('firstRunCustomModel') }] : []),
+            ]}
+            size="md"
+            className="mt-2 w-full font-body"
+            aria-label={t('agentFormModel')}
           />
-          {MODEL_PRESETS[selectedProvider] && (
-            <datalist id={`model-presets-${selectedProvider}`}>
-              {MODEL_PRESETS[selectedProvider].map((model) => (
-                <option key={model.value} value={model.value}>{model.label}</option>
-              ))}
-            </datalist>
+          {customModel && (
+            <input
+              autoFocus
+              value={selectedModel}
+              onChange={(event) => setValue('model_name', event.target.value)}
+              placeholder={t('firstRunCustomModelPlaceholder')}
+              maxLength={100}
+              className="mt-2 h-10 w-full rounded-lg border border-border bg-white px-3 font-mono text-sm outline-none focus:border-muted-foreground focus:ring-2 focus:ring-muted"
+            />
           )}
-          <p className="font-mono text-[11px] text-muted-foreground">
-            {t('agentFormModelHelp')}
-          </p>
         </div>
       )}
 
-      <div className="border-y-2 border-black py-3">
+      <div className="space-y-2">
+        <Label htmlFor="system_prompt">{t('agentFormSystemPrompt')}</Label>
+        <Textarea id="system_prompt" placeholder={t('agentFormSystemPromptPlaceholder')} className="min-h-28 resize-y" aria-label={t('agentFormSystemPrompt')} {...register('system_prompt')} />
+      </div>
+
+      <div className="border-t border-border pt-4">
         <button
           type="button"
           onClick={() => setShowAdvanced((current) => !current)}
           className="flex w-full items-center gap-3 text-left"
           aria-expanded={showAdvanced}
         >
-          <span className="flex h-8 w-8 items-center justify-center border-2 border-black bg-brutal-primary-light shadow-brutal-sm">
+          <span className="flex h-8 w-8 items-center justify-center rounded-md bg-brutal-cream">
             <Wrench className="h-3.5 w-3.5" />
           </span>
           <span className="min-w-0 flex-1">
@@ -407,40 +281,7 @@ export function AgentForm({
         </button>
 
         {showAdvanced && (
-          <div className="mt-5 space-y-6">
-            <div className="space-y-3">
-              <Label>{t('agentFormRoleTemplate')}</Label>
-              <div className="flex flex-wrap gap-2">
-                {ROLE_TEMPLATES.map((template) => {
-                  const isSelected = selectedTemplateKey === template.key;
-                  return (
-                    <button
-                      key={template.key}
-                      type="button"
-                      onClick={() => handleTemplateSelect(template)}
-                      className={cn(
-                        'border-2 border-black px-3 py-2 text-left transition-all',
-                        isSelected
-                          ? 'translate-x-0.5 translate-y-0.5 bg-brutal-primary shadow-brutal-sm'
-                          : 'bg-white shadow-brutal-sm hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal',
-                      )}
-                    >
-                      <span className="whitespace-nowrap font-heading text-xs font-bold leading-tight">{template.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="system_prompt">{t('agentFormSystemPrompt')}</Label>
-              <Textarea
-                id="system_prompt"
-                placeholder={t('agentFormSystemPromptPlaceholder')}
-                className="min-h-24 resize-y"
-                aria-label={t('agentFormSystemPrompt')}
-                {...register('system_prompt')}
-              />
-            </div>
+          <div className="mt-5 space-y-6 rounded-lg border border-border bg-brutal-cream/40 p-4">
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <Terminal className="h-4 w-4" />
@@ -467,12 +308,11 @@ export function AgentForm({
         )}
       </div>
 
-      {/* Submit */}
-      <div className="sticky bottom-0 z-10 -mx-2 flex items-center justify-end border-t-2 border-black bg-card px-2 py-3">
+      <DialogFooter className="sticky -bottom-4 z-10 -mx-4 -mb-4 border-t border-border bg-card px-4 py-4 sm:-bottom-6 sm:-mx-6 sm:-mb-6 sm:px-6">
+        {onCancel && <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>{t('cancel')}</Button>}
         <Button
           type="submit"
-          variant="success"
-          disabled={isSubmitting}
+          disabled={isSubmitting || (customModel && !selectedModel.trim())}
         >
           {isSubmitting ? (
             <>
@@ -481,39 +321,12 @@ export function AgentForm({
             </>
           ) : (
             <>
-              <Bot className="mr-2 h-4 w-4" />
               {submitLabel}
             </>
           )}
         </Button>
-      </div>
-    </form>
-    <Dialog open={!!pendingTemplate} onOpenChange={(open) => { if (!open) setPendingTemplate(null); }}>
-      <DialogHeader>
-        <DialogTitle>{t('agentFormRoleTemplate')}</DialogTitle>
-        <DialogCloseButton onClick={() => setPendingTemplate(null)} />
-      </DialogHeader>
-      <DialogDescription>
-        {t('agentFormTemplateWarning')}
-      </DialogDescription>
-      <DialogFooter>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setPendingTemplate(null)}
-        >
-          {t('cancel')}
-        </Button>
-        <Button
-          type="button"
-          variant="danger"
-          onClick={() => pendingTemplate && applyTemplate(pendingTemplate)}
-        >
-          {t('confirm')}
-        </Button>
       </DialogFooter>
-    </Dialog>
-    </>
+    </form>
   );
 }
 
