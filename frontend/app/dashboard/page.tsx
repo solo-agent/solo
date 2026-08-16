@@ -53,7 +53,7 @@ export default function DashboardPage() {
         <div className="flex h-screen items-center justify-center bg-brutal-cream">
           <div className="flex flex-col items-center gap-3">
             <Spinner size="md" />
-            <p className="font-mono text-sm text-muted-foreground">{t('loading')}</p>
+            <p className="font-body text-sm text-muted-foreground">{t('loading')}</p>
           </div>
         </div>
       }

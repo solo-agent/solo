@@ -71,7 +71,7 @@ export default function TemplatesPage() {
                   <LayoutTemplate className="h-5 w-5 text-brutal-accent" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block font-mono text-[10px] font-bold uppercase tracking-widest text-black/55">{t('templatesTargetEyebrow')}</span>
+                  <span className="block font-body text-[11px] font-semibold uppercase tracking-wider text-black/55">{t('templatesTargetEyebrow')}</span>
                   <span className="mt-0.5 block font-heading text-base font-black">{t('templatesTargetTitle')}</span>
                   <span className="mt-1 block font-body text-xs leading-relaxed text-black/65">
                     {t('templatesTargetDesc')}
@@ -128,7 +128,7 @@ export default function TemplatesPage() {
           {isLoading ? (
             <div className="flex justify-center py-24"><Spinner size="md" /></div>
           ) : error ? (
-            <div className="border-4 border-black bg-brutal-danger-light p-6 font-mono text-sm shadow-brutal">{error}</div>
+            <div className="border-4 border-black bg-brutal-danger-light p-6 font-body text-sm shadow-brutal">{error}</div>
           ) : visibleTemplates.length === 0 ? (
             <div className="border-4 border-dashed border-black bg-white p-12 text-center">
               <p className="font-heading text-xl font-black">{t('templatesNoMatch')}</p>

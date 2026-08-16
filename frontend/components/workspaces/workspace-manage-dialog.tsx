@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Trash2 } from 'lucide-react';
+import { Save, Trash2 } from 'lucide-react';
 import {
   Dialog,
   DialogCloseButton,
@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button, iconActionClass } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useWorkspace, type ManageTabKey } from '@/lib/workspace-context';
 import { WorkspaceSettingsCard } from '@/components/workspaces/workspace-members-dialog';
 import { useToast } from '@/components/ui/toast';
@@ -27,18 +28,40 @@ const TABS = [
 // per P0-09 A — the rail does not gain an empty bell tab.
 export function WorkspaceManageDialog() {
   const router = useRouter();
-  const { activeWorkspace, deleteWorkspace, manageDialog, openManage, closeManage } = useWorkspace();
+  const { activeWorkspace, updateWorkspace, deleteWorkspace, manageDialog, openManage, closeManage } = useWorkspace();
   const { showToast } = useToast();
   const [tab, setTab] = useState<ManageTabKey>(manageDialog.tab);
   const [busy, setBusy] = useState(false);
+  const [name, setName] = useState('');
+  const [icon, setIcon] = useState('');
 
   useEffect(() => {
     if (manageDialog.open) setTab(manageDialog.tab);
   }, [manageDialog.open, manageDialog.tab]);
 
+  useEffect(() => {
+    if (!manageDialog.open || !activeWorkspace) return;
+    setName(activeWorkspace.name);
+    setIcon(activeWorkspace.icon);
+  }, [activeWorkspace, manageDialog.open]);
+
   const canDelete = activeWorkspace?.role === 'owner'
     && !activeWorkspace.is_default
     && !activeWorkspace.is_personal;
+  const canEdit = activeWorkspace?.role === 'owner' || activeWorkspace?.role === 'admin';
+
+  const save = async () => {
+    if (!activeWorkspace || !name.trim() || !icon.trim()) return;
+    setBusy(true);
+    try {
+      await updateWorkspace(activeWorkspace.id, { name: name.trim(), icon: icon.trim() });
+      showToast(t('workspaceUpdated'), 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : t('workspaceUpdateFailed'), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const remove = async () => {
     if (!activeWorkspace) return;
@@ -90,21 +113,44 @@ export function WorkspaceManageDialog() {
         <div className="min-h-0 flex-1 overflow-y-auto pr-1" role="tabpanel">
           {tab === 'overview' && (
             <div className="flex flex-col gap-4">
-              <div className="flex items-start gap-3 border-2 border-black bg-white p-3 shadow-brutal-sm">
+              <div className="flex items-start gap-3 rounded-xl border-2 border-black bg-brutal-cream p-4 shadow-brutal-sm">
                 <span className="flex h-12 w-12 shrink-0 items-center justify-center border-2 border-black bg-brutal-primary font-heading text-lg font-black">
                   {activeWorkspace.icon?.slice(0, 2) || 'S'}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="font-heading text-base font-black">{activeWorkspace.name}</div>
-                  <div className="mt-0.5 font-mono text-[10px] font-bold uppercase text-black/55">
-                    {activeWorkspace.role} · {activeWorkspace.member_count} {t('workspaceMemberCount')}
+                  <div className="mt-1 flex flex-wrap gap-2 font-mono text-[10px] font-bold uppercase text-black/55">
+                    <span>{activeWorkspace.member_count} {t('workspaceMemberCount')}</span>
+                    <span>·</span>
+                    <span>{t(activeWorkspace.visibility === 'public' ? 'workspaceVisibilityPublic' : 'workspaceVisibilityPrivate')}</span>
+                    <span>·</span>
+                    <span>{t(activeWorkspace.is_personal ? 'workspaceTypePersonal' : 'workspaceTypeShared')}</span>
                   </div>
                 </div>
               </div>
 
-              <div className="border-2 border-dashed border-black/30 bg-brutal-cream p-3 text-xs text-black/60">
-                {t('workspaceManageOverviewPending')}
+              <div className="grid gap-3 sm:grid-cols-[96px_minmax(0,1fr)]">
+                <label className="space-y-1">
+                  <span className="font-heading text-xs font-bold">{t('workspaceIconLabel')}</span>
+                  <Input value={icon} onChange={(event) => setIcon(event.target.value)} maxLength={8} disabled={!canEdit || busy} />
+                </label>
+                <label className="space-y-1">
+                  <span className="font-heading text-xs font-bold">{t('workspaceNameLabel')}</span>
+                  <Input value={name} onChange={(event) => setName(event.target.value)} maxLength={100} disabled={!canEdit || busy} />
+                </label>
               </div>
+
+              {canEdit && (
+                <div className="flex justify-end">
+                  <Button
+                    onClick={() => void save()}
+                    disabled={busy || !name.trim() || !icon.trim() || (name.trim() === activeWorkspace.name && icon.trim() === activeWorkspace.icon)}
+                  >
+                    <Save className="mr-2 h-4 w-4" />
+                    {t('workspaceSaveOverview')}
+                  </Button>
+                </div>
+              )}
 
               {canDelete && (
                 <div className="mt-auto border-t-2 border-black pt-4">

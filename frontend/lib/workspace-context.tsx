@@ -43,6 +43,7 @@ interface WorkspaceContextValue {
   error: string | null;
   switchWorkspace: (workspaceId: string) => void;
   createWorkspace: (name: string, icon?: string) => Promise<Workspace>;
+  updateWorkspace: (workspaceId: string, input: { name?: string; icon?: string }) => Promise<Workspace>;
   deleteWorkspace: (workspaceId: string) => Promise<void>;
   refetch: () => Promise<void>;
   manageDialog: ManageDialogState;
@@ -103,6 +104,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return workspace;
   }, [user?.id]);
 
+  const updateWorkspace = useCallback(async (workspaceId: string, input: { name?: string; icon?: string }) => {
+    const workspace = await apiClient.patch<Workspace>(`/api/v1/workspaces/${workspaceId}`, input);
+    setWorkspaces((current) => current.map((item) => item.id === workspaceId ? workspace : item));
+    return workspace;
+  }, []);
+
   const deleteWorkspace = useCallback(async (workspaceId: string) => {
     await apiClient.delete(`/api/v1/workspaces/${workspaceId}`);
     setWorkspaces((current) => current.filter((item) => item.id !== workspaceId));
@@ -123,9 +130,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, []);
   const value = useMemo(() => ({
     workspaces, activeWorkspace, isLoading, error,
-    switchWorkspace, createWorkspace, deleteWorkspace, refetch: load,
+    switchWorkspace, createWorkspace, updateWorkspace, deleteWorkspace, refetch: load,
     manageDialog, openManage, closeManage,
-  }), [workspaces, activeWorkspace, isLoading, error, switchWorkspace, createWorkspace, deleteWorkspace, load, manageDialog, openManage, closeManage]);
+  }), [workspaces, activeWorkspace, isLoading, error, switchWorkspace, createWorkspace, updateWorkspace, deleteWorkspace, load, manageDialog, openManage, closeManage]);
 
   return (
     <WorkspaceContext.Provider value={value}>

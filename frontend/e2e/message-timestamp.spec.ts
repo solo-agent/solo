@@ -1,8 +1,9 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
-const credentials = { email: 'message-time-e2e@solo.local', password: 'SoloE2E-2026!' };
+const credentials = { email: `message-time-e2e-${Date.now()}@solo.local`, password: 'SoloE2E-2026!' };
 
 interface AuthResponse {
   access_token: string;
@@ -25,6 +26,15 @@ async function authenticate(request: APIRequestContext): Promise<AuthResponse> {
   return register.json();
 }
 
+function bypassUnrelatedFirstRunWizard() {
+  execFileSync('docker', [
+    'exec', process.env.SOLO_POSTGRES_CONTAINER ?? 'solo-postgres',
+    'psql', '-U', process.env.POSTGRES_USER ?? 'solo',
+    '-d', process.env.POSTGRES_DB ?? 'solo', '-v', 'ON_ERROR_STOP=1', '-c',
+    `UPDATE users SET onboarding_completed_at=now() WHERE email='${credentials.email}'`,
+  ], { stdio: 'ignore' });
+}
+
 function shiftedDay(value: string, days: number) {
   const date = new Date(value);
   date.setDate(date.getDate() + days);
@@ -42,6 +52,7 @@ function expectedTime(value: string, locale: 'en' | 'zh-CN') {
 
 test('channel message timestamps use localized calendar labels and a 24-hour clock', async ({ page, request }) => {
   const auth = await authenticate(request);
+  bypassUnrelatedFirstRunWizard();
   const createdChannel = await request.post(`${apiBase}/api/v1/channels`, {
     headers: { authorization: `Bearer ${auth.access_token}` },
     data: { name: `message-time-e2e-${Date.now()}`, description: 'Message timestamp E2E' },
@@ -65,6 +76,13 @@ test('channel message timestamps use localized calendar labels and a 24-hour clo
     expect(persisted?.content).toBe(message.content);
     expect(new Date(persisted!.created_at).getTime()).toBe(new Date(message.created_at).getTime());
 
+    const createdFollowUp = await request.post(`${apiBase}/api/v1/channels/${channel.id}/messages`, {
+      headers: { authorization: `Bearer ${auth.access_token}` },
+      data: { content: `GROUPED_TIMESTAMP_E2E_${Date.now()}` },
+    });
+    expect(createdFollowUp.ok()).toBe(true);
+    const followUp = await createdFollowUp.json() as MessageResponse;
+
     await page.addInitScript(({ accessToken, refreshToken }) => {
       localStorage.setItem('access_token', accessToken);
       localStorage.setItem('refresh_token', refreshToken);
@@ -75,6 +93,8 @@ test('channel message timestamps use localized calendar labels and a 24-hour clo
 
     const timestamp = page.locator(`[data-message-id="${message.id}"] time`);
     await expect(timestamp).toHaveText(expectedTime(message.created_at, 'zh-CN'));
+    await expect(page.locator('[data-message-date-separator]').first()).toContainText('今天');
+    await expect(page.locator(`[data-message-id="${followUp.id}"]`)).toHaveAttribute('data-message-grouped', 'true');
 
     await page.clock.setFixedTime(shiftedDay(message.created_at, 1));
     await page.reload();

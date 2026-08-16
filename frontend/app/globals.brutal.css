@@ -54,12 +54,14 @@
 @theme {
   /* ---- Typography ---- */
   /* --font-sans / --font-body: body and UI text.
-     --font-heading: heavy display (Space Grotesk).
+     --font-heading: strong UI labels and compact headings.
+     --font-display: page-level Archive headings only.
      --font-mono: code, IDs, tabular numerals only. Do not use for prose. */
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui;
-  --font-body: var(--font-inter), ui-sans-serif, system-ui;
-  --font-heading: var(--font-space-grotesk), 'Space Grotesk', sans-serif;
-  --font-mono: var(--font-space-mono), ui-monospace, monospace;
+  --font-sans: var(--font-inter), var(--font-noto-sans-sc), 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui;
+  --font-body: var(--font-inter), var(--font-noto-sans-sc), 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui;
+  --font-heading: var(--font-space-grotesk), var(--font-noto-sans-sc), 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-display: var(--font-literata), var(--font-noto-serif-sc), 'Songti SC', 'Noto Serif CJK SC', serif;
+  --font-mono: var(--font-space-mono), var(--font-noto-sans-sc), ui-monospace, monospace;
 
   /* ---- Brand Color Palette (semantic, light mode) ----
      primary = call-to-action yellow, accent = hot red, info = electric blue,
@@ -1178,13 +1180,23 @@
    ============================================================ */
 
 :root[data-skin="archive"] {
-  --font-heading: var(--font-literata), Georgia, serif;
   --radius: 0.625rem;
   --color-black: var(--skin-ink);
   --color-white: var(--skin-surface);
   --archive-shadow-sm: 0 1px 2px rgb(57 52 47 / 10%);
   --archive-shadow-md: 0 5px 16px rgb(57 52 47 / 12%);
   --archive-shadow-lg: 0 12px 30px rgb(57 52 47 / 15%);
+  --scrollbar-thumb: color-mix(in srgb, var(--skin-rule) 72%, var(--skin-surface));
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--skin-subtle-text) 46%, var(--skin-surface));
+}
+
+:root[data-skin="archive"] :where(h1.font-heading) {
+  font-family: var(--font-display);
+}
+
+:root[data-skin="archive"] ::selection {
+  background: var(--skin-accent-light);
+  color: var(--skin-ink);
 }
 
 :root[data-skin="archive"] body::before {
@@ -1344,6 +1356,7 @@
   border-width: 1px;
   border-color: var(--skin-rule);
   border-radius: 0.875rem;
+  overscroll-behavior: contain;
 }
 
 :root[data-skin="archive"] :where(.bg-grid, .bg-halftone) {

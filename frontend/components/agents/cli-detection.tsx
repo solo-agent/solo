@@ -24,7 +24,7 @@ export function CliDetection({ selectedRuntime, className }: CliDetectionProps) 
     return (
       <div className={cn('flex items-center gap-1.5 text-muted-foreground', className)}>
         <Loader2 className="h-3 w-3 animate-spin" />
-        <span className="font-mono text-[11px]">{t('cliChecking')}</span>
+        <span className="font-body text-xs">{t('cliChecking')}</span>
       </div>
     );
   }
@@ -34,7 +34,7 @@ export function CliDetection({ selectedRuntime, className }: CliDetectionProps) 
     return (
       <div className={cn('flex items-center gap-1.5 text-brutal-muted', className)}>
         <AlertTriangle className="h-3 w-3" />
-        <span className="font-mono text-[11px]">{t('cliCheckFailed')}</span>
+        <span className="font-body text-xs">{t('cliCheckFailed')}</span>
       </div>
     );
   }

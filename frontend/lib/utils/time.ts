@@ -55,6 +55,44 @@ export function formatMessageTimestamp(iso: string | null | undefined, now = new
   return `${day} ${time}`;
 }
 
+/** Formats only the local 24-hour clock time for compact chat gutters. */
+export function formatMessageTime(iso: string | null | undefined): string {
+  if (!iso) return t('unknown');
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return t('unknown');
+  return new Intl.DateTimeFormat(getLocale(), {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(date);
+}
+
+/** Local calendar key used to split chat history into days. */
+export function messageDateKey(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+/** Formats the label shown in a chat day separator. */
+export function formatMessageDateLabel(iso: string | null | undefined, now = new Date()): string {
+  if (!iso) return t('unknown');
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return t('unknown');
+  if (date.toDateString() === now.toDateString()) return t('today');
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return t('yesterday');
+
+  return new Intl.DateTimeFormat(getLocale(), {
+    ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' as const } : {}),
+    month: 'short',
+    day: 'numeric',
+  }).format(date);
+}
+
 /**
  * Returns a full Chinese datetime string.
  * Example: "2026-05-19 15:30:45"

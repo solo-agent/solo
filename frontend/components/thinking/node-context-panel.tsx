@@ -55,7 +55,7 @@ function HandoffCard({
 
 function EmptyState({ children }: { children: string }) {
   return (
-    <div className="border-2 border-dashed border-black bg-white px-3 py-2 font-mono text-[10px] text-muted-foreground">
+    <div className="border-2 border-dashed border-black bg-white px-3 py-2 font-body text-[10px] text-muted-foreground">
       {children}
     </div>
   );
@@ -145,7 +145,7 @@ export function NodeContextPanel({
         <div className="max-h-[46vh] space-y-4 overflow-y-auto border-t-2 border-black p-4">
           {node.parent_id && (
             <div className="space-y-2">
-              <h3 className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{t('thinkingContextFromParent')}</h3>
+              <h3 className="font-heading text-xs font-bold text-muted-foreground">{t('thinkingContextFromParent')}</h3>
               {node.inherited_handoff ? (
                 <HandoffCard
                   kind="inherited"
@@ -164,7 +164,7 @@ export function NodeContextPanel({
 
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3">
-              <h3 className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{t('thinkingCurrentState')}</h3>
+              <h3 className="font-heading text-xs font-bold text-muted-foreground">{t('thinkingCurrentState')}</h3>
               {refreshEligible && (
                 <Button
                   type="button"
@@ -199,12 +199,12 @@ export function NodeContextPanel({
             ) : (
               <EmptyState>{node.message_count === 0 ? t('thinkingCurrentStateStartFirst') : t('thinkingCurrentStateNotPublished')}</EmptyState>
             )}
-            {error && <p className="font-mono text-[10px] font-bold text-brutal-danger">{error}</p>}
+            {error && <p className="font-body text-[10px] font-bold text-brutal-danger">{error}</p>}
           </div>
 
           {siblings.length > 0 && (
             <div className="space-y-2">
-              <h3 className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{t('thinkingContextRelated')}</h3>
+              <h3 className="font-heading text-xs font-bold text-muted-foreground">{t('thinkingContextRelated')}</h3>
               {siblings.map((sibling) => sibling.returned_handoff || sibling.checkpoint_handoff ? (
                 <HandoffCard
                   key={sibling.id}
@@ -222,7 +222,7 @@ export function NodeContextPanel({
 
           {returnedChildren.length > 0 && (
             <div className="space-y-2">
-              <h3 className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{t('thinkingContextChildReturns')}</h3>
+              <h3 className="font-heading text-xs font-bold text-muted-foreground">{t('thinkingContextChildReturns')}</h3>
               {returnedChildren.map((child) => (
                 <HandoffCard
                   key={child.id}

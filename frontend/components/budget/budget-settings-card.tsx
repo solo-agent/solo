@@ -159,7 +159,7 @@ function TokenInput({ label, value, onChange }: { label: string; value: string; 
         <Input aria-label={label} type="number" inputMode="decimal" min="0.0001" step="0.0001" value={value} onChange={(event) => onChange(event.target.value)} placeholder="100" className="min-w-0" />
         <span className="flex items-center border-y-2 border-r-2 border-black bg-white px-2 font-mono text-[10px] font-bold">{t('budgetMonthlyUnit')}</span>
       </div>
-      <p className="mt-1 font-mono text-[10px] text-muted-foreground">{t('budgetMonthlyInputHint')}</p>
+      <p className="mt-1 font-body text-[11px] text-muted-foreground">{t('budgetMonthlyInputHint')}</p>
     </div>
   );
 }

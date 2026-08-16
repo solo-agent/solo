@@ -1,57 +1,33 @@
-// ============================================================================
-// 404 Not Found page — neubrutalist styling (v3.2 Phase 2)
-// - Halftone dot grid texture behind the hero block (print/risograph feel)
-// - 404 wordmark rotated 2° + hollow text-stroke (display treatment)
-// ============================================================================
-
 import Link from 'next/link';
 import { FileQuestion } from 'lucide-react';
+import { t } from '@/lib/i18n';
 
 export default function NotFoundPage() {
   return (
-    <div className="relative flex min-h-screen flex-col items-center justify-center bg-brutal-cream px-4 overflow-hidden">
-      {/* v3.2 (Phase 2): halftone texture behind the hero block.
-          Pointer-events-none so it never intercepts clicks. */}
-      <div className="absolute inset-0 bg-halftone pointer-events-none" aria-hidden />
-
-      <div className="relative mx-auto flex max-w-sm flex-col items-center text-center">
-        <div className="mb-6 flex h-20 w-20 items-center justify-center border-brutal-4 bg-brutal-primary shadow-brutal">
-          <FileQuestion className="h-10 w-10 text-black" />
+    <main id="main-content" className="relative flex min-h-screen items-center justify-center bg-brutal-cream px-4 py-16">
+      <div className="pointer-events-none absolute inset-0 bg-grid opacity-20" aria-hidden />
+      <div className="relative mx-auto flex max-w-md flex-col items-center rounded-2xl border border-black bg-white p-10 text-center shadow-brutal-lg">
+        <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl border border-black bg-brutal-primary shadow-brutal-sm">
+          <FileQuestion className="h-9 w-9" aria-hidden="true" />
         </div>
-        {/* v3.2 (Phase 2): 404 wordmark treated as a display sticker —
-            rotated + hollow (text-stroke). The number becomes a piece
-            of the page rather than just a label. */}
-        <h1
-          className="font-heading text-7xl font-black text-foreground"
-          style={{
-            transform: 'rotate(2deg)',
-            WebkitTextStroke: '2px #000',
-            color: 'transparent',
-          }}
-        >
-          404
-        </h1>
-        <p className="mt-2 font-heading text-lg font-bold text-foreground">
-          Page not found
-        </p>
-        <p className="mt-2 font-body text-sm text-muted-foreground">
-          The page you are looking for does not exist or has been removed. Please check the link.
-        </p>
-        <div className="mt-8 flex gap-4">
+        <p className="font-mono text-xs font-bold uppercase tracking-[0.22em] text-muted-foreground">404</p>
+        <h1 className="mt-2 font-heading text-3xl font-bold">{t('pageNotFound')}</h1>
+        <p className="mt-3 font-body text-sm leading-6 text-muted-foreground">{t('pageNotFoundDesc')}</p>
+        <div className="mt-8 flex w-full flex-col gap-3 sm:flex-row">
           <Link
             href="/dashboard"
-            className="btn-brutal btn-brutal-primary px-5 py-2.5 text-sm"
+            className="btn-brutal btn-brutal-primary flex-1 px-5 py-2.5 text-sm"
           >
-            Back to Dashboard
+            {t('backToDashboard')}
           </Link>
           <Link
             href="/auth/login"
-            className="btn-brutal bg-white px-5 py-2.5 text-sm"
+            className="btn-brutal flex-1 bg-white px-5 py-2.5 text-sm"
           >
-            Back to Login
+            {t('backToLogin')}
           </Link>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

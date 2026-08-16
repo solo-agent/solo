@@ -11,6 +11,7 @@
 'use client';
 
 import {
+  Fragment,
   useEffect,
   useRef,
   useState,
@@ -32,6 +33,7 @@ import {
   CheckCircle2,
   Pin,
   PinOff,
+  UserRoundCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { buildValidNames } from '@/lib/utils/highlight';
@@ -52,10 +54,16 @@ import { AgentMessage } from './agent-message';
 import { MessageMarkdown } from './message-markdown';
 import { StreamingMessage } from './streaming-message';
 import { MessageAttachments } from './message-attachments';
+import { canGroupMessages, MessageDateSeparator } from './message-layout';
+import { ThreadPreview } from './thread-preview';
 import type { AgentDetailTarget, ChannelMember, Message } from '@/lib/types';
 import { sanitizeHtml } from '@/lib/sanitize';
 import { t } from '@/lib/i18n';
-import { formatMessageTimestamp } from '@/lib/utils/time';
+import {
+  formatMessageTime,
+  formatMessageTimestamp,
+  messageDateKey,
+} from '@/lib/utils/time';
 // Agent activity now lives in team/observability surfaces, not inline typing badges.
 interface MessageListProps {
   messages: Message[];
@@ -120,6 +128,7 @@ const TASK_HEADER_CONFIG: Record<string, { label: string; accentClass: string; b
 
 interface MessageItemProps {
   message: Message;
+  isGrouped?: boolean;
   isHighlighted?: boolean;
   onRetry: (id: string, content: string) => void;
   onCancel?: (id: string) => void;
@@ -134,6 +143,7 @@ interface MessageItemProps {
 
 const MessageItem = memo(function MessageItem({
   message,
+  isGrouped,
   isHighlighted,
   onRetry,
   onCancel,
@@ -215,6 +225,7 @@ const MessageItem = memo(function MessageItem({
   }, [isHovered, onEdit, onDelete, message.content, message.id, isEditing, isFailed, isSending]);
 
   const time = formatMessageTimestamp(message.created_at);
+  const compactTime = formatMessageTime(message.created_at);
 
   const handleSaveEdit = useCallback(async () => {
     if (isSaving) return;
@@ -264,7 +275,7 @@ const MessageItem = memo(function MessageItem({
               <CheckCircle2 className="h-5 w-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <div className="font-mono text-[10px] font-bold uppercase tracking-widest text-black/55">{t('lucyChannelReady')}</div>
+              <div className="font-body text-[11px] font-semibold uppercase tracking-wider text-black/55">{t('lucyChannelReady')}</div>
               <h3 className="truncate font-heading text-lg font-black"># {channelName}</h3>
               <p className="mt-1 font-body text-sm text-black/65">{message.content}</p>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -296,8 +307,10 @@ const MessageItem = memo(function MessageItem({
   return (
     <div
       data-message-id={message.id}
+      data-message-grouped={isGrouped ? 'true' : 'false'}
       className={cn(
-        'group relative flex gap-3 px-6 py-2.5 transition-colors border-b border-brutal-muted',
+        'group relative flex gap-3 px-6 transition-colors',
+        isGrouped ? 'py-1' : 'pt-3 pb-1.5',
         !isTaskMessage && 'hover:bg-brutal-muted/15',
         isFailed && 'bg-brutal-danger-light/30',
         isEditing && 'border-l-[3px] border-l-brutal-primary bg-brutal-primary-light/30',
@@ -331,7 +344,16 @@ const MessageItem = memo(function MessageItem({
         </button>
       )}
 
-      {message.sender_type === 'user' ? (
+      {isGrouped ? (
+        <div className="mt-0.5 w-8 flex-shrink-0 text-center">
+          <time
+            dateTime={message.created_at}
+            className="font-mono text-[9px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+          >
+            {compactTime}
+          </time>
+        </div>
+      ) : message.sender_type === 'user' ? (
         <UserAvatar
           userId={message.user_id}
           name={message.display_name}
@@ -347,6 +369,7 @@ const MessageItem = memo(function MessageItem({
       )}
 
       <div className="min-w-0 flex-1">
+        {isGrouped && <span className="sr-only">{message.display_name}, {compactTime}</span>}
         {/* SOLO-225-F: Task header row — above sender name + timestamp */}
         {isTaskMessage && headerConfig && (
           <div className="flex items-center gap-2 mb-1.5">
@@ -366,7 +389,7 @@ const MessageItem = memo(function MessageItem({
         )}
 
         {/* Sender name + timestamp */}
-        <div className="mb-1.5 flex items-baseline gap-2">
+        <div className={cn('mb-1.5 items-baseline gap-2', isGrouped ? 'hidden' : 'flex')}>
           <span className="font-heading text-sm font-bold text-foreground">
             {message.display_name}
           </span>
@@ -391,7 +414,7 @@ const MessageItem = memo(function MessageItem({
             {isSaving && (
               <div className="flex items-center gap-1.5">
                 <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-                <span className="font-mono text-[11px] text-muted-foreground">{t('savingMessage')}</span>
+                <span className="font-body text-xs text-muted-foreground">{t('savingMessage')}</span>
               </div>
             )}
             <textarea
@@ -484,36 +507,31 @@ const MessageItem = memo(function MessageItem({
           </div>
         )}
 
-        {/* Task claimer + reply badges */}
-        {(isTaskMessage || (message.reply_count ?? 0) > 0) && (
-        <div className="mt-2 flex items-center gap-2">
-          {isTaskMessage && headerConfig && (
-            <span className={cn('badge-brutal', headerConfig.badgeClass)}>
-              {message.task_claimer_name ? (
-                <>@{message.task_claimer_name}{message.task_claimer_deleted ? ` (${t('deleted')})` : ''}</>
-              ) : (
-                t('unclaimed')
-              )}
-            </span>
-          )}
-
-        {/* Thread reply count — brutalist badge */}
-        {(message.reply_count ?? 0) > 0 && onReply && (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onReply(message); }}
-            className={cn(
-              'badge-brutal cursor-pointer transition-all',
-              hasUnreadThread
-                ? 'bg-brutal-primary text-black border-brutal-primary'
-                : 'bg-white text-black hover:bg-brutal-primary hover:-translate-y-px hover:shadow-brutal',
-            )}
+        {/* Task claimer */}
+        {isTaskMessage && headerConfig && (
+          <div
+            data-task-claimer
+            className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full border border-brutal-muted bg-brutal-cream px-2.5 py-1 text-xs"
           >
-            <MessageSquare className="mr-1 h-3 w-3" />
-            <span>{t('threadReplies', { n: message.reply_count ?? 0 })}</span>
-          </button>
+            <UserRoundCheck className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className="flex-shrink-0 text-muted-foreground">{t('claimerLabel')}</span>
+            <span className="min-w-0 truncate font-heading font-bold text-foreground">
+              {message.task_claimer_name
+                ? `${message.task_claimer_name}${message.task_claimer_deleted ? ` (${t('deleted')})` : ''}`
+                : t('unclaimed')}
+            </span>
+          </div>
         )}
-        </div>
+
+        {/* Thread preview */}
+        {(message.reply_count ?? 0) > 0 && onReply && (
+          <ThreadPreview
+            channelId={message.channel_id}
+            messageId={message.id}
+            replyCount={message.reply_count ?? 0}
+            hasUnread={hasUnreadThread}
+            onOpen={() => onReply(message)}
+          />
         )}
       </div>
 
@@ -522,7 +540,7 @@ const MessageItem = memo(function MessageItem({
         <div className="absolute right-3 top-2 flex items-center gap-1
                         opacity-0 group-hover:opacity-100
                         translate-x-2 group-hover:translate-x-0
-                        transition-all duration-200">
+                        transition-[opacity,transform] duration-200">
           {onEdit && (
             <button
               type="button"
@@ -732,7 +750,7 @@ function LoadMoreFailed({ onRetry }: { onRetry: () => void }) {
   return (
     <div className="flex items-center justify-center gap-2 py-3">
       <AlertCircle className="h-3.5 w-3.5 text-brutal-danger" />
-      <span className="font-mono text-xs text-brutal-danger">{t('loadError')}</span>
+      <span className="font-body text-xs text-brutal-danger">{t('loadError')}</span>
       <button
         type="button"
         onClick={onRetry}
@@ -983,53 +1001,61 @@ export function MessageList({
           <ChannelBeginning />
         )}
 
-        <div className="py-4 space-y-1">
-          {messages.map((message) =>
-            message.status === 'streaming' ? (
-              <StreamingMessage
-                key={message.id}
-                message={message}
-                onAgentClick={onAgentClick}
-              />
-            ) : message.sender_type === 'agent' ? (
-              <AgentMessage
-                key={message.id}
-                message={message}
-                onReply={onReply}
-                validNames={validNames}
-                isHighlighted={highlightedMessageId === message.id}
-                onOpenArtifactReference={onOpenArtifactReference}
-                onPin={onPin}
-                pinned={pinnedMessageIds.has(message.id)}
-                onAgentClick={onAgentClick}
-              />
-            ) : (
-              <MessageItem
-                key={message.id}
-                message={message}
-                isHighlighted={highlightedMessageId === message.id}
-                onRetry={onRetry}
-                onCancel={onCancel}
-                onReply={onReply}
-                onEdit={onEdit}
-                onAsTask={onAsTask}
-                onOpenArtifactReference={onOpenArtifactReference}
-                onPin={onPin}
-                pinned={pinnedMessageIds.has(message.id)}
-                onDelete={
-                  onDelete
-                    ? (id) => {
-                        const msg = messages.find((m) => m.id === id);
-                        setDeleteTarget({
-                          id,
-                          displayName: msg?.display_name ?? t('user'),
-                        });
-                      }
-                    : undefined
-                }
-              />
-            ),
-          )}
+        <div className="py-2">
+          {messages.map((message, index) => {
+            const previous = messages[index - 1];
+            const startsDay = !previous || messageDateKey(previous.created_at) !== messageDateKey(message.created_at);
+            const isGrouped = !startsDay && canGroupMessages(previous, message);
+            return (
+              <Fragment key={message.id}>
+                {startsDay && <MessageDateSeparator createdAt={message.created_at} />}
+                {message.status === 'streaming' ? (
+                  <StreamingMessage
+                    message={message}
+                    isGrouped={isGrouped}
+                    onAgentClick={onAgentClick}
+                  />
+                ) : message.sender_type === 'agent' ? (
+                  <AgentMessage
+                    message={message}
+                    isGrouped={isGrouped}
+                    onReply={onReply}
+                    validNames={validNames}
+                    isHighlighted={highlightedMessageId === message.id}
+                    onOpenArtifactReference={onOpenArtifactReference}
+                    onPin={onPin}
+                    pinned={pinnedMessageIds.has(message.id)}
+                    onAgentClick={onAgentClick}
+                  />
+                ) : (
+                  <MessageItem
+                    message={message}
+                    isGrouped={isGrouped}
+                    isHighlighted={highlightedMessageId === message.id}
+                    onRetry={onRetry}
+                    onCancel={onCancel}
+                    onReply={onReply}
+                    onEdit={onEdit}
+                    onAsTask={onAsTask}
+                    onOpenArtifactReference={onOpenArtifactReference}
+                    onPin={onPin}
+                    pinned={pinnedMessageIds.has(message.id)}
+                    onDelete={
+                      onDelete
+                        ? (id) => {
+                            const msg = messages.find((m) => m.id === id);
+                            setDeleteTarget({
+                              id,
+                              displayName: msg?.display_name ?? t('user'),
+                            });
+                          }
+                        : undefined
+                    }
+                  />
+                )}
+              </Fragment>
+            );
+          })}
         </div>
 
         {showShortcutsHelp && messages.length > 0 && (

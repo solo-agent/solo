@@ -132,7 +132,7 @@ export function WorkspaceRail() {
           className="mt-2"
           autoFocus
         />
-        {createError && <p role="alert" className="mt-3 font-mono text-xs font-bold text-brutal-danger">{createError}</p>}
+        {createError && <p role="alert" className="mt-3 font-body text-xs font-bold text-brutal-danger">{createError}</p>}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={creating}>{t('cancel')}</Button>
           <Button type="submit" disabled={creating || !workspaceName.trim()}>{creating ? t('saving') : t('create')}</Button>

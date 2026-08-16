@@ -94,8 +94,8 @@ export function WorkspacePeople() {
               <div key={member.user_id} data-testid="workspace-person" className={selectableRowClass(false, 'cursor-default bg-transparent hover:bg-white/50')}>
                 <UserAvatar userId={member.user_id} name={member.display_name} avatarUrl={member.avatar_url} size="sm" />
                 <span className="min-w-0 flex-1 truncate font-body text-sm">{member.display_name}</span>
-                <span className="font-mono text-[9px] font-bold uppercase text-black/55">{t(`workspaceRole${member.role.charAt(0).toUpperCase()}${member.role.slice(1)}` as 'workspaceRoleOwner' | 'workspaceRoleAdmin' | 'workspaceRoleMember')}</span>
-                {member.user_id === user?.id && <span className="font-mono text-[9px] text-black/50">{t('workspaceYouSuffix')}</span>}
+                <span className="font-body text-[10px] font-semibold text-black/55">{t(`workspaceRole${member.role.charAt(0).toUpperCase()}${member.role.slice(1)}` as 'workspaceRoleOwner' | 'workspaceRoleAdmin' | 'workspaceRoleMember')}</span>
+                {member.user_id === user?.id && <span className="font-body text-[10px] text-black/50">{t('workspaceYouSuffix')}</span>}
               </div>
             ))}
           </div>
@@ -121,7 +121,7 @@ export function WorkspacePeople() {
         <DialogDescription>
           {t('workspaceInviteDesc')}
         </DialogDescription>
-        <label htmlFor="workspace-invite-email" className="mt-5 block font-mono text-xs font-bold uppercase tracking-wider">{t('workspaceInviteEmailLabel')}</label>
+        <label htmlFor="workspace-invite-email" className="mt-5 block font-heading text-xs font-bold">{t('workspaceInviteEmailLabel')}</label>
         <Input
           id="workspace-invite-email"
           type="email"
@@ -134,7 +134,7 @@ export function WorkspacePeople() {
           autoFocus
         />
         <fieldset className="mt-5">
-          <legend className="font-mono text-xs font-bold uppercase tracking-wider">{t('workspaceInviteRoleLegend')}</legend>
+          <legend className="font-heading text-xs font-bold">{t('workspaceInviteRoleLegend')}</legend>
           <div className="mt-2 grid grid-cols-2 gap-2">
             {(['member', 'admin'] as const).map((value) => (
               activeWorkspace.role === 'owner' || value === 'member' ?

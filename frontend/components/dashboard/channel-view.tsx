@@ -142,6 +142,7 @@ export function ChannelView({
     users,
     agents,
     isLoading: membersLoading,
+    error: membersError,
     removeMember,
     updateMemberStatus,
     refetch: refetchMembers,
@@ -169,6 +170,7 @@ export function ChannelView({
   // ---- Member popover state ----
   const [isMemberPopoverOpen, setIsMemberPopoverOpen] = useState(false);
   const [isWorkspaceCollapsed, setIsWorkspaceCollapsed] = useState(false);
+  const workspaceDefaultedForChannelRef = useRef<string | null>(null);
   const [isWorkspaceFullscreen, setIsWorkspaceFullscreen] = useState(false);
   const [conversationPanelPercent, setConversationPanelPercent] = useState(50);
   const splitContainerRef = useRef<HTMLDivElement>(null);
@@ -428,6 +430,19 @@ export function ChannelView({
       status: agent.status,
     })),
   }), [agents]);
+
+  useEffect(() => {
+    if (
+      workspaceDefaultedForChannelRef.current === channel.id
+      || membersLoading
+      || tasksLoading
+      || membersError
+      || tasksError
+    ) return;
+    workspaceDefaultedForChannelRef.current = channel.id;
+    setIsWorkspaceFullscreen(false);
+    setIsWorkspaceCollapsed(workspaceView === 'team' && agents.length === 0 && channelTasks.length === 0);
+  }, [agents.length, channel.id, channelTasks.length, membersError, membersLoading, tasksError, tasksLoading, workspaceView]);
 
   const channelAgentMap = useMemo(() => {
     return new Map(channelTeam.agents.map((agent) => [agent.id, agent]));
@@ -1057,7 +1072,7 @@ export function ChannelView({
                 <span className="font-heading text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   {isThinking ? t('thinkingCurrentBranch') : t('taskChannel')}
                 </span>
-                <h2 className="truncate font-heading text-lg font-bold text-foreground">{isThinking ? selectedThinkingNode?.title ?? channel.name : channel.name}</h2>
+                <h2 className="truncate font-display text-lg font-bold text-foreground">{isThinking ? selectedThinkingNode?.title ?? channel.name : channel.name}</h2>
                 {!isThinking && boundProjectPath && (
                   <span className="hidden max-w-56 items-center gap-1 truncate border border-black bg-brutal-info-light px-1.5 py-0.5 font-mono text-[9px] font-bold sm:flex" title={boundProjectPath}>
                     <FolderOpen className="h-3 w-3 shrink-0" />
@@ -1091,7 +1106,7 @@ export function ChannelView({
             )}
             {!isThinking && pinnedMessages.length > 0 && (
               <div className="border-b-2 border-black bg-brutal-warning-light px-4 py-2">
-                <div className="mb-1 flex items-center gap-1 font-mono text-[10px] font-bold uppercase"><Pin className="h-3 w-3" />{t('channelPinnedMessages')}</div>
+                <div className="mb-1 flex items-center gap-1 font-heading text-xs font-bold"><Pin className="h-3 w-3" />{t('channelPinnedMessages')}</div>
                 {pinnedMessages.slice(0, 3).map((item) => <button key={item.message_id} type="button" className="block w-full truncate text-left font-body text-xs hover:underline" onClick={() => { setScrollToMessageId(item.message_id); setScrollMsgKey((key) => key + 1); }}>{item.sender_name}: {item.content}</button>)}
               </div>
             )}

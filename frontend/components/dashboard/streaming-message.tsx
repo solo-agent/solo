@@ -13,12 +13,13 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
-import { formatMessageTimestamp } from '@/lib/utils/time';
+import { formatMessageTime, formatMessageTimestamp } from '@/lib/utils/time';
 import type { AgentDetailTarget, Message } from '@/lib/types';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 
 interface StreamingMessageProps {
   message: Message;
+  isGrouped?: boolean;
   onAgentClick?: (agent: AgentDetailTarget) => void;
 }
 
@@ -90,8 +91,9 @@ function TypingDots() {
   );
 }
 
-export function StreamingMessage({ message, onAgentClick }: StreamingMessageProps) {
+export function StreamingMessage({ message, isGrouped, onAgentClick }: StreamingMessageProps) {
   const time = formatMessageTimestamp(message.created_at);
+  const compactTime = formatMessageTime(message.created_at);
 
   const unclosedCodeBlock = hasUnclosedCodeBlock(message.content);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -113,26 +115,42 @@ export function StreamingMessage({ message, onAgentClick }: StreamingMessageProp
     <div
       ref={containerRef}
       data-message-id={message.id}
-      className="group relative flex gap-3 px-6 py-2.5 agent-message border-l-brutal-primary"
+      data-message-grouped={isGrouped ? 'true' : 'false'}
+      className={cn(
+        'group relative flex gap-3 px-6 agent-message border-l-brutal-primary',
+        isGrouped ? 'py-1' : 'pt-3 pb-1.5',
+      )}
       role="listitem"
       aria-label={t('streaming')}
       data-streaming="true"
     >
-      <PixelAvatar
-        agentId={message.user_id}
-        avatarUrl={message.avatar_url}
-        size="md"
-        className="mt-0.5 flex-shrink-0"
-        onClick={onAgentClick ? () => onAgentClick?.({
-          id: message.user_id,
-          name: message.display_name,
-          is_active: message.sender_active,
-        }) : undefined}
-        ariaLabel={t('viewAgentDetail', { name: message.display_name })}
-      />
+      {isGrouped ? (
+        <div className="mt-0.5 w-8 flex-shrink-0 text-center">
+          <time
+            dateTime={message.created_at}
+            className="font-mono text-[9px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+          >
+            {compactTime}
+          </time>
+        </div>
+      ) : (
+        <PixelAvatar
+          agentId={message.user_id}
+          avatarUrl={message.avatar_url}
+          size="md"
+          className="mt-0.5 flex-shrink-0"
+          onClick={onAgentClick ? () => onAgentClick?.({
+            id: message.user_id,
+            name: message.display_name,
+            is_active: message.sender_active,
+          }) : undefined}
+          ariaLabel={t('viewAgentDetail', { name: message.display_name })}
+        />
+      )}
 
       <div className="min-w-0 flex-1">
-        <div className="mb-1.5 flex items-baseline gap-2">
+        {isGrouped && <span className="sr-only">{message.display_name}, {compactTime}</span>}
+        <div className={cn('mb-1.5 items-baseline gap-2', isGrouped ? 'hidden' : 'flex')}>
           <span className="font-heading text-sm font-bold text-brutal-primary">
             {message.display_name}
           </span>

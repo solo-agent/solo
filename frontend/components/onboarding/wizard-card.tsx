@@ -120,7 +120,7 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
           </Button>
           {recommendation && (
             <div className="mt-3 border-2 border-black bg-white p-3">
-              <div className="font-mono text-[10px] font-bold uppercase tracking-widest text-black/50">{t('onboardingGoalResult')}</div>
+              <div className="font-body text-[11px] font-semibold uppercase tracking-wider text-black/50">{t('onboardingGoalResult')}</div>
               <div className="mt-1 font-heading text-base font-black">{recommendation.template.icon} {recommendation.template.name}</div>
               <p className="mt-1 font-body text-xs leading-relaxed text-black/65">{recommendation.reason}</p>
               <p className="mt-2 font-body text-xs font-semibold">{t('onboardingGoalNext')}</p>
@@ -216,7 +216,7 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
             {!cliLoaded ? (
               <Spinner size="sm" />
             ) : cliError ? (
-              <p className="font-mono text-xs text-brutal-danger">
+              <p className="font-body text-xs text-brutal-danger">
                 {t('onboardingToolDetectError')}
               </p>
             ) : hasAvailableRuntime ? (
@@ -227,7 +227,7 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
                 placeholder={t('onboardingChooseTool')}
               />
             ) : (
-              <p className="font-mono text-xs text-brutal-danger">
+              <p className="font-body text-xs text-brutal-danger">
                 {t('onboardingNoTool')}
               </p>
             )}
@@ -284,7 +284,7 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
             )}
 
             {createError && (
-              <div className="mt-2 flex items-center gap-1.5 font-mono text-xs text-brutal-danger">
+              <div className="mt-2 flex items-center gap-1.5 font-body text-xs text-brutal-danger">
                 <AlertCircle className="h-3.5 w-3.5" />
                 {createError}
               </div>

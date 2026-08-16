@@ -63,10 +63,10 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="card-brutal-heavy p-8 w-full relative" style={{ transform: 'rotate(-0.8deg)' }}>
+    <div className="w-full rounded-2xl border border-black bg-white p-8 shadow-brutal-lg">
       <div className="text-center mb-6">
-        <div className="inline-flex h-14 w-14 items-center justify-center bg-brutal-accent border-brutal border-black shadow-brutal mb-4">
-          <span className="font-heading font-bold text-2xl text-black">↻</span>
+        <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-black bg-brutal-accent-light shadow-brutal-sm">
+          <span className="font-heading text-2xl font-bold">↻</span>
         </div>
         <h1 className="font-heading font-bold text-3xl mb-1">{t('resetPassword')}</h1>
         <p className="font-sans text-sm text-muted-foreground">{t('resetPasswordHint')}</p>
@@ -112,7 +112,7 @@ export default function ForgotPasswordPage() {
       )}
 
       {step !== 'done' && (
-        <div className="text-center mt-6 pt-4 border-t-2 border-black">
+        <div className="mt-6 border-t border-black pt-4 text-center">
           <Link href="/auth/login" className="font-heading text-sm font-bold underline">{t('backToLogin')}</Link>
         </div>
       )}

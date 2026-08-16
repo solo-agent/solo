@@ -239,7 +239,7 @@ export function FilePreview({
   if (content === null) {
     return (
       <div className="flex items-center justify-center h-full">
-        <p className="font-mono text-xs text-muted-foreground">{t('workspaceLoadError')}</p>
+        <p className="font-body text-sm text-muted-foreground">{t('workspaceLoadError')}</p>
       </div>
     );
   }
