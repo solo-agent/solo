@@ -11,7 +11,7 @@
 
 'use client';
 
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Monitor,
@@ -25,6 +25,8 @@ import {
   Plus,
   Copy,
   Trash2,
+  RefreshCw,
+  Unplug,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { t } from '@/lib/i18n';
@@ -48,6 +50,9 @@ import { relativeTime, formatDateTime } from '@/lib/utils/time';
 import { cn } from '@/lib/utils';
 import type { Computer } from '@/lib/types';
 import { Dialog, DialogCloseButton, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { computerPairingCommands } from '@/lib/computer-pairing';
+import { RuntimeLogo } from '@/components/agents/runtime-logo';
+import { isSupportedAgentRuntime } from '@/lib/agent-runtimes';
 
 // ---- OS icon helper ----
 
@@ -64,6 +69,14 @@ function getOsIcon(os?: string): { icon: React.ReactNode; label: string } {
     return { icon: <Monitor className="h-4 w-4" />, label: 'Windows' };
   }
   return { icon: <MonitorDot className="h-4 w-4" />, label: os };
+}
+
+function runtimeBadgeClass(type: string): string {
+  if (type === 'claude') return 'bg-brutal-warning-light';
+  if (type === 'codex') return 'bg-brutal-info-light';
+  if (type === 'opencode') return 'bg-brutal-violet-light';
+  if (type === 'openclaw') return 'bg-brutal-accent-light';
+  return 'bg-brutal-cream';
 }
 
 // Agent status indicator
@@ -93,10 +106,6 @@ function AgentStatusDot({ status }: { status: string }) {
   );
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
-
 export default function ComputersPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { computers, isLoading, error, addComputer, updateComputer, deleteComputer, createEnrollment, revokeCredential, refetch } = useComputers();
@@ -107,9 +116,7 @@ export default function ComputersPage() {
   const [editName, setEditName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [pairDialogOpen, setPairDialogOpen] = useState(false);
-  const [newComputerName, setNewComputerName] = useState('');
   const [pairingComputer, setPairingComputer] = useState<Computer | null>(null);
-  const [isPairing, setIsPairing] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Computer | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -117,20 +124,6 @@ export default function ComputersPage() {
 
   // Selected computer (driven by ComputersLeftColumn)
   const [selectedComputerId, setSelectedComputerId] = useState<string | null>(null);
-  const selectedComputer = useMemo(
-    () => (selectedComputerId ? computers.find((c) => c.id === selectedComputerId) : undefined),
-    [computers, selectedComputerId],
-  );
-
-  // Auto-select and expand the first computer on initial load
-  const [autoSelected, setAutoSelected] = useState(false);
-  useEffect(() => {
-    if (!autoSelected && !isLoading && computers.length > 0 && !selectedComputerId) {
-      const firstId = computers[0].id;
-      setSelectedComputerId(firstId);
-      setAutoSelected(true);
-    }
-  }, [autoSelected, isLoading, computers, selectedComputerId]);
 
   // Left-column click: re-click clears selection; switching resets edit
   const handleComputerClick = useCallback((id: string) => {
@@ -182,33 +175,30 @@ export default function ComputersPage() {
     [handleSaveName, handleCancelEdit],
   );
 
-  const openPairDialog = useCallback(() => {
-    setNewComputerName('');
+  const openPairDialog = useCallback(async () => {
     setPairingComputer(null);
     setPairDialogOpen(true);
-  }, []);
-
-  const createPairing = useCallback(async () => {
-    if (!newComputerName.trim()) return;
-    setIsPairing(true);
     try {
-      const computer = await addComputer(newComputerName.trim());
+      const pending = computers.find((computer) => computer.pairing_status === 'pending');
+      const computer = pending ? await createEnrollment(pending.id) : await addComputer(t('computersDefaultName'));
       setPairingComputer(computer);
       setSelectedComputerId(computer.id);
-    } finally {
-      setIsPairing(false);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : t('computersPairError'), 'error');
+      setPairDialogOpen(false);
     }
-  }, [addComputer, newComputerName]);
+  }, [addComputer, computers, createEnrollment, showToast]);
 
   const showEnrollment = useCallback(async (computer: Computer) => {
-    setIsPairing(true);
+    setPairingComputer(null);
+    setPairDialogOpen(true);
     try {
       setPairingComputer(await createEnrollment(computer.id));
-      setPairDialogOpen(true);
-    } finally {
-      setIsPairing(false);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : t('computersPairError'), 'error');
+      setPairDialogOpen(false);
     }
-  }, [createEnrollment]);
+  }, [createEnrollment, showToast]);
 
   const copyPairingCommand = useCallback(async (command: string) => {
     try {
@@ -235,14 +225,9 @@ export default function ComputersPage() {
     }
   }, [deleteComputer, deleteTarget, showToast]);
 
-  const daemonServerURL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
-  const installScriptURL = process.env.NEXT_PUBLIC_INSTALL_URL ?? 'https://raw.githubusercontent.com/solo-agent/solo/master/scripts/install.sh';
-  const installedPairCommand = pairingComputer?.enrollment_token
-    ? `solo daemon connect --server ${shellQuote(daemonServerURL)} --computer-id ${shellQuote(pairingComputer.id)} --token ${shellQuote(pairingComputer.enrollment_token)}`
-    : '';
-  const pairCommand = pairingComputer?.enrollment_token
-    ? `curl -fsSL ${shellQuote(installScriptURL)} | bash -s -- connect --server ${shellQuote(daemonServerURL)} --computer-id ${shellQuote(pairingComputer.id)} --token ${shellQuote(pairingComputer.enrollment_token)}`
-    : '';
+  const pairingCommands = pairingComputer?.enrollment_token
+    ? computerPairingCommands(pairingComputer.id, pairingComputer.enrollment_token)
+    : null;
 
   // Auth loading state
   if (authLoading || !isAuthenticated) {
@@ -264,7 +249,7 @@ export default function ComputersPage() {
             <h1 className="font-heading text-2xl font-black">{t('personalComputers')}</h1>
             <p className="mt-1 font-body text-sm text-muted-foreground">{t('personalComputerDesc')}</p>
           </div>
-          <Button type="button" size="sm" onClick={openPairDialog}><Plus className="mr-1.5 h-4 w-4" />{t('computersAddComputer')}</Button>
+          <Button type="button" size="sm" data-onboarding="connect-computer" onClick={() => void openPairDialog()}><Plus className="mr-1.5 h-4 w-4" />{t('computersAddComputer')}</Button>
         </div>
         <div className="flex-1 overflow-y-auto bg-white">
           <div className="mx-auto w-full max-w-5xl px-8 py-6">
@@ -321,60 +306,82 @@ export default function ComputersPage() {
                 {computers.map((computer) => {
                   const isOnline = computer.status === 'online';
                   const osInfo = getOsIcon(computer.os);
+                  const runtimes = (computer.runtime_inventory ?? []).filter((runtime) => isSupportedAgentRuntime(runtime.type));
                   return (
-                    <button
-                      key={computer.id}
-                      type="button"
-                      onClick={() => handleComputerClick(computer.id)}
-                      aria-current={computer.id === selectedComputerId ? 'true' : undefined}
-                      className={cn(
-                        'flex w-full items-center gap-4 border-2 border-black bg-white px-5 py-4 text-left shadow-brutal-sm transition-[transform,box-shadow]',
-                        computer.id === selectedComputerId
-                          ? 'bg-brutal-info-light shadow-brutal'
-                          : 'hover:-translate-y-px hover:shadow-brutal',
+                    <div key={computer.id} className="overflow-hidden border-2 border-black bg-white shadow-brutal-sm">
+                      <button
+                        type="button"
+                        onClick={() => handleComputerClick(computer.id)}
+                        aria-expanded={computer.id === selectedComputerId}
+                        className="flex w-full items-start gap-4 bg-white px-5 py-4 text-left transition-colors hover:bg-brutal-cream/40"
+                      >
+                        <span className={cn('flex h-12 w-12 shrink-0 items-center justify-center border-2 border-black shadow-brutal-sm', isOnline ? 'bg-brutal-success-light' : 'bg-brutal-muted-light')}>
+                          {osInfo.icon}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span className="truncate font-heading text-base font-black">{computer.name}</span>
+                            <span className={cn('inline-flex items-center gap-1.5 border border-black px-2 py-0.5 font-body text-xs', isOnline ? 'bg-brutal-success-light' : 'bg-brutal-muted-light')}>
+                              <span className={cn('h-2 w-2 rounded-full border border-black', isOnline ? 'bg-brutal-success' : 'bg-brutal-muted')} aria-hidden="true" />
+                              {isOnline ? t('online') : t('offline')}
+                            </span>
+                          </span>
+                          <span className="mt-1 block truncate font-mono text-[11px] text-muted-foreground">
+                            {[osInfo.label, computer.hostname, computer.daemon_version, relativeTime(computer.last_heartbeat)].filter(Boolean).join(' · ')}
+                          </span>
+                          {runtimes.length > 0 && (
+                            <span className="mt-3 flex flex-wrap gap-2">
+                              {runtimes.map((runtime) => (
+                                <span
+                                  key={runtime.type}
+                                  aria-disabled={!runtime.available}
+                                  title={!runtime.available ? t('computersRuntimeUnavailable') : undefined}
+                                  className={cn(
+                                    'inline-flex items-center gap-1.5 border px-2 py-1 font-body text-xs',
+                                    runtime.available
+                                      ? cn('border-black', runtimeBadgeClass(runtime.type))
+                                      : 'border-black/20 bg-brutal-muted-light text-muted-foreground opacity-45 grayscale',
+                                  )}
+                                >
+                                  <RuntimeLogo runtime={runtime.type} className="h-3.5 w-3.5 shrink-0" />
+                                  {runtime.display_name || runtime.type}
+                                </span>
+                              ))}
+                            </span>
+                          )}
+                        </span>
+                        <ChevronDown className={cn('mt-1 h-4 w-4 shrink-0 transition-transform', computer.id === selectedComputerId && 'rotate-180')} aria-hidden="true" />
+                      </button>
+                      {!isOnline && computer.my_role === 'owner' && (
+                        <div className="flex justify-end px-5 pb-4">
+                          <Button type="button" size="sm" variant="outline" onClick={() => void showEnrollment(computer)}>
+                            <RefreshCw className="mr-1.5 h-4 w-4" />
+                            {t('computersReconnect')}
+                          </Button>
+                        </div>
                       )}
-                    >
-                      <span className="flex h-12 w-12 shrink-0 items-center justify-center border-2 border-black bg-brutal-cream shadow-brutal-sm">
-                        {osInfo.icon}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-2">
-                          <span className="truncate font-heading text-base font-black">{computer.name}</span>
-                          <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full border border-black', isOnline ? 'bg-brutal-success' : 'bg-brutal-muted')} aria-hidden="true" />
-                        </span>
-                        <span className="mt-1 block truncate font-mono text-[11px] text-muted-foreground">
-                          {[osInfo.label, computer.hostname, isOnline ? t('online') : t('offline')].filter(Boolean).join(' · ')}
-                        </span>
-                      </span>
-                      <ChevronDown className={cn('h-4 w-4 shrink-0 transition-transform', computer.id === selectedComputerId && 'rotate-180')} aria-hidden="true" />
-                    </button>
+                      {computer.id === selectedComputerId && (
+                        <ComputerCard
+                          computer={computer}
+                          editingId={editingId}
+                          editName={editName}
+                          isSaving={isSaving}
+                          editInputRef={editInputRef}
+                          onStartEdit={handleStartEdit}
+                          onCancelEdit={handleCancelEdit}
+                          onSaveName={handleSaveName}
+                          onEditKeyDown={handleEditKeyDown}
+                          onEditNameChange={setEditName}
+                          onRevokeCredential={async (item) => { await revokeCredential(item.id); }}
+                          onDelete={(item) => {
+                            setDeleteError(null);
+                            setDeleteTarget(item);
+                          }}
+                        />
+                      )}
+                    </div>
                   );
                 })}
-              </div>
-            )}
-
-            {/* Computer detail card */}
-            {!isLoading && !error && selectedComputer && (
-              <div className="card-brutal-heavy mt-6 overflow-hidden">
-                <ComputerCard
-                  key={selectedComputer.id}
-                  computer={selectedComputer}
-                  editingId={editingId}
-                  editName={editName}
-                  isSaving={isSaving}
-                  editInputRef={editInputRef}
-                  onStartEdit={handleStartEdit}
-                  onCancelEdit={handleCancelEdit}
-                  onSaveName={handleSaveName}
-                  onEditKeyDown={handleEditKeyDown}
-                  onEditNameChange={setEditName}
-                  onCreateEnrollment={showEnrollment}
-                  onRevokeCredential={async (computer) => { await revokeCredential(computer.id); }}
-                  onDelete={(computer) => {
-                    setDeleteError(null);
-                    setDeleteTarget(computer);
-                  }}
-                />
               </div>
             )}
           </div>
@@ -386,31 +393,25 @@ export default function ComputersPage() {
           <DialogTitle>{t('computersPairTitle')}</DialogTitle>
           <DialogCloseButton onClick={() => setPairDialogOpen(false)} />
         </DialogHeader>
-        {!pairingComputer?.enrollment_token ? (
-          <div className="space-y-3">
-            <label className="font-heading text-sm font-bold" htmlFor="new-computer-name">{t('computersName')}</label>
-            <input id="new-computer-name" className="input-brutal w-full" value={newComputerName} onChange={(event) => setNewComputerName(event.target.value)} autoFocus />
+        {!pairingCommands ? (
+          <div className="flex items-center gap-3 py-8 font-body text-sm text-muted-foreground">
+            <Spinner size="sm" />{t('computersCreatingConnection')}
           </div>
         ) : (
           <div className="space-y-3">
             <p className="font-body text-sm">{t('computersPairInstructions')}</p>
             <div className="flex items-center justify-between gap-2">
               <p className="font-heading text-xs font-bold uppercase">{t('computersFreshInstall')}</p>
-              <Button type="button" size="sm" variant="outline" onClick={() => void copyPairingCommand(pairCommand)}><Copy className="mr-1.5 h-4 w-4" />{t('copy')}</Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => void copyPairingCommand(pairingCommands.fresh)}><Copy className="mr-1.5 h-4 w-4" />{t('copy')}</Button>
             </div>
-            <pre className="overflow-x-auto border-2 border-black bg-black p-3 font-mono text-xs text-white">{pairCommand}</pre>
+            <pre className="overflow-x-auto border-2 border-black bg-black p-3 font-mono text-xs text-white">{pairingCommands.fresh}</pre>
             <div className="flex items-center justify-between gap-2">
               <p className="font-heading text-xs font-bold uppercase">{t('computersAlreadyInstalled')}</p>
-              <Button type="button" size="sm" variant="outline" onClick={() => void copyPairingCommand(installedPairCommand)}><Copy className="mr-1.5 h-4 w-4" />{t('copy')}</Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => void copyPairingCommand(pairingCommands.installed)}><Copy className="mr-1.5 h-4 w-4" />{t('copy')}</Button>
             </div>
-            <pre className="overflow-x-auto border-2 border-black bg-black p-3 font-mono text-xs text-white">{installedPairCommand}</pre>
+            <pre className="overflow-x-auto border-2 border-black bg-black p-3 font-mono text-xs text-white">{pairingCommands.installed}</pre>
             <p className="font-mono text-[11px] text-brutal-danger">{t('computersPairOnce')}</p>
           </div>
-        )}
-        {!pairingComputer?.enrollment_token && (
-          <DialogFooter>
-            <Button type="button" onClick={createPairing} disabled={isPairing || !newComputerName.trim()}>{isPairing ? t('saving') : t('computersCreatePairing')}</Button>
-          </DialogFooter>
         )}
       </Dialog>
 
@@ -470,7 +471,6 @@ interface ComputerCardProps {
   onSaveName: (id: string) => void;
   onEditKeyDown: (e: React.KeyboardEvent<HTMLInputElement>, id: string) => void;
   onEditNameChange: (name: string) => void;
-  onCreateEnrollment: (computer: Computer) => void;
   onRevokeCredential: (computer: Computer) => void;
   onDelete: (computer: Computer) => void;
 }
@@ -486,7 +486,6 @@ function ComputerCard({
   onSaveName,
   onEditKeyDown,
   onEditNameChange,
-  onCreateEnrollment,
   onRevokeCredential,
   onDelete,
 }: ComputerCardProps) {
@@ -494,44 +493,7 @@ function ComputerCard({
   const osInfo = getOsIcon(computer.os);
 
   return (
-    <div className="bg-white">
-      <div className="border-b-2 border-black bg-white px-4 py-3">
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center border-2 border-black bg-brutal-info shadow-brutal-sm">
-            {osInfo.icon}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h3 className="truncate text-base font-heading font-bold text-foreground">
-                {computer.name}
-              </h3>
-              {/* v3.3: chunky status pill replacing the bare dot. */}
-              <span
-                className={cn(
-                  'inline-flex items-center gap-1.5 border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider',
-                  isOnline ? 'bg-brutal-success text-black' : 'bg-brutal-muted text-black',
-                )}
-              >
-                <span
-                  className={cn(
-                    'h-1.5 w-1.5 border border-black',
-                    isOnline ? 'bg-white' : 'bg-black',
-                  )}
-                  aria-hidden
-                />
-                {isOnline ? t('online') : t('offline')}
-              </span>
-            </div>
-            <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-              {isOnline
-                ? `${t('computersLastHeartbeat')}: ${relativeTime(computer.last_heartbeat)}`
-                : `${t('offline')} ${relativeTime(computer.last_heartbeat, false)}`}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Detail panel */}
+    <div className="border-t-2 border-black bg-brutal-cream/40">
       <div>
         <div className="space-y-4 bg-white p-4">
           {/* Section: System Info */}
@@ -645,11 +607,11 @@ function ComputerCard({
               <InfoRow label={t('computersPairingStatus')}>
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-xs">{computer.pairing_status}</span>
-                  {computer.my_role === 'owner' && (
-                    <Button type="button" size="sm" variant="outline" onClick={() => onCreateEnrollment(computer)}>{t('computersGeneratePairing')}</Button>
-                  )}
-                  {computer.my_role === 'owner' && computer.pairing_status === 'paired' && (
-                    <Button type="button" size="sm" variant="danger" onClick={() => onRevokeCredential(computer)}>{t('computersRevoke')}</Button>
+                  {computer.my_role === 'owner' && isOnline && computer.pairing_status === 'paired' && (
+                    <Button type="button" size="sm" variant="danger" onClick={() => onRevokeCredential(computer)}>
+                      <Unplug className="mr-1.5 h-4 w-4" />
+                      {t('computersDisconnect')}
+                    </Button>
                   )}
                 </div>
               </InfoRow>

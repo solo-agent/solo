@@ -423,6 +423,19 @@ export interface UpdateComputerInput {
   name?: string;
 }
 
+export interface OnboardingStatus {
+  required: boolean;
+  step: 1 | 2 | 3 | 4;
+  computer_id?: string;
+  computer_name?: string;
+  runtimes: Array<{ type: string; display_name: string; available: boolean; version?: string }>;
+  workspace_id?: string;
+  workspace_name?: string;
+  lucy_channel_id?: string;
+  lucy_agent_id?: string;
+  greeting_ready: boolean;
+}
+
 // ---- Search types (SOLO-237-F) ----
 
 /** Matches backend handler/search.go SearchResult JSON shape */
@@ -542,6 +555,7 @@ export interface CreateLucyRequest {
   runtime_type: string;
   computer_id: string;
   channel_id: string;
+  model_name?: string;
 }
 
 export interface CreateLucyResponse {

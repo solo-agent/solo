@@ -112,6 +112,15 @@ func TestBuildSystemPrompt_CLICommands(t *testing.T) {
 	assertHas(t, p, "only output channel")
 }
 
+func TestBuildSystemPrompt_UsesWorkspaceSoloCLI(t *testing.T) {
+	p := BuildSystemPrompt(
+		AgentConfig{Name: "Bot", WorkspacePath: "/tmp/bot-workspace"},
+		ChannelContext{TriggerType: TriggerChat}, "", nil,
+	)
+	assertHas(t, p, "/tmp/bot-workspace/solo message send")
+	assertNotHas(t, p, "`solo message send")
+}
+
 func TestBuildSystemPrompt_MentionedNames(t *testing.T) {
 	p := BuildSystemPrompt(
 		AgentConfig{Name: "Bot"},

@@ -34,17 +34,18 @@ func NewWorkspaceHandler(pool *pgxpool.Pool, daemonManagers ...*service.DaemonMa
 }
 
 type WorkspaceResponse struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Icon        string `json:"icon"`
-	Visibility  string `json:"visibility"`
-	IsDefault   bool   `json:"is_default"`
-	IsPersonal  bool   `json:"is_personal"`
-	MemberCount int    `json:"member_count"`
-	Role        string `json:"role"`
-	CreatedBy   string `json:"created_by,omitempty"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Icon          string `json:"icon"`
+	Visibility    string `json:"visibility"`
+	IsDefault     bool   `json:"is_default"`
+	IsPersonal    bool   `json:"is_personal"`
+	LucyChannelID string `json:"lucy_channel_id,omitempty"`
+	MemberCount   int    `json:"member_count"`
+	Role          string `json:"role"`
+	CreatedBy     string `json:"created_by,omitempty"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 type WorkspaceMemberResponse struct {
@@ -442,6 +443,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.pool.Query(r.Context(), `
 		SELECT ws.id::text, ws.name, ws.icon, ws.visibility, ws.is_default, ws.is_personal,
 		       (SELECT count(*) FROM workspace_members members WHERE members.workspace_id=ws.id),
+		       COALESCE((SELECT c.id::text FROM channels c WHERE c.workspace_id=ws.id AND c.type='lucy' AND c.is_archived=false LIMIT 1),''),
 		       wm.role, COALESCE(ws.created_by::text, ''), ws.created_at, ws.updated_at
 		  FROM workspace_members wm
 		  JOIN workspaces ws ON ws.id = wm.workspace_id
@@ -456,7 +458,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var item WorkspaceResponse
 		var createdAt, updatedAt time.Time
-		if rows.Scan(&item.ID, &item.Name, &item.Icon, &item.Visibility, &item.IsDefault, &item.IsPersonal, &item.MemberCount, &item.Role, &item.CreatedBy, &createdAt, &updatedAt) == nil {
+		if rows.Scan(&item.ID, &item.Name, &item.Icon, &item.Visibility, &item.IsDefault, &item.IsPersonal, &item.MemberCount, &item.LucyChannelID, &item.Role, &item.CreatedBy, &createdAt, &updatedAt) == nil {
 			item.CreatedAt, item.UpdatedAt = createdAt.Format(time.RFC3339), updatedAt.Format(time.RFC3339)
 			result = append(result, item)
 		}
@@ -496,12 +498,20 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
+	var isPersonal bool
+	if err = tx.QueryRow(r.Context(), `
+		SELECT NOT EXISTS (
+			SELECT 1 FROM workspaces WHERE created_by=$1 AND is_personal=true AND deleted_at IS NULL
+		) FROM users WHERE id=$1 FOR UPDATE`, userID).Scan(&isPersonal); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create Workspace")
+		return
+	}
 	workspaceID, channelID, lucyChannelID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	var createdAt, updatedAt time.Time
 	err = tx.QueryRow(r.Context(), `
-		INSERT INTO workspaces (id, name, icon, visibility, created_by)
-		VALUES ($1, $2, $3, 'private', $4)
-		RETURNING created_at, updated_at`, workspaceID, name, icon, userID).Scan(&createdAt, &updatedAt)
+		INSERT INTO workspaces (id, name, icon, visibility, is_personal, created_by)
+		VALUES ($1, $2, $3, 'private', $4, $5)
+		RETURNING created_at, updated_at`, workspaceID, name, icon, isPersonal, userID).Scan(&createdAt, &updatedAt)
 	if err == nil {
 		_, err = tx.Exec(r.Context(), `INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, 'owner')`, workspaceID, userID)
 	}
@@ -519,7 +529,7 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	lucyAgentID := uuid.NewString()
 	lucyCloned := false
-	if err == nil {
+	if err == nil && !isPersonal {
 		var tag interface{ RowsAffected() int64 }
 		tag, err = tx.Exec(r.Context(), `
 			INSERT INTO agents (
@@ -563,7 +573,7 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 			go onboarding.SeedAgentKnowledge(lucyAgentID, displayName, email)
 		}
 	}
-	writeJSON(w, http.StatusCreated, WorkspaceResponse{ID: workspaceID, Name: name, Icon: icon, Visibility: "private", MemberCount: 1, Role: "owner", CreatedBy: userID, CreatedAt: createdAt.Format(time.RFC3339), UpdatedAt: updatedAt.Format(time.RFC3339)})
+	writeJSON(w, http.StatusCreated, WorkspaceResponse{ID: workspaceID, Name: name, Icon: icon, Visibility: "private", IsPersonal: isPersonal, LucyChannelID: lucyChannelID, MemberCount: 1, Role: "owner", CreatedBy: userID, CreatedAt: createdAt.Format(time.RFC3339), UpdatedAt: updatedAt.Format(time.RFC3339)})
 }
 
 func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -1078,6 +1088,10 @@ func (h *WorkspaceHandler) AcceptInviteLink(w http.ResponseWriter, r *http.Reque
 		 WHERE workspace_id=$1 AND type='channel' AND is_archived=false
 		ON CONFLICT DO NOTHING`, workspaceID, userID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to join Workspace channels")
+		return
+	}
+	if _, err = tx.Exec(r.Context(), `UPDATE users SET onboarding_completed_at=COALESCE(onboarding_completed_at,now()) WHERE id=$1`, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to finish invited registration")
 		return
 	}
 	if !alreadyMember {

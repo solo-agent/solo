@@ -118,11 +118,12 @@ test.describe('A Channel owns a real project folder', () => {
       channel = { id: channelID!, name: channelName };
       await expect(page.getByRole('heading', { name: channelName })).toBeVisible();
 
-      // Verify the simplified Agent dialog fits a laptop screen and keeps advanced fields folded.
+      // Verify the Agent dialog fits a laptop screen, exposes role instructions,
+      // and keeps environment variables and CLI arguments folded.
       await page.getByRole('button', { name: '创建第一个智能体' }).click();
       const agentDialog = page.getByRole('dialog').last();
       await expect(agentDialog.getByText('高级运行时设置')).toBeVisible();
-      await expect(agentDialog.getByLabel('系统提示词')).toHaveCount(0);
+      await expect(agentDialog.getByLabel('系统提示词')).toBeVisible();
       const createAgentButton = agentDialog.getByRole('button', { name: '创建智能体' });
       await createAgentButton.scrollIntoViewIfNeeded();
       await expect(createAgentButton).toBeVisible();

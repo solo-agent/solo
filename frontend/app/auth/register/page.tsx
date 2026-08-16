@@ -45,7 +45,7 @@ export default function RegisterPage() {
   const [verificationCode, setVerificationCode] = useState('');
   const [resendIn, setResendIn] = useState(0);
   const [signupAvailable, setSignupAvailable] = useState(true);
-  const [returnTo, setReturnTo] = useState('/dashboard');
+  const [returnTo, setReturnTo] = useState('/home?onboarding=1');
 
   const {
     register,
@@ -89,10 +89,8 @@ export default function RegisterPage() {
         display_name: data.displayName || data.email.split("@")[0],
       });
       if (localVerificationCode) {
-        const onboardingChannelId = await verifyRegistration({ email: data.email, code: localVerificationCode });
-        router.replace(returnTo !== '/dashboard' ? returnTo : onboardingChannelId
-          ? `/dashboard?channel=${encodeURIComponent(onboardingChannelId)}&onboarding=1`
-          : '/dashboard?lucy=1');
+        await verifyRegistration({ email: data.email, code: localVerificationCode });
+        router.replace(returnTo);
         return;
       }
       setPending(data);
@@ -116,10 +114,8 @@ export default function RegisterPage() {
     clearError();
     submittingRef.current = true;
     try {
-      const onboardingChannelId = await verifyRegistration({ email: pending.email, code: verificationCode.trim() });
-      router.replace(returnTo !== '/dashboard' ? returnTo : onboardingChannelId
-        ? `/dashboard?channel=${encodeURIComponent(onboardingChannelId)}&onboarding=1`
-        : '/dashboard?lucy=1');
+      await verifyRegistration({ email: pending.email, code: verificationCode.trim() });
+      router.replace(returnTo);
     } catch {
       submittingRef.current = false;
     }

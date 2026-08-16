@@ -117,7 +117,7 @@ func (h *ChannelHandler) ServerInfo(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.pool.Query(r.Context(),
 		`SELECT c.id, c.name, COALESCE(c.description,''), c.type,
 		 EXISTS(SELECT 1 FROM channel_members WHERE channel_id=c.id AND member_id=$1) as joined
-		 FROM channels c WHERE c.workspace_id=$2 AND ((c.type='channel' AND NOT c.is_archived) OR (c.type='dm' AND EXISTS(SELECT 1 FROM channel_members WHERE channel_id=c.id AND member_id=$1)))`, userID, serverworkspace.ID(r))
+		 FROM channels c WHERE c.workspace_id=$2 AND ((c.type='channel' AND NOT c.is_archived) OR (c.type='lucy' AND NOT c.is_archived AND EXISTS(SELECT 1 FROM channel_members WHERE channel_id=c.id AND member_id=$1)) OR (c.type='dm' AND EXISTS(SELECT 1 FROM channel_members WHERE channel_id=c.id AND member_id=$1)))`, userID, serverworkspace.ID(r))
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {

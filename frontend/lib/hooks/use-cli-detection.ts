@@ -10,6 +10,7 @@ import { t } from '@/lib/i18n';
 import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '@/lib/api-client';
 import type { AgentBackendDetectItem } from '@/lib/types';
+import { isSupportedAgentRuntime } from '@/lib/agent-runtimes';
 
 export interface CliDetectionState {
   /** Map of type -> detection result */
@@ -18,9 +19,6 @@ export interface CliDetectionState {
   isLoading: boolean;
   error: string | null;
 }
-
-/** Whitelist of runtimes available for agent creation. */
-const ALLOWED_RUNTIMES = new Set(["openclaw", "hermes", "claude", "opencode", "codex"]);
 
 /** Raw shape from backend — matches GET /api/v1/agent-backends/detect */
 interface DetectResponseItem {
@@ -45,6 +43,17 @@ export function useCliDetection(computerId?: string, cached: DetectResponseItem[
   useEffect(() => {
     const cachedItems = JSON.parse(cachedKey) as DetectResponseItem[];
     mountedRef.current = true;
+    if (cachedItems.length > 0) {
+      const map: Record<string, AgentBackendDetectItem> = {};
+      for (const item of cachedItems) {
+        if (isSupportedAgentRuntime(item.type)) map[item.type] = item;
+      }
+      setResults(map);
+      setIsLoaded(true);
+      setIsLoading(false);
+      setError(null);
+      return () => { mountedRef.current = false; };
+    }
     setIsLoading(true);
     setError(null);
     setResults({});
@@ -55,7 +64,7 @@ export function useCliDetection(computerId?: string, cached: DetectResponseItem[
         if (!mountedRef.current) return;
         const map: Record<string, AgentBackendDetectItem> = {};
         for (const item of data) {
-          if (!ALLOWED_RUNTIMES.has(item.type)) continue;
+          if (!isSupportedAgentRuntime(item.type)) continue;
           map[item.type] = {
             type: item.type,
             display_name: item.display_name,
@@ -73,7 +82,7 @@ export function useCliDetection(computerId?: string, cached: DetectResponseItem[
         if (cachedItems.length > 0) {
           const map: Record<string, AgentBackendDetectItem> = {};
           for (const item of cachedItems) {
-            if (ALLOWED_RUNTIMES.has(item.type)) map[item.type] = item;
+            if (isSupportedAgentRuntime(item.type)) map[item.type] = item;
           }
           setResults(map);
           setError(null);

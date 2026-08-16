@@ -262,9 +262,9 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
                       'cursor-pointer px-3 py-1.5 font-heading text-xs font-bold transition-colors',
                       opt.disabled && 'cursor-not-allowed opacity-50',
                       isSelected
-                        ? 'bg-black text-brutal-primary'
+                        ? 'bg-brutal-info-light text-black'
                         : isActive
-                          ? 'bg-brutal-primary text-black'
+                          ? 'bg-brutal-info text-black'
                           : 'bg-brutal-cream text-black',
                     )}
                   >

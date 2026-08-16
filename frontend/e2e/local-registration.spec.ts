@@ -63,7 +63,8 @@ test.describe('localhost registration', () => {
       expect(registerResponse.status()).toBe(202);
       expect(await registerResponse.json()).toMatchObject({ email_verification: false });
 
-      await expect(page).toHaveURL(/\/dashboard/);
+      await expect(page).toHaveURL(/\/home\?onboarding=1/);
+      await expect(page.getByRole('heading', { name: 'Start from Computers' })).toBeVisible();
       await expect(page.getByRole('heading', { name: 'Verify your email' })).toHaveCount(0);
       expect(await page.evaluate(() =>
         (window as Window & { __soloSawEmailVerification?: boolean }).__soloSawEmailVerification)).toBe(false);
@@ -72,7 +73,7 @@ test.describe('localhost registration', () => {
         verified: boolean;
         sessions: number;
         personal_workspaces: number;
-        personal_general: number;
+        onboarding_required: boolean;
         public_membership: number;
         missing_public_channels: number;
       }>(`
@@ -80,7 +81,7 @@ test.describe('localhost registration', () => {
           'verified', u.email_verified_at IS NOT NULL,
           'sessions', (SELECT COUNT(*) FROM sessions s WHERE s.user_id=u.id),
           'personal_workspaces', (SELECT COUNT(*) FROM workspaces w WHERE w.created_by=u.id AND w.is_personal=true AND w.deleted_at IS NULL),
-          'personal_general', (SELECT COUNT(*) FROM channels c JOIN workspaces w ON w.id=c.workspace_id WHERE w.created_by=u.id AND w.is_personal=true AND c.type='channel' AND c.name='general' AND c.is_archived=false),
+          'onboarding_required', u.onboarding_completed_at IS NULL,
           'public_membership', (SELECT COUNT(*) FROM workspace_members wm WHERE wm.user_id=u.id AND wm.workspace_id='00000000-0000-0000-0000-000000000001'),
           'missing_public_channels', (SELECT COUNT(*) FROM channels c WHERE c.workspace_id='00000000-0000-0000-0000-000000000001' AND c.type='channel' AND c.is_archived=false AND NOT EXISTS (SELECT 1 FROM channel_members cm WHERE cm.channel_id=c.id AND cm.member_type='user' AND cm.member_id=u.id))
         )::text FROM users u WHERE u.email='${email}'
@@ -88,8 +89,8 @@ test.describe('localhost registration', () => {
       expect(persisted).toEqual({
         verified: true,
         sessions: 1,
-        personal_workspaces: 1,
-        personal_general: 1,
+        personal_workspaces: 0,
+        onboarding_required: true,
         public_membership: 1,
         missing_public_channels: 0,
       });

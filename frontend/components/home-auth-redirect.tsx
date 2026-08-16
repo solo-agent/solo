@@ -11,7 +11,7 @@ export default function HomeAuthRedirect() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      router.push("/dashboard");
+      router.push("/home");
     }
   }, [isAuthenticated, isLoading, router]);
 

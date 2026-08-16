@@ -382,7 +382,9 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 		r.Get("/api/v1/agent-backends/detect", agentHandler.AgentBackendsDetect)
 
 		// Onboarding wizard
+		r.Get("/api/v1/onboarding/status", onboardingHandler.Status)
 		r.Post("/api/v1/onboarding/create-lucy", onboardingHandler.CreateLucy)
+		r.Post("/api/v1/onboarding/complete", onboardingHandler.Complete)
 
 		r.Get("/api/v1/agent-runs", agentRunHandler.Recent)
 		r.Get("/api/v1/agent-runs/active", agentRunHandler.Active)

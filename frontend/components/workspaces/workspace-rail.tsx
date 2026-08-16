@@ -106,6 +106,7 @@ export function WorkspaceRail() {
         <button
           type="button"
           onClick={openCreate}
+          data-onboarding="create-workspace"
           aria-label={t('workspaceRailCreate')}
           title={t('workspaceRailCreate')}
           className="group relative flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center border-2 border-dashed border-black bg-white text-black shadow-brutal-sm transition-[transform,box-shadow] hover:-translate-x-px hover:-translate-y-px hover:border-solid hover:shadow-brutal"

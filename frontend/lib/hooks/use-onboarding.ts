@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { apiClient } from '@/lib/api-client';
-import type { CreateLucyRequest, CreateLucyResponse } from '@/lib/types';
+import type { CreateLucyRequest, CreateLucyResponse, OnboardingStatus } from '@/lib/types';
 
 export function useOnboarding() {
   const [isCreating, setIsCreating] = useState(false);
@@ -25,5 +25,8 @@ export function useOnboarding() {
     }
   }, []);
 
-  return { createLucy, isCreating, createdAgent, error } as const;
+  const getStatus = useCallback(() => apiClient.get<OnboardingStatus>('/api/v1/onboarding/status'), []);
+  const complete = useCallback(() => apiClient.post<{ channel_id: string }>('/api/v1/onboarding/complete'), []);
+
+  return { createLucy, getStatus, complete, isCreating, createdAgent, error } as const;
 }
