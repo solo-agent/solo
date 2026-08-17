@@ -51,7 +51,7 @@ export function PersonalFrame({ children }: { children: React.ReactNode }) {
                 data-onboarding={item.href === '/computers' ? 'computers-nav' : undefined}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
-                  'flex items-center gap-3 border-2 px-3 py-3 font-body text-sm font-bold transition-colors',
+                  'flex items-center gap-3 border-2 px-3 py-3 font-body text-sm transition-colors',
                   active
                     ? 'border-black bg-white shadow-brutal-sm'
                     : 'border-transparent hover:border-black hover:bg-white/60',
