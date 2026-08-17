@@ -458,15 +458,15 @@
   --skin-canvas: oklch(0.975 0.008 80);
   --skin-surface: oklch(0.995 0.003 80);
   --skin-ink: #39342f;
-  --skin-rule: oklch(0.865 0.014 75);
+  --skin-rule: #EAE4D7;
   --skin-subtle-text: #6e665e;
   --skin-shadow: rgb(57 52 47 / 16%);
   --skin-primary: oklch(0.955 0.01 80);
   --skin-primary-light: oklch(0.985 0.004 80);
-  --skin-accent: #d0937f;
+  --skin-accent: #d97757;
   --skin-accent-light: #f0ded7;
-  --skin-info: #88a2b9;
-  --skin-info-light: #dbe5ed;
+  --skin-info: #9aa5b0;
+  --skin-info-light: #e1e6ea;
   --skin-success: #a9b59a;
   --skin-success-light: #e6eadf;
   --skin-warning: #d6b06c;
@@ -1188,10 +1188,33 @@
   --archive-shadow-lg: 0 12px 30px rgb(57 52 47 / 15%);
   --scrollbar-thumb: color-mix(in srgb, var(--skin-rule) 72%, var(--skin-surface));
   --scrollbar-thumb-hover: color-mix(in srgb, var(--skin-subtle-text) 46%, var(--skin-surface));
+
+  /* Phase 1a — Editorial typography knobs (mirrors Anthropic's 500 / 1.60 / 1.30 cadence) */
+  --archive-display-line: 1.15;
+  --archive-heading-line: 1.30;
+  --archive-body-line: 1.55;
 }
 
 :root[data-skin="archive"] :where(h1.font-heading) {
   font-family: var(--font-display);
+}
+
+/* Phase 1a — Force archive h1/h2 to weight 500 (Anthropic Do/Don't: serif headings never 700+).
+   Overrides Tailwind's .font-black/.font-bold utility on archive pages. */
+:root[data-skin="archive"] :where(h1, h2) {
+  font-weight: 500;
+}
+
+:root[data-skin="archive"] :where(h1) {
+  line-height: var(--archive-display-line);
+}
+
+:root[data-skin="archive"] :where(h2) {
+  line-height: var(--archive-heading-line);
+}
+
+:root[data-skin="archive"] :where(body, p, .font-body) {
+  line-height: var(--archive-body-line);
 }
 
 :root[data-skin="archive"] ::selection {
