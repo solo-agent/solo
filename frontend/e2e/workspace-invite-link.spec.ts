@@ -86,7 +86,9 @@ test.describe('Workspace member invite links', () => {
   test('redirects visitors, then lets a signed-in user join and see the workspace', async ({ page, browser, request }) => {
     const owner = await register(request, 'InviteOwner');
     const member = await register(request, 'InviteMember');
-    const workspaceID = owner.workspace_id!;
+    const workspaceID = (await call<Workspace>(request, owner, 'post', '/api/v1/workspaces', undefined, {
+      name: `Invite ${Date.now().toString(36)}`,
+    })).id;
     let invitePath = '';
 
     try {
@@ -96,6 +98,8 @@ test.describe('Workspace member invite links', () => {
       const visitorContext = await browser.newContext();
       const visitor = await visitorContext.newPage();
       await visitor.goto(invitePath);
+      await expect(visitor.getByRole('heading', { name: /invited to join/i })).toBeVisible();
+      await visitor.getByRole('button', { name: /log in or sign up to join/i }).click();
       await expect(visitor).toHaveURL(/\/auth\/login\?return_to=.*invite/);
       await visitorContext.close();
 

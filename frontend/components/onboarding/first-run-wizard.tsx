@@ -39,6 +39,7 @@ export function FirstRunWizard() {
   const targetRef = useRef<HTMLElement | null>(null);
   const completing = useRef(false);
   const guideSkipKey = user?.id ? `solo:first-run-guide-skipped:${user.id}` : null;
+  const onboardingDeferred = pathname.startsWith('/invite/');
 
   const load = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -80,7 +81,7 @@ export function FirstRunWizard() {
   }, [guideSkipKey, searchParams, status?.required]);
 
   useEffect(() => {
-    if (!status?.required || !guideStateReady || !guideVisible) return;
+    if (onboardingDeferred || !status?.required || !guideStateReady || !guideVisible) return;
     if (status.step === 1) {
       if (pathname !== '/home' && pathname !== '/computers') router.replace('/home?onboarding=1');
       return;
@@ -94,7 +95,7 @@ export function FirstRunWizard() {
     if (status.lucy_channel_id && (pathname !== '/dashboard' || currentChannel !== status.lucy_channel_id || !params.has('onboarding'))) {
       router.replace(`/dashboard?channel=${encodeURIComponent(status.lucy_channel_id)}&onboarding=1`);
     }
-  }, [guideStateReady, guideVisible, pathname, router, status]);
+  }, [guideStateReady, guideVisible, onboardingDeferred, pathname, router, status]);
 
   useEffect(() => {
     const defaultRuntime = status?.runtimes.find((item) => isSupportedAgentRuntime(item.type));
@@ -102,7 +103,7 @@ export function FirstRunWizard() {
   }, [runtime, status?.runtimes]);
 
   useEffect(() => {
-    if (!status?.required || !status.greeting_ready || completing.current) return;
+    if (onboardingDeferred || !status?.required || !status.greeting_ready || completing.current) return;
     completing.current = true;
     void complete().then(({ channel_id }) => {
       setStatus((current) => current ? { ...current, required: false } : current);
@@ -111,7 +112,7 @@ export function FirstRunWizard() {
       completing.current = false;
       setError(err instanceof Error ? err.message : t('firstRunCompleteError'));
     });
-  }, [complete, router, status]);
+  }, [complete, onboardingDeferred, router, status]);
 
   const targetSelector = useMemo(() => {
     if (!status?.required || !guideVisible) return '';
@@ -203,7 +204,7 @@ export function FirstRunWizard() {
     router.replace(`${pathname}${query ? `?${query}` : ''}`, { scroll: false });
   };
 
-  if (authLoading || !isAuthenticated || !status?.required) return null;
+  if (onboardingDeferred || authLoading || !isAuthenticated || !status?.required) return null;
 
   const onTarget = () => targetRef.current?.click();
   const onCoachAction = status.step === 3 ? () => setLucyOpen(true) : onTarget;
