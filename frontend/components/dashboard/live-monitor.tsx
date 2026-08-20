@@ -142,9 +142,9 @@ interface AgentTranscriptEntry {
 }
 
 const GROUP_HEADER_CLASSES: Record<string, string> = {
-  working: 'border-l-4 border-l-brutal-info bg-brutal-info-light',
-  needs_attention: 'border-l-4 border-l-brutal-violet bg-brutal-violet-light',
-  idle_recent: 'border-l-4 border-l-brutal-success bg-brutal-success-light',
+  working: 'border-l-4 border-l-brutal-info bg-brutal-info',
+  needs_attention: 'border-l-4 border-l-brutal-violet bg-brutal-violet',
+  idle_recent: 'border-l-4 border-l-brutal-success bg-brutal-success',
 };
 
 function groupLabel(key: string, fallback: string) {

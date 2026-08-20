@@ -6,7 +6,7 @@
 // 前端在 ws-client.ts 中解包服务端事件: payload 字段展开到顶层
 // 前端在 ws-client.ts 中打包客户端命令: 非 type 字段包裹到 payload
 
-import type { Attachment } from './types';
+import type { Attachment, MessageReaction } from './types';
 
 /** 消息来源（与后端 sender_type 对齐） */
 export type WSMessageSource = 'user' | 'agent' | 'system';
@@ -37,6 +37,7 @@ export interface WSMessage {
   status?: 'sending' | 'sent' | 'failed' | 'streaming';
   /** SOLO-249-F: attachments on the message */
   attachments?: Attachment[];
+  reactions?: MessageReaction[];
 }
 
 /**
@@ -53,6 +54,7 @@ export type WSServerEvent =
   // ---- 消息事件 ----
   | { type: 'message.new'; id: string; client_msg_id?: string; channel_id: string; sender_type: string; sender_id: string; sender_name?: string; sender_avatar?: string | null; content: string; content_type: string; metadata?: Record<string, unknown>; thread_id?: string; thinking_node_id?: string; created_at: string; attachments?: Attachment[]; task_number?: number; task_title?: string; task_status?: string; task_claimer_name?: string; task_claimer_deleted?: boolean; reply_count?: number; has_unread_thread?: boolean }
   | { type: 'message.updated'; id: string; channel_id: string; content: string; sender_type?: string; sender_id?: string; updated_at: string; task_number?: number; task_title?: string; task_status?: string; task_claimer_name?: string; task_claimer_deleted?: boolean; reply_count?: number }
+  | { type: 'message.reactions.updated'; id: string; channel_id: string; reactions: MessageReaction[] }
   | { type: 'message.deleted'; channel_id: string; message_id: string }
   | { type: 'thinking.updated'; channel_id: string; space_id?: string; node_id?: string }
   // ---- 线程事件 ----

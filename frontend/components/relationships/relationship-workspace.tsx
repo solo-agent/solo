@@ -28,6 +28,7 @@ import dagre from 'dagre';
 import { GitFork, Handshake, Loader2, Plus, LayoutGrid, LayoutTemplate, Undo2, Redo2 } from 'lucide-react';
 import { AppFrame } from '@/components/layout/app-frame';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
 import { RelationshipNode, type AgentNodeTask } from '@/components/relationships/relationship-node';
 import { RelationshipEdge } from '@/components/relationships/relationship-edge';
 import { orderCollaboratingIds, reorderRankX } from '@/components/relationships/relationship-layout';
@@ -135,6 +136,7 @@ interface RelationshipWorkspaceProps {
   refreshKey?: number;
   onAddAgent?: () => void;
   onChooseTemplate?: () => void;
+  onGuide?: () => void;
   onDetailOpen?: (detail: { relationship: AgentRelationship | null; agent: GraphAgent | null }) => void;
   onDetailClose?: () => void;
   embeddedActions?: ReactNode;
@@ -155,6 +157,7 @@ export function RelationshipWorkspace({
   refreshKey = 0,
   onAddAgent,
   onChooseTemplate,
+  onGuide,
   onDetailOpen,
   onDetailClose,
   embeddedActions,
@@ -983,7 +986,7 @@ export function RelationshipWorkspace({
             <Button
               type="button"
               onClick={() => setShowCreateAgentModal(true)}
-              variant="success"
+              variant="primary"
               size="sm"
               className="gap-1.5 uppercase tracking-wider"
             >
@@ -1083,30 +1086,33 @@ export function RelationshipWorkspace({
           {/* Empty state overlay */}
           {visibleAgents.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-              <div data-onboarding="create-agent" className="pointer-events-auto flex max-w-sm flex-col items-center gap-3 border-4 border-black bg-brutal-cream p-8 text-center shadow-brutal-xl">
-                <span className="flex h-12 w-12 items-center justify-center border-2 border-black bg-white shadow-brutal-sm">
-                  <Plus className="h-6 w-6" />
-                </span>
-                <h3 className="font-heading text-lg font-black">
-                  {emptyTitle}
-                </h3>
-                <p className="max-w-xs font-body text-sm text-muted-foreground">
-                  {emptyDescription}
-                </p>
-                <div className="flex flex-wrap justify-center gap-2">
-                  {onAddAgent && (
-                    <Button type="button" variant="success" size="sm" onClick={onAddAgent}>
-                      <Plus className="mr-1.5 h-3.5 w-3.5" />
-                      {t('relationshipEditorCreateFirstAgent')}
-                    </Button>
-                  )}
-                  {onChooseTemplate && (
-                    <Button type="button" variant="outline" size="sm" onClick={onChooseTemplate}>
-                      <LayoutTemplate className="mr-1.5 h-3.5 w-3.5" />
-                      {t('relationshipEditorChooseTemplate')}
-                    </Button>
-                  )}
-                </div>
+              <div data-onboarding="create-agent" className="pointer-events-auto w-full max-w-md px-6">
+                <EmptyState
+                  illustration={{ src: '/illustrations/empty-team.png', alt: emptyTitle ?? t('teamsNoAgents') }}
+                  title={emptyTitle ?? t('teamsNoAgents')}
+                  actions={
+                    <>
+                      {onAddAgent && (
+                        <Button type="button" variant="primary" size="sm" onClick={onAddAgent}>
+                          <Plus className="mr-1.5 h-3.5 w-3.5" />
+                          {t('relationshipEditorCreateFirstAgent')}
+                        </Button>
+                      )}
+                      {onChooseTemplate && (
+                        <Button type="button" variant="outline" size="sm" onClick={onChooseTemplate}>
+                          <LayoutTemplate className="mr-1.5 h-3.5 w-3.5" />
+                          {t('relationshipEditorChooseTemplate')}
+                        </Button>
+                      )}
+                      {onGuide && (
+                        <Button type="button" variant="outline" size="sm" onClick={onGuide}>
+                          {t('firstRunGuideMe')}
+                        </Button>
+                      )}
+                    </>
+                  }
+                  className="bg-skin-surface"
+                />
               </div>
             </div>
           )}

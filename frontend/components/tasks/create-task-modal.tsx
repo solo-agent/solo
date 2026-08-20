@@ -164,7 +164,7 @@ export function CreateTaskModal({
         </Button>
         <Button
           type="button"
-          variant="success"
+          variant="primary"
           size="sm"
           onClick={handleSubmit}
           disabled={isDisabled}

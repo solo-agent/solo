@@ -12,7 +12,8 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Monitor,
   Edit3,
@@ -107,6 +108,8 @@ function AgentStatusDot({ status }: { status: string }) {
 }
 
 export default function ComputersPage() {
+  const searchParams = useSearchParams();
+  const onboardingActive = searchParams.has('onboarding');
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { computers, isLoading, error, addComputer, updateComputer, deleteComputer, createEnrollment, revokeCredential, refetch } = useComputers();
   const { showToast } = useToast();
@@ -251,7 +254,7 @@ export default function ComputersPage() {
           </div>
           <Button type="button" size="sm" data-onboarding="connect-computer" onClick={() => void openPairDialog()}><Plus className="mr-1.5 h-4 w-4" />{t('computersAddComputer')}</Button>
         </div>
-        <div className="flex-1 overflow-y-auto bg-white">
+        <div className="flex-1 overflow-y-auto bg-skin-canvas">
           <div className="mx-auto w-full max-w-5xl px-8 py-6">
             {/* Error state */}
             {error && (
@@ -288,17 +291,21 @@ export default function ComputersPage() {
 
             {/* Empty state — no computers at all */}
             {!isLoading && !error && computers.length === 0 && (
-              <EmptyState
-                variant="dashed"
-                rotation={-0.5}
-                icon={
-                  <div className="flex h-12 w-12 items-center justify-center border-2 border-black bg-brutal-info shadow-brutal-sm">
-                    <Monitor className="h-6 w-6 text-white" />
+              <div className="space-y-3">
+                <EmptyState
+                  variant="dashed"
+                  illustration={{ src: '/illustrations/no-computers.png', alt: t('computersNoComputers') }}
+                  title={t('computersNoComputers')}
+                  description={t('computersNoComputersDesc')}
+                />
+                {onboardingActive && (
+                  <div className="flex justify-center">
+                    <Link href="/computers?onboarding=1&guide=1" className="btn-brutal rounded-lg px-3 py-1.5 text-xs">
+                      {t('firstRunGuideMe')}
+                    </Link>
                   </div>
-                }
-                title={t('computersNoComputers')}
-                description={t('computersNoComputersDesc')}
-              />
+                )}
+              </div>
             )}
 
             {!isLoading && !error && computers.length > 0 && (
@@ -539,7 +546,7 @@ function ComputerCard({
                     <div className="flex flex-shrink-0 items-center gap-1.5">
                       <Button
                         type="button"
-                        variant="success"
+                        variant="primary"
                         size="sm"
                         onClick={() => onSaveName(computer.id)}
                         disabled={isSaving || !editName.trim()}

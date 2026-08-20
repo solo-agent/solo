@@ -175,7 +175,7 @@ function RelationshipNodeComponent({ data, selected }: NodeProps) {
         {agentData.onOpenRun && (
           <button
             type="button"
-            className="relationship-agent-run-button nodrag nopan absolute -right-3 -top-3 z-20 flex h-8 w-8 items-center justify-center border-2 border-black bg-brutal-info-light text-black shadow-brutal-sm transition-transform hover:-translate-y-0.5 hover:bg-brutal-info active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brutal-info"
+            className="relationship-agent-run-button nodrag nopan absolute -right-3 -top-3 z-20 flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-brutal-accent-light text-foreground shadow-none transition-colors hover:bg-brutal-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brutal-accent"
             onClick={(event) => {
               event.stopPropagation();
               agentData.onOpenRun?.(agentData.agentId);

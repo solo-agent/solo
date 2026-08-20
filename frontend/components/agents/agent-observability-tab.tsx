@@ -242,13 +242,13 @@ export function AgentObservabilityTab({ agentId, initialRunId }: { agentId: stri
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <span className={detailSectionTitleClass()}>{t('observabilityAgentRunHistory')}</span>
-        <div className="flex border-2 border-black font-heading text-xs font-bold">
+        <div className="flex overflow-hidden rounded-lg border border-border font-heading text-xs font-bold">
           {(['sessions', 'tasks', 'runs'] as const).map((item) => (
             <button
               key={item}
               type="button"
               onClick={() => setScope(item)}
-              className={cn('border-r-2 border-black px-2 py-1 last:border-r-0', scope === item ? 'bg-brutal-primary' : 'bg-white')}
+              className={cn('border-r border-border px-2 py-1 last:border-r-0', scope === item ? 'bg-brutal-primary' : 'bg-white')}
             >
               {scopeLabel(item)}
             </button>
@@ -366,16 +366,16 @@ function TranscriptPanel({ entries, events, selectedRun }: { entries: AgentTrans
         <div className="space-y-2 p-2">
           <RunTokenSummary run={selectedRun} />
           {transcriptPath && (
-            <div className="truncate border-2 border-black bg-white px-2 py-1 font-mono text-[11px] text-muted-foreground">
+            <div className="truncate rounded-md border border-border bg-white px-2 py-1 font-mono text-[11px] text-muted-foreground">
               {transcriptPath}
             </div>
           )}
           {entries.map((entry) => (
-            <details key={`${entry.seq}-${entry.type}`} className="border-2 border-black bg-white" open={entry.type !== 'tool_use' && entry.type !== 'tool_result'}>
+            <details key={`${entry.seq}-${entry.type}`} className="overflow-hidden rounded-lg border border-border bg-white" open={entry.type !== 'tool_use' && entry.type !== 'tool_result'}>
               <summary className="cursor-pointer px-2 py-1 font-heading text-xs font-bold">
                 {entryLabel(entry)} <span className="font-mono font-normal text-muted-foreground">{formatTime(entry.timestamp)}</span>
               </summary>
-              <div className="border-t-2 border-black p-2 text-sm">
+              <div className="border-t border-border p-2 text-sm">
                 {entry.input ? (
                   <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words bg-black p-2 font-mono text-xs text-white">
                     {JSON.stringify(entry.input, null, 2)}
@@ -390,13 +390,13 @@ function TranscriptPanel({ entries, events, selectedRun }: { entries: AgentTrans
       ) : !transcriptPath ? (
         <>
           <RunTokenSummary run={selectedRun} />
-          <div className="border-b-2 border-black p-3 text-sm text-muted-foreground">{t('observabilityNoTranscriptPath')}</div>
+          <div className="border-b border-border p-3 text-sm text-muted-foreground">{t('observabilityNoTranscriptPath')}</div>
           {fallback}
         </>
       ) : (
         <>
           <RunTokenSummary run={selectedRun} />
-          <div className="border-b-2 border-black p-3 text-sm text-muted-foreground">{t('observabilityUnreadableTranscriptPath', { path: transcriptPath })}</div>
+          <div className="border-b border-border p-3 text-sm text-muted-foreground">{t('observabilityUnreadableTranscriptPath', { path: transcriptPath })}</div>
           {fallback}
         </>
       )}
@@ -429,7 +429,7 @@ function RecoverySummary({ events }: { events: AgentRunEvent[] }) {
         : t('observabilityRecoveryPending');
 
   return (
-    <div className="border-b-2 border-black bg-brutal-primary-light p-3 text-black">
+    <div className="border-b border-border bg-brutal-primary-light p-3 text-foreground">
       <div className="font-heading text-xs font-black uppercase tracking-wider">{t('observabilityRecoveryTitle')}</div>
       <div className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
         <RecoveryField label={t('observabilityRecoveryReason')} value={failureLabel(failureCode)} />
@@ -466,7 +466,7 @@ function RunCostLine({ run }: { run: AgentRun }) {
 function RunTokenSummary({ run }: { run?: AgentRun }) {
   if (!run?.budget_state) return null;
   return (
-    <div className="border-2 border-black bg-brutal-primary-light px-2 py-2 text-foreground">
+    <div className="rounded-lg border border-border bg-brutal-primary-light px-2 py-2 text-foreground">
       <div className="font-heading text-xs font-black">{t('runCostTitle')}</div>
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[11px]">
         <span>{t('runCostStatus')}: {budgetStateText(run.budget_state)}</span>
@@ -484,7 +484,7 @@ function RunTokenSummary({ run }: { run?: AgentRun }) {
 
 function RecoveryField({ label, value }: { label: string; value: string }) {
   return (
-    <div className="border-2 border-black bg-white px-2 py-1.5">
+    <div className="rounded-md border border-border bg-white px-2 py-1.5">
       <div className="font-mono text-[10px] font-bold text-muted-foreground">{label}</div>
       <div className="mt-0.5 font-heading text-xs font-bold text-black">{value}</div>
     </div>
@@ -539,17 +539,17 @@ function EventsTimeline({ events }: { events: AgentRunEvent[] }) {
         const callID = typeof event.payload?.call_id === 'string' ? event.payload.call_id : '';
         const toolName = event.tool_name || toolNameByCallId.get(callID) || '';
         return (
-          <details key={event.id} className="border-2 border-black bg-white">
+          <details key={event.id} className="overflow-hidden rounded-lg border border-border bg-white">
             <summary className="flex cursor-pointer items-center gap-2 px-2 py-1 font-heading text-xs font-bold">
               <span>#{event.seq}</span>
               <span>{eventLabel(event.type, toolName)}</span>
               <span className="ml-auto font-mono font-normal text-muted-foreground">{formatTime(event.created_at)}</span>
             </summary>
-            <div className="space-y-2 border-t-2 border-black p-2">
+            <div className="space-y-2 border-t border-border p-2">
               {meta.length > 0 && (
                 <div className="flex flex-wrap gap-1">
                   {meta.map(([key, value]) => (
-                    <span key={key} className="border-2 border-black bg-brutal-cream px-1.5 py-0.5 font-mono text-[11px]">
+                    <span key={key} className="rounded-md border border-border bg-brutal-cream px-1.5 py-0.5 font-mono text-[11px]">
                       {key}: {value}
                     </span>
                   ))}
@@ -623,8 +623,8 @@ function upsertEvent(events: AgentRunEvent[], nextEvent: AgentRunEvent) {
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="min-h-[260px] border-2 border-black bg-brutal-cream">
-      <div className="border-b-2 border-black bg-white px-2 py-1 font-heading text-xs font-bold">{title}</div>
+    <div className="min-h-[260px] overflow-hidden rounded-xl border border-border bg-brutal-cream">
+      <div className="border-b border-border bg-white px-2 py-1 font-heading text-xs font-bold">{title}</div>
       <div className="max-h-[520px] overflow-auto">{children}</div>
     </div>
   );
@@ -635,7 +635,7 @@ function Row({ active, onClick, children }: { active: boolean; onClick: () => vo
     <button
       type="button"
       onClick={onClick}
-      className={cn('block w-full border-b-2 border-black px-2 py-2 text-left last:border-b-0 hover:bg-white', active && 'bg-white')}
+      className={cn('block w-full border-b border-border px-2 py-2 text-left last:border-b-0 hover:bg-white', active && 'bg-white')}
     >
       <div className="flex min-w-0 flex-col gap-0.5 font-mono text-xs">{children}</div>
     </button>

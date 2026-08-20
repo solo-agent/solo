@@ -40,6 +40,11 @@ import { useMentions } from '@/lib/hooks/use-mentions';
 import { useWebSocket } from '@/lib/ws-context';
 import { useToast } from '@/components/ui/toast';
 import { MentionDropdown, type DropdownAnchor } from './mention-dropdown';
+import {
+  MessageReactionChips,
+  MessageReactionPicker,
+  useMessageReactions,
+} from './message-reactions';
 import { t } from '@/lib/i18n';
 import { formatMessageTime, formatMessageTimestamp, messageDateKey } from '@/lib/utils/time';
 import type { AgentDetailTarget, Message, ChannelMember, Task, TaskStatus } from '@/lib/types';
@@ -78,9 +83,11 @@ function ParentMessageBlock({
   const isAgent = message.sender_type === 'agent';
   const displayName = task?.creator_name || message.display_name;
   const time = formatMessageTimestamp(message.created_at);
+  const [reactionOpen, setReactionOpen] = useState(false);
+  const reactionState = useMessageReactions(message.id, message.reactions);
 
   return (
-    <div className={`flex gap-3 border-b border-brutal-muted px-6 py-4 ${isAgent ? 'border-l-2 border-l-brutal-primary' : ''}`}>
+    <div className="group relative flex gap-3 border-b border-brutal-muted px-6 py-4">
       {isAgent ? (
         <PixelAvatar
           agentId={message.user_id || message.id}
@@ -125,6 +132,15 @@ function ParentMessageBlock({
             {message.content}
           </ReactMarkdown>
         </div>
+        <MessageReactionChips {...reactionState} />
+      </div>
+      <div className="absolute right-3 top-3 flex items-center gap-1">
+        <MessageReactionPicker
+          open={reactionOpen}
+          setOpen={setReactionOpen}
+          isSaving={reactionState.isSaving}
+          toggleReaction={reactionState.toggleReaction}
+        />
       </div>
     </div>
   );
@@ -283,7 +299,7 @@ function ReplyItem({
   onOpenArtifactReference,
   onAgentClick,
 }: {
-  message: { id: string; display_name?: string; sender_id?: string; sender_avatar?: string | null; sender_active?: boolean; content: string; created_at: string; status?: string; sender_type?: string };
+  message: { id: string; display_name?: string; sender_id?: string; sender_avatar?: string | null; sender_active?: boolean; content: string; created_at: string; status?: string; sender_type?: string; reactions?: import('@/lib/types').MessageReaction[] };
   isGrouped?: boolean;
   validNames?: string[];
   isHighlighted?: boolean;
@@ -297,6 +313,8 @@ function ReplyItem({
 
   const time = formatMessageTimestamp(message.created_at);
   const compactTime = formatMessageTime(message.created_at);
+  const [reactionOpen, setReactionOpen] = useState(false);
+  const reactionState = useMessageReactions(message.id, message.reactions);
 
   return (
     <div
@@ -304,10 +322,9 @@ function ReplyItem({
       data-thread-reply
       data-grouped={isGrouped ? 'true' : 'false'}
       className={cn(
-        'group flex gap-3 px-6',
+        'group relative flex gap-3 px-6',
         isGrouped ? 'py-1' : 'pb-1.5 pt-3',
-        isAgent && 'border-l-2 border-l-brutal-primary',
-        isHighlighted && 'bg-brutal-info-light ring-2 ring-black',
+        isHighlighted && 'bg-brutal-primary-light ring-2 ring-brutal-accent',
       )}
     >
       {isGrouped ? (
@@ -387,6 +404,7 @@ function ReplyItem({
             </div>
           )}
         </div>
+        <MessageReactionChips {...reactionState} />
         {isFailed && (
           <div className="mt-2 flex items-center gap-1">
             <AlertCircle className="h-3.5 w-3.5 text-brutal-danger" />
@@ -398,6 +416,14 @@ function ReplyItem({
             <span className="font-body text-xs text-muted-foreground">{t('sending')}</span>
           </div>
         )}
+      </div>
+      <div className="absolute right-3 top-2 flex items-center gap-1">
+        <MessageReactionPicker
+          open={reactionOpen}
+          setOpen={setReactionOpen}
+          isSaving={reactionState.isSaving}
+          toggleReaction={reactionState.toggleReaction}
+        />
       </div>
     </div>
   );

@@ -71,7 +71,7 @@ export function Sidebar({
 
   return (
     <aside
-      className="navbar-brutal flex h-full w-[240px] flex-shrink-0 flex-col border-r-2 border-black py-3"
+      className="navbar-brutal flex h-full w-[240px] flex-shrink-0 flex-col py-3"
     >
       <div className="flex flex-col gap-2">
         <div className="flex w-full items-center gap-2 px-3">

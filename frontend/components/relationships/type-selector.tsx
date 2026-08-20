@@ -101,7 +101,7 @@ export function TypeSelector({ fromName, toName, onSelect, onCancel }: TypeSelec
         <Button
           type="button"
           onClick={() => onSelect(selected)}
-          variant="success"
+          variant="primary"
           size="sm"
         >
           {t('confirm')}

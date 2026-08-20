@@ -40,6 +40,7 @@ import { buildValidNames } from '@/lib/utils/highlight';
 import { Avatar } from '@/components/ui/avatar';
 import { UserAvatar } from '@/components/ui/user-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
 import { motionScrollBehavior } from '@/lib/motion';
 import {
@@ -54,6 +55,11 @@ import { AgentMessage } from './agent-message';
 import { MessageMarkdown } from './message-markdown';
 import { StreamingMessage } from './streaming-message';
 import { MessageAttachments } from './message-attachments';
+import {
+  MessageReactionChips,
+  MessageReactionPicker,
+  useMessageReactions,
+} from './message-reactions';
 import { canGroupMessages, MessageDateSeparator } from './message-layout';
 import { ThreadPreview } from './thread-preview';
 import type { AgentDetailTarget, ChannelMember, Message } from '@/lib/types';
@@ -104,7 +110,7 @@ const TASK_HEADER_CONFIG: Record<string, { label: string; accentClass: string; b
   in_progress: {
     label: t('statusInProgress'),
     accentClass: 'border-l-brutal-info',
-    bgClass: 'bg-brutal-info-light/20',
+    bgClass: 'bg-brutal-primary-light/35',
     badgeClass: 'bg-brutal-info text-black border-2 border-black',
     lightClass: 'bg-brutal-info-light',
   },
@@ -160,7 +166,9 @@ const MessageItem = memo(function MessageItem({
   const [isSaving, setIsSaving] = useState(false);
   const [isTogglingPin, setIsTogglingPin] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [reactionOpen, setReactionOpen] = useState(false);
   const editRef = useRef<HTMLTextAreaElement>(null);
+  const reactionState = useMessageReactions(message.id, message.reactions);
 
   const isFailed = message.status === 'failed';
   const isSending = message.status === 'sending';
@@ -293,7 +301,7 @@ const MessageItem = memo(function MessageItem({
           {channelId && (
             <Link
               href={`/dashboard?channel=${encodeURIComponent(channelId)}`}
-              className="mt-4 flex w-full items-center justify-between border-2 border-black bg-brutal-success px-3 py-2 font-heading text-sm font-black shadow-brutal-sm hover:-translate-y-px"
+              className="mt-4 flex w-full items-center justify-between border-2 border-black bg-brutal-primary px-3 py-2 font-heading text-sm font-black shadow-brutal-sm hover:-translate-y-px"
             >
               {t('lucyOpenChannel')}
               <ArrowUpRight className="h-4 w-4" />
@@ -314,7 +322,7 @@ const MessageItem = memo(function MessageItem({
         !isTaskMessage && 'hover:bg-brutal-muted/15',
         isFailed && 'bg-brutal-danger-light/30',
         isEditing && 'border-l-[3px] border-l-brutal-primary bg-brutal-primary-light/30',
-        isHighlighted && 'bg-brutal-info-light ring-2 ring-black',
+        isHighlighted && 'bg-brutal-primary-light ring-2 ring-brutal-accent',
         isTaskMessage && 'border-l-4',
         isTaskMessage && headerConfig?.accentClass,
         isTaskMessage && headerConfig?.bgClass,
@@ -473,6 +481,10 @@ const MessageItem = memo(function MessageItem({
           <MessageAttachments attachments={message.attachments} />
         )}
 
+        {!isEditing && !isFailed && !isSending && (
+          <MessageReactionChips {...reactionState} />
+        )}
+
         {/* Failed state actions */}
         {isFailed && (
           <div className="mt-2 flex items-center gap-2">
@@ -537,10 +549,18 @@ const MessageItem = memo(function MessageItem({
 
       {/* Hover actions: edit / delete / reply */}
       {!isEditing && !isFailed && !isSending && (
-        <div className="absolute right-3 top-2 flex items-center gap-1
-                        opacity-0 group-hover:opacity-100
-                        translate-x-2 group-hover:translate-x-0
-                        transition-[opacity,transform] duration-200">
+        <div className={cn(
+          'absolute right-3 top-2 flex items-center gap-1 transition-[opacity,transform] duration-200',
+          reactionOpen
+            ? 'opacity-100 translate-x-0'
+            : 'opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0',
+        )}>
+          <MessageReactionPicker
+            open={reactionOpen}
+            setOpen={setReactionOpen}
+            isSaving={reactionState.isSaving}
+            toggleReaction={reactionState.toggleReaction}
+          />
           {onEdit && (
             <button
               type="button"
@@ -684,12 +704,13 @@ function MessageSkeleton() {
 
 function MessageListEmpty() {
   return (
-    <div className="flex flex-1 items-center justify-center">
-      <div className="text-center">
-        <p className="font-body text-sm text-muted-foreground">
-          {t('noMessages')}
-        </p>
-      </div>
+    <div className="flex flex-1 items-center justify-center p-6">
+      <EmptyState
+        size="md"
+        illustration={{ src: '/illustrations/empty-tasks.png', alt: t('noMessages') }}
+        title={t('noMessages')}
+        className="bg-transparent border-0 shadow-none"
+      />
     </div>
   );
 }

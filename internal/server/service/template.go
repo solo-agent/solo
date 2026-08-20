@@ -114,6 +114,7 @@ func (s *TemplateService) List(ctx context.Context, locales ...string) ([]AgentT
 		SELECT id, name, description, category, icon, members, translations
 		  FROM agent_templates
 		 WHERE is_official = true
+		   AND id NOT LIKE 'starter-%'
 		 ORDER BY category ASC, name ASC
 	`)
 	if err != nil {
@@ -159,7 +160,7 @@ func loadTemplate(ctx context.Context, q interface {
 	err := q.QueryRow(ctx, `
 		SELECT id, name, description, category, icon, members, relationships, translations
 		  FROM agent_templates
-		 WHERE id = $1 AND is_official = true
+		 WHERE id = $1 AND is_official = true AND id NOT LIKE 'starter-%'
 	`, templateID).Scan(
 		&tmpl.ID, &tmpl.Name, &tmpl.Description, &tmpl.Category, &tmpl.Icon,
 		&rawMembers, &rawRelationships, &rawTranslations,

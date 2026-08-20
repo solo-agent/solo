@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 import Script from "next/script";
 import {
   Inter,
@@ -57,7 +58,7 @@ const notoSerifSC = Noto_Serif_SC({
   variable: "--font-noto-serif-sc",
 });
 
-const bootstrapScript = `try{const skin=localStorage.getItem("solo.skin");document.documentElement.dataset.skin=["archive","classic"].includes(skin)?skin:"archive";const storedLocale=localStorage.getItem("solo.locale");document.documentElement.lang=storedLocale==="zh-CN"||(!storedLocale&&navigator.language.toLowerCase().startsWith("zh"))?"zh-CN":"en"}catch{document.documentElement.dataset.skin="archive"}`;
+const bootstrapScript = `try{const skin=localStorage.getItem("solo.skin");document.documentElement.dataset.skin=skin==="archive"?skin:"archive";const storedLocale=localStorage.getItem("solo.locale");document.documentElement.lang=storedLocale==="zh-CN"||(!storedLocale&&navigator.language.toLowerCase().startsWith("zh"))?"zh-CN":"en"}catch{document.documentElement.dataset.skin="archive"}`;
 
 export const metadata: Metadata = {
   title: t('appTitle'),
@@ -93,11 +94,13 @@ export default function RootLayout({
               <ToastProvider>
                 <WSAuthBridge />
                 <LocaleHydrator>
-                  <FirstRunWizard />
+                  <Suspense fallback={null}>
+                    <FirstRunWizard />
+                  </Suspense>
                   <ConnectionBanner />
                   <NetworkStatus />
                   <GlobalSearchTrigger />
-                  {children}
+                  <Suspense fallback={null}>{children}</Suspense>
                 </LocaleHydrator>
               </ToastProvider>
             </WSProvider>

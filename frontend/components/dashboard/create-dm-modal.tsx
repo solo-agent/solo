@@ -205,7 +205,7 @@ export function CreateDMModal({
                         className={`flex-shrink-0 border-2 border-black px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider ${
                           isAgent
                             ? 'bg-brutal-primary text-black'
-                            : 'bg-brutal-info-light text-black'
+                            : 'bg-brutal-primary-light text-black'
                         }`}
                       >
                         {isAgent ? t('agent') : t('user')}
@@ -234,7 +234,7 @@ export function CreateDMModal({
                   {/* Action button */}
                   <Button
                     size="sm"
-                    variant={existing ? 'outline' : 'success'}
+                    variant={existing ? 'outline' : 'primary'}
                     disabled={isCreating}
                     className="flex-shrink-0"
                     onClick={(e) => {

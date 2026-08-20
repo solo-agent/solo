@@ -117,7 +117,7 @@ export function StreamingMessage({ message, isGrouped, onAgentClick }: Streaming
       data-message-id={message.id}
       data-message-grouped={isGrouped ? 'true' : 'false'}
       className={cn(
-        'group relative flex gap-3 px-6 agent-message border-l-brutal-primary',
+        'group relative flex gap-3 px-6 agent-message',
         isGrouped ? 'py-1' : 'pt-3 pb-1.5',
       )}
       role="listitem"

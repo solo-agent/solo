@@ -100,7 +100,7 @@ function InlineTextField({
             type="button"
             onClick={handleSave}
             disabled={saving || draft === value}
-            variant="success"
+            variant="primary"
             size="sm"
             className="gap-1 text-[10px] uppercase tracking-wider"
           >

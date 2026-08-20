@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -111,29 +112,170 @@ type AttachmentMeta struct {
 }
 
 type MessageResponse struct {
-	ID                 string           `json:"id"`
-	TaskNumber         int              `json:"task_number,omitempty"`
-	ChannelID          string           `json:"channel_id"`
-	SenderType         string           `json:"sender_type"`
-	SenderID           string           `json:"sender_id"`
-	SenderName         string           `json:"sender_name,omitempty"`
-	SenderAvatar       string           `json:"sender_avatar,omitempty"`
-	SenderActive       bool             `json:"sender_active"`
-	Content            string           `json:"content"`
-	ContentType        string           `json:"content_type"`
-	Metadata           map[string]any   `json:"metadata,omitempty"`
-	MentionedAgentIDs  []string         `json:"mentioned_agent_ids,omitempty"`
-	AttachmentIDs      []string         `json:"attachment_ids,omitempty"`
-	Attachments        []AttachmentMeta `json:"attachments,omitempty"`
-	CreatedAt          string           `json:"created_at"`
-	ReplyCount         int              `json:"reply_count,omitempty"`
-	TaskStatus         string           `json:"task_status,omitempty"`
-	TaskClaimerName    string           `json:"task_claimer_name,omitempty"`
-	TaskClaimerDeleted bool             `json:"task_claimer_deleted"`
-	HasUnreadThread    bool             `json:"has_unread_thread,omitempty"`
-	ThinkingNodeID     string           `json:"thinking_node_id,omitempty"`
-	ClientMsgID        string           `json:"client_msg_id,omitempty"`
-	Deduplicated       bool             `json:"deduplicated,omitempty"`
+	ID                 string            `json:"id"`
+	TaskNumber         int               `json:"task_number,omitempty"`
+	ChannelID          string            `json:"channel_id"`
+	SenderType         string            `json:"sender_type"`
+	SenderID           string            `json:"sender_id"`
+	SenderName         string            `json:"sender_name,omitempty"`
+	SenderAvatar       string            `json:"sender_avatar,omitempty"`
+	SenderActive       bool              `json:"sender_active"`
+	Content            string            `json:"content"`
+	ContentType        string            `json:"content_type"`
+	Metadata           map[string]any    `json:"metadata,omitempty"`
+	MentionedAgentIDs  []string          `json:"mentioned_agent_ids,omitempty"`
+	AttachmentIDs      []string          `json:"attachment_ids,omitempty"`
+	Attachments        []AttachmentMeta  `json:"attachments,omitempty"`
+	CreatedAt          string            `json:"created_at"`
+	ReplyCount         int               `json:"reply_count,omitempty"`
+	TaskStatus         string            `json:"task_status,omitempty"`
+	TaskClaimerName    string            `json:"task_claimer_name,omitempty"`
+	TaskClaimerDeleted bool              `json:"task_claimer_deleted"`
+	HasUnreadThread    bool              `json:"has_unread_thread,omitempty"`
+	ThinkingNodeID     string            `json:"thinking_node_id,omitempty"`
+	ClientMsgID        string            `json:"client_msg_id,omitempty"`
+	Deduplicated       bool              `json:"deduplicated,omitempty"`
+	Reactions          []MessageReaction `json:"reactions,omitempty"`
+}
+
+type MessageReaction struct {
+	Emoji   string `json:"emoji"`
+	Count   int    `json:"count"`
+	Reacted bool   `json:"reacted"`
+}
+
+type ToggleMessageReactionRequest struct {
+	Emoji string `json:"emoji"`
+}
+
+type MessageReactionsResponse struct {
+	Reactions []MessageReaction `json:"reactions"`
+}
+
+func queryMessageReactionMap(ctx context.Context, pool *pgxpool.Pool, messageIDs []string, userID string) (map[string][]MessageReaction, error) {
+	result := make(map[string][]MessageReaction)
+	if len(messageIDs) == 0 {
+		return result, nil
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT message_id::text, emoji, COUNT(*)::int, BOOL_OR(user_id = $2)
+		FROM message_reactions
+		WHERE message_id = ANY($1::uuid[])
+		GROUP BY message_id, emoji
+		ORDER BY message_id, emoji`, formatUUIDArray(messageIDs), userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var messageID string
+		var reaction MessageReaction
+		if err := rows.Scan(&messageID, &reaction.Emoji, &reaction.Count, &reaction.Reacted); err != nil {
+			return nil, err
+		}
+		result[messageID] = append(result[messageID], reaction)
+	}
+	return result, rows.Err()
+}
+
+func validReactionEmoji(emoji string) bool {
+	trimmed := strings.TrimSpace(emoji)
+	return trimmed != "" && trimmed == emoji && len([]rune(emoji)) <= 4 && len(emoji) <= 16
+}
+
+// ToggleReaction handles POST /api/v1/messages/{messageID}/reactions.
+func (h *MessageHandler) ToggleReaction(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	messageID := chi.URLParam(r, "messageID")
+	if _, err := uuid.Parse(messageID); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid message ID")
+		return
+	}
+	var req ToggleMessageReactionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !validReactionEmoji(req.Emoji) {
+		writeError(w, http.StatusBadRequest, "invalid emoji")
+		return
+	}
+
+	var allowed bool
+	var channelID, channelType, threadID string
+	err := h.pool.QueryRow(r.Context(), `
+		SELECT m.channel_id::text, c.type, COALESCE(m.thread_id::text, ''),
+		       (
+			       EXISTS (
+				       SELECT 1 FROM channel_members cm
+				        WHERE cm.channel_id = m.channel_id
+				          AND cm.member_type IN ('user', 'agent')
+				          AND cm.member_id = $2
+			       )
+			       OR EXISTS (
+				       SELECT 1 FROM dm_members dm
+				        WHERE dm.channel_id = m.channel_id
+				          AND dm.member_type IN ('user', 'agent')
+				          AND dm.member_id = $2
+			       )
+		       )
+		  FROM messages m
+		  JOIN channels c ON c.id = m.channel_id
+		 WHERE m.id = $1`, messageID, userID).Scan(&channelID, &channelType, &threadID, &allowed)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "message not found")
+			return
+		}
+		slog.Error("failed to check reaction membership", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if !allowed {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	result, err := tx.Exec(r.Context(), `DELETE FROM message_reactions WHERE message_id = $1 AND user_id = $2 AND emoji = $3`, messageID, userID, req.Emoji)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update reaction")
+		return
+	}
+	if result.RowsAffected() == 0 {
+		_, err = tx.Exec(r.Context(), `INSERT INTO message_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, messageID, userID, req.Emoji)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update reaction")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update reaction")
+		return
+	}
+
+	reactions, err := queryMessageReactionMap(r.Context(), h.pool, []string{messageID}, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load reactions")
+		return
+	}
+	if channelType != "dm" {
+		payload := ws.Envelope(ws.EventMessageReactionsUpdated, map[string]any{
+			"id":         messageID,
+			"channel_id": channelID,
+			"reactions":  reactions[messageID],
+		})
+		h.hub.BroadcastToChannel(channelID, payload)
+		if threadID != "" {
+			h.hub.BroadcastToThread(threadID, payload)
+		}
+	}
+	writeJSON(w, http.StatusOK, MessageReactionsResponse{Reactions: reactions[messageID]})
 }
 
 type FreshnessHeldMessageResponse struct {
@@ -1027,6 +1169,21 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+		}
+	}
+	if len(messages) > 0 {
+		messageIDs := make([]string, 0, len(messages))
+		for _, message := range messages {
+			messageIDs = append(messageIDs, message.ID)
+		}
+		reactionMap, err := queryMessageReactionMap(r.Context(), h.pool, messageIDs, userID)
+		if err != nil {
+			slog.Error("failed to query message reactions", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to list messages")
+			return
+		}
+		for i := range messages {
+			messages[i].Reactions = reactionMap[messages[i].ID]
 		}
 	}
 

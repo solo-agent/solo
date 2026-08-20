@@ -177,7 +177,7 @@ export default function RegisterPage() {
             />
             <p className="font-sans text-xs text-muted-foreground">{t('verificationCodeExpires')}</p>
           </div>
-          <Button type="submit" className="w-full" disabled={verificationCode.length !== 6}>{t('verifyAndContinue')}</Button>
+          <Button type="submit" variant="primary" className="w-full" disabled={verificationCode.length !== 6}>{t('verifyAndContinue')}</Button>
           <div className="flex items-center justify-between gap-3 text-sm">
             <button type="button" className="font-heading font-bold underline" onClick={() => { clearError(); setPending(null); setVerificationCode(''); }}>{t('changeEmail')}</button>
             <button type="button" className="font-heading font-bold underline disabled:opacity-50" disabled={resendIn > 0} onClick={resendCode}>
@@ -316,7 +316,7 @@ export default function RegisterPage() {
         {/* Submit button */}
         <Button
           type="submit"
-          variant="default"
+          variant="primary"
           className="w-full"
           disabled={isSubmitting}
         >

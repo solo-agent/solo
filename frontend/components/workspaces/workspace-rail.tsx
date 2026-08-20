@@ -15,9 +15,9 @@ import { cn } from '@/lib/utils';
 
 const railItemClass = (isActive: boolean) =>
   cn(
-    'group relative flex h-10 w-10 cursor-pointer items-center justify-center border-2 border-black font-heading text-sm font-black shadow-brutal-sm',
-    'transition-[transform,box-shadow] hover:-translate-x-px hover:-translate-y-px hover:shadow-brutal',
-    isActive ? 'bg-brutal-primary' : 'bg-white hover:bg-brutal-cream',
+    'group relative flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg border border-border font-heading text-sm font-black shadow-none',
+    'transition-colors hover:bg-brutal-primary-light',
+    isActive ? 'bg-brutal-primary-light' : 'bg-white',
   );
 
 // Vertical 56px rail. Items stay in API order so switching does not visually reorder them;
@@ -62,7 +62,7 @@ export function WorkspaceRail() {
     <>
     <nav
       aria-label={t('workspaceRailLabel')}
-      className="navbar-brutal flex w-14 flex-shrink-0 flex-col items-center gap-2 border-r-2 border-black py-3"
+      className="navbar-brutal flex w-14 flex-shrink-0 flex-col items-center gap-2 border-r border-border py-3"
     >
       <Link
         href="/home"
@@ -72,12 +72,12 @@ export function WorkspaceRail() {
         className={railItemClass(personalArea)}
       >
         {personalArea && (
-          <span aria-hidden className="absolute -left-3 top-1/2 h-6 w-1 -translate-y-1/2 bg-black" />
+          <span aria-hidden className="absolute -left-3 top-1/2 h-6 w-1 -translate-y-1/2 bg-brutal-accent" />
         )}
         <Image src="/favicon.svg" alt="" width={32} height={32} priority />
       </Link>
 
-      <div className="h-px w-8 shrink-0 bg-black/20" />
+      <div className="h-px w-8 shrink-0 bg-border" />
 
       <div className="flex max-h-[60vh] w-full flex-col items-center gap-2 overflow-x-hidden overflow-y-auto">
         {workspaces.map((item) => {
@@ -96,7 +96,7 @@ export function WorkspaceRail() {
               className={railItemClass(isActive)}
             >
               {isActive && (
-                <span aria-hidden className="absolute -left-3 top-1/2 h-6 w-1 -translate-y-1/2 bg-black" />
+                <span aria-hidden className="absolute -left-3 top-1/2 h-6 w-1 -translate-y-1/2 bg-brutal-accent" />
               )}
               {item.icon?.slice(0, 2) || '·'}
             </button>
@@ -109,7 +109,7 @@ export function WorkspaceRail() {
           data-onboarding="create-workspace"
           aria-label={t('workspaceRailCreate')}
           title={t('workspaceRailCreate')}
-          className="group relative flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center border-2 border-dashed border-black bg-white text-black shadow-brutal-sm transition-[transform,box-shadow] hover:-translate-x-px hover:-translate-y-px hover:border-solid hover:shadow-brutal"
+          className="group relative flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-dashed border-border bg-transparent text-foreground shadow-none transition-colors hover:border-solid hover:bg-brutal-primary-light"
         >
           <Plus className="h-4 w-4" />
         </button>
@@ -135,7 +135,7 @@ export function WorkspaceRail() {
         {createError && <p role="alert" className="mt-3 font-body text-xs font-bold text-brutal-danger">{createError}</p>}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={creating}>{t('cancel')}</Button>
-          <Button type="submit" disabled={creating || !workspaceName.trim()}>{creating ? t('saving') : t('create')}</Button>
+          <Button type="submit" variant="primary" disabled={creating || !workspaceName.trim()}>{creating ? t('saving') : t('create')}</Button>
         </DialogFooter>
       </form>
     </Dialog>

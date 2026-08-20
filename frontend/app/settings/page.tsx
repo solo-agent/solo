@@ -1,6 +1,6 @@
 // ============================================================================
-// Settings / Profile page — neubrutalist styling
-// - card-brutal form, input-brutal, btn-brutal-primary
+// Settings / Profile page — editorial styling
+// - shared surface, input, and button primitives
 // - Display email and display_name
 // - Loading / error / success states
 // ============================================================================
@@ -9,10 +9,9 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Mail, LogOut, Globe2, Palette, Check, Upload, RotateCcw } from 'lucide-react';
+import { User, Mail, LogOut, Globe2, Check, Upload, RotateCcw } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { getLocale, languageOptions, setLocale, t, type Locale } from '@/lib/i18n';
-import { defaultThemeId, getStoredTheme, setTheme, themeOptions, type ThemeId } from '@/lib/theme';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -36,13 +35,11 @@ export default function SettingsPage() {
 
   const [loggingOut, setLoggingOut] = useState(false);
   const [language, setLanguage] = useState<Locale>('en');
-  const [theme, setThemeState] = useState<ThemeId>(defaultThemeId);
   const [avatarSaving, setAvatarSaving] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
 
   useEffect(() => {
     setLanguage(getLocale());
-    setThemeState(getStoredTheme());
   }, []);
 
   const handleLogout = useCallback(async () => {
@@ -132,7 +129,7 @@ export default function SettingsPage() {
 
   return (
     <PersonalFrame>
-      <div className="h-full overflow-y-auto bg-white">
+      <div className="h-full overflow-y-auto bg-skin-canvas">
       <div className="mx-auto max-w-4xl px-6 py-8">
       {/* Page header — v3.2 (Phase 2): h1 gets sticker rotation +
           the title container uses card-brutal-heavy for hero weight. */}
@@ -328,44 +325,6 @@ export default function SettingsPage() {
               <p className="mt-1 font-body text-xs text-muted-foreground">{t('settingsLanguageHint')}</p>
             </div>
 
-            {/* Skin */}
-            <div className="border-t-2 border-black px-6 py-5">
-              <Label className="flex items-center gap-2 font-heading text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                <Palette className="h-4 w-4" aria-hidden="true" />
-                {t('settingsTheme')}
-              </Label>
-              <p className="mt-1 font-body text-xs text-muted-foreground">{t('settingsThemeHint')}</p>
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {themeOptions.map((option) => {
-                  const selected = theme === option.id;
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      data-skin-preview={option.id}
-                      aria-pressed={selected}
-                      onClick={() => setThemeState(setTheme(option.id))}
-                      className={`overflow-hidden border-2 border-black bg-white text-left font-heading text-xs font-bold text-black transition-[transform,box-shadow] ${
-                        selected
-                          ? '-translate-y-0.5 shadow-brutal'
-                          : 'shadow-brutal-sm hover:-translate-y-0.5 hover:shadow-brutal'
-                      }`}
-                    >
-                      <span className="grid grid-cols-4 border-b-2 border-black" aria-hidden="true">
-                        <span className="h-8 bg-brutal-primary" />
-                        <span className="h-8 bg-brutal-accent" />
-                        <span className="h-8 bg-brutal-info" />
-                        <span className="h-8 bg-brutal-success" />
-                      </span>
-                      <span className="flex items-center justify-between gap-2 px-3 py-2">
-                        <span>{t(option.labelKey)}</span>
-                        {selected && <Check className="h-4 w-4 flex-shrink-0" aria-hidden="true" />}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
           </div>
 
           <BudgetSettingsCard />

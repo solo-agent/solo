@@ -196,7 +196,7 @@ export function CreateChannelModal({
             >
               {t('cancel')}
             </Button>
-            <Button type="submit" variant="success" disabled={isSubmitting}>
+            <Button type="submit" variant="primary" disabled={isSubmitting}>
               {isSubmitting ? t('creating') : t('create')}
             </Button>
           </DialogFooter>
@@ -226,7 +226,7 @@ function ChannelStartChoice({
       type="button"
       onClick={onClick}
       className={`group flex w-full items-center gap-3 border-2 border-black p-3 text-left shadow-brutal-sm transition-[transform,box-shadow,background-color] hover:-translate-y-px hover:shadow-brutal ${
-        featured ? 'bg-brutal-accent-light' : 'bg-white hover:bg-brutal-primary-light'
+        featured ? 'bg-warm-stone' : 'bg-white hover:bg-brutal-primary-light'
       }`}
     >
       <span className="flex h-10 w-10 shrink-0 items-center justify-center border-2 border-black bg-white shadow-brutal-sm">

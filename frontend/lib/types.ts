@@ -13,6 +13,12 @@ export interface Attachment {
   thumbnail_url?: string;
 }
 
+export interface MessageReaction {
+  emoji: string;
+  count: number;
+  reacted: boolean;
+}
+
 export interface Channel {
   id: string;
   name: string;
@@ -63,6 +69,7 @@ export interface Message {
   sender_active?: boolean;
   /** Thinking node this message belongs to. Omitted for normal channel messages. */
   thinking_node_id?: string;
+  reactions?: MessageReaction[];
 }
 
 export type ThinkingNodeSource = 'root' | 'team' | 'manual' | 'auto';

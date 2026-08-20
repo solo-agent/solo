@@ -83,11 +83,9 @@ export function ArgsEditor({ value, onChange, disabled }: ArgsEditorProps) {
       {/* Tag display area */}
       <div
         className={cn(
-          'flex flex-wrap items-center gap-2 rounded-none p-2',
-          'border-2 border-black shadow-brutal-sm min-h-[44px]',
+          'flex min-h-[44px] flex-wrap items-center gap-2 rounded-lg border border-border bg-white p-2 shadow-none',
           disabled && 'opacity-50',
         )}
-        style={{ background: '#fffaef' }}
         onClick={() => inputRef.current?.focus()}
       >
         {tags.map((tag, idx) => (
@@ -95,7 +93,7 @@ export function ArgsEditor({ value, onChange, disabled }: ArgsEditorProps) {
             key={`${tag}-${idx}`}
             className={cn(
               'inline-flex items-center gap-1 px-2 py-0.5',
-              'border-2 border-black bg-white shadow-brutal-sm',
+              'rounded-md border border-border bg-white shadow-none',
               'font-mono text-xs font-bold text-foreground',
             )}
           >

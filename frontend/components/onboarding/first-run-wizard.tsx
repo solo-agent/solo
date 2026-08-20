@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Bot, Check, LoaderCircle, MessageSquareText, Monitor, UsersRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogCloseButton, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -23,8 +23,9 @@ type TargetRect = { top: number; right: number; bottom: number; left: number; wi
 
 export function FirstRunWizard() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { createLucy, getStatus, complete, isCreating } = useOnboarding();
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [runtime, setRuntime] = useState('');
@@ -33,8 +34,11 @@ export function FirstRunWizard() {
   const [targetRect, setTargetRect] = useState<TargetRect | null>(null);
   const [externalDialogOpen, setExternalDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [guideVisible, setGuideVisible] = useState(true);
+  const [guideStateReady, setGuideStateReady] = useState(false);
   const targetRef = useRef<HTMLElement | null>(null);
   const completing = useRef(false);
+  const guideSkipKey = user?.id ? `solo:first-run-guide-skipped:${user.id}` : null;
 
   const load = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -62,6 +66,21 @@ export function FirstRunWizard() {
 
   useEffect(() => {
     if (!status?.required) return;
+    if (!guideSkipKey) {
+      setGuideStateReady(true);
+      return;
+    }
+    if (searchParams.get('guide') === '1') {
+      window.localStorage.removeItem(guideSkipKey);
+      setGuideVisible(true);
+    } else {
+      setGuideVisible(window.localStorage.getItem(guideSkipKey) === null);
+    }
+    setGuideStateReady(true);
+  }, [guideSkipKey, searchParams, status?.required]);
+
+  useEffect(() => {
+    if (!status?.required || !guideStateReady || !guideVisible) return;
     if (status.step === 1) {
       if (pathname !== '/home' && pathname !== '/computers') router.replace('/home?onboarding=1');
       return;
@@ -75,7 +94,7 @@ export function FirstRunWizard() {
     if (status.lucy_channel_id && (pathname !== '/dashboard' || currentChannel !== status.lucy_channel_id || !params.has('onboarding'))) {
       router.replace(`/dashboard?channel=${encodeURIComponent(status.lucy_channel_id)}&onboarding=1`);
     }
-  }, [pathname, router, status]);
+  }, [guideStateReady, guideVisible, pathname, router, status]);
 
   useEffect(() => {
     const defaultRuntime = status?.runtimes.find((item) => isSupportedAgentRuntime(item.type));
@@ -95,14 +114,14 @@ export function FirstRunWizard() {
   }, [complete, router, status]);
 
   const targetSelector = useMemo(() => {
-    if (!status?.required) return '';
+    if (!status?.required || !guideVisible) return '';
     if (status.step === 1) return pathname === '/computers'
       ? '[data-onboarding="connect-computer"]'
       : '[data-onboarding="computers-nav"]';
     if (status.step === 2) return '[data-onboarding="create-workspace"]';
     if (status.step === 3) return '[data-onboarding="create-agent"]';
     return '[data-onboarding="message-composer"]';
-  }, [pathname, status?.required, status?.step]);
+  }, [guideVisible, pathname, status?.required, status?.step]);
 
   useEffect(() => {
     targetRef.current = null;
@@ -174,6 +193,16 @@ export function FirstRunWizard() {
     }
   };
 
+  const skipGuide = () => {
+    if (!status || !guideSkipKey) return;
+    window.localStorage.setItem(guideSkipKey, String(status.step));
+    setGuideVisible(false);
+    const params = new URLSearchParams(window.location.search);
+    params.delete('guide');
+    const query = params.toString();
+    router.replace(`${pathname}${query ? `?${query}` : ''}`, { scroll: false });
+  };
+
   if (authLoading || !isAuthenticated || !status?.required) return null;
 
   const onTarget = () => targetRef.current?.click();
@@ -194,9 +223,9 @@ export function FirstRunWizard() {
 
   return (
     <>
-      {!lucyOpen && !externalDialogOpen && (
+      {guideVisible && !lucyOpen && !externalDialogOpen && (
         targetRect ? (
-          <CoachMark rect={targetRect} step={status.step} title={title} description={description} action={action} onAction={status.step < 4 ? onCoachAction : undefined} />
+          <CoachMark rect={targetRect} step={status.step} title={title} description={description} action={action} onAction={status.step < 4 ? onCoachAction : undefined} onSkip={skipGuide} />
         ) : (
           <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55"><Spinner size="md" /></div>
         )
@@ -217,38 +246,37 @@ export function FirstRunWizard() {
   );
 }
 
-function CoachMark({ rect, step, title, description, action, onAction }: {
+function CoachMark({ rect, step, title, description, action, onAction, onSkip }: {
   rect: TargetRect;
   step: number;
   title: string;
   description: string;
   action: string;
   onAction?: () => void;
+  onSkip: () => void;
 }) {
   const gap = 8;
   const cardBottom = rect.top > window.innerHeight * 0.6
     ? window.innerHeight - rect.top + 24
     : 28;
-  const blockers = [
-    { left: 0, top: 0, right: 0, height: Math.max(0, rect.top - gap) },
-    { left: 0, top: Math.max(0, rect.top - gap), width: Math.max(0, rect.left - gap), height: rect.height + gap * 2 },
-    { left: rect.right + gap, top: Math.max(0, rect.top - gap), right: 0, height: rect.height + gap * 2 },
-    { left: 0, top: rect.bottom + gap, right: 0, bottom: 0 },
-  ];
   return (
     <div role="dialog" aria-modal="true" aria-label={title}>
-      {blockers.map((style, index) => <div key={index} className="fixed z-[90] bg-black/60" style={style} />)}
-      <div className="pointer-events-none fixed z-[91] border-4 border-brutal-primary shadow-brutal" style={{ left: rect.left - gap, top: rect.top - gap, width: rect.width + gap * 2, height: rect.height + gap * 2 }} />
-      <section className="fixed left-1/2 z-[92] w-[min(440px,calc(100vw-32px))] -translate-x-1/2 border-2 border-black bg-brutal-cream p-4 shadow-brutal-xl" style={{ bottom: cardBottom }}>
-        <div className="mb-3 flex gap-2" aria-label={t('firstRunProgress')}>
-          {stepIcons.map((Icon, index) => {
-            const number = index + 1;
-            return (
-              <span key={number} className={cn('flex h-7 flex-1 items-center justify-center gap-1 border-2 border-black font-mono text-[10px] font-bold', number < step ? 'bg-brutal-success' : number === step ? 'bg-brutal-primary' : 'bg-white text-muted-foreground')}>
-                {number < step ? <Check className="h-3.5 w-3.5" /> : <Icon className="h-3.5 w-3.5" />}{number}/4
-              </span>
-            );
-          })}
+      <div className="pointer-events-none fixed z-[90] rounded-xl border-4 border-brutal-primary shadow-[0_0_0_9999px_rgba(0,0,0,0.6)]" style={{ left: rect.left - gap, top: rect.top - gap, width: rect.width + gap * 2, height: rect.height + gap * 2 }} />
+      <section className="fixed left-1/2 z-[92] w-[min(440px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border-2 border-black bg-brutal-cream p-4 shadow-brutal-xl" style={{ bottom: cardBottom }}>
+        <div className="mb-3 flex items-center gap-2">
+          <div className="flex min-w-0 flex-1 gap-2" aria-label={t('firstRunProgress')}>
+            {stepIcons.map((Icon, index) => {
+              const number = index + 1;
+              return (
+                <span key={number} className={cn('flex h-7 flex-1 items-center justify-center gap-1 rounded-md border-2 border-black font-mono text-[10px] font-bold', number < step ? 'bg-brutal-success' : number === step ? 'bg-brutal-primary' : 'bg-white text-muted-foreground')}>
+                  {number < step ? <Check className="h-3.5 w-3.5" /> : <Icon className="h-3.5 w-3.5" />}{number}/4
+                </span>
+              );
+            })}
+          </div>
+          <button type="button" onClick={onSkip} className="shrink-0 rounded-md px-2 py-1 font-body text-xs font-semibold text-muted-foreground transition-colors hover:bg-brutal-muted-light hover:text-foreground">
+            {t('firstRunSkipGuide')}
+          </button>
         </div>
         <h2 className="font-heading text-lg font-black">{title}</h2>
         <p className="mt-1 font-body text-sm text-muted-foreground">{description}</p>
@@ -334,7 +362,7 @@ function LucyDialog({ open, onOpenChange, status, runtime, model, onRuntimeChang
               value={model}
               onChange={(event) => onModelChange(event.target.value)}
               placeholder={t('firstRunCustomModelPlaceholder')}
-              className="mt-2 h-10 w-full rounded-lg border border-border bg-white px-3 font-mono text-sm outline-none focus:border-brutal-info focus:ring-2 focus:ring-brutal-info-light"
+              className="mt-2 h-10 w-full rounded-lg border border-border bg-white px-3 font-mono text-sm outline-none focus:border-brutal-accent focus:ring-2 focus:ring-brutal-accent-light"
             />
           )}
         </div>
@@ -342,7 +370,7 @@ function LucyDialog({ open, onOpenChange, status, runtime, model, onRuntimeChang
       </div>
       <DialogFooter className="sticky -bottom-4 z-10 -mx-4 -mb-4 border-t border-border bg-card px-4 py-4 sm:-bottom-6 sm:-mx-6 sm:-mb-6 sm:px-6">
         <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isCreating}>{t('cancel')}</Button>
-        <Button onClick={onCreate} disabled={isCreating || !runtime || (customModel && !model.trim())}>{isCreating ? t('onboardingCreatingLucy') : t('firstRunCreateLucy')}</Button>
+        <Button variant="primary" onClick={onCreate} disabled={isCreating || !runtime || (customModel && !model.trim())}>{isCreating ? t('onboardingCreatingLucy') : t('firstRunCreateLucy')}</Button>
       </DialogFooter>
     </Dialog>
   );

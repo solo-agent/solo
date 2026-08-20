@@ -5,7 +5,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Plus, ChevronDown, Search, X } from 'lucide-react';
+import { Plus, ChevronDown, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 import { selectableRowClass, selectableRowIconClass } from '@/components/ui/selectable-row';
@@ -156,14 +156,13 @@ export function ChannelList({
     <div className="space-y-0.5">
       {channels.length > 12 && (
         <label className="relative mb-2 block px-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-black/45" />
           <input
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t('channelListSearchPlaceholder')}
             aria-label={t('channelListSearchPlaceholder')}
-            className="input-brutal h-8 w-full pl-8 pr-2 text-xs"
+            className="input-brutal h-8 w-full px-2 text-xs"
           />
         </label>
       )}

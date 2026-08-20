@@ -106,9 +106,6 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
               'input-brutal h-9 flex-[1.2] font-mono text-xs uppercase tracking-wider',
               'placeholder:text-muted-foreground placeholder:font-body placeholder:normal-case placeholder:tracking-normal',
             )}
-            style={{
-              background: '#fffaef',
-            }}
           />
           <input
             type="text"
@@ -121,9 +118,6 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
               'input-brutal h-9 flex-[2] font-mono text-xs',
               'placeholder:text-muted-foreground placeholder:font-body',
             )}
-            style={{
-              background: '#fffaef',
-            }}
           />
           <button
             type="button"
@@ -132,12 +126,10 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
             aria-label={t('agentEnvRemove', { n: idx + 1 })}
             className={cn(
               'flex h-9 w-9 flex-shrink-0 items-center justify-center',
-              'border-2 border-black bg-white shadow-brutal-sm',
-              'transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal',
-              'active:translate-x-[3px] active:translate-y-[3px] active:shadow-none',
+              'rounded-md border border-border bg-white shadow-none',
+              'transition-colors hover:border-brutal-accent hover:bg-brutal-accent-light',
               'disabled:opacity-50 disabled:pointer-events-none',
             )}
-            style={{ background: '#fffaef' }}
           >
             <Trash2 className="h-3.5 w-3.5 text-brutal-danger" />
           </button>
@@ -150,13 +142,11 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
         disabled={disabled}
         className={cn(
           'inline-flex items-center gap-1.5 px-3 py-1.5',
-          'border-2 border-black bg-white shadow-brutal-sm',
+          'rounded-md border border-border bg-white shadow-none',
           'font-heading text-xs font-bold',
-          'transition-all hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-brutal',
-          'active:translate-x-[3px] active:translate-y-[3px] active:shadow-none',
+          'transition-colors hover:border-brutal-accent hover:bg-brutal-accent-light',
           'disabled:opacity-50 disabled:pointer-events-none',
         )}
-        style={{ background: '#fffaef' }}
       >
         <Plus className="h-3.5 w-3.5" />
         Add Variable

@@ -5,7 +5,6 @@ export const defaultThemeId = 'archive';
 
 export const themeOptions = [
   { id: 'archive', labelKey: 'themeArchive' },
-  { id: 'classic', labelKey: 'themeClassic' },
 ] as const satisfies ReadonlyArray<{ id: string; labelKey: TranslationKey }>;
 
 export type ThemeId = (typeof themeOptions)[number]['id'];

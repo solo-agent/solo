@@ -57,21 +57,22 @@ type ThreadResponse struct {
 }
 
 type ThreadReplyResponse struct {
-	ID            string           `json:"id"`
-	ChannelID     string           `json:"channel_id"`
-	ThreadID      string           `json:"thread_id"`
-	SenderType    string           `json:"sender_type"`
-	SenderID      string           `json:"sender_id"`
-	SenderName    string           `json:"sender_name,omitempty"`
-	SenderAvatar  string           `json:"sender_avatar,omitempty"`
-	SenderActive  bool             `json:"sender_active"`
-	Content       string           `json:"content"`
-	ContentType   string           `json:"content_type"`
-	AttachmentIDs []string         `json:"attachment_ids,omitempty"`
-	Attachments   []AttachmentMeta `json:"attachments,omitempty"`
-	CreatedAt     string           `json:"created_at"`
-	ClientMsgID   string           `json:"client_msg_id,omitempty"`
-	Deduplicated  bool             `json:"deduplicated,omitempty"`
+	ID            string            `json:"id"`
+	ChannelID     string            `json:"channel_id"`
+	ThreadID      string            `json:"thread_id"`
+	SenderType    string            `json:"sender_type"`
+	SenderID      string            `json:"sender_id"`
+	SenderName    string            `json:"sender_name,omitempty"`
+	SenderAvatar  string            `json:"sender_avatar,omitempty"`
+	SenderActive  bool              `json:"sender_active"`
+	Content       string            `json:"content"`
+	ContentType   string            `json:"content_type"`
+	AttachmentIDs []string          `json:"attachment_ids,omitempty"`
+	Attachments   []AttachmentMeta  `json:"attachments,omitempty"`
+	CreatedAt     string            `json:"created_at"`
+	ClientMsgID   string            `json:"client_msg_id,omitempty"`
+	Deduplicated  bool              `json:"deduplicated,omitempty"`
+	Reactions     []MessageReaction `json:"reactions,omitempty"`
 }
 
 type ThreadMessageListResponse struct {
@@ -594,6 +595,21 @@ func (h *ThreadHandler) ListThreadMessages(w http.ResponseWriter, r *http.Reques
 					}
 				}
 			}
+		}
+	}
+	if len(messages) > 0 {
+		messageIDs := make([]string, 0, len(messages))
+		for _, message := range messages {
+			messageIDs = append(messageIDs, message.ID)
+		}
+		reactionMap, err := queryMessageReactionMap(r.Context(), h.pool, messageIDs, userID)
+		if err != nil {
+			slog.Error("failed to query thread message reactions", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to list thread messages")
+			return
+		}
+		for i := range messages {
+			messages[i].Reactions = reactionMap[messages[i].ID]
 		}
 	}
 

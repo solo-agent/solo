@@ -21,7 +21,7 @@ import {
   retryReliableSend,
   sendReliably,
 } from '@/lib/reliable-send';
-import type { Attachment, Message } from '@/lib/types';
+import type { Attachment, Message, MessageReaction } from '@/lib/types';
 
 // ---- Constants ----
 
@@ -53,6 +53,7 @@ interface MessageResponse {
   created_at: string;
   /** SOLO-249-F: attachments on the message */
   attachments?: Attachment[];
+  reactions?: MessageReaction[];
 }
 
 interface MessageListResponse {
@@ -87,6 +88,7 @@ function mapMessageResponse(resp: MessageResponse): Message {
     task_claimer_deleted: resp.task_claimer_deleted,
     has_unread_thread: resp.has_unread_thread,
     attachments: resp.attachments,
+    reactions: resp.reactions,
   };
 }
 
@@ -113,6 +115,7 @@ function flatToMessage(event: {
   has_unread_thread?: boolean;
   created_at: string;
   attachments?: Attachment[];
+  reactions?: MessageReaction[];
 }): Message {
   return {
     id: event.id,
@@ -138,6 +141,7 @@ function flatToMessage(event: {
     task_claimer_deleted: event.task_claimer_deleted,
     has_unread_thread: event.has_unread_thread,
     attachments: event.attachments,
+    reactions: event.reactions,
   };
 }
 
@@ -147,7 +151,7 @@ export function useMessages(channelId: string | null, thinkingNodeId: string | n
   const { user } = useAuth();
   const { subscribe, unsubscribe, onEvent, isConnected } = useWebSocket();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(Boolean(channelId));
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -359,6 +363,12 @@ export function useMessages(channelId: string | null, thinkingNodeId: string | n
         }
       }
 
+      if (event.type === 'message.reactions.updated' && event.channel_id === cid) {
+        setMessages((prev) => prev.map((message) => (
+          message.id === event.id ? { ...message, reactions: event.reactions } : message
+        )));
+      }
+
       if (event.type === 'message.deleted') {
         if (event.channel_id === cid) {
           setMessages((prev) =>
@@ -450,16 +460,21 @@ export function useMessages(channelId: string | null, thinkingNodeId: string | n
       }
     } catch (err) {
       const message = err instanceof ApiError ? err.message : t('messageLoadError');
-      setError(message);
+      if (channelRef.current === id && thinkingNodeIdRef.current === requestedNodeID) {
+        setError(message);
+      }
     } finally {
-      setIsLoading(false);
-      loadingRef.current = false;
+      if (channelRef.current === id && thinkingNodeIdRef.current === requestedNodeID) {
+        setIsLoading(false);
+        loadingRef.current = false;
+      }
     }
   }, []);
 
   useEffect(() => {
     setMessages([]);
     loadingRef.current = false;
+    setIsLoading(Boolean(channelId));
     if (channelId) {
       loadMessages(channelId);
     } else {

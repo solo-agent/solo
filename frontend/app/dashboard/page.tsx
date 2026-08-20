@@ -7,11 +7,11 @@ import { MessageSquare, RefreshCw } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { t } from '@/lib/i18n';
 import { useChannels } from "@/lib/hooks/use-channels";
-import { useChannelMembers } from "@/lib/hooks/use-channel-members";
 import { useDM } from "@/lib/hooks/use-dm";
 import { useDMTasks } from "@/lib/hooks/use-tasks";
 import { Sidebar } from "@/components/dashboard/sidebar";
 import { WorkspaceRail } from "@/components/workspaces/workspace-rail";
+import { GlobalAccountBar } from "@/components/layout/global-account-bar";
 import { WorkspaceManageDialog } from "@/components/workspaces/workspace-manage-dialog";
 import { CreateChannelModal } from "@/components/dashboard/create-channel-modal";
 import { CreateDMModal } from "@/components/dashboard/create-dm-modal";
@@ -74,7 +74,6 @@ function DashboardContent() {
   const messageFromUrl = searchParams.get('message');
   const inboxFromUrl = searchParams.has('inbox');
   const lucyFromUrl = searchParams.has('lucy');
-  const firstRunFromUrl = searchParams.has('onboarding');
 
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const {
@@ -162,15 +161,9 @@ function DashboardContent() {
   }, [dmFromUrl]);
 
   // ---- Onboarding wizard detection ----
-  const { agents: channelAgents } = useChannelMembers(selectedChannelId);
-
   const selectedChannel: Channel | undefined = selectedChannelId === lucyChannel?.id
     ? lucyChannel
     : channels.find((c) => c.id === selectedChannelId);
-
-  const isOnboardingChannel = selectedChannel?.name?.startsWith('welcome-')
-    || (selectedChannel?.type === 'lucy' && channelAgents.length === 0);
-  const showOnboardingWizard = !firstRunFromUrl && isOnboardingChannel && channelAgents.length === 0;
 
   const selectedDM: DMChannel | undefined = dmChannels.find(
     (dm) => dm.id === selectedDmId,
@@ -297,7 +290,6 @@ function DashboardContent() {
         <ChannelView
           key={`chan-${selectedChannel.id}`}
           channel={selectedChannel}
-          showOnboardingWizard={showOnboardingWizard}
           initialThreadMessageId={threadFromUrl ?? undefined}
           initialScrollToMessageId={messageFromUrl ?? undefined}
           onChannelCreated={refetchChannels}
@@ -346,6 +338,16 @@ function DashboardContent() {
       return <InboxView />;
     }
 
+    // Keep the previous empty-state card out of the first frame while a
+    // workspace is resolving its default channel.
+    if (!channelsError && !dmError && (channelsLoading || isLoadingDMs || channels.length > 0 || dmChannels.length > 0)) {
+      return (
+        <div className="flex flex-1 items-center justify-center">
+          <Spinner size="md" />
+        </div>
+      );
+    }
+
     // Empty/no-selection state (default: no URL params)
     return (
       <div className="flex flex-1 items-center justify-center bg-muted/5">
@@ -390,27 +392,33 @@ function DashboardContent() {
 
   return (
     <div className="flex h-screen min-w-[1024px] overflow-hidden bg-brutal-cream">
-      <WorkspaceRail />
-      <Sidebar
-        isCollapsed={isSidebarCollapsed}
-        onToggleCollapsed={() => setIsSidebarCollapsed((value) => !value)}
-        channels={channels}
-        lucyChannel={lucyChannel}
-        isLoading={channelsLoading}
-        selectedChannelId={selectedChannelId}
-        onSelectChannel={handleSelectChannel}
-        onCreateChannel={() => setIsCreateModalOpen(true)}
-        onDeleteChannel={(id) => setDeleteTargetId(id)}
-        dms={dmChannels}
-        dmsLoading={isLoadingDMs}
-        selectedDmId={selectedDmId}
-        onSelectDM={handleSelectDM}
-        onCreateDM={() => setIsCreateDMModalOpen(true)}
-        inboxSelected={inboxFromUrl}
-        onSelectInbox={handleSelectInbox}
-      />
+      {/* Left meta column — WorkspaceRail (col 1) + Sidebar (col 2) + GlobalAccountBar (spans 1+2) */}
+      <div className="flex flex-shrink-0 flex-col border-r border-border bg-skin-primary">
+        <div className="flex flex-1 overflow-hidden">
+          <WorkspaceRail />
+          <Sidebar
+            isCollapsed={isSidebarCollapsed}
+            onToggleCollapsed={() => setIsSidebarCollapsed((value) => !value)}
+            channels={channels}
+            lucyChannel={lucyChannel}
+            isLoading={channelsLoading}
+            selectedChannelId={selectedChannelId}
+            onSelectChannel={handleSelectChannel}
+            onCreateChannel={() => setIsCreateModalOpen(true)}
+            onDeleteChannel={(id) => setDeleteTargetId(id)}
+            dms={dmChannels}
+            dmsLoading={isLoadingDMs}
+            selectedDmId={selectedDmId}
+            onSelectDM={handleSelectDM}
+            onCreateDM={() => setIsCreateDMModalOpen(true)}
+            inboxSelected={inboxFromUrl}
+            onSelectInbox={handleSelectInbox}
+          />
+        </div>
+        <GlobalAccountBar />
+      </div>
       {/* Main content area */}
-      <main className="relative flex flex-1 flex-col overflow-hidden">
+      <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-skin-canvas">
         <div className={`flex min-h-0 flex-1 overflow-hidden ${isSidebarCollapsed ? '[&_.sidebar-collapse-offset]:pl-14' : ''}`}>
           {renderMainContent()}
         </div>

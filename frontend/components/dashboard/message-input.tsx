@@ -1,7 +1,7 @@
 // ============================================================================
 // MessageInput — bottom message composition with brutalist styling
 // - input-brutal textarea with Space Mono placeholder
-// - Send button: btn-brutal-success circular icon button
+// - Send/Create Task: shared btn-brutal-primary action style
 // - Enter/Shift+Enter handling
 // - @mention autocomplete (SOLO-51-F)
 // - File upload: drag & drop + paste (SOLO-247-F)
@@ -23,8 +23,8 @@ import {
   Send,
   MessageSquare,
   SquareCheckBig,
+  Plus,
   Upload,
-  Paperclip,
   SmilePlus,
   X,
   Check,
@@ -34,6 +34,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useMentions } from '@/lib/hooks/use-mentions';
 import { MentionDropdown, type DropdownAnchor } from './mention-dropdown';
+import { EmojiPickerPanel } from './message-reactions';
 import { useToast } from '@/components/ui/toast';
 import { Spinner } from '@/components/ui/spinner';
 import { t } from '@/lib/i18n';
@@ -656,7 +657,7 @@ export function MessageInput({
               onClick={() => { setAsTask(false); onThinkingModeChange?.(false); }}
               className={cn(
                 'tab-button btn-brutal btn-brutal-sm flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] font-bold',
-                !asTask && !thinkingMode ? 'btn-brutal-primary' : 'bg-white text-muted-foreground hover:text-foreground',
+                !asTask && !thinkingMode ? 'bg-brutal-primary-light text-foreground' : 'bg-white text-muted-foreground hover:text-foreground',
               )}
               aria-pressed={!asTask && !thinkingMode}
             >
@@ -668,7 +669,7 @@ export function MessageInput({
               onClick={() => { setAsTask(true); onThinkingModeChange?.(false); }}
               className={cn(
                 'tab-button btn-brutal btn-brutal-sm flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] font-bold',
-                asTask && !thinkingMode ? 'btn-brutal-primary' : 'bg-white text-muted-foreground hover:text-foreground',
+                asTask && !thinkingMode ? 'bg-brutal-primary-light text-foreground' : 'bg-white text-muted-foreground hover:text-foreground',
               )}
               aria-pressed={asTask && !thinkingMode}
             >
@@ -680,7 +681,7 @@ export function MessageInput({
               onClick={() => { setAsTask(false); onThinkingModeChange?.(true); }}
               className={cn(
                 'tab-button btn-brutal btn-brutal-sm flex items-center gap-1.5 px-2.5 py-1 font-mono text-[11px] font-bold',
-                thinkingMode ? 'btn-brutal-primary' : 'bg-white text-muted-foreground hover:text-foreground',
+                thinkingMode ? 'bg-brutal-primary-light text-foreground' : 'bg-white text-muted-foreground hover:text-foreground',
               )}
               aria-pressed={thinkingMode}
             >
@@ -718,46 +719,50 @@ export function MessageInput({
             aria-expanded={mentionActive}
             aria-haspopup="listbox"
             className={cn(
-              'input-brutal min-h-[44px] resize-none font-body text-sm leading-relaxed',
+              'input-brutal min-h-[44px] resize-none pl-12 font-body text-sm leading-relaxed',
               'placeholder:font-body placeholder:text-muted-foreground/60',
               'disabled:opacity-50',
-              asTask ? 'pr-48' : 'pr-32',
+              asTask ? 'pr-48' : 'pr-28',
               asTask && 'border-brutal-primary',
             )}
+            style={{
+              paddingLeft: '3.5rem',
+              paddingRight: asTask ? '12rem' : '7rem',
+            }}
           />
-          <div ref={emojiPickerRef}>
+          <button
+            type="button"
+            onClick={openFilePicker}
+            disabled={isSending || hasUploading || disabled}
+            className={cn(
+              'absolute bottom-2 left-3 flex h-8 w-8 items-center justify-center',
+              'btn-brutal bg-white text-foreground hover:bg-brutal-primary-light',
+              'disabled:opacity-40 disabled:pointer-events-none',
+            )}
+            aria-label={t('attachFiles')}
+            title={t('attachFiles')}
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+          <div className="absolute bottom-2 right-3 flex items-center gap-2">
+            <div ref={emojiPickerRef} className="relative">
             {emojiOpen && (
-              <div
-                role="dialog"
-                aria-label={t('emojiPicker')}
-                className={cn(
-                  'absolute bottom-12 z-20 grid grid-cols-4 gap-1 border-2 border-black',
-                  'bg-brutal-cream p-2 shadow-brutal-sm',
-                  asTask ? 'right-[152px]' : 'right-[88px]',
-                )}
-              >
-                {['\u{1F600}', '\u{1F602}', '\u{1F44D}', '\u2764\uFE0F', '\u{1F389}', '\u{1F440}', '\u{1F64F}', '\u{1F914}'].map((emoji) => (
-                  <button
-                    key={emoji}
-                    type="button"
-                    onClick={() => insertEmoji(emoji)}
-                    className="flex h-9 w-9 items-center justify-center text-xl hover:bg-brutal-primary-light focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-black"
-                    aria-label={t('insertEmoji', { emoji })}
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
+              <EmojiPickerPanel
+                onSelect={(emoji) => {
+                  insertEmoji(emoji);
+                  setEmojiOpen(false);
+                }}
+                className="absolute bottom-10 right-0 z-20"
+              />
             )}
             <button
               type="button"
               onClick={() => setEmojiOpen((open) => !open)}
               disabled={isSending || disabled}
               className={cn(
-                'absolute bottom-2 flex h-8 w-8 items-center justify-center',
-                'btn-brutal bg-white text-foreground hover:bg-brutal-primary-light',
+                'btn-brutal flex h-8 w-8 items-center justify-center',
+                'bg-white text-foreground hover:bg-brutal-primary-light',
                 'disabled:pointer-events-none disabled:opacity-40',
-                asTask ? 'right-[152px]' : 'right-[88px]',
               )}
               aria-label={t('emojiPicker')}
               aria-expanded={emojiOpen}
@@ -766,29 +771,14 @@ export function MessageInput({
             >
               <SmilePlus className="h-4 w-4" />
             </button>
-          </div>
-          <button
-            type="button"
-            onClick={openFilePicker}
-            disabled={isSending || hasUploading || disabled}
-            className={cn(
-              'absolute bottom-2 flex h-8 w-8 items-center justify-center',
-              'btn-brutal bg-white text-foreground hover:bg-brutal-primary-light',
-              'disabled:opacity-40 disabled:pointer-events-none',
-              asTask ? 'right-[112px]' : 'right-12',
-            )}
-            aria-label={t('attachFiles')}
-            title={t('attachFiles')}
-          >
-            <Paperclip className="h-4 w-4" />
-          </button>
+            </div>
           <button
             type="button"
             onClick={handleSend}
             disabled={!canSend}
             className={cn(
-              'absolute bottom-2 right-2 flex h-8 items-center justify-center gap-1.5 px-3',
-              'btn-brutal btn-brutal-success',
+              'btn-brutal flex h-8 items-center justify-center gap-1.5 px-3',
+              'btn-brutal-primary',
               !canSend && 'opacity-40 pointer-events-none',
               // v3.1: when the user has typed something and the send is
               // armed, a slow 2s pulse draws the eye without being frantic.
@@ -806,6 +796,7 @@ export function MessageInput({
               <Send className="h-4 w-4" />
             )}
           </button>
+          </div>
         </div>
       </div>
     </div>

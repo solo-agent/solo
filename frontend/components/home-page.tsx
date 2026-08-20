@@ -9,7 +9,7 @@ export default function HomePage() {
   return (
     <main id="main-content" className="relative flex min-h-screen items-center justify-center bg-brutal-cream px-4 py-16">
       <div className="absolute right-4 top-4 z-20"><LanguageSwitcher /></div>
-      <div className="pointer-events-none absolute inset-0 bg-grid opacity-20" aria-hidden />
+      <div className="pointer-events-none absolute inset-0 bg-noise opacity-25" aria-hidden />
 
       <div className="relative w-full max-w-3xl text-center">
         <div className="mb-6 inline-flex h-16 w-16 items-center justify-center rounded-2xl border border-black bg-brutal-primary shadow-brutal-sm">

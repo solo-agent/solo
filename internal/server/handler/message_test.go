@@ -97,6 +97,17 @@ func TestHasMessageBody(t *testing.T) {
 	}
 }
 
+func TestValidReactionEmoji(t *testing.T) {
+	if !validReactionEmoji("👍") {
+		t.Fatal("expected emoji to be accepted")
+	}
+	for _, emoji := range []string{"", " 👍", "👍 ", "plain text"} {
+		if validReactionEmoji(emoji) {
+			t.Fatalf("expected %q to be rejected", emoji)
+		}
+	}
+}
+
 func TestCanPostToThinkingNode(t *testing.T) {
 	if !canPostToThinkingNode("user", "user-1", "agent-1") {
 		t.Fatal("human channel member should be able to post to a selected node")

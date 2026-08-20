@@ -247,7 +247,7 @@ export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent
           <Button
             type="button"
             onClick={onAddAgent}
-            variant="success"
+            variant="primary"
             size="icon"
             className="h-7 w-7"
             aria-label={t('addAgentToChannel')}

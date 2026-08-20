@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Users, Loader2, SquareCheckBig, Plus, Network, Maximize2, Minimize2, BrainCircuit, Sparkles, CalendarClock, Pin, Settings2, FolderOpen } from 'lucide-react';
+import { Users, Loader2, SquareCheckBig, Plus, Network, Maximize2, Minimize2, BrainCircuit, Sparkles, CalendarClock, Pin, Settings2, FolderOpen, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
 import { useThinkingSpace } from '@/lib/hooks/use-thinking-space';
@@ -38,7 +38,6 @@ import {
   DialogCloseButton,
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast';
-import { WizardCard } from '@/components/onboarding/wizard-card';
 import { t } from '@/lib/i18n';
 import { useWorkspace } from '@/lib/workspace-context';
 import { useAuth } from '@/lib/auth-context';
@@ -67,8 +66,6 @@ const ThreadPanel = lazy(() =>
 
 interface ChannelViewProps {
   channel: Channel;
-  /** Show the onboarding wizard card above the message list */
-  showOnboardingWizard?: boolean;
   /** Optional message ID to open ThreadPanel for on mount */
   initialThreadMessageId?: string;
   /** Optional message ID to scroll to on mount */
@@ -90,7 +87,6 @@ interface ChannelViewProps {
 
 export function ChannelView({
   channel,
-  showOnboardingWizard,
   initialThreadMessageId,
   initialScrollToMessageId,
   onThreadChange,
@@ -105,6 +101,13 @@ export function ChannelView({
   const dashboardState = useMemo(() => parseDashboardParams(searchParams), [searchParams]);
   const workspaceView = dashboardState.view;
   const mainPanel = dashboardState.panel;
+  const openOnboardingGuide = useCallback(() => {
+    setIsWorkspaceCollapsed(false);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('onboarding', '1');
+    params.set('guide', '1');
+    router.push(`/dashboard?${params.toString()}`);
+  }, [router, searchParams]);
   const isThinking = workspaceView === 'thinking';
   const pushDashboardState = useCallback(
     (patch: Partial<{
@@ -156,6 +159,7 @@ export function ChannelView({
   const [isAddAgentModalOpen, setIsAddAgentModalOpen] = useState(false);
   const [teamRefreshKey, setTeamRefreshKey] = useState(0);
   const [messageSuggestion, setMessageSuggestion] = useState<string | null>(null);
+  const [showLucyQuickStart, setShowLucyQuickStart] = useState(true);
   const [workspaceDetail, setWorkspaceDetail] = useState<WorkspaceDetail | null>(null);
   const [threadTask, setThreadTask] = useState<Task | null>(null);
   const [artifactPreview, setArtifactPreview] = useState<ArtifactPreview | null>(null);
@@ -189,6 +193,17 @@ export function ChannelView({
   const { activeWorkspace } = useWorkspace();
   const { user } = useAuth();
   const { computers } = useComputers();
+  const quickStartDismissKey = `solo:lucy-quick-start-dismissed:${channel.id}`;
+
+  useEffect(() => {
+    setShowLucyQuickStart(window.localStorage.getItem(quickStartDismissKey) !== '1');
+  }, [quickStartDismissKey]);
+
+  const dismissLucyQuickStart = () => {
+    window.localStorage.setItem(quickStartDismissKey, '1');
+    setShowLucyQuickStart(false);
+  };
+
   const [moderation, setModeration] = useState<ModerationStatus | null>(null);
   const [mutedMembers, setMutedMembers] = useState<MutedMember[]>([]);
   const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>([]);
@@ -441,8 +456,8 @@ export function ChannelView({
     ) return;
     workspaceDefaultedForChannelRef.current = channel.id;
     setIsWorkspaceFullscreen(false);
-    setIsWorkspaceCollapsed(workspaceView === 'team' && agents.length === 0 && channelTasks.length === 0);
-  }, [agents.length, channel.id, channelTasks.length, membersError, membersLoading, tasksError, tasksLoading, workspaceView]);
+    setIsWorkspaceCollapsed(false);
+  }, [channel.id, membersError, membersLoading, tasksError, tasksLoading]);
 
   const channelAgentMap = useMemo(() => {
     return new Map(channelTeam.agents.map((agent) => [agent.id, agent]));
@@ -1067,20 +1082,20 @@ export function ChannelView({
             key={isThinking ? `thinking-${thinking.selectedNodeId ?? 'root'}` : `channel-${channel.id}`}
             className="flex min-h-0 flex-1 flex-col animate-fade-in"
           >
-            <div className="sidebar-collapse-offset flex h-14 flex-shrink-0 items-center border-b-2 border-black px-4">
+            <div className="sidebar-collapse-offset flex h-14 flex-shrink-0 items-center border-b border-border px-4">
               <div className="flex min-w-0 flex-1 items-center gap-2">
                 <span className="font-heading text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   {isThinking ? t('thinkingCurrentBranch') : t('taskChannel')}
                 </span>
                 <h2 className="truncate font-display text-lg font-bold text-foreground">{isThinking ? selectedThinkingNode?.title ?? channel.name : channel.name}</h2>
                 {!isThinking && boundProjectPath && (
-                  <span className="hidden max-w-56 items-center gap-1 truncate border border-black bg-brutal-info-light px-1.5 py-0.5 font-mono text-[9px] font-bold sm:flex" title={boundProjectPath}>
+                  <span className="hidden max-w-56 items-center gap-1 truncate rounded-md border border-border bg-brutal-primary-light px-1.5 py-0.5 font-mono text-[9px] font-bold text-muted-foreground sm:flex" title={boundProjectPath}>
                     <FolderOpen className="h-3 w-3 shrink-0" />
                     <span className="truncate">{boundProjectPath}</span>
                   </span>
                 )}
                 {isThinking && selectedThinkingNode?.agent_name && (
-                  <span className="truncate border border-black bg-brutal-info-light px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase">{selectedThinkingNode.agent_name}</span>
+                  <span className="truncate rounded-md border border-border bg-brutal-primary-light px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase text-muted-foreground">{selectedThinkingNode.agent_name}</span>
                 )}
               </div>
               {moderation?.can_manage && !isThinking && (
@@ -1098,11 +1113,6 @@ export function ChannelView({
                 onRefresh={thinking.refreshCheckpoint}
                 onOpenArtifactReference={handleOpenArtifactReference}
               />
-            )}
-            {showOnboardingWizard && !isThinking && (
-              <div className="px-4 pt-4">
-                <WizardCard channelId={channel.id} />
-              </div>
             )}
             {!isThinking && pinnedMessages.length > 0 && (
               <div className="border-b-2 border-black bg-brutal-warning-light px-4 py-2">
@@ -1130,11 +1140,17 @@ export function ChannelView({
               onPin={moderation?.can_manage ? togglePin : undefined}
               pinnedMessageIds={new Set(pinnedMessages.map((item) => item.message_id))}
             />
-            {channel.type === 'lucy' && !isThinking && (
+            {channel.type === 'lucy' && !isThinking && showLucyQuickStart && (
               <div className="border-t-2 border-black bg-brutal-cream px-4 py-2">
                 <div className="mb-1.5 flex items-center gap-1.5 font-mono text-[9px] font-bold uppercase tracking-widest text-black/50">
                   <Sparkles className="h-3 w-3 text-brutal-accent" />
                   {t('lucyQuickStart')}
+                  <button type="button" onClick={openOnboardingGuide} className="ml-auto rounded-md px-2 py-1 font-body text-[10px] font-semibold normal-case tracking-normal text-muted-foreground hover:bg-brutal-muted-light hover:text-foreground">
+                    {t('firstRunGuideMe')}
+                  </button>
+                  <button type="button" onClick={dismissLucyQuickStart} className="rounded-md p-1 text-muted-foreground hover:bg-brutal-muted-light hover:text-foreground" aria-label={t('close')} title={t('close')}>
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                 </div>
                 <div className="flex gap-2 overflow-x-auto pb-1">
                   {[
@@ -1335,6 +1351,7 @@ export function ChannelView({
             refreshKey={teamRefreshKey}
             onAddAgent={canAddAgents ? () => setIsAddAgentModalOpen(true) : undefined}
             onChooseTemplate={canAddAgents ? () => router.push(`/templates?channel=${encodeURIComponent(channel.id)}`) : undefined}
+            onGuide={agents.length === 0 ? openOnboardingGuide : undefined}
             agentTasks={latestTaskByAgent}
             onOpenTask={handleTeamTaskOpen}
             onOpenTaskArtifact={handleTeamTaskArtifactOpen}
@@ -1511,7 +1528,7 @@ export function ChannelView({
           <DialogCloseButton onClick={() => setModerationOpen(false)} />
         </DialogHeader>
         <div className="space-y-4">
-          <section className="border-2 border-black bg-brutal-info-light p-3 shadow-brutal-sm">
+          <section className="rounded-lg border border-border bg-brutal-primary-light p-3 shadow-none">
             <div className="mb-1 flex items-center gap-2 font-heading text-sm font-bold">
               <FolderOpen className="h-4 w-4" />
               {t('channelProjectFolder')}
@@ -1546,7 +1563,7 @@ export function ChannelView({
                 {boundProjectPath && (
                   <Button type="button" variant="outline" size="sm" disabled={projectBindingBusy} onClick={() => void saveProjectBinding(true)}>{t('channelProjectClear')}</Button>
                 )}
-                <Button type="button" size="sm" disabled={projectBindingBusy || !projectComputerId || !projectPath.trim()} onClick={() => void saveProjectBinding()}>
+                <Button type="button" variant="primary" size="sm" disabled={projectBindingBusy || !projectComputerId || !projectPath.trim()} onClick={() => void saveProjectBinding()}>
                   {projectBindingBusy ? t('saving') : t('channelProjectSave')}
                 </Button>
               </div>

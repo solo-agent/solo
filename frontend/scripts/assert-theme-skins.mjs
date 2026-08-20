@@ -45,17 +45,17 @@ const theme = loadTheme();
 const { defaultThemeId, getStoredTheme, resolveThemeId, setTheme, themeOptions } = theme;
 
 if (defaultThemeId !== 'archive') throw new Error('Default theme should be archive');
-if (themeOptions.length !== 2) throw new Error('Expected exactly two themes');
-if (new Set(themeOptions.map(({ id }) => id)).size !== 2) throw new Error('Theme IDs must be unique');
+if (themeOptions.length !== 1) throw new Error('Expected exactly one theme');
+if (new Set(themeOptions.map(({ id }) => id)).size !== 1) throw new Error('Theme IDs must be unique');
 if (resolveThemeId('unknown') !== 'archive') throw new Error('Unknown theme must fall back');
 if (getStoredTheme() !== 'archive') throw new Error('Missing storage must fall back');
-if (setTheme('classic') !== 'classic') throw new Error('Valid theme should apply');
-if (theme.document.documentElement.dataset.skin !== 'classic') throw new Error('Theme must update the root');
-if (theme.storage.get('solo.skin') !== 'classic') throw new Error('Theme must persist');
+if (setTheme('archive') !== 'archive') throw new Error('Default theme should apply');
+if (theme.document.documentElement.dataset.skin !== 'archive') throw new Error('Theme must update the root');
+if (theme.storage.get('solo.skin') !== 'archive') throw new Error('Theme must persist');
 if (!theme.events.includes('solo:theme-change')) throw new Error('Theme switch should notify the UI');
 
 const stored = loadTheme([['solo.skin', 'classic']]);
-if (stored.getStoredTheme() !== 'classic') throw new Error('Stored theme should be restored');
+if (stored.getStoredTheme() !== 'archive') throw new Error('Removed theme should fall back');
 
 const invalid = loadTheme([['solo.skin', 'nope']]);
 if (invalid.getStoredTheme() !== 'archive') throw new Error('Invalid storage should fall back');
@@ -64,8 +64,8 @@ const blockedRead = loadTheme([], { readError: true });
 if (blockedRead.getStoredTheme() !== 'archive') throw new Error('Blocked reads should fall back');
 
 const blockedWrite = loadTheme([], { writeError: true });
-if (blockedWrite.setTheme('classic') !== 'classic') throw new Error('Blocked writes should still apply');
-if (blockedWrite.document.documentElement.dataset.skin !== 'classic') {
+if (blockedWrite.setTheme('classic') !== 'archive') throw new Error('Removed theme should fall back');
+if (blockedWrite.document.documentElement.dataset.skin !== 'archive') {
   throw new Error('Blocked writes should still update the root');
 }
 
@@ -113,14 +113,18 @@ for (const { id } of themeOptions) {
 }
 
 const expectedRefresh = {
-  archive: ['Warm Retro', '暖色复古', 'oklch(0.955 0.01 80)', '#d0937f'],
-  classic: ['Yellow Neo-Brutalism', '黄色新粗野主义', '#ffd23f', '#ff6b6b'],
+  archive: ['Warm Editorial', '暖色编辑', '#eee9e1', '#d0937f', 'var(--skin-accent)', '#e3dacc'],
 };
 const i18n = read('lib/i18n.ts');
-for (const [id, [englishName, chineseName, primary, accent]] of Object.entries(expectedRefresh)) {
+for (const [id, [englishName, chineseName, primary, accent, accentInteractive, stone]] of Object.entries(expectedRefresh)) {
   const blockStart = css.indexOf(`:root[data-skin="${id}"]`);
   const block = css.slice(blockStart, css.indexOf('\n}', blockStart)).toLowerCase();
-  if (!block.includes(`--skin-primary: ${primary};`) || !block.includes(`--skin-accent: ${accent};`)) {
+  if (
+    !block.includes(`--skin-primary: ${primary};`)
+    || !block.includes(`--skin-accent: ${accent};`)
+    || !block.includes(`--skin-accent-interactive: ${accentInteractive};`)
+    || !block.includes(`--skin-stone: ${stone};`)
+  ) {
     throw new Error(`${id} is missing its approved editor palette`);
   }
   const { labelKey } = themeOptions.find((option) => option.id === id);
@@ -129,12 +133,50 @@ for (const [id, [englishName, chineseName, primary, accent]] of Object.entries(e
   }
 }
 
+for (const token of ['cactus: #bcd1ca', 'heather: #cbcadb', 'sky: #6a9bcc']) {
+  if (!css.includes(`--skin-illustration-${token};`)) {
+    throw new Error(`Archive illustration palette is missing ${token}`);
+  }
+}
+if (!css.includes('background: var(--skin-accent-interactive);\n  color: var(--skin-accent-foreground);')) {
+  throw new Error('Archive primary CTA must use the interactive clay ramp and its foreground');
+}
+if (!css.includes('--skin-accent-interactive: var(--skin-accent);')) {
+  throw new Error('Archive CTA must reuse the original Terra Pink token');
+}
+if (!css.includes('--skin-accent-foreground: var(--skin-ink);')) {
+  throw new Error('Archive CTA must use Solo ink on the original Terra Pink');
+}
+if (!css.includes('--color-accent: var(--skin-accent-interactive);')) {
+  throw new Error('Functional accent must resolve to the accessible interactive clay');
+}
+
+const templatesPage = `${read('app/templates/page.tsx')}\n${read('components/templates/lucy-team-composer.tsx')}`;
+for (const token of ['bg-warm-stone', 'bg-illustration-cactus', 'bg-illustration-heather', 'bg-illustration-sky']) {
+  if (!templatesPage.includes(token)) throw new Error(`Templates should use ${token}`);
+}
+
+const messageInput = read('components/dashboard/message-input.tsx');
+if (!messageInput.includes("'btn-brutal-primary'")) {
+  throw new Error('Message send action must use the primary CTA');
+}
+if (messageInput.includes("'btn-brutal btn-brutal-success'")) {
+  throw new Error('Message send action must not use the semantic success color');
+}
+
+if (!css.includes(':root[data-skin="archive"] .mention-highlight {\n  background: var(--skin-muted-light);')) {
+  throw new Error('Archive mentions must use the warm gray chip background');
+}
+if (!css.includes('color: var(--skin-ink);')) {
+  throw new Error('Archive mentions must remain readable');
+}
+
 const layout = read('app/layout.tsx');
 for (const needle of ['data-skin="archive"', 'suppressHydrationWarning', 'solo.skin']) {
   if (!layout.includes(needle)) throw new Error(`Layout is missing ${needle}`);
 }
 
-const bootstrap = layout.match(/const themeScript = `([^`]+)`;/)?.[1];
+const bootstrap = layout.match(/const bootstrapScript = `([^`]+)`;/)?.[1];
 if (!bootstrap) throw new Error('Layout theme bootstrap is missing');
 
 function runBootstrap(stored) {
@@ -153,7 +195,7 @@ if (runBootstrap('unknown-skin') !== 'archive' || runBootstrap(null) !== 'archiv
   throw new Error('Bootstrap should normalize missing or invalid storage to archive');
 }
 
-const removedThemeIds = ['blueprint', 'ultraviolet', 'seasalt', 'tomato', 'matcha', 'bubblegum', 'lavender', 'sky'];
+const removedThemeIds = ['classic', 'blueprint', 'ultraviolet', 'seasalt', 'tomato', 'matcha', 'bubblegum', 'lavender', 'sky'];
 for (const id of removedThemeIds) {
   if (source.includes(`id: '${id}'`) || css.includes(`data-skin="${id}"`)) {
     throw new Error(`Removed theme ${id} is still exposed`);
@@ -161,8 +203,8 @@ for (const id of removedThemeIds) {
 }
 
 const settings = read('app/settings/page.tsx');
-for (const needle of ['themeOptions.map', 'aria-pressed', 'data-skin-preview']) {
-  if (!settings.includes(needle)) throw new Error(`Settings is missing ${needle}`);
+for (const needle of ['themeOptions', 'data-skin-preview']) {
+  if (settings.includes(needle)) throw new Error(`Settings should not expose a removed theme selector`);
 }
 
 const relationshipNode = read('components/relationships/relationship-node.tsx');

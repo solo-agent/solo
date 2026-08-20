@@ -15,11 +15,11 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // Primary CTA (yellow call-to-action)
+        // Primary CTA (Solo Terra Pink with warm ink foreground)
         primary: "btn-brutal-primary",
         // Dangerous action (destructive intent; white text on coral red)
         danger: "btn-brutal-danger",
-        // Successful action (save/confirm intent; green fill)
+        // Semantic success action (green fill; not the default CTA)
         success: "btn-brutal-success",
         // Outlined: white fill, 2px black border (already on the base)
         outline: "bg-brutal-white text-brutal-black",

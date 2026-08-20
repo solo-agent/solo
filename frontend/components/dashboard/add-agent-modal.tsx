@@ -88,11 +88,11 @@ export function AddAgentModal({
 
       {workspaceAgents.length > 0 && (
         <section className="mb-5">
-          <h3 className="mb-2 flex items-center gap-2 font-heading text-sm font-black uppercase"><Link2 className="h-4 w-4" /> {t('agentAddConnectExisting')}</h3>
+          <h3 className="mb-2 flex items-center gap-2 font-heading text-sm font-bold"><Link2 className="h-4 w-4" /> {t('agentAddConnectExisting')}</h3>
           <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
             {workspaceAgents.map((agent) => (
-              <div key={agent.id} className="flex items-center gap-3 border-2 border-black bg-white px-3 py-2">
-                <div className="flex h-8 w-8 items-center justify-center border-2 border-black bg-[#DBEAFE]"><Bot className="h-4 w-4" /></div>
+              <div key={agent.id} className="flex items-center gap-3 rounded-lg border border-border bg-white px-3 py-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-brutal-primary-light"><Bot className="h-4 w-4" /></div>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-bold">{agent.name}</div>
                   <div className="truncate font-body text-xs text-black/50">{agent.description || t('agentAddWorkspaceAgent')}</div>
@@ -116,10 +116,10 @@ export function AddAgentModal({
         </section>
       )}
 
-      {workspaceAgents.length > 0 && <h3 className="mb-2 font-heading text-sm font-black uppercase">{t('agentAddCreateNew')}</h3>}
+      {workspaceAgents.length > 0 && <h3 className="mb-2 font-heading text-sm font-bold">{t('agentAddCreateNew')}</h3>}
 
       {error && (
-        <div className="mb-4 flex items-center gap-2 border-2 border-brutal-danger bg-brutal-danger-light/30 px-3 py-2">
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-brutal-danger bg-brutal-danger-light/30 px-3 py-2">
           <AlertCircle className="h-4 w-4 flex-shrink-0 text-brutal-danger" />
           <span className="flex-1 font-body text-xs text-brutal-danger">{error}</span>
         </div>
