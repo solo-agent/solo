@@ -96,8 +96,8 @@ export function AgentChunkItem({ chunk }: AgentChunkItemProps) {
       return <ToolResultDisplay chunk={chunk} />;
     case 'context':
       return (
-        <div className="chunk-context border-l-2 border-brutal-info pl-2 py-1 mb-1 bg-brutal-info-light">
-          <div className="font-mono text-[10px] text-brutal-info font-bold mb-0.5">Trigger</div>
+        <div className="chunk-context border-l-2 border-brutal-muted pl-2 py-1 mb-1 bg-brutal-primary-light">
+          <div className="font-mono text-[10px] text-muted-foreground font-bold mb-0.5">Trigger</div>
           <div className="font-mono text-[11px] text-foreground whitespace-pre-wrap break-words">
             {chunk.content.length > 300 ? chunk.content.slice(0, 300) + '…' : chunk.content}
           </div>

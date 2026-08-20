@@ -159,7 +159,7 @@ export function WorkspacePeople() {
         </fieldset>
         <DialogFooter>
           <Button variant="outline" onClick={() => setInviteOpen(false)} disabled={busy}>{t('cancel')}</Button>
-          <Button onClick={() => void invite()} disabled={busy || !email.trim()}>
+          <Button variant="primary" onClick={() => void invite()} disabled={busy || !email.trim()}>
             {busy ? t('workspaceInvitingButton') : t('workspaceInvitePersonButton')}
           </Button>
         </DialogFooter>

@@ -30,19 +30,20 @@ const (
 
 // Event types (server -> client)
 const (
-	EventPing              = "ping"
-	EventMessageNew        = "message.new"
-	EventMessageUpdated    = "message.updated"
-	EventMessageDeleted    = "message.deleted"
-	EventChannelUpdated    = "channel.updated"
-	EventMemberJoined      = "member.joined"
-	EventMemberLeft        = "member.left"
-	EventTyping            = "typing"
-	EventError             = "error"
-	EventSystem            = "system"
-	EventThreadMessageNew  = "thread.message.new"
-	EventThreadReplyNotify = "thread.reply"
-	EventThinkingUpdated   = "thinking.updated"
+	EventPing                    = "ping"
+	EventMessageNew              = "message.new"
+	EventMessageUpdated          = "message.updated"
+	EventMessageReactionsUpdated = "message.reactions.updated"
+	EventMessageDeleted          = "message.deleted"
+	EventChannelUpdated          = "channel.updated"
+	EventMemberJoined            = "member.joined"
+	EventMemberLeft              = "member.left"
+	EventTyping                  = "typing"
+	EventError                   = "error"
+	EventSystem                  = "system"
+	EventThreadMessageNew        = "thread.message.new"
+	EventThreadReplyNotify       = "thread.reply"
+	EventThinkingUpdated         = "thinking.updated"
 
 	// Agent status events (SOLO-46-B)
 	EventAgentThinking = "agent.thinking"

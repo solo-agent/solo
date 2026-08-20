@@ -1,6 +1,7 @@
 'use client';
 
 import { Children, type ReactNode } from 'react';
+import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -108,6 +109,19 @@ export function MessageMarkdown({ content, validNames = [], onOpenArtifactRefere
                 </button>
               );
             }
+            // Internal routes (e.g. /dashboard?channel=...) should reuse the
+            // current tab via Next.js client-side navigation, matching the
+            // "进入频道" card. External links keep the default new-tab behavior.
+            if (isInternalHref(href)) {
+              return (
+                <Link
+                  href={href!}
+                  className="font-bold text-brutal-info underline decoration-2 underline-offset-2 transition-colors hover:text-brutal-primary"
+                >
+                  {children}
+                </Link>
+              );
+            }
             return (
               <a
                 href={href}
@@ -169,4 +183,14 @@ export function MessageMarkdown({ content, validNames = [], onOpenArtifactRefere
       </ReactMarkdown>
     </div>
   );
+}
+
+function isInternalHref(href: string | undefined): boolean {
+  if (!href) return false;
+  // Anchor-only links stay in-document and shouldn't trigger a router push.
+  if (href.startsWith('#')) return false;
+  // Protocol-relative or absolute external URLs.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return false;
+  // Treat root-relative paths and same-origin absolute paths as internal.
+  return href.startsWith('/') && !href.startsWith('//');
 }

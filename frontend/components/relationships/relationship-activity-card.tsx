@@ -36,7 +36,7 @@ function CardShell({
 
 export const ActivityCard = memo(function ActivityCard({ text }: { text: string }) {
   return (
-    <CardShell kind="activity" className="bg-brutal-info-light" title={text}>
+    <CardShell kind="activity" className="bg-brutal-primary-light" title={text}>
       <div className="flex items-center gap-1.5">
         <Brain className="h-3 w-3 flex-shrink-0 text-brutal-info" />
         <span className="truncate font-mono text-[9px] font-bold text-black">

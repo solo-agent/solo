@@ -243,7 +243,7 @@ export function CreateRelationshipModal({
           type="button"
           onClick={handleSubmit}
           disabled={!canSubmit}
-          variant="success"
+          variant="primary"
           size="sm"
           className="px-4"
         >

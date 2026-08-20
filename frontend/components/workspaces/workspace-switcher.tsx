@@ -71,7 +71,7 @@ export function WorkspaceSwitcher() {
 
       {menuOpen && (
         <div
-          className="absolute left-0 top-[calc(100%+10px)] z-40 w-[220px] border-2 border-black bg-white p-2 shadow-brutal-lg"
+          className="absolute left-0 top-[calc(100%+10px)] z-40 w-[220px] rounded-xl border border-border bg-white p-2 shadow-lg"
           role="menu"
         >
           {MENU_ITEMS.map((item) => (

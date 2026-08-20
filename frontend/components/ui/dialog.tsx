@@ -117,7 +117,7 @@ export function Dialog({ open, onOpenChange, children, width = 'md' }: DialogPro
         <div
           ref={dialogRef}
           className={cn(
-            'my-auto max-h-[calc(100dvh-2rem)] w-full overflow-y-auto overscroll-contain border-4 border-black bg-card p-4 shadow-brutal-2xl sm:p-6',
+            'solo-dialog my-auto max-h-[calc(100dvh-2rem)] w-full overflow-y-auto overscroll-contain border-4 border-black bg-card p-4 shadow-brutal-2xl sm:p-6',
             DIALOG_WIDTHS[width],
           )}
           data-dialog-scroll
@@ -140,7 +140,7 @@ export function DialogCloseButton({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className={iconActionClass('rounded-none shadow-brutal-sm')}
+    className={iconActionClass('rounded-lg shadow-none')}
       aria-label={t('close')}
     >
       <X className="h-4 w-4" />

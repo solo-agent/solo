@@ -251,7 +251,7 @@ export function WorkspaceSettingsCard({ bare = false, view = 'all' }: { bare?: b
         <section className={bare ? 'border-t-2 border-black pt-4' : 'mt-5 border-t-2 border-black pt-4'}>
           <h3 className="mb-1 flex items-center gap-2 font-heading text-sm font-black uppercase"><Link2 className="h-4 w-4" /> {t('workspaceSectionInviteLinks')}</h3>
           <p className="mb-3 text-xs text-black/55">{t('workspaceInviteLinkDesc')}</p>
-          <Button variant="outline" onClick={() => void createInviteLink()} disabled={busy}>
+          <Button variant="primary" onClick={() => void createInviteLink()} disabled={busy}>
             <Link2 className="mr-1 h-4 w-4" /> {t('workspaceCreateInviteLink')}
           </Button>
           {newInviteURL && (
@@ -287,7 +287,7 @@ export function WorkspaceSettingsCard({ bare = false, view = 'all' }: { bare?: b
           <div className="flex gap-2">
             <Select value={ruleType} onChange={setRuleType} options={[{ value: 'domain', label: t('workspaceRuleTypeDomain') }, { value: 'email', label: t('workspaceRuleTypeEmail') }]} size="md" aria-label={t('workspaceRuleTypeAria')} />
             <Input value={ruleValue} onChange={(event) => setRuleValue(event.target.value)} placeholder={ruleType === 'domain' ? t('workspaceRulePlaceholderDomain') : t('workspaceRulePlaceholderEmail')} />
-            <Button variant="outline" onClick={() => void addRule()} disabled={busy || !ruleValue.trim()}>{t('workspaceAllowButton')}</Button>
+            <Button variant="primary" onClick={() => void addRule()} disabled={busy || !ruleValue.trim()}>{t('workspaceAllowButton')}</Button>
           </div>
           {rules.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{rules.map((rule) => (
             <button key={rule.id} type="button" onClick={async () => {
@@ -320,12 +320,12 @@ export function WorkspaceSettingsCard({ bare = false, view = 'all' }: { bare?: b
               );
             })}
           </div>
-          {!embed.enabled && embed.channels.length > 0 && <Button className="mt-3" variant="outline" onClick={() => void saveEmbed(true, embed.channels.map((item) => item.id))} disabled={busy}>{t('workspaceEnableChannelsButton')}</Button>}
+          {!embed.enabled && embed.channels.length > 0 && <Button className="mt-3" variant="primary" onClick={() => void saveEmbed(true, embed.channels.map((item) => item.id))} disabled={busy}>{t('workspaceEnableChannelsButton')}</Button>}
           {embed.enabled && (
             <>
               <div className="mt-3 flex gap-2">
                 <Input value={guestLabel} onChange={(event) => setGuestLabel(event.target.value)} placeholder={t('workspaceLinkLabelPlaceholder')} />
-                <Button variant="outline" onClick={() => void createGuestLink()} disabled={busy || embed.channels.length === 0}><Link2 className="mr-1 h-4 w-4" /> {t('workspaceCreateGuestLink')}</Button>
+                <Button variant="primary" onClick={() => void createGuestLink()} disabled={busy || embed.channels.length === 0}><Link2 className="mr-1 h-4 w-4" /> {t('workspaceCreateGuestLink')}</Button>
                 <Button variant="danger" onClick={() => void saveEmbed(false, embed.channels.map((item) => item.id))} disabled={busy}>{t('workspaceDisableButton')}</Button>
               </div>
               {newGuestURL && (

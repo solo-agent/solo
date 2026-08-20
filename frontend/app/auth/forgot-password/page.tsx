@@ -78,7 +78,7 @@ export default function ForgotPasswordPage() {
         <form onSubmit={requestCode} className="space-y-4">
           <label htmlFor="reset-email" className="font-heading font-bold text-sm block">{t('email')}</label>
           <input id="reset-email" type="email" required autoComplete="email" className="input-brutal" value={email} onChange={(event) => setEmail(event.target.value)} />
-          <Button type="submit" className="w-full" disabled={busy}>{busy ? t('sendingCode') : t('sendResetCode')}</Button>
+          <Button type="submit" variant="primary" className="w-full" disabled={busy}>{busy ? t('sendingCode') : t('sendResetCode')}</Button>
         </form>
       )}
 
@@ -97,7 +97,7 @@ export default function ForgotPasswordPage() {
             <label htmlFor="confirm-new-password" className="font-heading font-bold text-sm block">{t('confirmPassword')}</label>
             <input id="confirm-new-password" type="password" required minLength={8} autoComplete="new-password" className="input-brutal" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
           </div>
-          <Button type="submit" className="w-full" disabled={busy || code.length !== 6}>{busy ? t('resettingPassword') : t('resetPassword')}</Button>
+          <Button type="submit" variant="primary" className="w-full" disabled={busy || code.length !== 6}>{busy ? t('resettingPassword') : t('resetPassword')}</Button>
           <button type="button" className="w-full font-heading text-sm font-bold underline disabled:opacity-50" disabled={busy || resendIn > 0} onClick={() => requestCode()}>
             {resendIn > 0 ? t('resendIn').replace('{seconds}', String(resendIn)) : t('resendCode')}
           </button>

@@ -18,7 +18,6 @@ export default function TemplatesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [targetChannelID, setTargetChannelID] = useState('');
-  const [showProfessional, setShowProfessional] = useState(false);
 
   useEffect(() => {
     setTargetChannelID(new URLSearchParams(window.location.search).get('channel') ?? '');
@@ -45,10 +44,7 @@ export default function TemplatesPage() {
       ].some((value) => value.toLowerCase().includes(needle));
     });
   }, [category, query, templates]);
-  const isDefaultBrowse = category === 'All' && query.trim() === '';
-  const visibleTemplates = isDefaultBrowse && !showProfessional
-    ? filtered.filter((template) => template.id.startsWith('starter-'))
-    : filtered;
+  const visibleTemplates = filtered;
 
   return (
     <AppFrame>
@@ -84,22 +80,6 @@ export default function TemplatesPage() {
 
         <div className="mx-auto max-w-[1480px] px-5 py-4 lg:px-8">
           <LucyTeamComposer templates={templates} targetChannelID={targetChannelID} />
-
-          {isDefaultBrowse && (
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-2 border-black bg-brutal-success-light p-3 shadow-brutal-sm">
-              <div>
-                <h2 className="font-heading text-lg font-black">{t('templatesBeginnerTitle')}</h2>
-                <p className="font-body text-xs text-black/65">{t('templatesBeginnerDesc')}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowProfessional((value) => !value)}
-                className="border-2 border-black bg-white px-3 py-2 font-mono text-xs font-bold uppercase shadow-brutal-sm hover:bg-brutal-primary-light"
-              >
-                {showProfessional ? t('templatesHideProfessional') : t('templatesShowProfessional')}
-              </button>
-            </div>
-          )}
 
           <div className="mb-4 flex flex-col gap-2 border-2 border-black bg-white p-2 shadow-brutal md:flex-row md:items-center">
             <div className="min-w-0 flex-1 md:w-80 md:flex-none">
@@ -144,7 +124,7 @@ export default function TemplatesPage() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <span className={`flex h-9 w-9 items-center justify-center border-2 border-black text-lg shadow-brutal-sm ${
-                      index % 3 === 0 ? 'bg-brutal-accent-light' : index % 3 === 1 ? 'bg-brutal-primary-light' : 'bg-brutal-success-light'
+                      index % 3 === 0 ? 'bg-illustration-cactus' : index % 3 === 1 ? 'bg-illustration-heather' : 'bg-illustration-sky'
                     }`}>
                       {template.icon || '✦'}
                     </span>

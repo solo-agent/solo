@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, LayoutTemplate, Sparkles, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,7 @@ import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Textarea } from '@/components/ui/textarea';
 import { apiClient } from '@/lib/api-client';
 import { getLocale, t } from '@/lib/i18n';
-import { recommendTemplate } from '@/lib/recommend-template';
+import { useChannel } from '@/lib/use-channel';
 import type { Template } from '@/lib/templates-api';
 import type { Channel } from '@/lib/types';
 
@@ -34,24 +34,73 @@ export function LucyTeamComposer({
   const [isCreating, setIsCreating] = useState(false);
   const [createdChannelID, setCreatedChannelID] = useState('');
   const [error, setError] = useState('');
+  const [lucyChannelID, setLucyChannelID] = useState('');
+  const [pendingRequestID, setPendingRequestID] = useState('');
+  const {
+    messages: lucyMessages,
+    sendMessage: sendLucyMessage,
+    clearMessages: clearLucyMessages,
+  } = useChannel(lucyChannelID || null);
+
+  useEffect(() => {
+    let active = true;
+    apiClient.get<{ id: string }>('/api/v1/channels/lucy')
+      .then((channel) => {
+        if (active) setLucyChannelID(channel.id);
+      })
+      .catch(() => {
+        if (active) setError(t('templatesLucyRecommendError'));
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isMatching || !pendingRequestID) return;
+    const reply = [...lucyMessages]
+      .reverse()
+      .find((message) => message.sender_type === 'agent' && message.id !== pendingRequestID);
+    if (!reply) return;
+
+    const template = templates.find((candidate) => reply.content.includes(candidate.id));
+    setPendingRequestID('');
+    setIsMatching(false);
+    if (!template) {
+      setError(t('templatesLucyUnrecognized'));
+      return;
+    }
+    setRecommendation({ reply: reply.content, template });
+    setChannelName(slugify(goal) || slugify(template.name));
+  }, [goal, isMatching, lucyMessages, pendingRequestID, templates]);
+
+  useEffect(() => {
+    if (!isMatching) return;
+    const timeout = window.setTimeout(() => {
+      setPendingRequestID('');
+      setIsMatching(false);
+      setError(t('templatesLucyTimeout'));
+    }, 30_000);
+    return () => window.clearTimeout(timeout);
+  }, [isMatching]);
 
   const askLucy = () => {
     const trimmedGoal = goal.trim();
-    if (!trimmedGoal || isMatching || templates.length === 0) return;
+    if (!trimmedGoal || isMatching || !lucyChannelID) return;
 
     setIsMatching(true);
     setRecommendation(null);
     setCreatedChannelID('');
     setError('');
-
-    const result = recommendTemplate(trimmedGoal, templates);
-    if (!result) {
+    clearLucyMessages();
+    void sendLucyMessage(
+      `Recommend one official Solo team for this goal. First run solo template list --json to inspect the current catalog. Do not create anything. Reply in the same language as the goal, include a short rationale, and put the exact selected template ID on its own line as template_id: <id>.\n\nGoal: ${trimmedGoal}`,
+    ).then((message) => {
+      setPendingRequestID(message.id);
+    }).catch(() => {
+      setIsMatching(false);
       setError(t('templatesLucyRecommendError'));
-    } else {
-      setRecommendation({ reply: result.reason, template: result.template });
-      setChannelName(slugify(trimmedGoal) || slugify(result.template.name));
-    }
-    setIsMatching(false);
+    });
   };
 
   const createAndStart = async () => {
@@ -93,7 +142,7 @@ export function LucyTeamComposer({
   };
 
   return (
-    <section className="mx-auto mb-4 max-w-6xl border-2 border-black bg-brutal-accent-light shadow-brutal">
+    <section className="mx-auto mb-4 max-w-6xl border-2 border-black bg-warm-stone shadow-brutal">
       <div className="grid gap-3 p-3 lg:grid-cols-[150px_minmax(0,1fr)_auto] lg:items-center">
         <div>
           <div className="flex items-center gap-2 font-heading text-base font-black">
@@ -114,7 +163,7 @@ export function LucyTeamComposer({
         <Button
           type="button"
           onClick={askLucy}
-          disabled={!goal.trim() || isMatching || isCreating || templates.length === 0}
+          disabled={!goal.trim() || isMatching || isCreating || !lucyChannelID}
           className="h-14 min-w-36"
         >
           <Sparkles className="h-4 w-4" />
@@ -200,6 +249,7 @@ export function LucyTeamComposer({
 
                 <Button
                   type="button"
+                  variant="primary"
                   onClick={createAndStart}
                   disabled={isCreating || (!targetChannelID && !channelName.trim())}
                   className="mt-3 w-full"

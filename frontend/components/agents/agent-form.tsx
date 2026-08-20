@@ -312,6 +312,7 @@ export function AgentForm({
         {onCancel && <Button type="button" variant="outline" onClick={onCancel} disabled={isSubmitting}>{t('cancel')}</Button>}
         <Button
           type="submit"
+          variant="primary"
           disabled={isSubmitting || (customModel && !selectedModel.trim())}
         >
           {isSubmitting ? (

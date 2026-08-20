@@ -88,7 +88,7 @@ export default function WorkspaceInvitePage() {
 
   return (
     <main id="main-content" className="relative flex min-h-screen items-center justify-center bg-brutal-cream px-4 py-12">
-      <div className="pointer-events-none absolute inset-0 bg-grid opacity-20" aria-hidden />
+      <div className="pointer-events-none absolute inset-0 bg-noise opacity-25" aria-hidden />
       <section className="relative w-full max-w-[520px] rounded-2xl border border-black bg-white px-6 py-8 shadow-brutal-lg sm:px-12 sm:py-12">
         {error ? (
           <div className="text-center">

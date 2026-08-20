@@ -49,6 +49,7 @@ export function useChannelMembers(channelId: string | null) {
   const [members, setMembers] = useState<ChannelMember[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loadedChannelId, setLoadedChannelId] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const channelIdRef = useRef(channelId);
   channelIdRef.current = channelId;
@@ -74,24 +75,29 @@ export function useChannelMembers(channelId: string | null) {
   const loadMembers = useCallback(async () => {
     if (!channelId) {
       setMembers([]);
+      setLoadedChannelId(null);
       setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
     setError(null);
+    setLoadedChannelId(null);
     try {
       const res = await apiClient.get<MemberResponse[]>(
         `/api/v1/channels/${channelId}/members`,
       );
-      if (mountedRef.current) {
+      if (mountedRef.current && channelIdRef.current === channelId) {
         setMembers(res.map(mapMember));
+        setLoadedChannelId(channelId);
       }
     } catch (err) {
       const message = err instanceof ApiError ? err.message : `${t('memberLoadError')}`;
       setError(message);
     } finally {
-      setIsLoading(false);
+      if (mountedRef.current && channelIdRef.current === channelId) {
+        setIsLoading(false);
+      }
     }
   }, [channelId]);
 
@@ -153,6 +159,7 @@ export function useChannelMembers(channelId: string | null) {
     users,
     agents,
     isLoading,
+    loadedChannelId,
     error,
     addAgentToChannel,
     removeMember,

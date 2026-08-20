@@ -78,9 +78,9 @@ Your first task: send a warm, practical welcome message that:
 }
 
 // WizardWelcomePrompt builds the welcome message shown in the onboarding channel
-// before Lucy is created. It tells the user to use the wizard card to set up Lucy.
+// before Lucy is created. It points the user to the guided onboarding flow.
 func WizardWelcomePrompt(displayName string) string {
-	return fmt.Sprintf("Welcome to Solo, %s! Use the setup card above to create your first AI agent, Lucy. She'll help you get started with your workspace.", displayName)
+	return fmt.Sprintf("Welcome to Solo, %s! Follow the guide to create Lucy, your first AI teammate. She'll help you get started with your workspace.", displayName)
 }
 
 // KnowledgeFiles returns the files to seed into Lucy's workspace.

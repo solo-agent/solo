@@ -270,7 +270,7 @@ export default function TemplateDetailPage() {
                 {error && <p className="border-2 border-black bg-brutal-danger-light p-2 font-body text-xs">{error}</p>}
                 <Button
                   type="button"
-                  variant="success"
+                  variant="primary"
                   className="w-full justify-between"
                   disabled={(!targetChannelID && !channelName.trim()) || isCreating}
                   onClick={createOrApplyTeam}

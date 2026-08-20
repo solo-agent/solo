@@ -176,8 +176,8 @@ export function RelationshipDetailPanel({
     return (
       <div
         className={embedded
-          ? 'flex h-full flex-col border-l-2 border-r-2 border-b-2 border-black bg-white shadow-brutal-sm animate-slide-in-from-right'
-          : 'fixed right-0 top-14 h-[calc(100%-3.5rem)] border-l-4 border-black bg-white shadow-brutal-2xl z-40 flex flex-col animate-slide-in-from-right'}
+          ? 'flex h-full flex-col rounded-l-xl border border-border bg-white shadow-none animate-slide-in-from-right'
+          : 'fixed right-0 top-14 z-40 flex h-[calc(100%-3.5rem)] flex-col rounded-l-xl border-l border-border bg-white shadow-lg animate-slide-in-from-right'}
         style={embedded ? undefined : { width: panelWidth }}
       >
         {!embedded && (
@@ -215,7 +215,7 @@ export function RelationshipDetailPanel({
           </button>
         </div>
 
-        <div className="flex items-center gap-3 border-b-2 border-black bg-white px-4 py-3">
+        <div className="flex items-center gap-3 border-b border-border bg-white px-4 py-3">
           <PixelAvatar agentId={agent.id} avatarUrl={agent.avatar_url} size="md" />
           <div className="min-w-0 flex-1">
             <div className="truncate font-heading text-base font-bold text-black">
@@ -243,12 +243,12 @@ export function RelationshipDetailPanel({
           </Button>
         </div>
 
-        <div className="grid grid-cols-3 border-b-2 border-black" role="tablist">
+        <div className="relationship-agent-tabs grid grid-cols-3 overflow-hidden rounded-xl border border-border" role="tablist">
           <button
             type="button"
             onClick={() => setAgentTab('profile')}
             className={[
-              'tab-button border-r-2 border-black px-3 py-2 font-heading text-xs font-bold uppercase tracking-wider',
+              'tab-button px-3 py-2 font-heading text-xs font-bold uppercase tracking-wider',
               agentTab === 'profile' ? 'bg-brutal-primary text-black' : 'bg-white hover:bg-brutal-primary-light',
             ].join(' ')}
             role="tab"
@@ -263,7 +263,7 @@ export function RelationshipDetailPanel({
               if (!hasUserResizedPanel) setPanelWidth((width) => Math.max(width, 960));
             }}
             className={[
-              'tab-button border-r-2 border-black px-3 py-2 font-heading text-xs font-bold uppercase tracking-wider',
+              'tab-button px-3 py-2 font-heading text-xs font-bold uppercase tracking-wider',
               agentTab === 'runs' ? 'bg-brutal-primary text-black' : 'bg-white hover:bg-brutal-primary-light',
             ].join(' ')}
             role="tab"
@@ -325,8 +325,8 @@ export function RelationshipDetailPanel({
   return (
     <div
       className={embedded
-        ? 'flex h-full flex-col border-l-2 border-r-2 border-b-2 border-black bg-white shadow-brutal-sm animate-slide-in-from-right'
-        : 'fixed right-0 top-14 h-[calc(100%-3.5rem)] border-l-4 border-black bg-white shadow-brutal-2xl z-40 flex flex-col animate-slide-in-from-right'}
+        ? 'flex h-full flex-col rounded-l-xl border border-border bg-white shadow-none animate-slide-in-from-right'
+        : 'fixed right-0 top-14 z-40 flex h-[calc(100%-3.5rem)] flex-col rounded-l-xl border-l border-border bg-white shadow-lg animate-slide-in-from-right'}
       style={embedded ? undefined : { width: panelWidth }}
     >
       {!embedded && (
@@ -363,9 +363,9 @@ export function RelationshipDetailPanel({
         </button>
       </div>
 
-      <div className="border-b-2 border-black bg-white px-4 py-3">
+      <div className="border-b border-border bg-white px-4 py-3">
         <div
-          className="mb-3 inline-flex items-center gap-1.5 px-3 py-1.5 border-2 border-black bg-brutal-primary font-heading text-xs font-black uppercase tracking-wider shadow-brutal-sm"
+          className="mb-3 inline-flex items-center gap-1.5 rounded-lg border border-border bg-brutal-primary-light px-3 py-1.5 font-heading text-xs font-black uppercase tracking-wider shadow-none"
         >
           <svg width="16" height="8">
             <line x1="0" y1="4" x2="16" y2="4"
@@ -453,7 +453,7 @@ export function RelationshipDetailPanel({
                   type="button"
                   onClick={handleSaveInstruction}
                   disabled={isSaving}
-                  variant="success"
+                  variant="primary"
                   size="sm"
                   className="gap-1 text-[10px] uppercase tracking-wider"
                 >
@@ -522,7 +522,7 @@ export function RelationshipDetailPanel({
                   type="button"
                   onClick={handleSave}
                   disabled={isSaving}
-                  variant="success"
+                  variant="primary"
                   size="sm"
                   className="gap-1 text-[10px] uppercase tracking-wider"
                 >
@@ -596,7 +596,7 @@ export function RelationshipDetailPanel({
       </div>
 
       {/* Delete action */}
-      <div className="border-t-2 border-black p-4 bg-brutal-cream">
+      <div className="border-t border-border bg-brutal-cream p-4">
         <Button
           type="button"
           onClick={() => setShowDeleteConfirm(true)}

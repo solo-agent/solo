@@ -19,7 +19,7 @@ import {
   postMessageWithTimeout,
   sendReliably,
 } from '@/lib/reliable-send';
-import type { Attachment } from '@/lib/types';
+import type { Attachment, MessageReaction } from '@/lib/types';
 import type { WSMessage, WSMessageSource } from '@/lib/ws-types';
 
 // ---- API 响应类型（与后端 handler/thread.go 对齐） ----
@@ -38,6 +38,7 @@ interface ThreadReplyResponse {
   content_type: string;
   attachments?: Attachment[];
   created_at: string;
+  reactions?: MessageReaction[];
 }
 
 interface ThreadMessageListResponse {
@@ -63,6 +64,7 @@ function toWSMessage(r: ThreadReplyResponse): WSMessage {
     content_type: r.content_type,
     thread_parent_id: r.thread_id,
     attachments: r.attachments,
+    reactions: r.reactions,
     created_at: r.created_at,
     status: 'sent',
   };
@@ -264,6 +266,12 @@ export function useThread(): UseThreadReturn {
           }
           return result;
         });
+      }
+
+      if (event.type === 'message.reactions.updated' && event.channel_id === channelIdRef.current) {
+        setMessages((prev) => prev.map((message) => (
+          message.id === event.id ? { ...message, reactions: event.reactions } : message
+        )));
       }
     });
     return unsub;

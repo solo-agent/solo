@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { Check, Monitor, Cpu, Sparkles, AlertCircle, RefreshCw } from 'lucide-react';
 import { useCliDetection } from '@/lib/hooks/use-cli-detection';
@@ -9,9 +9,6 @@ import { useOnboarding } from '@/lib/hooks/use-onboarding';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Select, type SelectOption } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
-import { listTemplates, type Template } from '@/lib/templates-api';
-import { recommendTemplate, type TemplateRecommendation } from '@/lib/recommend-template';
 import { t } from '@/lib/i18n';
 
 interface WizardCardProps {
@@ -33,13 +30,6 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
   const [selectedRuntime, setSelectedRuntime] = useState<string>('');
   const [done, setDone] = useState(false);
   const [claimingId, setClaimingId] = useState<string | null>(null);
-  const [goal, setGoal] = useState('');
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [recommendation, setRecommendation] = useState<TemplateRecommendation | null>(null);
-
-  useEffect(() => {
-    listTemplates().then(setTemplates).catch(() => setTemplates([]));
-  }, []);
 
   const joinableComputers = computers.filter((c) => c.status === 'online' && !isMember(c));
 
@@ -85,7 +75,7 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
   };
 
   return (
-    <div className="card-brutal mb-4">
+    <div className="card-brutal mb-4 rounded-xl">
       {/* Header */}
       <div className="flex items-center gap-2 border-b-2 border-black px-5 py-3">
         <Sparkles className="h-4 w-4 text-brutal-primary" />
@@ -95,39 +85,6 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
       </div>
 
       <div className="space-y-1 px-5 py-4">
-        <div className="mb-4 border-2 border-black bg-brutal-accent-light p-3 shadow-brutal-sm">
-          <p className="font-heading text-base font-black">{t('onboardingGoalTitle')}</p>
-          <p className="mt-1 font-body text-xs text-black/65">{t('onboardingGoalDesc')}</p>
-          <Textarea
-            value={goal}
-            onChange={(event) => {
-              setGoal(event.target.value);
-              setRecommendation(null);
-            }}
-            rows={2}
-            className="mt-3 min-h-16 resize-none bg-white"
-            placeholder={t('onboardingGoalPlaceholder')}
-          />
-          <Button
-            type="button"
-            size="sm"
-            className="mt-2"
-            disabled={!goal.trim() || templates.length === 0}
-            onClick={() => setRecommendation(recommendTemplate(goal, templates))}
-          >
-            <Sparkles className="h-3.5 w-3.5" />
-            {t('onboardingGoalRecommend')}
-          </Button>
-          {recommendation && (
-            <div className="mt-3 border-2 border-black bg-white p-3">
-              <div className="font-body text-[11px] font-semibold uppercase tracking-wider text-black/50">{t('onboardingGoalResult')}</div>
-              <div className="mt-1 font-heading text-base font-black">{recommendation.template.icon} {recommendation.template.name}</div>
-              <p className="mt-1 font-body text-xs leading-relaxed text-black/65">{recommendation.reason}</p>
-              <p className="mt-2 font-body text-xs font-semibold">{t('onboardingGoalNext')}</p>
-            </div>
-          )}
-        </div>
-
         <div className="mb-2 border-b-2 border-black pb-2">
           <p className="font-heading text-sm font-black">{t('onboardingSetupTitle')}</p>
           <p className="font-body text-xs text-muted-foreground">{t('onboardingSetupDesc')}</p>
@@ -262,7 +219,7 @@ export function WizardCard({ channelId, onComplete }: WizardCardProps) {
             {!done && (
               <div className="mt-2">
                 <Button
-                  variant="default"
+                  variant="primary"
                   size="sm"
                   disabled={!selectedRuntime || isCreating || !hasAvailableRuntime || !myComputer}
                   onClick={handleCreateLucy}

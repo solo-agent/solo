@@ -1,7 +1,6 @@
 /* ============================================================
-   globals.brutal.css — Solo Neubrutalist Design System v3.1
-   Based on neubrutalism.com canonical patterns
-   Replaces globals.css as the primary stylesheet
+   globals.brutal.css — Solo Editorial Design System
+   Legacy brutal utility names remain as a compatibility layer.
 
    v3.1 changelog:
    - Added shadow-brutal-2xl (12px) and shadow-brutal-3xl (16px) tokens,
@@ -18,8 +17,8 @@
 
    v3.0 changelog (audit: solid, no fixes needed in 3.1):
    - A11y: BrutalAlert has role=alert/status, ui/ components forward ARIA
-     props, global focus-visible 3px info outline. WCAG AA contrast passes
-     on every primary/light/dark color pair with black text (≥4.5:1).
+     props, global focus-visible 3px info outline. Interactive fills use an
+     explicit foreground token so their contrast can be checked independently.
    - Dark mode: canvas/shadow inversion keeps brutal aesthetic intact;
      hard-offset white shadow reads correctly on dark canvas.
    - Motion: prefers-reduced-motion covers all custom animations + global
@@ -76,6 +75,8 @@
   --color-brutal-primary-light: #FFF9E0;
   --color-brutal-accent: #FF6B6B;
   --color-brutal-accent-light: #FFD4D4;
+  --color-brutal-accent-interactive: #C53F3F;
+  --color-brutal-accent-foreground: #FFFFFF;
   --color-brutal-info: #74B9FF;
   --color-brutal-info-light: #E0F0FF;
   --color-brutal-success: #88D498;
@@ -88,6 +89,22 @@
   --color-brutal-violet-light: #f0ecff;
   --color-brutal-muted: #c0b9b1;
   --color-brutal-muted-light: #ece6df;
+  --color-warm-stone: #e3dacc;
+
+  /* Editorial colors describe content families, never product status. */
+  --color-illustration-cactus: #bcd1ca;
+  --color-illustration-heather: #cbcadb;
+  --color-illustration-sky: #6a9bcc;
+
+  /* Runtime skin aliases used by the editorial shell utilities. */
+  --color-skin-canvas: var(--skin-canvas);
+  --color-skin-primary: var(--skin-primary);
+  --color-skin-primary-light: var(--skin-primary-light);
+  --color-skin-accent: var(--skin-accent);
+  --color-skin-surface: var(--skin-surface);
+  --color-skin-rule: var(--skin-rule);
+  --color-skin-ink: var(--skin-ink);
+  --color-skin-subtle-text: var(--skin-subtle-text);
 
   /* Hard shadow color. Switched to white in dark mode (see media query below). */
   --color-brutal-shadow: #000000;
@@ -109,7 +126,7 @@
   --color-brutal-red-light: var(--color-brutal-danger-light);
   --color-brutal-lavender: var(--color-brutal-violet);
   --color-brutal-lavender-light: var(--color-brutal-violet-light);
-  --color-brutal-stone: var(--color-brutal-muted);
+  --color-brutal-stone: var(--color-warm-stone);
 
   /* ---- Functional Colors (shadcn/ui compatibility) ---- */
   --color-background: #fffaef;
@@ -124,8 +141,8 @@
   --color-secondary-foreground: #000000;
   --color-muted: #f5f0e8;
   --color-muted-foreground: #666666;
-  --color-accent: var(--color-brutal-accent);
-  --color-accent-foreground: #000000;
+  --color-accent: var(--color-brutal-accent-interactive);
+  --color-accent-foreground: var(--color-brutal-accent-foreground);
   --color-destructive: var(--color-brutal-danger);
   --color-destructive-foreground: #000000;
   --color-border: #000000;
@@ -385,8 +402,9 @@
   --skin-primary-light: #fff9e0;
   --skin-accent: #ff6b6b;
   --skin-accent-light: #ffd4d4;
-  --skin-info: #74b9ff;
-  --skin-info-light: #e0f0ff;
+  --skin-accent-interactive: #c53f3f;
+  --skin-accent-interactive-hover: #a93333;
+  --skin-accent-foreground: #ffffff;
   --skin-success: #88d498;
   --skin-success-light: #e0f5e0;
   --skin-warning: #f8a16f;
@@ -397,6 +415,10 @@
   --skin-violet-light: #f0ecff;
   --skin-muted: #c0b9b1;
   --skin-muted-light: #ece6df;
+  --skin-stone: #e3dacc;
+  --skin-illustration-cactus: #bcd1ca;
+  --skin-illustration-heather: #cbcadb;
+  --skin-illustration-sky: #6a9bcc;
   --skin-surface: #ffffff;
   --skin-ink: #000000;
   --skin-rule: #000000;
@@ -411,8 +433,10 @@
   --color-brutal-primary-light: var(--skin-primary-light);
   --color-brutal-accent: var(--skin-accent);
   --color-brutal-accent-light: var(--skin-accent-light);
-  --color-brutal-info: var(--skin-info);
-  --color-brutal-info-light: var(--skin-info-light);
+  --color-brutal-accent-interactive: var(--skin-accent-interactive);
+  --color-brutal-accent-foreground: var(--skin-accent-foreground);
+  --color-brutal-info: var(--skin-accent);
+  --color-brutal-info-light: var(--skin-accent-light);
   --color-brutal-success: var(--skin-success);
   --color-brutal-success-light: var(--skin-success-light);
   --color-brutal-warning: var(--skin-warning);
@@ -423,6 +447,10 @@
   --color-brutal-violet-light: var(--skin-violet-light);
   --color-brutal-muted: var(--skin-muted);
   --color-brutal-muted-light: var(--skin-muted-light);
+  --color-warm-stone: var(--skin-stone);
+  --color-illustration-cactus: var(--skin-illustration-cactus);
+  --color-illustration-heather: var(--skin-illustration-heather);
+  --color-illustration-sky: var(--skin-illustration-sky);
   --color-brutal-shadow: var(--skin-shadow);
 
   --color-background: var(--skin-canvas);
@@ -437,13 +465,13 @@
   --color-secondary-foreground: var(--skin-ink);
   --color-muted: var(--skin-muted-light);
   --color-muted-foreground: var(--skin-subtle-text);
-  --color-accent: var(--skin-accent);
-  --color-accent-foreground: var(--skin-ink);
+  --color-accent: var(--skin-accent-interactive);
+  --color-accent-foreground: var(--skin-accent-foreground);
   --color-destructive: var(--skin-danger);
   --color-destructive-foreground: var(--skin-ink);
   --color-border: var(--skin-rule);
   --color-input: var(--skin-rule);
-  --color-ring: var(--skin-info);
+  --color-ring: var(--skin-accent);
   --color-sidebar: var(--skin-canvas);
   --color-sidebar-foreground: var(--skin-ink);
   --color-sidebar-muted: var(--skin-muted-light);
@@ -455,18 +483,19 @@
 
 :root[data-skin="archive"],
 [data-skin-preview="archive"] {
-  --skin-canvas: oklch(0.975 0.008 80);
-  --skin-surface: oklch(0.995 0.003 80);
+  --skin-canvas: #f7f4ef;
+  --skin-surface: #fffdf9;
   --skin-ink: #39342f;
-  --skin-rule: #EAE4D7;
+  --skin-rule: #D9D1C9;
   --skin-subtle-text: #6e665e;
   --skin-shadow: rgb(57 52 47 / 16%);
-  --skin-primary: oklch(0.955 0.01 80);
-  --skin-primary-light: oklch(0.985 0.004 80);
-  --skin-accent: #d97757;
+  --skin-primary: #eee9e1;
+  --skin-primary-light: #f5f1ea;
+  --skin-accent: #d0937f;
   --skin-accent-light: #f0ded7;
-  --skin-info: #9aa5b0;
-  --skin-info-light: #e1e6ea;
+  --skin-accent-interactive: var(--skin-accent);
+  --skin-accent-interactive-hover: var(--skin-accent);
+  --skin-accent-foreground: var(--skin-ink);
   --skin-success: #a9b59a;
   --skin-success-light: #e6eadf;
   --skin-warning: #d6b06c;
@@ -475,29 +504,12 @@
   --skin-danger-light: #f1ddd8;
   --skin-violet: #b6abbc;
   --skin-violet-light: #e8e1eb;
-  --skin-muted: oklch(0.82 0.014 75);
-  --skin-muted-light: oklch(0.93 0.008 80);
-}
-
-:root[data-skin="classic"],
-[data-skin-preview="classic"] {
-  --skin-canvas: #fffaef;
-  --skin-primary: #ffd23f;
-  --skin-primary-light: #fff9e0;
-  --skin-accent: #ff6b6b;
-  --skin-accent-light: #ffd4d4;
-  --skin-info: #74b9ff;
-  --skin-info-light: #e0f0ff;
-  --skin-success: #88d498;
-  --skin-success-light: #e0f5e0;
-  --skin-warning: #f8a16f;
-  --skin-warning-light: #fff0e0;
-  --skin-danger: #f97264;
-  --skin-danger-light: #ffe0dc;
-  --skin-violet: #bbafe6;
-  --skin-violet-light: #f0ecff;
-  --skin-muted: #c0b9b1;
-  --skin-muted-light: #ece6df;
+  --skin-muted: #b9b0a7;
+  --skin-muted-light: #eae5dd;
+  --skin-stone: #e3dacc;
+  --skin-illustration-cactus: #bcd1ca;
+  --skin-illustration-heather: #cbcadb;
+  --skin-illustration-sky: #6a9bcc;
 }
 
 /* ============================================================
@@ -636,9 +648,10 @@
   pointer-events: none;
 }
 
-/* Primary variant (yellow call-to-action) */
+/* Primary CTA keeps Solo's original Terra Pink with its warm ink foreground. */
 .btn-brutal-primary {
-  background: var(--color-brutal-primary);
+  background: var(--color-brutal-accent-interactive);
+  color: var(--color-brutal-accent-foreground);
 }
 
 /* Danger variant (coral red, white text). Uses `background` shorthand so it
@@ -1195,7 +1208,7 @@
   --archive-body-line: 1.55;
 }
 
-:root[data-skin="archive"] :where(h1.font-heading) {
+:root[data-skin="archive"] :where(h1.font-heading, h2.font-heading) {
   font-family: var(--font-display);
 }
 
@@ -1220,17 +1233,6 @@
 :root[data-skin="archive"] ::selection {
   background: var(--skin-accent-light);
   color: var(--skin-ink);
-}
-
-:root[data-skin="archive"] body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 2147483647;
-  pointer-events: none;
-  opacity: 0.025;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  mix-blend-mode: multiply;
 }
 
 :root[data-skin="archive"] :where(.font-heading.font-black) {
@@ -1311,10 +1313,26 @@
   background: var(--skin-primary);
 }
 
+:root[data-skin="archive"] .solo-dialog {
+  border-width: 1px;
+  border-color: var(--skin-rule);
+  border-radius: 1.25rem;
+  box-shadow: var(--archive-shadow-lg);
+}
+
 :root[data-skin="archive"] :where(.btn-brutal, .navbar-icon) {
   border: 1px solid var(--skin-rule);
   border-radius: 0.5rem;
   box-shadow: var(--archive-shadow-sm);
+}
+
+:root[data-skin="archive"] .btn-brutal-primary {
+  background: var(--skin-accent-interactive);
+  color: var(--skin-accent-foreground);
+}
+
+:root[data-skin="archive"] .btn-brutal-primary:hover {
+  background: var(--skin-accent-interactive-hover);
 }
 
 :root[data-skin="archive"] :where(.btn-brutal, .navbar-icon):hover {
@@ -1366,6 +1384,11 @@
   border: 1px solid var(--skin-rule);
   border-radius: 999px;
   box-shadow: none;
+}
+
+:root[data-skin="archive"] .mention-highlight {
+  background: var(--skin-muted-light);
+  color: var(--skin-ink);
 }
 
 :root[data-skin="archive"] .message-bubble {
@@ -1471,6 +1494,16 @@
   transform: none;
 }
 
+:root[data-skin="archive"] .relationship-agent-tabs .tab-button {
+  border: 0;
+  border-right: 1px solid var(--skin-rule);
+  border-radius: 0;
+}
+
+:root[data-skin="archive"] .relationship-agent-tabs .tab-button:last-child {
+  border-right: 0;
+}
+
 :root[data-skin="archive"] .tab-button:hover {
   border-color: var(--skin-rule);
   background: var(--skin-surface);
@@ -1480,6 +1513,7 @@
 :root[data-skin="archive"] .tab-button:is([aria-pressed="true"], [aria-selected="true"]) {
   border-color: var(--skin-rule);
   background: var(--skin-primary);
+  color: var(--skin-ink);
   box-shadow: inset 0 1px 2px rgb(57 52 47 / 8%);
 }
 
@@ -1522,7 +1556,7 @@
 }
 
 :root[data-skin="archive"] .task-action-button[data-tone="info"] {
-  background: color-mix(in srgb, var(--skin-info) 58%, var(--skin-surface));
+  background: color-mix(in srgb, var(--skin-accent) 32%, var(--skin-surface));
 }
 
 :root[data-skin="archive"] .relationship-agent-node {
@@ -1559,7 +1593,7 @@
   border-width: 1px;
   border-color: var(--skin-rule);
   border-radius: 0.625rem;
-  background: var(--skin-info-light);
+  background: var(--skin-accent-light);
   box-shadow: var(--archive-shadow-sm);
 }
 
@@ -1656,10 +1690,11 @@
 
 :root[data-skin="archive"] *:focus-visible {
   outline-width: 2px;
+  outline-color: var(--skin-accent);
 }
 
 :root[data-skin="archive"] .personal-workspace-row:focus-visible {
   outline: none;
-  background: var(--skin-info-light);
-  box-shadow: inset 0 0 0 2px var(--skin-info);
+  background: var(--skin-accent-light);
+  box-shadow: inset 0 0 0 2px var(--skin-accent);
 }

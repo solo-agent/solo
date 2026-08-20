@@ -596,6 +596,21 @@ func (h *DMHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if len(messages) > 0 {
+		messageIDs := make([]string, 0, len(messages))
+		for _, message := range messages {
+			messageIDs = append(messageIDs, message.ID)
+		}
+		reactionMap, err := queryMessageReactionMap(r.Context(), h.pool, messageIDs, userID)
+		if err != nil {
+			slog.Error("failed to query DM message reactions", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to list messages")
+			return
+		}
+		for i := range messages {
+			messages[i].Reactions = reactionMap[messages[i].ID]
+		}
+	}
 
 	// Non-after queries arrive newest-first and need reversing for display.
 	if after == "" {

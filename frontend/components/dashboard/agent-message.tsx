@@ -17,6 +17,11 @@ import { t } from '@/lib/i18n';
 import { formatMessageTime, formatMessageTimestamp } from '@/lib/utils/time';
 import { MessageMarkdown } from './message-markdown';
 import { ThreadPreview } from './thread-preview';
+import {
+  MessageReactionChips,
+  MessageReactionPicker,
+  useMessageReactions,
+} from './message-reactions';
 
 interface AgentMessageProps {
   message: Message;
@@ -35,6 +40,8 @@ export function AgentMessage({ message, isGrouped, onReply, validNames = [], isH
   const time = formatMessageTimestamp(message.created_at);
   const compactTime = formatMessageTime(message.created_at);
   const [isTogglingPin, setIsTogglingPin] = useState(false);
+  const [reactionOpen, setReactionOpen] = useState(false);
+  const reactionState = useMessageReactions(message.id, message.reactions);
 
   const hasUnreadThread = message.has_unread_thread === true && (message.reply_count ?? 0) > 0;
   return (
@@ -42,9 +49,9 @@ export function AgentMessage({ message, isGrouped, onReply, validNames = [], isH
       data-message-id={message.id}
       data-message-grouped={isGrouped ? 'true' : 'false'}
       className={cn(
-        'group relative flex gap-3 px-6 agent-message border-l-brutal-primary',
+        'group relative flex gap-3 px-6 agent-message',
         isGrouped ? 'py-1' : 'pt-3 pb-1.5',
-        isHighlighted && 'bg-brutal-info-light ring-2 ring-black',
+        isHighlighted && 'bg-brutal-primary-light ring-2 ring-brutal-accent',
       )}
       role="listitem"
     >
@@ -96,6 +103,7 @@ export function AgentMessage({ message, isGrouped, onReply, validNames = [], isH
           validNames={validNames}
           onOpenArtifactReference={onOpenArtifactReference}
         />
+        <MessageReactionChips {...reactionState} />
 
         {/* Thread preview */}
         {(message.reply_count ?? 0) > 0 && onReply && (
@@ -110,42 +118,48 @@ export function AgentMessage({ message, isGrouped, onReply, validNames = [], isH
       </div>
 
       {/* Hover reply button */}
-      {(onReply || onPin) && (
-        <div className="absolute right-3 top-2 flex items-center gap-1
-                        opacity-0 group-hover:opacity-100
-                        translate-x-2 group-hover:translate-x-0
-                        transition-[opacity,transform] duration-200">
-          {onPin && <button
-            type="button"
-            onClick={async (e) => {
-              e.stopPropagation();
-              if (isTogglingPin) return;
-              setIsTogglingPin(true);
-              try {
-                await onPin(message);
-              } finally {
-                setIsTogglingPin(false);
-              }
-            }}
-            disabled={isTogglingPin}
-            aria-pressed={Boolean(pinned)}
-            className={`btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0 transition-transform active:translate-x-[2px] active:translate-y-[2px] active:shadow-none disabled:cursor-wait disabled:opacity-70 ${pinned ? 'bg-brutal-warning' : ''}`}
-            aria-label={pinned ? t('channelUnpin') : t('channelPin')}
-            title={pinned ? t('channelUnpin') : t('channelPin')}
-          >
-            {isTogglingPin ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-          </button>}
-          {onReply && <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onReply(message); }}
-            className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
-            aria-label={t('replyToMessage', { name: message.display_name })}
-            title="Reply"
-          >
-            <MessageSquare className="h-3.5 w-3.5" />
-          </button>}
-        </div>
-      )}
+      <div className={cn(
+        'absolute right-3 top-2 flex items-center gap-1 transition-[opacity,transform] duration-200',
+        reactionOpen
+          ? 'opacity-100 translate-x-0'
+          : 'opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0',
+      )}>
+        <MessageReactionPicker
+          open={reactionOpen}
+          setOpen={setReactionOpen}
+          isSaving={reactionState.isSaving}
+          toggleReaction={reactionState.toggleReaction}
+        />
+        {onPin && <button
+          type="button"
+          onClick={async (e) => {
+            e.stopPropagation();
+            if (isTogglingPin) return;
+            setIsTogglingPin(true);
+            try {
+              await onPin(message);
+            } finally {
+              setIsTogglingPin(false);
+            }
+          }}
+          disabled={isTogglingPin}
+          aria-pressed={Boolean(pinned)}
+          className={`btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0 transition-transform active:translate-x-[2px] active:translate-y-[2px] active:shadow-none disabled:cursor-wait disabled:opacity-70 ${pinned ? 'bg-brutal-warning' : ''}`}
+          aria-label={pinned ? t('channelUnpin') : t('channelPin')}
+          title={pinned ? t('channelUnpin') : t('channelPin')}
+        >
+          {isTogglingPin ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+        </button>}
+        {onReply && <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onReply(message); }}
+          className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
+          aria-label={t('replyToMessage', { name: message.display_name })}
+          title="Reply"
+        >
+          <MessageSquare className="h-3.5 w-3.5" />
+        </button>}
+      </div>
     </div>
   );
 }

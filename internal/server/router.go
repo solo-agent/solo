@@ -234,6 +234,7 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 		r.Get("/api/v1/server/info", channelHandler.ServerInfo)
 
 		r.Get("/api/v1/messages/check", messageHandler.Check)
+		r.Post("/api/v1/messages/{messageID}/reactions", messageHandler.ToggleReaction)
 		r.Post("/api/v1/channels/join", channelHandler.JoinByTarget)
 
 		r.Route("/api/v1/channels", func(r chi.Router) {

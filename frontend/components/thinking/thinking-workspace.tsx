@@ -403,7 +403,7 @@ export function ThinkingWorkspace({
           {actionError && <p className="font-body text-xs text-brutal-danger" role="alert">{actionError}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setShowSplit(false)} disabled={busy}>{t('cancel')}</Button>
-            <Button type="submit" variant="success" disabled={!title.trim() || busy}>
+            <Button type="submit" variant="primary" disabled={!title.trim() || busy}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : t('create')}
             </Button>
           </DialogFooter>

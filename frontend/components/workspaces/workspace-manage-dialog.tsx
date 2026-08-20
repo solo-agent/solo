@@ -143,6 +143,7 @@ export function WorkspaceManageDialog() {
               {canEdit && (
                 <div className="flex justify-end">
                   <Button
+                    variant="primary"
                     onClick={() => void save()}
                     disabled={busy || !name.trim() || !icon.trim() || (name.trim() === activeWorkspace.name && icon.trim() === activeWorkspace.icon)}
                   >

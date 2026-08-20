@@ -110,6 +110,7 @@ type teamFormationCaller struct {
 	RuntimeID   string
 	ChannelID   string
 	ChannelName string
+	WorkspaceID string
 	SourceID    string
 	SourceText  string
 }
@@ -211,7 +212,7 @@ func (s *TeamFormationService) authorizeCaller(ctx context.Context, callerID, ch
 	caller := teamFormationCaller{ChannelID: channelID}
 	err := s.pool.QueryRow(ctx, `
 		SELECT a.id, a.owner_id, a.model_provider, a.model_name,
-		       COALESCE(a.runtime_id, ''), c.name
+		       COALESCE(a.runtime_id, ''), c.name, c.workspace_id::text
 		  FROM agents a
 		  JOIN channels c
 		    ON c.id = a.home_channel_id
@@ -229,6 +230,7 @@ func (s *TeamFormationService) authorizeCaller(ctx context.Context, callerID, ch
 	`, callerID, channelID).Scan(
 		&caller.AgentID, &caller.OwnerID, &caller.Provider,
 		&caller.ModelName, &caller.RuntimeID, &caller.ChannelName,
+		&caller.WorkspaceID,
 	)
 	if err != nil {
 		return nil, ErrTeamFormationForbidden
@@ -358,6 +360,7 @@ func (s *TeamFormationService) provision(
 
 	provisioned, err := s.templates.provisionChannelTx(ctx, tx, TemplateProvisionRequest{
 		OwnerID:         caller.OwnerID,
+		WorkspaceID:     caller.WorkspaceID,
 		TemplateID:      plan.TemplateID,
 		ChannelName:     plan.Channel.Name,
 		Description:     plan.Channel.Description,
