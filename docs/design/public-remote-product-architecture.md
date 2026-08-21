@@ -104,16 +104,22 @@ Computers page creates Computer and one-time enrollment token
  -> user runs generated install command
  -> installer downloads archive + checksum from GitHub Releases
  -> installs `solo` and `solo-daemon`
- -> `solo daemon connect` starts `solo-daemon` with the one-time token
+ -> the Computer ID is also used as the managed Daemon profile
+ -> `solo daemon connect` starts that profile with the one-time token
  -> Daemon exchanges and persists the machine credential
  -> `solo daemon status` observes the managed background process
 ```
 
-`connect` replaces only this Computer's local pairing and restarts the managed
-Daemon. The Server's existing one-current-connection fence remains the remote
-authority. `start`, `stop`, `restart`, `status`, and `logs` operate on the local
-managed process. Direct `solo-daemon` execution remains supported for containers
-and advanced operators.
+The Computers page and installer derive the profile from the existing Computer
+ID; users do not choose another name. Each Computer therefore owns an independent
+local state directory, process, port, credential, and log. `connect` replaces only
+that Computer's local pairing and restarts only its managed Daemon. This remains
+compatible with the released CLI that already supports explicit profiles, while a
+newer CLI can also infer the same profile when it is omitted. No database or API
+migration is required. The Server's existing one-current-connection fence remains
+the remote authority. `start`, `stop`, `restart`, `status`, and `logs` operate on
+the selected local managed process. Direct `solo-daemon` execution remains
+supported for containers and advanced operators.
 
 ## 4. Data flow and trust boundaries
 

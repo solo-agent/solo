@@ -94,6 +94,12 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("machine lock acquired", "pid", machineLock.PID)
+	pidPath, err := writeDaemonProcessRecord(strings.TrimSpace(os.Getenv("SOLO_DAEMON_STATE_DIR")), machineLock.PID)
+	if err != nil {
+		_ = machineLock.Release()
+		slog.Error("failed to write daemon process record", "error", err)
+		os.Exit(1)
+	}
 
 	// Create task manager
 	taskMgr = newTaskManager()
@@ -229,6 +235,9 @@ func main() {
 
 	// Release machine lock
 	if machineLock != nil {
+		if err := removeDaemonProcessRecord(pidPath, machineLock.PID); err != nil {
+			slog.Warn("failed to remove daemon process record", "error", err)
+		}
 		if err := machineLock.Release(); err != nil {
 			slog.Warn("failed to release machine lock", "error", err)
 		} else {
@@ -251,6 +260,36 @@ func resolveInternalToken(configuredToken, jwtSecret string) string {
 		return configuredToken
 	}
 	return jwtSecret
+}
+
+func writeDaemonProcessRecord(stateDir string, pid int) (string, error) {
+	if stateDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		stateDir = filepath.Join(home, ".solo", "daemon")
+	}
+	path := filepath.Join(stateDir, "daemon.pid")
+	if err := os.WriteFile(path, []byte(strconv.Itoa(pid)+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func removeDaemonProcessRecord(path string, pid int) error {
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	recorded, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || recorded != pid {
+		return nil
+	}
+	return os.Remove(path)
 }
 
 // registerWithServer sends a registration request to the server.
