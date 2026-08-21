@@ -95,5 +95,5 @@ if [ "$CONNECT" -eq 1 ]; then
   [ -n "$SERVER" ] || fail "connect requires --server"
   [ -n "$COMPUTER_ID" ] || fail "connect requires --computer-id"
   [ -n "$TOKEN" ] || fail "connect requires --token"
-  exec "$BIN_DIR/solo" daemon connect --server "$SERVER" --computer-id "$COMPUTER_ID" --token "$TOKEN"
+  exec "$BIN_DIR/solo" daemon connect --server "$SERVER" --computer-id "$COMPUTER_ID" --token "$TOKEN" --profile "$COMPUTER_ID"
 fi

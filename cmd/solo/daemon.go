@@ -33,14 +33,14 @@ func handleDaemonCommand(args []string) int {
 		fmt.Fprintln(os.Stderr, "solo: daemon command required: connect, start, stop, restart, status, logs")
 		return exitUsage
 	}
-	profile, commandArgs, err := parseDaemonProfile(args[1:])
+	profile, profileExplicit, commandArgs, err := parseDaemonProfile(args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "solo: daemon: %v\n", err)
 		return exitUsage
 	}
 	switch args[0] {
 	case "connect":
-		err = daemonConnect(commandArgs, profile)
+		err = daemonConnect(commandArgs, profile, profileExplicit)
 	case "start":
 		err = startManagedDaemonProfile(profile, nil)
 	case "stop":
@@ -63,34 +63,37 @@ func handleDaemonCommand(args []string) int {
 	return exitOK
 }
 
-func parseDaemonProfile(args []string) (string, []string, error) {
+func parseDaemonProfile(args []string) (string, bool, []string, error) {
 	profile := defaultDaemonProfile
+	explicit := false
 	result := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--profile" {
 			if i+1 >= len(args) {
-				return "", nil, errors.New("--profile requires a name")
+				return "", false, nil, errors.New("--profile requires a name")
 			}
 			profile = args[i+1]
+			explicit = true
 			i++
 			continue
 		}
 		if strings.HasPrefix(args[i], "--profile=") {
 			profile = strings.TrimPrefix(args[i], "--profile=")
+			explicit = true
 			continue
 		}
 		result = append(result, args[i])
 	}
 	profile = strings.TrimSpace(profile)
 	if profile == "" || len(profile) > 64 {
-		return "", nil, errors.New("invalid Daemon profile name")
+		return "", false, nil, errors.New("invalid Daemon profile name")
 	}
 	for _, r := range profile {
 		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
-			return "", nil, errors.New("Daemon profile may contain only letters, numbers, '-' and '_'")
+			return "", false, nil, errors.New("Daemon profile may contain only letters, numbers, '-' and '_'")
 		}
 	}
-	return profile, result, nil
+	return profile, explicit, result, nil
 }
 
 func daemonStateDir() (string, error) {
@@ -163,20 +166,28 @@ func daemonProfilePID(profile string) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return 0, false
+	if raw, readErr := os.ReadFile(path); readErr == nil {
+		if pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw))); parseErr == nil && daemonProcessAlive(pid) {
+			return pid, true
+		}
+		_ = os.Remove(path)
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if err != nil || pid <= 1 {
-		return 0, false
+	var lock struct {
+		PID int `json:"pid"`
+	}
+	if raw, readErr := os.ReadFile(filepath.Join(filepath.Dir(path), "lock.json")); readErr == nil && json.Unmarshal(raw, &lock) == nil && daemonProcessAlive(lock.PID) {
+		_ = os.WriteFile(path, []byte(strconv.Itoa(lock.PID)+"\n"), 0o600)
+		return lock.PID, true
+	}
+	return 0, false
+}
+
+func daemonProcessAlive(pid int) bool {
+	if pid <= 1 {
+		return false
 	}
 	process, err := os.FindProcess(pid)
-	if err != nil || process.Signal(syscall.Signal(0)) != nil {
-		_ = os.Remove(path)
-		return 0, false
-	}
-	return pid, true
+	return err == nil && process.Signal(syscall.Signal(0)) == nil
 }
 
 func startManagedDaemon(extraEnv []string) error {
@@ -281,7 +292,7 @@ func stopManagedDaemonProfile(profile string) error {
 	return errors.New("Daemon did not stop within 10 seconds")
 }
 
-func daemonConnect(args []string, profile string) error {
+func daemonConnect(args []string, profile string, profileExplicit bool) error {
 	fs := flag.NewFlagSet("solo daemon connect", flag.ContinueOnError)
 	server := fs.String("server", "", "Solo Server URL")
 	computerID := fs.String("computer-id", "", "Computer ID")
@@ -293,12 +304,14 @@ func daemonConnect(args []string, profile string) error {
 	if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Scheme != "https" && !(parsed.Scheme == "http" && (parsed.Hostname() == "localhost" || parsed.Hostname() == "127.0.0.1"))) {
 		return errors.New("--server must be an https URL (http is allowed only for localhost)")
 	}
-	if _, err := uuid.Parse(strings.TrimSpace(*computerID)); err != nil {
+	computer := strings.TrimSpace(*computerID)
+	if _, err := uuid.Parse(computer); err != nil {
 		return errors.New("--computer-id must be a valid UUID")
 	}
 	if strings.TrimSpace(*token) == "" {
 		return errors.New("--token is required")
 	}
+	profile = daemonConnectProfile(profile, computer, profileExplicit)
 	credentialPath, err := managedProfileCredentialPath(profile)
 	if err != nil {
 		return err
@@ -310,7 +323,7 @@ func daemonConnect(args []string, profile string) error {
 	serverURL := strings.TrimRight(parsed.String(), "/")
 	if err := startManagedDaemonProfile(profile, []string{
 		"DAEMON_SERVER_URL=" + serverURL,
-		"SOLO_COMPUTER_ID=" + strings.TrimSpace(*computerID),
+		"SOLO_COMPUTER_ID=" + computer,
 		"SOLO_ENROLLMENT_TOKEN=" + strings.TrimSpace(*token),
 	}); err != nil {
 		return err
@@ -319,7 +332,7 @@ func daemonConnect(args []string, profile string) error {
 	for time.Now().Before(deadline) {
 		raw, readErr := os.ReadFile(credentialPath)
 		var credential managedDaemonCredential
-		if readErr == nil && !bytes.Equal(raw, oldCredential) && json.Unmarshal(raw, &credential) == nil && credential.ComputerID == strings.TrimSpace(*computerID) && strings.TrimRight(credential.ServerURL, "/") == serverURL && credential.Credential != "" && managedDaemonConnectedProfile(profile) {
+		if readErr == nil && !bytes.Equal(raw, oldCredential) && json.Unmarshal(raw, &credential) == nil && credential.ComputerID == computer && strings.TrimRight(credential.ServerURL, "/") == serverURL && credential.Credential != "" && managedDaemonConnectedProfile(profile) {
 			fmt.Printf("Computer paired with %s. The Daemon will reconnect automatically.\n", serverURL)
 			return nil
 		}
@@ -330,6 +343,20 @@ func daemonConnect(args []string, profile string) error {
 		time.Sleep(250 * time.Millisecond)
 	}
 	return errors.New("pairing timed out after 15 seconds")
+}
+
+func daemonConnectProfile(profile, computerID string, explicit bool) string {
+	if explicit {
+		return profile
+	}
+	path, err := managedProfileCredentialPath(defaultDaemonProfile)
+	if err == nil {
+		var credential managedDaemonCredential
+		if raw, readErr := os.ReadFile(path); readErr == nil && json.Unmarshal(raw, &credential) == nil && credential.ComputerID == computerID {
+			return defaultDaemonProfile
+		}
+	}
+	return computerID
 }
 
 func printDaemonStatus() error {

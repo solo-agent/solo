@@ -1,4 +1,4 @@
-.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-release-install test-e2e-first-run test-e2e-agent-delivery test-e2e-agent-target-resolution test-e2e-agent-message-coalescing test-e2e-agent-template-credential test-e2e-automation test-e2e-budget-gate test-e2e-budget-gate-run test-e2e-agent-session-resume test-e2e-agent-idle-resume test-e2e-agent-scope-router test-e2e-send-freshness test-e2e-websocket-recovery test-e2e-m8 test-e2e-m9 test-e2e-remote-product-completeness test-e2e-token-accounting test-e2e-remote-server test-e2e-public-remote test-e2e-workspaces
+.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-release-install test-e2e-first-run test-e2e-agent-delivery test-e2e-agent-target-resolution test-e2e-agent-message-coalescing test-e2e-agent-template-credential test-e2e-automation test-e2e-budget-gate test-e2e-budget-gate-run test-e2e-agent-session-resume test-e2e-agent-idle-resume test-e2e-agent-scope-router test-e2e-send-freshness test-e2e-websocket-recovery test-e2e-m8 test-e2e-m9 test-e2e-remote-product-completeness test-e2e-token-accounting test-e2e-remote-server test-e2e-public-remote test-e2e-workspaces test-e2e-auto-daemon
 .DEFAULT_GOAL := help
 
 ENV_FILE ?= .env
@@ -103,6 +103,9 @@ test-e2e-remote-server: rebuild ## Verify pairing, reverse runtime RPC, durable 
 
 test-e2e-workspaces: rebuild ## Verify Workspace isolation, multi-user collaboration, two local Daemons, Guest access, UI, and DB truth
 	@cd frontend && CI=1 SOLO_E2E_WORKSPACES=1 npx playwright test e2e/workspace-multi-daemon.spec.ts --workers=1
+
+test-e2e-auto-daemon: rebuild ## Verify two page pairing commands use isolated Daemons
+	@cd frontend && CI=1 SOLO_E2E_WORKSPACES=1 npx playwright test e2e/workspace-multi-daemon.spec.ts --grep "page pairing commands" --workers=1
 
 test-e2e-public-remote: ## Verify real SMTP, registration, recovery, DB state, and clean-machine setup UX
 	@bash scripts/test-public-remote-e2e.sh

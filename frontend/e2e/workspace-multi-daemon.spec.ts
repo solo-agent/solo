@@ -1,14 +1,14 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
 const repoRoot = join(process.cwd(), '..');
-const soloBinary = join(repoRoot, '.pids', 'solo');
-const daemonBinary = join(repoRoot, '.pids', 'daemon');
+const soloBinary = process.env.SOLO_E2E_SOLO_BINARY ?? join(repoRoot, '.pids', 'solo');
+const daemonBinary = process.env.SOLO_E2E_DAEMON_BINARY ?? join(repoRoot, '.pids', 'daemon');
 const publicWorkspaceID = '00000000-0000-0000-0000-000000000001';
 
 interface AuthResponse {
@@ -163,6 +163,15 @@ function connectDaemon(profile: string, computer: Computer) {
   ]);
 }
 
+function automaticDaemon(home: string, args: string[]): string {
+  return execFileSync(soloBinary, ['daemon', ...args], {
+    cwd: repoRoot,
+    env: { ...process.env, HOME: home, SOLO_DAEMON_BINARY: daemonBinary },
+    encoding: 'utf8',
+    timeout: 60000,
+  });
+}
+
 async function availableRuntime(request: APIRequestContext, auth: AuthResponse, workspaceID: string, computerID: string): Promise<Runtime> {
   const runtimes = await call<Runtime[]>(request, auth, 'get', `/api/v1/agent-backends/detect?computer_id=${computerID}`, workspaceID);
   const runtime = ['codex', 'claude', 'opencode', 'hermes', 'openclaw']
@@ -175,6 +184,50 @@ async function availableRuntime(request: APIRequestContext, auth: AuthResponse, 
 test.describe('Workspace and multi-Daemon product flow', () => {
   test.skip(process.env.SOLO_E2E_WORKSPACES !== '1', 'requires the make-managed frontend, API, PostgreSQL, and real local runtime');
   test.setTimeout(600000);
+
+  test('keeps two page pairing commands isolated by computer ID', async ({ page, request }) => {
+    const auth = await register(request, 'AutomaticDaemon');
+    const suffix = Date.now().toString(36);
+    const home = mkdtempSync(join(tmpdir(), 'solo-auto-daemon-'));
+    const computers = await Promise.all([
+      call<Computer>(request, auth, 'post', '/api/v1/computers', undefined, { name: `Automatic A ${suffix}` }),
+      call<Computer>(request, auth, 'post', '/api/v1/computers', undefined, { name: `Automatic B ${suffix}` }),
+    ]);
+
+    try {
+      for (const computer of computers) {
+        if (!computer.enrollment_token) throw new Error(`Computer ${computer.id} has no enrollment token`);
+        automaticDaemon(home, [
+          'connect', '--server', apiBase, '--computer-id', computer.id,
+          '--token', computer.enrollment_token, '--profile', computer.id,
+        ]);
+      }
+
+      await expect.poll(() => databaseJSON<number>(`
+        SELECT to_json(count(*))::text FROM computers
+         WHERE id IN ('${computers[0].id}','${computers[1].id}') AND status='online'
+      `), { intervals: [250, 500, 1000] }).toBe(2);
+
+      const directories = computers.map((computer) => join(home, '.solo', 'daemons', computer.id));
+      const ports = directories.map((directory) => Number(readFileSync(join(directory, 'port'), 'utf8').trim()));
+      const pids = directories.map((directory) => Number(readFileSync(join(directory, 'daemon.pid'), 'utf8').trim()));
+      expect(ports[0]).not.toBe(ports[1]);
+      expect(pids[0]).not.toBe(pids[1]);
+
+      databaseJSON(`WITH updated AS (UPDATE users SET onboarding_completed_at=now() WHERE id='${auth.user.id}' RETURNING 1) SELECT to_json(EXISTS(SELECT 1 FROM updated))::text`);
+      await authenticatePage(page, auth);
+      await page.goto('/computers');
+      for (const computer of computers) {
+        await expect(page.getByText(computer.name, { exact: true })).toBeVisible();
+      }
+    } finally {
+      for (const computer of computers) {
+        try { automaticDaemon(home, ['stop', '--profile', computer.id]); } catch { /* primary assertion reports failure */ }
+      }
+      rmSync(home, { recursive: true, force: true });
+      deactivateTestUsers(auth);
+    }
+  });
 
   test('switches isolated Workspaces and collaborates through two users and two Daemons', async ({ page, request, browser }) => {
     const userA = await register(request, 'WorkspaceA');

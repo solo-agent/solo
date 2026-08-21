@@ -1,11 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -127,8 +129,53 @@ func TestDaemonProfilesUseIndependentState(t *testing.T) {
 	if alpha == beta || !strings.HasSuffix(alpha, filepath.Join("daemons", "alpha")) || !strings.HasSuffix(beta, filepath.Join("daemons", "beta")) {
 		t.Fatalf("profiles share state: alpha=%q beta=%q", alpha, beta)
 	}
-	profile, remaining, err := parseDaemonProfile([]string{"--server", "https://solo.example", "--profile", "alpha"})
-	if err != nil || profile != "alpha" || len(remaining) != 2 {
+	profile, explicit, remaining, err := parseDaemonProfile([]string{"--server", "https://solo.example", "--profile", "alpha"})
+	if err != nil || profile != "alpha" || !explicit || len(remaining) != 2 {
 		t.Fatalf("profile parse = %q %#v %v", profile, remaining, err)
+	}
+}
+
+func TestDaemonConnectProfileUsesComputerIDUnlessExplicitOrLegacyDefault(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	computerID := "11111111-1111-4111-8111-111111111111"
+	if got := daemonConnectProfile(defaultDaemonProfile, computerID, false); got != computerID {
+		t.Fatalf("new automatic profile = %q, want computer ID", got)
+	}
+	if got := daemonConnectProfile("work", computerID, true); got != "work" {
+		t.Fatalf("explicit profile = %q, want work", got)
+	}
+	path, err := managedCredentialPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(managedDaemonCredential{ComputerID: computerID})
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := daemonConnectProfile(defaultDaemonProfile, computerID, false); got != defaultDaemonProfile {
+		t.Fatalf("legacy default profile = %q, want default", got)
+	}
+}
+
+func TestDaemonProfilePIDRecoversFromLiveLock(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	lockPath, err := daemonStatePath("lock.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]int{"pid": os.Getpid()})
+	if err := os.WriteFile(lockPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if pid, running := daemonPID(); !running || pid != os.Getpid() {
+		t.Fatalf("daemonPID() = %d, %v; want current process", pid, running)
+	}
+	pidPath, err := daemonStatePath("daemon.pid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw, err = os.ReadFile(pidPath); err != nil || strings.TrimSpace(string(raw)) != strconv.Itoa(os.Getpid()) {
+		t.Fatalf("repaired pid record = %q, %v", raw, err)
 	}
 }
