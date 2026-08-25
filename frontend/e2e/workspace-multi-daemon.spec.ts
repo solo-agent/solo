@@ -30,6 +30,11 @@ interface Channel { id: string; name: string; workspace_id: string }
 interface Computer { id: string; name: string; status: string; enrollment_token?: string }
 interface Runtime { type: string; available: boolean }
 interface Agent { id: string; name: string; owner_id: string; home_channel_id: string; system_prompt: string; computer_id?: string }
+interface ChannelMember { member_id: string; agent_owner_id?: string; agent_home_channel_id?: string }
+interface ChannelProject {
+  baseline_version: string;
+  mappings: Array<{ user_id: string; computer_id?: string; local_path?: string; available: boolean }>;
+}
 interface GuestToken { id: string; token: string; url: string; expires_at: string }
 interface GuestInfo { workspace_id: string; channels: Channel[] }
 interface LucyResponse { agent_id: string; channel_id: string }
@@ -174,7 +179,7 @@ function automaticDaemon(home: string, args: string[]): string {
 
 async function availableRuntime(request: APIRequestContext, auth: AuthResponse, workspaceID: string, computerID: string): Promise<Runtime> {
   const runtimes = await call<Runtime[]>(request, auth, 'get', `/api/v1/agent-backends/detect?computer_id=${computerID}`, workspaceID);
-  const runtime = ['codex', 'claude', 'opencode', 'hermes', 'openclaw']
+  const runtime = ['claude', 'codex', 'opencode', 'hermes', 'openclaw']
     .map((type) => runtimes.find((item) => item.type === type && item.available))
     .find(Boolean);
   if (!runtime) throw new Error(`No real Agent runtime is available on ${computerID}: ${JSON.stringify(runtimes)}`);
@@ -242,41 +247,46 @@ test.describe('Workspace and multi-Daemon product flow', () => {
     const profileB = `e2e-b-${suffix}`;
     const markerA = `PROFILE_A_${suffix.toUpperCase()}`;
     const markerB = `PROFILE_B_${suffix.toUpperCase()}`;
+    const projectMarkerA = `PROJECT_A_${suffix.toUpperCase()}`;
+    const projectMarkerB = `PROJECT_B_${suffix.toUpperCase()}`;
+    const projectDirA = mkdtempSync(join(tmpdir(), 'solo-project-a-'));
+    const projectDirB = mkdtempSync(join(tmpdir(), 'solo-project-b-'));
     let alpha: Workspace | undefined;
     let beta: Workspace | undefined;
+    let alphaProject: Channel | undefined;
     let agentA: Agent | undefined;
     let agentB: Agent | undefined;
     let computerA!: Computer;
+    let runtimeA!: Runtime;
+    let alphaLucy!: LucyResponse;
 
     try {
       for (const auth of [userA, userB, outsider]) {
         const workspaces = await call<Workspace[]>(request, auth, 'get', '/api/v1/workspaces');
         expect(workspaces).toContainEqual(expect.objectContaining({ id: publicWorkspaceID, is_default: true }));
-        expect(workspaces).toContainEqual(expect.objectContaining({ id: auth.workspace_id, is_personal: true, role: 'owner' }));
+        expect(workspaces.filter((workspace) => workspace.is_personal)).toEqual([]);
       }
 
       computerA = await call<Computer>(request, userA, 'post', '/api/v1/computers', undefined, { name: `A Computer ${suffix}` });
       connectDaemon(profileA, computerA);
       await expect.poll(() => databaseJSON<string>(`SELECT to_json(COALESCE((SELECT status FROM computers WHERE id='${computerA.id}'),''))::text`), { intervals: [250, 500, 1000] }).toBe('online');
-      const runtimeA = await availableRuntime(request, userA, userA.workspace_id!, computerA.id);
-      const personalLucyChannel = await call<Channel>(request, userA, 'get', '/api/v1/channels/lucy', userA.workspace_id);
-      const sourceLucy = await call<LucyResponse>(request, userA, 'post', '/api/v1/onboarding/create-lucy', userA.workspace_id, {
-        runtime_type: runtimeA.type,
-        computer_id: computerA.id,
-        channel_id: personalLucyChannel.id,
-      });
-
       await authenticatePage(page, userA);
       await page.goto('/dashboard');
-      await expect(page.getByRole('button', { name: 'Workspace menu' })).toBeVisible();
-
-      await page.getByRole('button', { name: 'Workspace menu' }).click();
-      await page.getByRole('menuitem', { name: 'New Workspace' }).click();
+      await page.getByRole('button', { name: 'Create workspace', exact: true }).click();
       await page.getByLabel('Workspace name').fill(alphaName);
-      await page.getByRole('button', { name: 'Create Workspace', exact: true }).last().click();
+      await page.getByRole('button', { name: 'Create', exact: true }).click();
       await expect(page.getByText(alphaName, { exact: true }).first()).toBeVisible();
       alpha = (await call<Workspace[]>(request, userA, 'get', '/api/v1/workspaces')).find((item) => item.name === alphaName);
       expect(alpha).toBeTruthy();
+      runtimeA = await availableRuntime(request, userA, alpha!.id, computerA.id);
+      const alphaLucyChannel = await call<Channel>(request, userA, 'get', '/api/v1/channels/lucy', alpha!.id);
+      alphaLucy = await call<LucyResponse>(request, userA, 'post', '/api/v1/onboarding/create-lucy', alpha!.id, {
+        runtime_type: runtimeA.type,
+        computer_id: computerA.id,
+        channel_id: alphaLucyChannel.id,
+      });
+      databaseJSON(`WITH updated AS (UPDATE users SET onboarding_completed_at=now() WHERE id='${userA.user.id}' RETURNING 1) SELECT to_json(EXISTS(SELECT 1 FROM updated))::text`);
+      await page.reload();
 
       const ownerReinvite = await request.post(`${apiBase}/api/v1/workspaces/${alpha!.id}/members`, {
         headers: { authorization: `Bearer ${userA.access_token}` },
@@ -292,7 +302,7 @@ test.describe('Workspace and multi-Daemon product flow', () => {
         headers: { authorization: `Bearer ${userB.access_token}` },
         data: { role: 'member' },
       });
-      expect(ownerDemotion.status()).toBe(400);
+      expect(ownerDemotion.status()).toBe(403);
       const ownerRemoval = await request.delete(`${apiBase}/api/v1/workspaces/${alpha!.id}/members/${userA.user.id}`, {
         headers: { authorization: `Bearer ${userB.access_token}` },
       });
@@ -302,13 +312,12 @@ test.describe('Workspace and multi-Daemon product flow', () => {
       const alphaGeneral = alphaChannels.find((item) => item.name === 'general');
       expect(alphaGeneral).toBeTruthy();
       expect((await call<Channel>(request, userA, 'get', '/api/v1/channels/lucy', alpha!.id)).workspace_id).toBe(alpha!.id);
-      await call<Channel>(request, userA, 'post', '/api/v1/channels', alpha!.id, { name: alphaChannelName });
+      alphaProject = await call<Channel>(request, userA, 'post', '/api/v1/channels', alpha!.id, { name: alphaChannelName });
       expect((await call<Channel[]>(request, userB, 'get', '/api/v1/channels', alpha!.id)).map((channel) => channel.name)).toContain(alphaChannelName);
 
-      await page.getByRole('button', { name: 'Workspace menu' }).click();
-      await page.getByRole('menuitem', { name: 'New Workspace' }).click();
+      await page.getByRole('button', { name: 'New workspace' }).click();
       await page.getByLabel('Workspace name').fill(betaName);
-      await page.getByRole('button', { name: 'Create Workspace', exact: true }).last().click();
+      await page.getByRole('button', { name: 'Create', exact: true }).click();
       await expect(page.getByText(betaName, { exact: true }).first()).toBeVisible();
       beta = (await call<Workspace[]>(request, userA, 'get', '/api/v1/workspaces')).find((item) => item.name === betaName);
       expect(beta).toBeTruthy();
@@ -325,25 +334,22 @@ test.describe('Workspace and multi-Daemon product flow', () => {
       `);
       expect(lucyIsolation.alpha_lucy).not.toBe('');
       expect(lucyIsolation.beta_lucy).not.toBe('');
-      expect(lucyIsolation.alpha_lucy).not.toBe(sourceLucy.agent_id);
+      expect(lucyIsolation.alpha_lucy).toBe(alphaLucy.agent_id);
       expect(lucyIsolation.alpha_lucy).not.toBe(lucyIsolation.beta_lucy);
       expect(lucyIsolation.shared_computer).toBe(true);
       expect(lucyIsolation.cross_session).toBe(0);
-      await expect.poll(() => [sourceLucy.agent_id, lucyIsolation.alpha_lucy, lucyIsolation.beta_lucy].every((id) => existsSync(join(homedir(), '.solo', 'agents', id, 'workspace', 'MEMORY.md')))).toBe(true);
+      await expect.poll(() => [lucyIsolation.alpha_lucy, lucyIsolation.beta_lucy].every((id) => existsSync(join(homedir(), '.solo', 'agents', id, 'workspace', 'MEMORY.md')))).toBe(true);
 
-      await page.getByRole('button', { name: 'Workspace menu' }).click();
-      await page.getByRole('menuitem', { name: `Switch to ${alphaName}` }).click();
+      await page.getByRole('button', { name: `Switch to ${alphaName}` }).click();
       await expect(page.getByText(alphaChannelName, { exact: true })).toBeVisible();
       await expect(page.getByText(betaChannelName, { exact: true })).toHaveCount(0);
       await expect(page.getByText('People', { exact: true })).toBeVisible();
       await expect(page.getByText(userB.user.display_name, { exact: true })).toBeVisible();
 
-      await page.getByRole('button', { name: 'Workspace menu' }).click();
-      await page.getByRole('menuitem', { name: `Switch to ${betaName}` }).click();
+      await page.getByRole('button', { name: `Switch to ${betaName}` }).click();
       await expect(page.getByText(betaChannelName, { exact: true })).toBeVisible();
       await expect(page.getByText(alphaChannelName, { exact: true })).toHaveCount(0);
-      await page.getByRole('button', { name: 'Workspace menu' }).click();
-      await page.getByRole('menuitem', { name: 'Switch to Solo Public' }).click();
+      await page.getByRole('button', { name: 'Switch to Solo Public' }).click();
       await expect(page.getByText(alphaChannelName, { exact: true })).toHaveCount(0);
       await expect(page.getByText(betaChannelName, { exact: true })).toHaveCount(0);
 
@@ -377,12 +383,34 @@ test.describe('Workspace and multi-Daemon product flow', () => {
       expect(daemon(profileB, ['status'])).toContain(computerB.id);
 
       const runtimeB = await availableRuntime(request, userB, alpha!.id, computerB.id);
+      await call<ChannelProject>(request, userA, 'patch', `/api/v1/channels/${alphaGeneral!.id}/project`, alpha!.id, {
+        source: 'https://example.invalid/shared-project.git',
+        baseline_version: 'main',
+      });
+      await call<ChannelProject>(request, userA, 'put', `/api/v1/channels/${alphaGeneral!.id}/project/mappings/${computerA.id}`, alpha!.id, {
+        local_path: projectDirA,
+        version: 'main',
+        access_mode: 'read_write',
+      });
+      await call<ChannelProject>(request, userB, 'put', `/api/v1/channels/${alphaGeneral!.id}/project/mappings/${computerB.id}`, alpha!.id, {
+        local_path: projectDirB,
+        version: 'main',
+        access_mode: 'read_write',
+      });
+      const projectAsA = await call<ChannelProject>(request, userA, 'get', `/api/v1/channels/${alphaGeneral!.id}/project`, alpha!.id);
+      const projectAsB = await call<ChannelProject>(request, userB, 'get', `/api/v1/channels/${alphaGeneral!.id}/project`, alpha!.id);
+      expect(projectAsA.baseline_version).toBe('main');
+      expect(projectAsA.mappings.find((mapping) => mapping.user_id === userA.user.id)).toMatchObject({ computer_id: computerA.id, local_path: projectDirA, available: true });
+      expect(projectAsA.mappings.find((mapping) => mapping.user_id === userB.user.id)?.local_path).toBeUndefined();
+      expect(projectAsB.mappings.find((mapping) => mapping.user_id === userB.user.id)).toMatchObject({ computer_id: computerB.id, local_path: projectDirB, available: true });
+      expect(projectAsB.mappings.find((mapping) => mapping.user_id === userA.user.id)?.local_path).toBeUndefined();
+
       agentA = await call<Agent>(request, userA, 'post', `/api/v1/channels/${alphaGeneral!.id}/agents`, alpha!.id, {
         name: `ProfileA${suffix}`,
         computer_id: computerA.id,
         model_provider: runtimeA.type,
         model_name: runtimeA.type === 'claude' ? 'sonnet' : '',
-        system_prompt: `When you introduce yourself, use solo message send exactly once with ${markerA}. Do not only print it.`,
+        system_prompt: `When you introduce yourself, use solo message send exactly once with ${markerA}. When a message contains PROJECT_MAPPING_PROOF, create agent-a-proof.txt with exactly ${projectMarkerA}, then send a visible reply containing ${projectMarkerA}.`,
       });
       await expect.poll(() => databaseJSON<{ completed: number; messages: number }>(`
         SELECT json_build_object(
@@ -396,7 +424,7 @@ test.describe('Workspace and multi-Daemon product flow', () => {
         computer_id: computerB.id,
         model_provider: runtimeB.type,
         model_name: runtimeB.type === 'claude' ? 'sonnet' : '',
-        system_prompt: `When you introduce yourself, use solo message send exactly once with ${markerB}. Do not only print it.`,
+        system_prompt: `When you introduce yourself, use solo message send exactly once with ${markerB}. When a message contains PROJECT_MAPPING_PROOF, create agent-b-proof.txt with exactly ${projectMarkerB}, then send a visible reply containing ${projectMarkerB}.`,
       });
 
       const directoryAsA = await call<Agent[]>(request, userA, 'get', '/api/v1/agents', alpha!.id);
@@ -414,6 +442,63 @@ test.describe('Workspace and multi-Daemon product flow', () => {
           'messages', (SELECT COUNT(*) FROM messages WHERE channel_id='${alphaGeneral.id}' AND sender_id IN ('${agentA.id}','${agentB.id}'))
         )::text
       `), { timeout: 240000, intervals: [1000, 2000, 5000] }).toEqual({ completed: 2, messages: 2 });
+      await expect.poll(() => databaseJSON<number>(`
+        SELECT count(*)::int FROM agent_runs
+        WHERE agent_id IN ('${agentA.id}','${agentB.id}') AND finished_at IS NULL
+      `), { timeout: 240000, intervals: [1000, 2000, 5000] }).toBe(0);
+
+      const foreignConnect = await request.post(`${apiBase}/api/v1/channels/${alphaProject!.id}/members`, {
+        headers: { authorization: `Bearer ${userB.access_token}`, 'X-Workspace-ID': alpha!.id },
+        data: { member_type: 'agent', member_id: agentA.id },
+      });
+      expect(foreignConnect.status()).toBe(403);
+      await call(request, userA, 'post', `/api/v1/channels/${alphaProject!.id}/members`, alpha!.id, { member_type: 'agent', member_id: agentA.id });
+      expect((await call<ChannelMember[]>(request, userA, 'get', `/api/v1/channels/${alphaProject!.id}/members`, alpha!.id)).find((member) => member.member_id === agentA!.id)).toMatchObject({
+        agent_owner_id: userA.user.id,
+        agent_home_channel_id: alphaGeneral!.id,
+      });
+      const foreignHomeDelete = await request.delete(`${apiBase}/api/v1/channels/${alphaGeneral!.id}/members/${agentA.id}`, {
+        headers: { authorization: `Bearer ${userB.access_token}`, 'X-Workspace-ID': alpha!.id },
+      });
+      expect(foreignHomeDelete.status()).toBe(403);
+      await call(request, userB, 'delete', `/api/v1/channels/${alphaProject!.id}/members/${agentA.id}`, alpha!.id);
+      expect(databaseJSON<{ active: boolean; home_member: number }>(`
+        SELECT json_build_object(
+          'active', is_active,
+          'home_member', (SELECT count(*) FROM channel_members WHERE channel_id='${alphaGeneral!.id}' AND member_type='agent' AND member_id='${agentA.id}')
+        )::text FROM agents WHERE id='${agentA.id}'
+      `)).toEqual({ active: true, home_member: 1 });
+
+      await page.evaluate(({ userID, workspaceID }) => localStorage.setItem(`solo_active_workspace_id:${userID}`, workspaceID), { userID: userA.user.id, workspaceID: alpha!.id });
+      await page.goto(`/dashboard?channel=${alphaProject!.id}`);
+      const createFirstAgent = page.getByRole('button', { name: 'Create first Agent' });
+      await expect(createFirstAgent).toBeVisible({ timeout: 15000 });
+      await createFirstAgent.click();
+      const connectOwnAgent = page.getByRole('dialog').last();
+      await expect(connectOwnAgent.getByText('Connect one of my Agents')).toBeVisible();
+      await expect(connectOwnAgent.getByText(agentA.name, { exact: true })).toBeVisible();
+      await expect(connectOwnAgent.getByText(agentB.name, { exact: true })).toHaveCount(0);
+      await page.keyboard.press('Escape');
+
+      const projectTrigger = await call<{ id: string }>(request, userA, 'post', `/api/v1/channels/${alphaGeneral!.id}/messages`, alpha!.id, {
+        content: 'PROJECT_MAPPING_PROOF',
+      });
+      await expect.poll(() => databaseJSON<{ completed: number; mapped: number }>(`
+        SELECT json_build_object(
+          'completed', count(*) FILTER (WHERE status='completed'),
+          'mapped', count(*) FILTER (WHERE
+            (agent_id='${agentA.id}' AND project_computer_id='${computerA.id}' AND project_path='${projectDirA}' AND project_version='main') OR
+            (agent_id='${agentB.id}' AND project_computer_id='${computerB.id}' AND project_path='${projectDirB}' AND project_version='main')
+          )
+        )::text
+        FROM agent_runs
+        WHERE agent_id IN ('${agentA.id}','${agentB.id}') AND trigger_message_id='${projectTrigger.id}'
+      `), { timeout: 240000, intervals: [1000, 2000, 5000] }).toEqual({ completed: 2, mapped: 2 });
+      await expect.poll(() => existsSync(join(projectDirA, 'agent-a-proof.txt')) && existsSync(join(projectDirB, 'agent-b-proof.txt')), {
+        timeout: 15000,
+      }).toBe(true);
+      expect(readFileSync(join(projectDirA, 'agent-a-proof.txt'), 'utf8').trim()).toBe(projectMarkerA);
+      expect(readFileSync(join(projectDirB, 'agent-b-proof.txt'), 'utf8').trim()).toBe(projectMarkerB);
 
       const agentMessages = await call<MessageList>(request, userA, 'get', `/api/v1/channels/${alphaGeneral.id}/messages?limit=100`, alpha.id);
       const agentAContent = agentMessages.messages.find((message) => message.sender_id === agentA!.id)?.content;
@@ -454,7 +539,7 @@ test.describe('Workspace and multi-Daemon product flow', () => {
       const betaGuestAccess = await request.get(`${apiBase}/api/v1/guest/channels/${(await call<Channel[]>(request, userA, 'get', '/api/v1/channels', beta!.id))[0].id}/messages`, { headers: { authorization: `Guest ${guestToken.token}` } });
       expect(betaGuestAccess.status()).toBe(404);
 
-      await page.evaluate((workspaceID) => localStorage.setItem('solo_active_workspace_id', workspaceID), alpha!.id);
+      await page.evaluate(({ userID, workspaceID }) => localStorage.setItem(`solo_active_workspace_id:${userID}`, workspaceID), { userID: userA.user.id, workspaceID: alpha!.id });
       await page.goto(`/dashboard?channel=${alphaGeneral!.id}`);
       await expect(page.getByText(agentAContent!, { exact: false })).toBeVisible({ timeout: 180000 });
       await expect(page.getByText(agentBContent!, { exact: false })).toBeVisible({ timeout: 180000 });
@@ -509,6 +594,8 @@ test.describe('Workspace and multi-Daemon product flow', () => {
         try { daemon(profile, ['stop']); } catch { /* test assertion reports the primary failure */ }
         rmSync(directory, { recursive: true, force: true });
       }
+      rmSync(projectDirA, { recursive: true, force: true });
+      rmSync(projectDirB, { recursive: true, force: true });
       finishTestRuns(userA, userB, outsider);
       if (alpha) await call(request, userA, 'delete', `/api/v1/workspaces/${alpha.id}`).catch(() => undefined);
       deactivateTestUsers(userA, userB, outsider);
@@ -617,7 +704,7 @@ test.describe('Workspace and multi-Daemon product flow', () => {
       });
 
       await authenticatePage(page, invited);
-      await page.addInitScript((workspaceID) => localStorage.setItem('solo_active_workspace_id', workspaceID), workspace.id);
+      await page.addInitScript(({ userID, workspaceID }) => localStorage.setItem(`solo_active_workspace_id:${userID}`, workspaceID), { userID: invited.user.id, workspaceID: workspace.id });
       await page.goto('/dashboard');
       await expect(page.getByRole('button', { name: 'Workspace menu' })).toContainText(workspace.name);
       await expect(page.getByRole('button', { name: 'People 6' })).toBeVisible();

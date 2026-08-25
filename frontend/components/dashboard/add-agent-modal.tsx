@@ -13,6 +13,7 @@ import { useAgents } from '@/lib/hooks/use-agents';
 import { t } from '@/lib/i18n';
 import { apiClient } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/lib/auth-context';
 
 interface WorkspaceAgent {
   id: string;
@@ -33,8 +34,7 @@ interface AddAgentModalProps {
 /**
  * Creates a fresh Agent whose home is the current Channel.
  *
- * Existing Agents are intentionally not offered here: visible Agents are
- * Channel-scoped and cannot be moved or reused across Channels.
+ * The owner may also connect one of their existing Workspace Agents.
  */
 export function AddAgentModal({
   open,
@@ -43,6 +43,7 @@ export function AddAgentModal({
   onChanged,
 }: AddAgentModalProps) {
   const { createAgent } = useAgents(channelId);
+  const { user } = useAuth();
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formKey, setFormKey] = useState(0);
@@ -51,9 +52,9 @@ export function AddAgentModal({
   useEffect(() => {
     if (!open) return;
     apiClient.get<WorkspaceAgent[]>('/api/v1/agents')
-      .then((items) => setWorkspaceAgents(items.filter((item) => item.home_channel_id !== channelId)))
+      .then((items) => setWorkspaceAgents(items.filter((item) => item.owner_id === user?.id && item.home_channel_id !== channelId)))
       .catch(() => setWorkspaceAgents([]));
-  }, [open, channelId]);
+  }, [open, channelId, user?.id]);
 
   const handleOpenChange = useCallback((next: boolean) => {
     setError(null);

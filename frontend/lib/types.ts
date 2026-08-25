@@ -202,6 +202,8 @@ export interface ChannelMember {
   member_id: string;
   role: 'owner' | 'admin' | 'member';
   workspace_role?: 'owner' | 'admin' | 'member';
+  agent_owner_id?: string;
+  agent_home_channel_id?: string;
   display_name: string;
   avatar_url?: string | null;
   status: 'online' | 'offline' | 'thinking' | 'typing';

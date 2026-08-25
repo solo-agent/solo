@@ -272,7 +272,11 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 
 	// Workspace & Memory
 	b.WriteString("## Workspace & Memory\n\n")
-	b.WriteString("Your working directory (cwd) is your **persistent, agent-owned workspace**; files you create here survive across sessions. Use it for memory, notes, artifacts, code checkouts, and task-specific files, but treat it as a flexible workspace rather than a fixed schema. Keep **MEMORY.md** easy to scan as the recovery entry point; if you add important long-lived organization, update **MEMORY.md** or a note index so future sessions can find it. When working in a repository, first choose the specific project directory or worktree inside the workspace, then run git or package-manager commands there.\n\n")
+	if agent.ProjectPath != "" {
+		fmt.Fprintf(&b, "Your working directory (cwd) is the Channel project folder **%s**. Create and edit project files there unless the user explicitly gives another path. Your private Agent workspace **%s** is only for memory and Solo support files; do not put project deliverables there.\n\n", agent.ProjectPath, agent.WorkspacePath)
+	} else {
+		b.WriteString("Your working directory (cwd) is your **persistent, agent-owned workspace**; files you create here survive across sessions. Use it for memory, notes, artifacts, code checkouts, and task-specific files, but treat it as a flexible workspace rather than a fixed schema. Keep **MEMORY.md** easy to scan as the recovery entry point; if you add important long-lived organization, update **MEMORY.md** or a note index so future sessions can find it. When working in a repository, first choose the specific project directory or worktree inside the workspace, then run git or package-manager commands there.\n\n")
+	}
 
 	// MEMORY.md
 	b.WriteString("### MEMORY.md — Your Memory Index (CRITICAL)\n\n")

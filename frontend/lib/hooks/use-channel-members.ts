@@ -23,6 +23,8 @@ interface MemberResponse {
   email?: string;
   role: string;
   workspace_role?: string;
+  agent_owner_id?: string;
+  agent_home_channel_id?: string;
   joined_at: string;
 }
 
@@ -35,6 +37,8 @@ function mapMember(resp: MemberResponse): ChannelMember {
     member_id: resp.member_id,
     role: resp.role as 'owner' | 'admin' | 'member',
     workspace_role: resp.workspace_role as 'owner' | 'admin' | 'member' | undefined,
+    agent_owner_id: resp.agent_owner_id,
+    agent_home_channel_id: resp.agent_home_channel_id,
     // Backend only resolves display_name for user members.
     // For agent members, fall back to member_id.
     display_name: resp.display_name || resp.member_id,

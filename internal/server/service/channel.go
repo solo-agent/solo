@@ -41,6 +41,8 @@ type Member struct {
 	Email         string    `json:"email,omitempty"`
 	Role          string    `json:"role"`
 	WorkspaceRole string    `json:"workspace_role,omitempty"`
+	AgentOwnerID  string    `json:"agent_owner_id,omitempty"`
+	AgentHomeID   string    `json:"agent_home_channel_id,omitempty"`
 	JoinedAt      time.Time `json:"joined_at"`
 }
 
@@ -131,11 +133,12 @@ func (s *ChannelService) AddMember(ctx context.Context, channelID, requesterID, 
 		return ErrChannelNotFound
 	}
 
-	// Verify requester is channel owner or admin
+	// Every request comes from a User who is already in the Channel. Connecting
+	// an Agent is an ownership action, not an administrator surrogate action.
 	var requesterRole string
 	err = s.pool.QueryRow(ctx,
 		`SELECT role FROM channel_members
-		 WHERE channel_id = $1 AND member_type IN ('user', 'agent') AND member_id = $2`,
+		 WHERE channel_id = $1 AND member_type = 'user' AND member_id = $2`,
 		channelID, requesterID,
 	).Scan(&requesterRole)
 	if err != nil {
@@ -144,7 +147,7 @@ func (s *ChannelService) AddMember(ctx context.Context, channelID, requesterID, 
 		}
 		return err
 	}
-	if requesterRole != "owner" && requesterRole != "admin" {
+	if memberType != "agent" && requesterRole != "owner" && requesterRole != "admin" {
 		return ErrPermissionDenied
 	}
 
@@ -167,20 +170,23 @@ func (s *ChannelService) AddMember(ctx context.Context, channelID, requesterID, 
 			return ErrUserNotFound
 		}
 	case "agent":
-		var kind string
+		var kind, ownerID string
 		err = s.pool.QueryRow(ctx,
-			`SELECT a.kind
+			`SELECT a.kind, a.owner_id::text
 			   FROM agents a
 			   JOIN channels home ON home.id=a.home_channel_id
 			   JOIN channels target ON target.id=$2
 			   JOIN workspace_members wm ON wm.workspace_id=target.workspace_id AND wm.user_id=a.owner_id
 			  WHERE a.id=$1 AND a.is_active=true AND home.workspace_id=target.workspace_id`, memberID, channelID,
-		).Scan(&kind)
+		).Scan(&kind, &ownerID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrAgentNotFound
 			}
 			return err
+		}
+		if ownerID != requesterID {
+			return ErrPermissionDenied
 		}
 		// Any ordinary Agent owned by a member of this Workspace can join.
 		// Runtime secrets remain owner-only in the Agent API.
@@ -244,9 +250,30 @@ func (s *ChannelService) RemoveMember(ctx context.Context, channelID, requesterI
 			return "", ErrPermissionDenied
 		}
 	}
+	if memberType == "agent" {
+		var agentOwnerID, homeChannelID, requesterRole, workspaceRole string
+		if err := s.pool.QueryRow(ctx, `SELECT owner_id::text, home_channel_id::text FROM agents WHERE id=$1 AND is_active=true`, memberID).Scan(&agentOwnerID, &homeChannelID); err != nil {
+			return "", ErrMemberNotFound
+		}
+		if err := s.pool.QueryRow(ctx, `
+			SELECT cm.role, wm.role
+			  FROM channels c
+			  JOIN channel_members cm ON cm.channel_id=c.id AND cm.member_type='user' AND cm.member_id=$2
+			  JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=$2
+			 WHERE c.id=$1`, channelID, requesterID).Scan(&requesterRole, &workspaceRole); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return "", ErrNotChannelMember
+			}
+			return "", err
+		}
+		isAdmin := requesterRole == "owner" || requesterRole == "admin" || workspaceRole == "owner" || workspaceRole == "admin"
+		if requesterID != agentOwnerID && (homeChannelID == channelID || !isAdmin) {
+			return "", ErrPermissionDenied
+		}
+	}
 
 	// Check permissions
-	if memberID != requesterID {
+	if memberType != "agent" && memberID != requesterID {
 		// Only owner/admin can remove other members
 		var requesterRole string
 		err = s.pool.QueryRow(ctx,
@@ -401,7 +428,8 @@ func (s *ChannelService) ListMembers(ctx context.Context, channelID, requesterID
 		`SELECT cm.channel_id, cm.member_type, cm.member_id,
 				COALESCE(u.display_name, a.name, 'Unknown'), COALESCE(u.email, ''),
 				COALESCE(u.avatar_url, a.avatar_url, ''),
-				cm.role, COALESCE(wm.role,''), cm.joined_at
+				cm.role, COALESCE(wm.role,''), COALESCE(a.owner_id::text,''),
+				COALESCE(a.home_channel_id::text,''), cm.joined_at
 		 FROM channel_members cm
 		 JOIN channels c ON c.id=cm.channel_id
 		 LEFT JOIN users u ON cm.member_type = 'user' AND cm.member_id = u.id
@@ -421,7 +449,8 @@ func (s *ChannelService) ListMembers(ctx context.Context, channelID, requesterID
 	for rows.Next() {
 		var m Member
 		if err := rows.Scan(&m.ChannelID, &m.MemberType, &m.MemberID,
-			&m.DisplayName, &m.Email, &m.AvatarURL, &m.Role, &m.WorkspaceRole, &m.JoinedAt); err != nil {
+			&m.DisplayName, &m.Email, &m.AvatarURL, &m.Role, &m.WorkspaceRole,
+			&m.AgentOwnerID, &m.AgentHomeID, &m.JoinedAt); err != nil {
 			return nil, err
 		}
 		members = append(members, m)

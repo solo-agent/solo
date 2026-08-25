@@ -226,6 +226,15 @@ func TestBuildSystemPrompt_Workspace(t *testing.T) {
 	assertNotHas(t, p, "Deliverable: ./path/to/result.html")
 }
 
+func TestBuildSystemPrompt_ProjectFolderOverridesWorkspaceCWD(t *testing.T) {
+	p := BuildSystemPrompt(AgentConfig{
+		Name: "Bot", WorkspacePath: "/agents/bot/workspace", ProjectPath: "/projects/shared",
+	}, ChannelContext{TriggerType: TriggerChat}, "", nil)
+	assertHas(t, p, "working directory (cwd) is the Channel project folder **/projects/shared**")
+	assertHas(t, p, "private Agent workspace **/agents/bot/workspace** is only for memory")
+	assertNotHas(t, p, "working directory (cwd) is your **persistent, agent-owned workspace**")
+}
+
 func TestBuildSystemPrompt_AllTriggers(t *testing.T) {
 	for _, trigger := range []TriggerType{TriggerChat, TriggerMention, TriggerDM, TriggerThread} {
 		t.Run(string(trigger), func(t *testing.T) {

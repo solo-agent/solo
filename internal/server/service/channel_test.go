@@ -92,3 +92,87 @@ func TestListMembersHidesInactiveAgentMembers(t *testing.T) {
 		t.Fatalf("active agent member missing from ListMembers")
 	}
 }
+
+func TestChannelAgentOwnershipAndRemovalBoundaries(t *testing.T) {
+	pool := taskSubmitTestPool(t)
+	ctx := context.Background()
+	ownerID := taskSubmitUser(t, pool)
+	adminID := taskSubmitUser(t, pool)
+	workspaceID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO workspaces (id,name,created_by) VALUES ($1,$2,$3)`, workspaceID, "Agent ownership "+workspaceID[:8], ownerID); err != nil {
+		t.Fatalf("create Workspace: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO workspace_members (workspace_id,user_id,role) VALUES ($1,$2,'owner'),($1,$3,'member')`, workspaceID, ownerID, adminID); err != nil {
+		t.Fatalf("create Workspace members: %v", err)
+	}
+	homeID, err := NewChannelService(pool).CreateChannelInWorkspace(ctx, "agent-home-"+workspaceID[:8], "", "channel", ownerID, workspaceID)
+	if err != nil {
+		t.Fatalf("create home Channel: %v", err)
+	}
+	sharedID, err := NewChannelService(pool).CreateChannelInWorkspace(ctx, "agent-shared-"+workspaceID[:8], "", "channel", ownerID, workspaceID)
+	if err != nil {
+		t.Fatalf("create shared Channel: %v", err)
+	}
+	foreignWorkspaceID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO workspaces (id,name,created_by) VALUES ($1,$2,$3)`, foreignWorkspaceID, "Foreign Workspace "+foreignWorkspaceID[:8], ownerID); err != nil {
+		t.Fatalf("create foreign Workspace: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO workspace_members (workspace_id,user_id,role) VALUES ($1,$2,'owner')`, foreignWorkspaceID, ownerID); err != nil {
+		t.Fatalf("create foreign Workspace member: %v", err)
+	}
+	foreignChannelID, err := NewChannelService(pool).CreateChannelInWorkspace(ctx, "foreign-channel-"+foreignWorkspaceID[:8], "", "channel", ownerID, foreignWorkspaceID)
+	if err != nil {
+		t.Fatalf("create foreign Channel: %v", err)
+	}
+	agentID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO agents (id,name,owner_id,model_name,home_channel_id) VALUES ($1,$2,$3,'test-model',$4)`, agentID, "owned-agent-"+agentID[:8], ownerID, homeID); err != nil {
+		t.Fatalf("create Agent: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO channel_members (channel_id,member_type,member_id) VALUES ($1,'agent',$2)`, homeID, agentID); err != nil {
+		t.Fatalf("add Agent to home Channel: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id=$1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM workspaces WHERE id IN ($1,$2)`, workspaceID, foreignWorkspaceID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id IN ($1,$2)`, ownerID, adminID)
+	})
+
+	svc := NewChannelService(pool)
+	if err := svc.AddMember(ctx, sharedID, adminID, "agent", agentID); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("non-owner AddMember error = %v, want %v", err, ErrPermissionDenied)
+	}
+	if err := svc.AddMember(ctx, sharedID, ownerID, "agent", agentID); err != nil {
+		t.Fatalf("owner AddMember: %v", err)
+	}
+	if err := svc.AddMember(ctx, foreignChannelID, ownerID, "agent", agentID); err == nil {
+		t.Fatalf("owner connected Agent across Workspaces")
+	}
+	members, err := svc.ListMembers(ctx, sharedID, ownerID)
+	if err != nil {
+		t.Fatalf("ListMembers: %v", err)
+	}
+	foundOwnership := false
+	for _, member := range members {
+		if member.MemberID == agentID {
+			foundOwnership = member.AgentOwnerID == ownerID && member.AgentHomeID == homeID
+		}
+	}
+	if !foundOwnership {
+		t.Fatalf("Agent ownership metadata missing from Channel members")
+	}
+	if _, err := svc.RemoveMember(ctx, sharedID, adminID, agentID); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("ordinary member RemoveMember error = %v, want %v", err, ErrPermissionDenied)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE workspace_members SET role='admin' WHERE workspace_id=$1 AND user_id=$2`, workspaceID, adminID); err != nil {
+		t.Fatalf("promote Workspace admin: %v", err)
+	}
+	if _, err := svc.RemoveMember(ctx, sharedID, adminID, agentID); err != nil {
+		t.Fatalf("Workspace admin remove connected Agent: %v", err)
+	}
+	if err := svc.AddMember(ctx, sharedID, ownerID, "agent", agentID); err != nil {
+		t.Fatalf("owner reconnect Agent: %v", err)
+	}
+	if _, err := svc.RemoveMember(ctx, homeID, adminID, agentID); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("Workspace admin delete foreign Agent error = %v, want %v", err, ErrPermissionDenied)
+	}
+}

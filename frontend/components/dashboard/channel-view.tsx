@@ -49,6 +49,26 @@ type WorkspaceDetail = { relationship: AgentRelationship | null; agent: AgentDet
 type ModerationStatus = { posting_policy: 'everyone' | 'admins_only'; role: 'owner' | 'admin' | 'member'; muted: boolean; can_manage: boolean; can_post: boolean };
 type MutedMember = { user_id: string; display_name: string; workspace_role: 'owner' | 'admin' | 'member' };
 type PinnedMessage = { message_id: string; content: string; sender_name: string; pinned_at: string };
+type ChannelProjectMapping = {
+  user_id: string;
+  user_name: string;
+  computer_id?: string;
+  computer_name?: string;
+  local_path?: string;
+  version?: string;
+  access_mode?: 'read_only' | 'read_write';
+  computer_status?: string;
+  available: boolean;
+  reason?: 'missing' | 'computer_offline' | 'read_only' | 'version_mismatch';
+};
+type ChannelProject = {
+  channel_id: string;
+  name: string;
+  source?: string;
+  baseline_version?: string;
+  can_manage: boolean;
+  mappings: ChannelProjectMapping[];
+};
 const TEAM_TASK_VISIBLE_STATUSES = new Set<TaskStatus>(['in_progress', 'in_review']);
 const MIN_SPLIT_PANE_WIDTH = 320;
 const SPLIT_KEYBOARD_STEP = 2;
@@ -208,34 +228,99 @@ export function ChannelView({
   const [mutedMembers, setMutedMembers] = useState<MutedMember[]>([]);
   const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>([]);
   const [moderationOpen, setModerationOpen] = useState(false);
-  const [projectComputerId, setProjectComputerId] = useState(channel.project_computer_id ?? '');
-  const [projectPath, setProjectPath] = useState(channel.project_path ?? '');
-  const [boundProjectPath, setBoundProjectPath] = useState(channel.project_path ?? '');
-  const [projectBindingBusy, setProjectBindingBusy] = useState(false);
+  const [projectOpen, setProjectOpen] = useState(false);
+  const [project, setProject] = useState<ChannelProject | null>(null);
+  const [projectComputerId, setProjectComputerId] = useState('');
+  const [projectPath, setProjectPath] = useState('');
+  const [projectVersion, setProjectVersion] = useState('');
+  const [projectAccessMode, setProjectAccessMode] = useState<'read_only' | 'read_write'>('read_write');
+  const [projectSource, setProjectSource] = useState('');
+  const [projectBaseline, setProjectBaseline] = useState('');
+  const [projectBusy, setProjectBusy] = useState(false);
+
+  const loadProject = useCallback(async () => {
+    if (channel.type !== 'channel') return;
+    try {
+      const next = await apiClient.get<ChannelProject>(`/api/v1/channels/${channel.id}/project`);
+      setProject(next);
+      setProjectSource(next.source ?? '');
+      setProjectBaseline(next.baseline_version ?? '');
+      const own = next.mappings.find((mapping) => mapping.user_id === user?.id && mapping.computer_id === projectComputerId)
+        ?? next.mappings.find((mapping) => mapping.user_id === user?.id && mapping.computer_id);
+      const computerID = own?.computer_id ?? computers.find((computer) => computer.status === 'online')?.id ?? computers[0]?.id ?? '';
+      setProjectComputerId(computerID);
+      setProjectPath(own?.local_path ?? '');
+      setProjectVersion(own?.version ?? next.baseline_version ?? '');
+      setProjectAccessMode(own?.access_mode ?? 'read_write');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : t('channelProjectLoadError'), 'error');
+    }
+  }, [channel.id, channel.type, computers, projectComputerId, showToast, user?.id]);
 
   useEffect(() => {
-    setProjectComputerId(channel.project_computer_id ?? '');
-    setProjectPath(channel.project_path ?? '');
-    setBoundProjectPath(channel.project_path ?? '');
-  }, [channel.id, channel.project_computer_id, channel.project_path]);
+    setProject(null);
+    setProjectComputerId('');
+    setProjectPath('');
+  }, [channel.id]);
 
-  const saveProjectBinding = useCallback(async (clear = false) => {
-    setProjectBindingBusy(true);
+  const selectProjectComputer = (computerID: string) => {
+    const own = project?.mappings.find((mapping) => mapping.user_id === user?.id && mapping.computer_id === computerID);
+    setProjectComputerId(computerID);
+    setProjectPath(own?.local_path ?? '');
+    setProjectVersion(own?.version ?? project?.baseline_version ?? '');
+    setProjectAccessMode(own?.access_mode ?? 'read_write');
+  };
+
+  const saveProjectMapping = useCallback(async () => {
+    if (!projectComputerId || !projectPath.trim()) return;
+    setProjectBusy(true);
     try {
-      const updated = await apiClient.patch<Channel>(`/api/v1/channels/${channel.id}`, {
-        project_computer_id: clear ? '' : projectComputerId,
-        project_path: clear ? '' : projectPath.trim(),
+      const next = await apiClient.put<ChannelProject>(`/api/v1/channels/${channel.id}/project/mappings/${projectComputerId}`, {
+        local_path: projectPath.trim(),
+        version: projectVersion.trim(),
+        access_mode: projectAccessMode,
       });
-      setProjectComputerId(updated.project_computer_id ?? '');
-      setProjectPath(updated.project_path ?? '');
-      setBoundProjectPath(updated.project_path ?? '');
-      showToast(t(clear ? 'channelProjectCleared' : 'channelProjectSaved'), 'success');
+      setProject(next);
+      showToast(t('channelProjectSaved'), 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : t('channelProjectSaveError'), 'error');
     } finally {
-      setProjectBindingBusy(false);
+      setProjectBusy(false);
     }
-  }, [channel.id, projectComputerId, projectPath, showToast]);
+  }, [channel.id, projectAccessMode, projectComputerId, projectPath, projectVersion, showToast]);
+
+  const removeProjectMapping = useCallback(async () => {
+    if (!projectComputerId) return;
+    setProjectBusy(true);
+    try {
+      const next = await apiClient.delete<ChannelProject>(`/api/v1/channels/${channel.id}/project/mappings/${projectComputerId}`);
+      setProject(next);
+      setProjectPath('');
+      setProjectVersion(next.baseline_version ?? '');
+      setProjectAccessMode('read_write');
+      showToast(t('channelProjectCleared'), 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : t('channelProjectSaveError'), 'error');
+    } finally {
+      setProjectBusy(false);
+    }
+  }, [channel.id, projectComputerId, showToast]);
+
+  const saveProjectDetails = useCallback(async () => {
+    setProjectBusy(true);
+    try {
+      const next = await apiClient.patch<ChannelProject>(`/api/v1/channels/${channel.id}/project`, {
+        source: projectSource.trim(),
+        baseline_version: projectBaseline.trim(),
+      });
+      setProject(next);
+      showToast(t('channelProjectDetailsSaved'), 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : t('channelProjectSaveError'), 'error');
+    } finally {
+      setProjectBusy(false);
+    }
+  }, [channel.id, projectBaseline, projectSource, showToast]);
 
   const loadModeration = useCallback(async () => {
     if (channel.type !== 'channel') return;
@@ -1088,16 +1173,22 @@ export function ChannelView({
                   {isThinking ? t('thinkingCurrentBranch') : t('taskChannel')}
                 </span>
                 <h2 className="truncate font-display text-lg font-bold text-foreground">{isThinking ? selectedThinkingNode?.title ?? channel.name : channel.name}</h2>
-                {!isThinking && boundProjectPath && (
-                  <span className="hidden max-w-56 items-center gap-1 truncate rounded-md border border-border bg-brutal-primary-light px-1.5 py-0.5 font-mono text-[9px] font-bold text-muted-foreground sm:flex" title={boundProjectPath}>
-                    <FolderOpen className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{boundProjectPath}</span>
-                  </span>
-                )}
                 {isThinking && selectedThinkingNode?.agent_name && (
                   <span className="truncate rounded-md border border-border bg-brutal-primary-light px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase text-muted-foreground">{selectedThinkingNode.agent_name}</span>
                 )}
               </div>
+              {!isThinking && channel.type === 'channel' && (
+                <button
+                  type="button"
+                  className="btn-brutal btn-brutal-sm mr-2 flex h-8 items-center gap-1.5 px-2"
+                  onClick={() => { setProjectOpen(true); void loadProject(); }}
+                  aria-label={t('channelProject')}
+                  title={t('channelProject')}
+                >
+                  <FolderOpen className="h-4 w-4" />
+                  <span className="hidden sm:inline">{t('channelProject')}</span>
+                </button>
+              )}
               {moderation?.can_manage && !isThinking && (
                 <button type="button" className="btn-brutal btn-brutal-sm flex h-8 w-8 items-center justify-center p-0" onClick={() => setModerationOpen(true)} aria-label={t('channelModeration')} title={t('channelModeration')}>
                   <Settings2 className="h-4 w-4" />
@@ -1522,53 +1613,124 @@ export function ChannelView({
         </div>
       </Dialog>
 
+      <Dialog open={projectOpen} onOpenChange={setProjectOpen}>
+        <DialogHeader>
+          <DialogTitle>{t('channelProject')} · {channel.name}</DialogTitle>
+          <DialogCloseButton onClick={() => setProjectOpen(false)} />
+        </DialogHeader>
+        <div className="max-h-[70vh] space-y-4 overflow-y-auto p-1">
+          <p className="font-body text-sm text-muted-foreground">{t('channelProjectDesc')}</p>
+
+          {project?.can_manage && (
+            <section className="space-y-2 rounded-lg border border-border bg-brutal-primary-light p-3">
+              <div className="font-heading text-sm font-bold">{t('channelProjectIdentity')}</div>
+              <label className="block font-heading text-xs font-bold" htmlFor="channel-project-source">{t('channelProjectSource')}</label>
+              <input
+                id="channel-project-source"
+                className="w-full rounded-md border border-border bg-white p-2 font-body text-sm"
+                value={projectSource}
+                onChange={(event) => setProjectSource(event.target.value)}
+                placeholder={t('channelProjectSourcePlaceholder')}
+                maxLength={2000}
+              />
+              <label className="block font-heading text-xs font-bold" htmlFor="channel-project-baseline">{t('channelProjectBaseline')}</label>
+              <input
+                id="channel-project-baseline"
+                className="w-full rounded-md border border-border bg-white p-2 font-mono text-sm"
+                value={projectBaseline}
+                onChange={(event) => setProjectBaseline(event.target.value)}
+                placeholder={t('channelProjectBaselinePlaceholder')}
+                maxLength={200}
+              />
+              <div className="flex justify-end">
+                <Button type="button" variant="outline" size="sm" disabled={projectBusy} onClick={() => void saveProjectDetails()}>
+                  {projectBusy ? t('saving') : t('channelProjectSaveDetails')}
+                </Button>
+              </div>
+            </section>
+          )}
+
+          <section>
+            <div className="mb-2 font-heading text-sm font-bold">{t('channelProjectTeamStatus')}</div>
+            <div className="space-y-2">
+              {(project?.mappings ?? []).map((mapping, index) => (
+                <div key={`${mapping.user_id}-${mapping.computer_id ?? index}`} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-white px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="truncate font-heading text-sm font-bold">{mapping.user_name}</div>
+                    <div className="truncate font-body text-xs text-muted-foreground">
+                      {mapping.computer_name || t('channelProjectNoComputer')}
+                      {mapping.version ? ` · ${mapping.version}` : ''}
+                      {mapping.local_path ? ` · ${mapping.local_path}` : ''}
+                    </div>
+                  </div>
+                  <span className={cn('shrink-0 rounded-full border px-2 py-0.5 font-heading text-[10px] font-bold', mapping.available ? 'border-brutal-success/40 bg-brutal-success-light' : 'border-border bg-brutal-muted-light text-muted-foreground')}>
+                    {mapping.available ? t('channelProjectReady')
+                      : mapping.reason === 'computer_offline' ? t('channelProjectComputerOffline')
+                        : mapping.reason === 'read_only' ? t('channelProjectReadOnly')
+                          : mapping.reason === 'version_mismatch' ? t('channelProjectVersionMismatch')
+                            : t('channelProjectNotConfigured')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="space-y-2 border-t border-border pt-4">
+            <div className="font-heading text-sm font-bold">{t('channelProjectMyFolder')}</div>
+            <p className="font-body text-xs text-muted-foreground">{t('channelProjectPrivacy')}</p>
+            <label className="block font-heading text-xs font-bold" htmlFor="channel-project-computer">{t('channelProjectComputer')}</label>
+            <select
+              id="channel-project-computer"
+              className="w-full rounded-md border border-border bg-white p-2 font-body text-sm"
+              value={projectComputerId}
+              onChange={(event) => selectProjectComputer(event.target.value)}
+            >
+              <option value="">{t('channelProjectChooseComputer')}</option>
+              {computers.map((computer) => (
+                <option key={computer.id} value={computer.id}>{computer.status === 'online' ? '●' : '○'} {computer.name}</option>
+              ))}
+            </select>
+            <label className="block font-heading text-xs font-bold" htmlFor="channel-project-path">{t('channelProjectPath')}</label>
+            <input
+              id="channel-project-path"
+              className="w-full rounded-md border border-border bg-white p-2 font-mono text-sm"
+              value={projectPath}
+              onChange={(event) => setProjectPath(event.target.value)}
+              placeholder={t('channelProjectPathPlaceholder')}
+              maxLength={2048}
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1 block font-heading text-xs font-bold" htmlFor="channel-project-version">{t('channelProjectVersion')}</label>
+                <input id="channel-project-version" className="w-full rounded-md border border-border bg-white p-2 font-mono text-sm" value={projectVersion} onChange={(event) => setProjectVersion(event.target.value)} placeholder={project?.baseline_version || t('channelProjectVersionPlaceholder')} maxLength={200} />
+              </div>
+              <div>
+                <label className="mb-1 block font-heading text-xs font-bold" htmlFor="channel-project-access">{t('channelProjectAccess')}</label>
+                <select id="channel-project-access" className="w-full rounded-md border border-border bg-white p-2 font-body text-sm" value={projectAccessMode} onChange={(event) => setProjectAccessMode(event.target.value as 'read_only' | 'read_write')}>
+                  <option value="read_write">{t('channelProjectReadWrite')}</option>
+                  <option value="read_only">{t('channelProjectReadOnly')}</option>
+                </select>
+              </div>
+            </div>
+            <p className="font-body text-[11px] text-muted-foreground">{t('channelProjectPathHint')}</p>
+            <div className="flex justify-end gap-2 pt-1">
+              {project?.mappings.some((mapping) => mapping.user_id === user?.id && mapping.computer_id === projectComputerId) && (
+                <Button type="button" variant="outline" size="sm" disabled={projectBusy} onClick={() => void removeProjectMapping()}>{t('channelProjectClear')}</Button>
+              )}
+              <Button type="button" variant="primary" size="sm" disabled={projectBusy || !projectComputerId || !projectPath.trim()} onClick={() => void saveProjectMapping()}>
+                {projectBusy ? t('saving') : t('channelProjectSave')}
+              </Button>
+            </div>
+          </section>
+        </div>
+      </Dialog>
+
       <Dialog open={moderationOpen} onOpenChange={setModerationOpen}>
         <DialogHeader>
           <DialogTitle>{t('channelModeration')}</DialogTitle>
           <DialogCloseButton onClick={() => setModerationOpen(false)} />
         </DialogHeader>
         <div className="space-y-4">
-          <section className="rounded-lg border border-border bg-brutal-primary-light p-3 shadow-none">
-            <div className="mb-1 flex items-center gap-2 font-heading text-sm font-bold">
-              <FolderOpen className="h-4 w-4" />
-              {t('channelProjectFolder')}
-            </div>
-            <p className="mb-3 font-body text-xs text-muted-foreground">{t('channelProjectFolderDesc')}</p>
-            <div className="space-y-2">
-              <label className="block font-heading text-xs font-bold" htmlFor="channel-project-computer">{t('channelProjectComputer')}</label>
-              <select
-                id="channel-project-computer"
-                className="w-full border-2 border-black bg-white p-2 font-body text-sm"
-                value={projectComputerId}
-                onChange={(event) => setProjectComputerId(event.target.value)}
-              >
-                <option value="">{t('channelProjectChooseComputer')}</option>
-                {computers
-                  .filter((computer) => computer.pairing_status === 'paired' || computer.status === 'online' || computer.id === projectComputerId)
-                  .map((computer) => (
-                    <option key={computer.id} value={computer.id}>{computer.status === 'online' ? '●' : '○'} {computer.name}</option>
-                  ))}
-              </select>
-              <label className="block font-heading text-xs font-bold" htmlFor="channel-project-path">{t('channelProjectPath')}</label>
-              <input
-                id="channel-project-path"
-                className="w-full border-2 border-black bg-white p-2 font-mono text-sm"
-                value={projectPath}
-                onChange={(event) => setProjectPath(event.target.value)}
-                placeholder={t('channelProjectPathPlaceholder')}
-                maxLength={2048}
-              />
-              <p className="font-body text-[11px] text-muted-foreground">{t('channelProjectPathHint')}</p>
-              <div className="flex justify-end gap-2 pt-1">
-                {boundProjectPath && (
-                  <Button type="button" variant="outline" size="sm" disabled={projectBindingBusy} onClick={() => void saveProjectBinding(true)}>{t('channelProjectClear')}</Button>
-                )}
-                <Button type="button" variant="primary" size="sm" disabled={projectBindingBusy || !projectComputerId || !projectPath.trim()} onClick={() => void saveProjectBinding()}>
-                  {projectBindingBusy ? t('saving') : t('channelProjectSave')}
-                </Button>
-              </div>
-            </div>
-          </section>
           <div>
             <label className="mb-1 block font-heading text-sm font-bold">{t('channelWhoCanPost')}</label>
             <select
