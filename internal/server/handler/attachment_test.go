@@ -25,7 +25,7 @@ func TestAttachmentRejectsBearerTokenInQuery(t *testing.T) {
 }
 
 func TestAgentRunAttachmentTokenIsLimitedToRunChannel(t *testing.T) {
-	pool := attachmentTestPool(t)
+	pool := handlerTestPool(t)
 	ctx := context.Background()
 	ownerID := uuid.NewString()
 	agentID := uuid.NewString()
@@ -87,7 +87,7 @@ func TestAgentRunAttachmentTokenIsLimitedToRunChannel(t *testing.T) {
 }
 
 func TestUserAvatarAttachmentIsVisibleOnlyInsideSharedWorkspace(t *testing.T) {
-	pool := attachmentTestPool(t)
+	pool := handlerTestPool(t)
 	ctx := context.Background()
 	ownerID := uuid.NewString()
 	viewerID := uuid.NewString()
@@ -173,7 +173,7 @@ func TestUserAvatarAttachmentIsVisibleOnlyInsideSharedWorkspace(t *testing.T) {
 	}
 }
 
-func attachmentTestPool(t *testing.T) *pgxpool.Pool {
+func handlerTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
