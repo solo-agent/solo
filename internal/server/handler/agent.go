@@ -411,7 +411,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var customEnvBytes, customArgsBytes []byte
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT id, name, COALESCE(description, ''), owner_id,
-		        home_channel_id, kind, model_provider, model_name,
+		        COALESCE(home_channel_id::text, ''), kind, model_provider, model_name,
 		        system_prompt, is_active, COALESCE(avatar_url, ''),
 		        custom_env, custom_args, COALESCE(runtime_id, ''),
 		        created_at, updated_at
