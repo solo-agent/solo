@@ -58,6 +58,7 @@ pkg/agent/.solo/
 
 # Screenshots
 *.png
+!frontend/public/illustrations/*.png
 frontend/e2e/screenshots/
 frontend/.audit-shots/
 # Exception: brand/logo assets under assets/ are NOT screenshots, they're README references.
