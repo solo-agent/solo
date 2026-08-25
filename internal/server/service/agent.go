@@ -53,6 +53,9 @@ const (
 	agentErrorNoAvailableDaemon    = "agent.error.no_available_daemon"
 	agentErrorMissingVisibleResult = "agent.error.missing_visible_result"
 	agentErrorProjectComputer      = "agent.error.project_computer_mismatch"
+	agentErrorProjectMapping       = "agent.error.project_mapping_missing"
+	agentErrorProjectReadOnly      = "agent.error.project_mapping_read_only"
+	agentErrorProjectVersion       = "agent.error.project_version_mismatch"
 
 	agentResultContractVisibleMessage = "visible_message"
 	agentResultContractHandoff        = "handoff"
@@ -623,36 +626,52 @@ func (s *AgentService) applyChannelProjectBinding(ctx context.Context, daemon *D
 	if taskReq == nil || taskReq.ChannelID == "" {
 		return nil
 	}
-	var computerID, projectPath string
-	if err := s.pool.QueryRow(ctx, `
-		SELECT COALESCE(project_computer_id::text, ''), COALESCE(project_path, '')
-		  FROM channels
-		 WHERE id = $1`, taskReq.ChannelID).Scan(&computerID, &projectPath); err != nil {
-		return fmt.Errorf("could not load the Channel project folder: %w", err)
-	}
-	if projectPath == "" {
-		taskReq.ProjectComputerID = ""
-		taskReq.ProjectPath = ""
-		return nil
-	}
 	effectiveComputerID := ""
 	if daemon != nil {
 		effectiveComputerID = daemon.ComputerID
 	}
 	if effectiveComputerID == "" && taskReq.AgentID != "" {
-		// The local compatibility connection is registered by daemon ID instead
-		// of computer ID. ResolveDaemonForAgent has already persisted the Agent's
-		// actual computer binding, so use that binding for the same safety check.
-		_ = s.pool.QueryRow(ctx,
-			`SELECT COALESCE(runtime_id, '') FROM agents WHERE id = $1`,
-			taskReq.AgentID,
-		).Scan(&effectiveComputerID)
+		_ = s.pool.QueryRow(ctx, `SELECT COALESCE(runtime_id, '') FROM agents WHERE id=$1`, taskReq.AgentID).Scan(&effectiveComputerID)
 	}
-	if effectiveComputerID == "" || effectiveComputerID != computerID {
+
+	var legacyComputerID, legacyPath, projectSource, baseline, computerID, projectPath, version, accessMode string
+	var hasMappings bool
+	if err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(c.project_computer_id::text,''), COALESCE(c.project_path,''), c.project_source, c.project_baseline,
+		       COALESCE(m.computer_id::text,''), COALESCE(m.local_path,''), COALESCE(m.version,''), COALESCE(m.access_mode,''),
+		       EXISTS(SELECT 1 FROM channel_project_mappings existing WHERE existing.channel_id=c.id)
+		  FROM channels c
+		  LEFT JOIN agents a ON a.id=$2
+		  LEFT JOIN channel_project_mappings m ON m.channel_id=c.id AND m.user_id=a.owner_id AND m.computer_id=NULLIF($3,'')::uuid
+		 WHERE c.id=$1`, taskReq.ChannelID, taskReq.AgentID, effectiveComputerID,
+	).Scan(&legacyComputerID, &legacyPath, &projectSource, &baseline, &computerID, &projectPath, &version, &accessMode, &hasMappings); err != nil {
+		return fmt.Errorf("could not load the Channel project folder: %w", err)
+	}
+	projectConfigured := projectSource != "" || baseline != "" || hasMappings
+	if !projectConfigured && legacyPath == "" {
+		taskReq.ProjectComputerID = ""
+		taskReq.ProjectPath = ""
+		taskReq.ProjectVersion = ""
+		return nil
+	}
+	if !hasMappings && legacyPath != "" {
+		computerID, projectPath, accessMode = legacyComputerID, legacyPath, "read_write"
+	}
+	if effectiveComputerID == "" || computerID == "" || projectPath == "" {
+		return errors.New(agentErrorProjectMapping)
+	}
+	if effectiveComputerID != computerID {
 		return errors.New(agentErrorProjectComputer)
+	}
+	if accessMode != "read_write" {
+		return errors.New(agentErrorProjectReadOnly)
+	}
+	if baseline != "" && version != baseline {
+		return errors.New(agentErrorProjectVersion)
 	}
 	taskReq.ProjectComputerID = computerID
 	taskReq.ProjectPath = projectPath
+	taskReq.ProjectVersion = version
 	return nil
 }
 
@@ -761,6 +780,9 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 		taskReq.TaskID = run.ID
 	}
 	taskReq.RunID = run.ID
+	if _, err := s.pool.Exec(ctx, `UPDATE agent_runs SET project_computer_id=NULLIF($2,'')::uuid, project_path=NULLIF($3,''), project_version=$4 WHERE id=$1`, run.ID, taskReq.ProjectComputerID, taskReq.ProjectPath, taskReq.ProjectVersion); err != nil {
+		slog.Warn("failed to record Agent run project mapping", "run_id", run.ID, "error", err)
+	}
 	s.dm.TrackTask(taskReq.TaskID, daemon.ID, ag.ID)
 	s.dm.AttachTaskRun(taskReq.TaskID, run.ID)
 	defer s.dm.RemoveTask(taskReq.TaskID)
@@ -2946,6 +2968,7 @@ type daemonTaskRequest struct {
 	ChannelName                 string            `json:"channel_name,omitempty"`
 	ProjectComputerID           string            `json:"project_computer_id,omitempty"`
 	ProjectPath                 string            `json:"project_path,omitempty"`
+	ProjectVersion              string            `json:"project_version,omitempty"`
 	CustomEnv                   map[string]string `json:"custom_env,omitempty"`
 	CustomArgs                  []string          `json:"custom_args,omitempty"`
 	AgentToken                  string            `json:"agent_token,omitempty"`

@@ -357,8 +357,10 @@ func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.pool.Query(r.Context(),
 		`SELECT c.id, c.workspace_id::text, c.name, COALESCE(c.description, ''), c.type, c.created_by,
-		        c.is_archived, COALESCE(c.source_template_id, ''), COALESCE(c.project_computer_id::text, ''),
-		        COALESCE(c.project_path, ''), c.created_at, c.updated_at
+		        c.is_archived, COALESCE(c.source_template_id, ''),
+		        COALESCE((SELECT m.computer_id::text FROM channel_project_mappings m WHERE m.channel_id=c.id AND m.user_id=$1 ORDER BY m.updated_at DESC LIMIT 1), ''),
+		        COALESCE((SELECT m.local_path FROM channel_project_mappings m WHERE m.channel_id=c.id AND m.user_id=$1 ORDER BY m.updated_at DESC LIMIT 1), ''),
+		        c.created_at, c.updated_at
 		 FROM channels c
 		 JOIN channel_members cm ON cm.channel_id = c.id
 		 WHERE cm.member_type = 'user' AND cm.member_id = $1 AND c.workspace_id = $2 AND c.is_archived = false AND c.type = 'channel'
@@ -403,8 +405,10 @@ func (h *ChannelHandler) GetLucy(w http.ResponseWriter, r *http.Request) {
 	var createdAt, updatedAt time.Time
 	err := h.pool.QueryRow(r.Context(), `
 		SELECT c.id, c.workspace_id::text, c.name, COALESCE(c.description, ''), c.type, c.created_by,
-		       c.is_archived, COALESCE(c.source_template_id, ''), COALESCE(c.project_computer_id::text, ''),
-		       COALESCE(c.project_path, ''), c.created_at, c.updated_at
+		       c.is_archived, COALESCE(c.source_template_id, ''),
+		       COALESCE((SELECT m.computer_id::text FROM channel_project_mappings m WHERE m.channel_id=c.id AND m.user_id=$1 ORDER BY m.updated_at DESC LIMIT 1), ''),
+		       COALESCE((SELECT m.local_path FROM channel_project_mappings m WHERE m.channel_id=c.id AND m.user_id=$1 ORDER BY m.updated_at DESC LIMIT 1), ''),
+		       c.created_at, c.updated_at
 		  FROM channels c
 		  JOIN channel_members cm
 		    ON cm.channel_id = c.id
@@ -475,11 +479,13 @@ func (h *ChannelHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var ch ChannelResponse
 	var createdAt, updatedAt time.Time
 	err = h.pool.QueryRow(r.Context(),
-		`SELECT id, workspace_id::text, name, COALESCE(description, ''), type, created_by,
-		        is_archived, COALESCE(source_template_id, ''), COALESCE(project_computer_id::text, ''),
-		        COALESCE(project_path, ''), created_at, updated_at
-		 FROM channels WHERE id = $1 AND workspace_id = $2 AND is_archived = false`,
-		channelID, serverworkspace.ID(r),
+		`SELECT c.id, c.workspace_id::text, c.name, COALESCE(c.description, ''), c.type, c.created_by,
+		        c.is_archived, COALESCE(c.source_template_id, ''),
+		        COALESCE((SELECT m.computer_id::text FROM channel_project_mappings m WHERE m.channel_id=c.id AND m.user_id=$3 ORDER BY m.updated_at DESC LIMIT 1), ''),
+		        COALESCE((SELECT m.local_path FROM channel_project_mappings m WHERE m.channel_id=c.id AND m.user_id=$3 ORDER BY m.updated_at DESC LIMIT 1), ''),
+		        c.created_at, c.updated_at
+		 FROM channels c WHERE c.id = $1 AND c.workspace_id = $2 AND c.is_archived = false`,
+		channelID, serverworkspace.ID(r), userID,
 	).Scan(&ch.ID, &ch.WorkspaceID, &ch.Name, &ch.Description, &ch.Type, &ch.CreatedBy,
 		&ch.IsArchived, &ch.SourceTemplateID, &ch.ProjectComputerID, &ch.ProjectPath, &createdAt, &updatedAt)
 	if err != nil {
@@ -606,10 +612,16 @@ func (h *ChannelHandler) Update(w http.ResponseWriter, r *http.Request) {
 		*req.ProjectPath = projectPath
 	}
 
-	// Build dynamic update query
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update channel")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
 	var ch ChannelResponse
 	var createdAt, updatedAt time.Time
-	err = h.pool.QueryRow(r.Context(),
+	err = tx.QueryRow(r.Context(),
 		`UPDATE channels SET
 			name = COALESCE($1, name),
 			description = COALESCE($2, description),
@@ -636,6 +648,32 @@ func (h *ChannelHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update channel")
 		return
 	}
+	if bindingProvided {
+		if *req.ProjectComputerID == "" {
+			_, err = tx.Exec(r.Context(), `DELETE FROM channel_project_mappings WHERE channel_id=$1 AND user_id=$2`, channelID, userID)
+		} else {
+			_, err = tx.Exec(r.Context(), `
+				INSERT INTO channel_project_mappings (channel_id,user_id,computer_id,local_path)
+				VALUES ($1,$2,$3,$4)
+				ON CONFLICT (channel_id,user_id,computer_id) DO UPDATE SET local_path=EXCLUDED.local_path, updated_at=now()`,
+				channelID, userID, *req.ProjectComputerID, *req.ProjectPath)
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update channel")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update channel")
+		return
+	}
+	ch.ProjectComputerID, ch.ProjectPath = "", ""
+	_ = h.pool.QueryRow(r.Context(), `
+		SELECT computer_id::text, local_path
+		  FROM channel_project_mappings
+		 WHERE channel_id=$1 AND user_id=$2
+		 ORDER BY updated_at DESC LIMIT 1`, channelID, userID,
+	).Scan(&ch.ProjectComputerID, &ch.ProjectPath)
 
 	ch.CreatedAt = createdAt.Format(time.RFC3339)
 	ch.UpdatedAt = updatedAt.Format(time.RFC3339)

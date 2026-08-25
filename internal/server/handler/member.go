@@ -6,13 +6,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/solo-ai/solo/internal/server/service"
 	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
-	"strings"
 )
 
 // MemberHandler handles channel member management requests.
@@ -78,7 +78,11 @@ func (h *MemberHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrNotChannelMember):
 			writeError(w, http.StatusForbidden, "you are not a member of this channel")
 		case errors.Is(err, service.ErrPermissionDenied):
-			writeError(w, http.StatusForbidden, "only channel owners and admins can add members")
+			if req.MemberType == "agent" {
+				writeError(w, http.StatusForbidden, "only the Agent owner can connect this Agent")
+			} else {
+				writeError(w, http.StatusForbidden, "only channel owners and admins can add members")
+			}
 		case errors.Is(err, service.ErrUserNotFound):
 			writeError(w, http.StatusNotFound, "user not found")
 		case errors.Is(err, service.ErrAgentNotFound):

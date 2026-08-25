@@ -19,6 +19,7 @@ type Auth = {
 
 type Entity = { id: string; name: string };
 type Runtime = { type: string; available: boolean };
+type ChannelProject = { can_manage: boolean };
 
 function databaseJSON<T>(query: string): T {
   const output = execFileSync('docker', [
@@ -40,7 +41,7 @@ function databaseExec(query: string): void {
 async function call<T>(
   request: APIRequestContext,
   auth: Auth,
-  method: 'get' | 'post' | 'patch' | 'delete',
+  method: 'get' | 'post' | 'put' | 'patch' | 'delete',
   path: string,
   data?: unknown,
 ): Promise<T> {
@@ -94,8 +95,16 @@ test.describe('A Channel owns a real project folder', () => {
       expect(verified.status()).toBe(201);
       auth = await verified.json() as Auth;
 
+      const workspaceResponse = await request.post(`${apiBase}/api/v1/workspaces`, {
+        headers: { authorization: `Bearer ${auth.access_token}` },
+        data: { name: `大学课程项目实验室-${suffix}` },
+      });
+      expect(workspaceResponse.status()).toBe(201);
+      auth.workspace_id = ((await workspaceResponse.json()) as Entity).id;
+      databaseExec(`UPDATE users SET onboarding_completed_at=now() WHERE id='${auth.user.id}';`);
+
       computerID = databaseJSON<string>(`
-        SELECT to_json(COALESCE((SELECT id::text FROM computers WHERE daemon_id='daemon-01' AND status='online' ORDER BY updated_at DESC LIMIT 1),''))::text
+        SELECT to_json(COALESCE((SELECT id::text FROM computers WHERE status='online' ORDER BY updated_at DESC LIMIT 1),''))::text
       `);
       expect(computerID).not.toBe('');
       databaseExec(`
@@ -108,8 +117,8 @@ test.describe('A Channel owns a real project folder', () => {
       await page.goto('/dashboard');
 
       // Create a naturally named Channel through the real UI.
-      await page.getByRole('button', { name: '创建频道' }).click();
-      await page.getByRole('button', { name: '空白频道' }).click();
+      await page.locator('button[aria-label="创建频道"]').click();
+      await page.getByRole('button', { name: '空白频道 先创建空白频道，之后再添加新的智能体。' }).click();
       await page.getByLabel('名称').fill(channelName);
       await page.getByRole('button', { name: '创建', exact: true }).click();
       await expect(page).toHaveURL(/\/dashboard\?channel=([0-9a-f-]{36})/);
@@ -117,6 +126,7 @@ test.describe('A Channel owns a real project folder', () => {
       expect(channelID).toMatch(/^[0-9a-f-]{36}$/);
       channel = { id: channelID!, name: channelName };
       await expect(page.getByRole('heading', { name: channelName })).toBeVisible();
+      expect((await call<ChannelProject>(request, auth, 'get', `/api/v1/channels/${channel.id}/project`)).can_manage).toBe(true);
 
       // Verify the Agent dialog fits a laptop screen, exposes role instructions,
       // and keeps environment variables and CLI arguments folded.
@@ -135,24 +145,48 @@ test.describe('A Channel owns a real project folder', () => {
       expect(submitBox!.y + submitBox!.height).toBeLessThanOrEqual(720);
       await page.keyboard.press('Escape');
 
-      // Bind the Channel to one existing folder through Channel management.
-      await page.getByRole('button', { name: '群管理' }).click();
+      // Configure the shared project identity and this member's private folder
+      // through the ordinary Channel header entry.
+      const projectResponse = page.waitForResponse((response) => response.url().endsWith(`/api/v1/channels/${channel!.id}/project`));
+      await page.getByRole('button', { name: '项目', exact: true }).click();
+      const loadedProject = await projectResponse;
+      expect(loadedProject.status()).toBe(200);
+      expect(((await loadedProject.json()) as ChannelProject).can_manage).toBe(true);
+      const projectSource = page.getByLabel('代码来源（可选）');
+      await expect(projectSource).toBeVisible({ timeout: 10_000 });
+      await projectSource.fill('https://example.invalid/course-project.git');
+      await page.getByLabel('团队约定版本（可选）').fill('main');
+      await page.getByRole('button', { name: '保存项目信息' }).click();
+      await expect(page.getByText('项目信息已保存。')).toBeVisible();
       await page.getByLabel('文件夹所在电脑').selectOption(computerID);
       await page.getByLabel('文件夹完整路径').fill(projectDir);
+      await page.getByLabel('我的版本').fill('main');
       await page.getByRole('button', { name: '保存项目文件夹' }).click();
       await expect(page.getByText('项目文件夹已保存。')).toBeVisible();
+      await expect(page.getByText('已准备好')).toBeVisible();
       await page.keyboard.press('Escape');
-      await expect(page.getByTitle(projectDir)).toBeVisible();
 
-      expect(databaseJSON<{ computer: string; path: string }>(`
+      expect(databaseJSON<{ source: string; baseline: string; computer: string; path: string; version: string }>(`
         SELECT json_build_object(
-          'computer', COALESCE(project_computer_id::text,''),
-          'path', COALESCE(project_path,'')
-        )::text FROM channels WHERE id='${channel.id}'
-      `)).toEqual({ computer: computerID, path: projectDir });
+          'source', c.project_source,
+          'baseline', c.project_baseline,
+          'computer', m.computer_id::text,
+          'path', m.local_path,
+          'version', m.version
+        )::text
+        FROM channels c
+        JOIN channel_project_mappings m ON m.channel_id=c.id AND m.user_id='${auth.user.id}'
+        WHERE c.id='${channel.id}'
+      `)).toEqual({
+        source: 'https://example.invalid/course-project.git',
+        baseline: 'main',
+        computer: computerID,
+        path: projectDir,
+        version: 'main',
+      });
 
       const runtimes = await call<Runtime[]>(request, auth, 'get', `/api/v1/agent-backends/detect?computer_id=${computerID}`);
-      const runtime = ['codex', 'claude', 'opencode', 'hermes', 'openclaw']
+      const runtime = ['claude', 'codex', 'opencode', 'hermes', 'openclaw']
         .map((type) => runtimes.find((item) => item.type === type && item.available))
         .find(Boolean);
       expect(runtime, `No real local Agent runtime is available: ${JSON.stringify(runtimes)}`).toBeTruthy();
@@ -186,6 +220,16 @@ test.describe('A Channel owns a real project folder', () => {
 
       await expect.poll(() => existsSync(join(projectDir, 'project-proof.txt')), { timeout: 30000 }).toBe(true);
       expect(readFileSync(join(projectDir, 'project-proof.txt'), 'utf8').trim()).toBe(marker);
+      expect(databaseJSON<{ computer: string; path: string; version: string }>(`
+        SELECT json_build_object(
+          'computer', COALESCE(project_computer_id::text,''),
+          'path', COALESCE(project_path,''),
+          'version', project_version
+        )::text
+        FROM agent_runs
+        WHERE agent_id='${agent.id}' AND trigger_message_id='${trigger.id}'
+        ORDER BY started_at DESC LIMIT 1
+      `)).toEqual({ computer: computerID, path: projectDir, version: 'main' });
       const agentWorkspace = join(homedir(), '.solo', 'agents', agent.id, 'workspace');
       expect(existsSync(agentWorkspace)).toBe(true);
       expect(agentWorkspace).not.toBe(projectDir);
@@ -193,7 +237,14 @@ test.describe('A Channel owns a real project folder', () => {
       if (auth && agent) await call(request, auth, 'delete', `/api/v1/agents/${agent.id}`).catch(() => undefined);
       if (auth && channel) await call(request, auth, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
       if (auth && computerID) databaseExec(`DELETE FROM computer_members WHERE computer_id='${computerID}' AND user_id='${auth.user.id}';`);
-      if (auth) databaseExec(`DELETE FROM sessions WHERE user_id='${auth.user.id}'; UPDATE users SET is_active=false WHERE id='${auth.user.id}';`);
+      if (auth) databaseExec(`
+        DELETE FROM channel_members cm USING channels c
+         WHERE cm.channel_id=c.id AND c.workspace_id='00000000-0000-0000-0000-000000000001' AND cm.member_id='${auth.user.id}';
+        DELETE FROM workspace_members WHERE workspace_id='00000000-0000-0000-0000-000000000001' AND user_id='${auth.user.id}';
+        DELETE FROM sessions WHERE user_id='${auth.user.id}';
+        UPDATE workspaces SET deleted_at=COALESCE(deleted_at,now()) WHERE created_by='${auth.user.id}' AND id<>'00000000-0000-0000-0000-000000000001';
+        UPDATE users SET is_active=false WHERE id='${auth.user.id}';
+      `);
       rmSync(projectDir, { recursive: true, force: true });
     }
   });

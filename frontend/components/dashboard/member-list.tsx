@@ -57,6 +57,12 @@ function MemberItem({
   onToggleMute?: (id: string, muted: boolean) => Promise<void>;
 }) {
   const isAgent = member.member_type === 'agent';
+  const ownsAgent = isAgent && member.agent_owner_id === currentUserId;
+  const isHomeChannel = isAgent && member.agent_home_channel_id === member.channel_id;
+  const canRemoveAgent = Boolean(onRemove) && (ownsAgent || (canModerateUsers && !isHomeChannel));
+  const removeLabel = ownsAgent
+    ? (isHomeChannel ? t('agentDeleteButton') : t('agentWithdrawButton'))
+    : t('agentRemoveButton');
   const canModerateTarget = !isAgent && member.member_id !== currentUserId && member.workspace_role !== 'owner' && (
     moderationRole === 'owner' || (moderationRole === 'admin' && member.workspace_role === 'member')
   );
@@ -157,7 +163,7 @@ function MemberItem({
             {isTogglingMute ? <Loader2 className="h-4 w-4 animate-spin" /> : muted ? <MessageSquare className="h-4 w-4" /> : <MessageSquareOff className="h-4 w-4" />}
           </button>
         )}
-        {isAgent && (
+        {isAgent && canRemoveAgent && (
           onRemove && (
             <button
               type="button"
@@ -167,8 +173,8 @@ function MemberItem({
                 setConfirming(true);
               }}
               className="flex-shrink-0 border-2 border-black bg-white px-1.5 py-0.5 opacity-100 shadow-brutal-sm transition-[background-color,color,opacity] hover:bg-brutal-danger hover:text-black md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
-              aria-label={`${t('agentDeleteButton')}: ${member.display_name}`}
-              title={t('agentDeleteButton')}
+              aria-label={`${removeLabel}: ${member.display_name}`}
+              title={removeLabel}
             >
               <X className="h-3 w-3" />
             </button>
@@ -183,11 +189,11 @@ function MemberItem({
         }}
       >
         <DialogHeader>
-          <DialogTitle>{t('agentDeleteTitle')}</DialogTitle>
+          <DialogTitle>{isHomeChannel ? t('agentDeleteTitle') : removeLabel}</DialogTitle>
           <DialogCloseButton onClick={() => !isDeleting && setConfirming(false)} />
         </DialogHeader>
         <DialogDescription>
-          {t('agentDeleteDesc', { name: member.display_name })}
+          {isHomeChannel ? t('agentDeleteDesc', { name: member.display_name }) : t('agentRemoveDesc', { name: member.display_name })}
         </DialogDescription>
         {deleteError && (
           <p className="border-2 border-black bg-brutal-danger-light p-2 font-mono text-xs text-brutal-danger" role="alert">
@@ -209,7 +215,7 @@ function MemberItem({
             onClick={handleRemove}
             disabled={isDeleting}
           >
-            {isDeleting ? t('deleting') : t('agentDeleteButton')}
+            {isDeleting ? t('deleting') : removeLabel}
           </Button>
         </DialogFooter>
       </Dialog>
@@ -294,6 +300,9 @@ export function MemberList({ users, agents, isLoading, onAddAgent, onRemoveAgent
                     member={member}
                     onRemove={onRemoveAgent}
                     onAgentClick={onAgentClick}
+                    canModerateUsers={canModerateUsers}
+                    moderationRole={moderationRole}
+                    currentUserId={currentUserId}
                   />
                 ))}
               </div>
