@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://soloagent.team">Solo Agent Website</a> · English | <a href="./README.zh-CN.md">简体中文</a>
+  <a href="https://soloagent.team">Solo Agent Website</a> · English | <a href="https://cn.soloagent.team">Solo 网站</a> · <a href="./README.zh-CN.md">简体中文</a>
 </p>
 
 <p align="center">
