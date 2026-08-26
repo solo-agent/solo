@@ -616,17 +616,7 @@ func (s *TaskService) SubmitTask(ctx context.Context, channelID, taskID, userID 
 }
 
 func (s *TaskService) AcceptTask(ctx context.Context, channelID, taskID, userID string) (*Task, error) {
-	task, err := s.GetTask(ctx, channelID, taskID, userID)
-	if err != nil {
-		return nil, err
-	}
-	if task.CreatorID != userID {
-		return nil, ErrTaskNotCreator
-	}
-	if task.Status != TaskStatusInReview {
-		return nil, ErrTaskNotReviewable
-	}
-	updated, err := s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusDone)
+	updated, err := s.reviewTask(ctx, channelID, taskID, userID, TaskStatusDone, "accepted", "")
 	if err == nil && s.agentNotifier != nil {
 		if notifyErr := s.agentNotifier.NotifyAccepted(ctx, updated.ID, userID); notifyErr != nil {
 			slog.Warn("notify accepted failed", "task_id", updated.ID, "err", notifyErr)
@@ -640,23 +630,78 @@ func (s *TaskService) RejectTask(ctx context.Context, channelID, taskID, userID,
 	if reason == "" {
 		return nil, ErrTaskReasonRequired
 	}
-	task, err := s.GetTask(ctx, channelID, taskID, userID)
-	if err != nil {
-		return nil, err
-	}
-	if task.CreatorID != userID {
-		return nil, ErrTaskNotCreator
-	}
-	if task.Status != TaskStatusInReview {
-		return nil, ErrTaskNotReviewable
-	}
-	updated, err := s.setTaskStatus(ctx, channelID, task.ID, userID, TaskStatusInProgress)
+	updated, err := s.reviewTask(ctx, channelID, taskID, userID, TaskStatusInProgress, "rejected", reason)
 	if err == nil && s.agentNotifier != nil {
 		if notifyErr := s.agentNotifier.NotifyRejected(ctx, updated.ID, userID, reason); notifyErr != nil {
 			slog.Warn("notify rejected failed", "task_id", updated.ID, "err", notifyErr)
 		}
 	}
 	return updated, err
+}
+
+func (s *TaskService) reviewTask(ctx context.Context, channelID, taskID, userID, status, decision, reason string) (*Task, error) {
+	if err := s.requireChannelMember(ctx, channelID, userID); err != nil {
+		return nil, err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var creatorID, currentStatus, claimerID string
+	if err := tx.QueryRow(ctx,
+		`SELECT creator_id::text, status, COALESCE(claimer_id::text, '')
+		 FROM tasks WHERE id = $1 AND channel_id = $2 FOR UPDATE`,
+		taskID, channelID,
+	).Scan(&creatorID, &currentStatus, &claimerID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrTaskNotFound
+		}
+		return nil, err
+	}
+	if creatorID != userID {
+		return nil, ErrTaskNotCreator
+	}
+	if currentStatus != TaskStatusInReview {
+		return nil, ErrTaskNotReviewable
+	}
+
+	var artifactID string
+	artifactErr := tx.QueryRow(ctx,
+		`SELECT id::text FROM artifacts
+		 WHERE task_id = $1 AND COALESCE(summary, '') <> 'pending'
+		 ORDER BY updated_at DESC LIMIT 1`,
+		taskID,
+	).Scan(&artifactID)
+	if artifactErr != nil && !errors.Is(artifactErr, pgx.ErrNoRows) {
+		return nil, artifactErr
+	}
+	var artifactValue, nextOwnerValue any
+	if artifactID != "" {
+		artifactValue = artifactID
+	}
+	if decision == "rejected" && claimerID != "" {
+		nextOwnerValue = claimerID
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE tasks SET status = $1, updated_at = now() WHERE id = $2 AND channel_id = $3`,
+		status, taskID, channelID,
+	); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO task_reviews (task_id, reviewer_id, decision, reason, artifact_id, next_owner_id)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		taskID, userID, decision, reason, artifactValue, nextOwnerValue,
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.GetTask(ctx, channelID, taskID, userID)
 }
 
 func (s *TaskService) CloseTask(ctx context.Context, channelID, taskID, userID string) (*Task, error) {

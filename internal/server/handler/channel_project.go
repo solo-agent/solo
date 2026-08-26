@@ -1,12 +1,18 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/solo-ai/solo/internal/realtime"
 	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
 )
 
@@ -35,6 +41,56 @@ type ChannelProjectResponse struct {
 func isAbsoluteProjectPath(path string) bool {
 	return strings.HasPrefix(path, "/") || strings.HasPrefix(path, `\\`) ||
 		(len(path) >= 3 && ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) && path[1] == ':' && (path[2] == '\\' || path[2] == '/'))
+}
+
+func (h *ChannelHandler) projectChangeBlocked(ctx context.Context, channelID string) (bool, error) {
+	var blocked bool
+	err := h.pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM agent_runs
+		 WHERE channel_id=$1 AND status IN ('queued','thinking','running','streaming','waiting_input','waiting_approval')
+	)`, channelID).Scan(&blocked)
+	return blocked, err
+}
+
+func (h *ChannelHandler) recordProjectChange(ctx context.Context, channelID, userID, event, source, baseline string) {
+	actorName := "A member"
+	_ = h.pool.QueryRow(ctx, `SELECT display_name FROM users WHERE id=$1`, userID).Scan(&actorName)
+	metadata := map[string]any{
+		"event": event, "actor_name": actorName, "source": source, "baseline_version": baseline,
+	}
+	encoded, _ := json.Marshal(metadata)
+	content := actorName + " changed the project used by this Channel. Future Agent work will use the new project."
+	if event == "channel.project.unlinked" || event == "channel.project.folder_unlinked" {
+		content = actorName + " disconnected the project used by this Channel. Future Agent work will use the Agent's private workspace."
+	}
+	messageID, createdAt := uuid.NewString(), time.Now().UTC()
+	if _, err := h.pool.Exec(ctx, `
+		INSERT INTO messages (id,channel_id,sender_type,sender_id,content,content_type,metadata,created_at,updated_at)
+		VALUES ($1,$2,'system','00000000-0000-0000-0000-000000000000',$3,'system',$4::jsonb,$5,$5)`,
+		messageID, channelID, content, encoded, createdAt); err != nil {
+		slog.Error("failed to record channel project change", "channel_id", channelID, "error", err)
+		return
+	}
+	if h.hub != nil {
+		h.hub.BroadcastToChannel(channelID, realtime.Envelope("message.new", map[string]any{
+			"id": messageID, "channel_id": channelID, "sender_type": "system", "sender_id": "system",
+			"sender_name": "Solo", "content": content, "content_type": "system", "metadata": metadata,
+			"created_at": createdAt.Format(time.RFC3339),
+		}))
+	}
+}
+
+func (h *ChannelHandler) rejectBlockedProjectChange(w http.ResponseWriter, r *http.Request, channelID string) bool {
+	blocked, err := h.projectChangeBlocked(r.Context(), channelID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check current Agent work")
+		return true
+	}
+	if blocked {
+		writeErrorCode(w, http.StatusConflict, "CHANNEL_PROJECT_BUSY", "finish the current Agent work before changing this project")
+		return true
+	}
+	return false
 }
 
 func (h *ChannelHandler) channelProjectRole(r *http.Request, channelID, userID string) (string, bool) {
@@ -146,11 +202,28 @@ func (h *ChannelHandler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "project source or version is too long")
 		return
 	}
+	if h.rejectBlockedProjectChange(w, r, channelID) {
+		return
+	}
+	var previousSource, previousBaseline string
+	if err := h.pool.QueryRow(r.Context(), `SELECT project_source, project_baseline FROM channels WHERE id=$1`, channelID).Scan(&previousSource, &previousBaseline); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load project")
+		return
+	}
+	if previousSource == req.Source && previousBaseline == req.BaselineVersion {
+		h.GetProject(w, r)
+		return
+	}
 	if _, err := h.pool.Exec(r.Context(), `UPDATE channels SET project_source=$1, project_baseline=$2, updated_at=now() WHERE id=$3`, req.Source, req.BaselineVersion, channelID); err != nil {
 		slog.Error("failed to update channel project", "channel_id", channelID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to update project")
 		return
 	}
+	event := "channel.project.changed"
+	if req.Source == "" && req.BaselineVersion == "" {
+		event = "channel.project.unlinked"
+	}
+	h.recordProjectChange(r.Context(), channelID, userID, event, req.Source, req.BaselineVersion)
 	h.GetProject(w, r)
 }
 
@@ -187,6 +260,20 @@ func (h *ChannelHandler) PutProjectMapping(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "computer is not available to this user")
 		return
 	}
+	if h.rejectBlockedProjectChange(w, r, channelID) {
+		return
+	}
+	var previousPath, previousVersion, previousAccess string
+	previousErr := h.pool.QueryRow(r.Context(), `SELECT local_path,version,access_mode FROM channel_project_mappings WHERE channel_id=$1 AND user_id=$2 AND computer_id=$3`, channelID, userID, computerID).
+		Scan(&previousPath, &previousVersion, &previousAccess)
+	if previousErr != nil && !errors.Is(previousErr, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to load project mapping")
+		return
+	}
+	if previousErr == nil && previousPath == req.LocalPath && previousVersion == req.Version && previousAccess == req.AccessMode {
+		h.GetProject(w, r)
+		return
+	}
 	_, err := h.pool.Exec(r.Context(), `
 		INSERT INTO channel_project_mappings (channel_id,user_id,computer_id,local_path,version,access_mode)
 		VALUES ($1,$2,$3,$4,$5,$6)
@@ -197,6 +284,7 @@ func (h *ChannelHandler) PutProjectMapping(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "failed to save project mapping")
 		return
 	}
+	h.recordProjectChange(r.Context(), channelID, userID, "channel.project.folder_changed", "", req.Version)
 	h.GetProject(w, r)
 }
 
@@ -211,9 +299,16 @@ func (h *ChannelHandler) DeleteProjectMapping(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	}
-	if _, err := h.pool.Exec(r.Context(), `DELETE FROM channel_project_mappings WHERE channel_id=$1 AND user_id=$2 AND computer_id=$3`, channelID, userID, computerID); err != nil {
+	if h.rejectBlockedProjectChange(w, r, channelID) {
+		return
+	}
+	result, err := h.pool.Exec(r.Context(), `DELETE FROM channel_project_mappings WHERE channel_id=$1 AND user_id=$2 AND computer_id=$3`, channelID, userID, computerID)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to remove project mapping")
 		return
+	}
+	if result.RowsAffected() > 0 {
+		h.recordProjectChange(r.Context(), channelID, userID, "channel.project.folder_unlinked", "", "")
 	}
 	h.GetProject(w, r)
 }

@@ -531,6 +531,33 @@ export interface InboxItem {
   parent_task_number?: number;
 }
 
+export interface InboxAction {
+  id: string;
+  state: 'pending' | 'handled';
+  type: 'review' | 'waiting_input' | 'waiting_approval' | 'failed' | 'assigned';
+  workspace_name: string;
+  channel_id: string;
+  channel_name: string;
+  task_id: string;
+  task_number: number;
+  task_title: string;
+  task_description?: string;
+  task_status: string;
+  message_id?: string;
+  run_id?: string;
+  run_status?: string;
+  agent_name?: string;
+  activity_text?: string;
+  source?: string;
+  artifact_id?: string;
+  artifact_title?: string;
+  decision?: 'accepted' | 'rejected';
+  reason?: string;
+  reviewer_name?: string;
+  next_owner_name?: string;
+  waiting_since: string;
+}
+
 export interface UnreadCount {
   total: number;
   mentions: number;

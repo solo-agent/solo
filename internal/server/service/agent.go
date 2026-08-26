@@ -53,7 +53,6 @@ const (
 	agentErrorNoAvailableDaemon    = "agent.error.no_available_daemon"
 	agentErrorMissingVisibleResult = "agent.error.missing_visible_result"
 	agentErrorProjectComputer      = "agent.error.project_computer_mismatch"
-	agentErrorProjectMapping       = "agent.error.project_mapping_missing"
 	agentErrorProjectReadOnly      = "agent.error.project_mapping_read_only"
 	agentErrorProjectVersion       = "agent.error.project_version_mismatch"
 
@@ -647,18 +646,16 @@ func (s *AgentService) applyChannelProjectBinding(ctx context.Context, daemon *D
 	).Scan(&legacyComputerID, &legacyPath, &projectSource, &baseline, &computerID, &projectPath, &version, &accessMode, &hasMappings); err != nil {
 		return fmt.Errorf("could not load the Channel project folder: %w", err)
 	}
-	projectConfigured := projectSource != "" || baseline != "" || hasMappings
-	if !projectConfigured && legacyPath == "" {
+	taskReq.ProjectSource = projectSource
+	taskReq.ProjectBaseline = baseline
+	if !hasMappings && legacyPath != "" {
+		computerID, projectPath, accessMode = legacyComputerID, legacyPath, "read_write"
+	}
+	if computerID == "" || projectPath == "" {
 		taskReq.ProjectComputerID = ""
 		taskReq.ProjectPath = ""
 		taskReq.ProjectVersion = ""
 		return nil
-	}
-	if !hasMappings && legacyPath != "" {
-		computerID, projectPath, accessMode = legacyComputerID, legacyPath, "read_write"
-	}
-	if effectiveComputerID == "" || computerID == "" || projectPath == "" {
-		return errors.New(agentErrorProjectMapping)
 	}
 	if effectiveComputerID != computerID {
 		return errors.New(agentErrorProjectComputer)
@@ -2969,6 +2966,8 @@ type daemonTaskRequest struct {
 	ProjectComputerID           string            `json:"project_computer_id,omitempty"`
 	ProjectPath                 string            `json:"project_path,omitempty"`
 	ProjectVersion              string            `json:"project_version,omitempty"`
+	ProjectSource               string            `json:"project_source,omitempty"`
+	ProjectBaseline             string            `json:"project_baseline,omitempty"`
 	CustomEnv                   map[string]string `json:"custom_env,omitempty"`
 	CustomArgs                  []string          `json:"custom_args,omitempty"`
 	AgentToken                  string            `json:"agent_token,omitempty"`

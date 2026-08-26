@@ -83,7 +83,7 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(pool, agentSvc)
-	channelHandler := handler.NewChannelHandler(pool, dm, templateSvc)
+	channelHandler := handler.NewChannelHandler(pool, dm, hub, templateSvc)
 	memberHandler := handler.NewMemberHandler(pool, agentSvc, dm)
 	messageHandler := handler.NewMessageHandler(pool, hub, agentSvc, taskSvc, sendDedupe)
 	agentHandler := handler.NewAgentHandler(pool, dm, hub, agentSvc)
@@ -480,6 +480,7 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 		// Inbox routes (v1.5)
 		r.Route("/api/v1/inbox", func(r chi.Router) {
 			r.Get("/", inboxHandler.List)
+			r.Get("/actions", inboxHandler.ListActions)
 			r.Get("/unread-count", inboxHandler.UnreadCount)
 			r.Post("/mark-all-read", inboxHandler.MarkAllRead)
 			r.Post("/clear-all", inboxHandler.ClearAll)

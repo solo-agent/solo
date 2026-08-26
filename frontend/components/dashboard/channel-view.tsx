@@ -15,7 +15,7 @@ import { useWebSocket } from '@/lib/ws-context';
 import { useTasks } from '@/lib/hooks/use-tasks';
 import { TaskArtifactStillPendingError, useTaskArtifact } from '@/lib/hooks/use-task-artifact';
 import { getTaskArtifactAction } from '@/lib/utils/task-artifact';
-import { apiClient } from '@/lib/api-client';
+import { apiClient, ApiError } from '@/lib/api-client';
 import { displayAgentErrorReason } from '@/lib/agent-activity';
 import { MessageList } from './message-list';
 import { MessageInput } from './message-input';
@@ -76,6 +76,12 @@ const SPLIT_KEYBOARD_STEP = 2;
 function clampSplitPercent(percent: number, containerWidth: number) {
   const minPercent = Math.min(50, (MIN_SPLIT_PANE_WIDTH / containerWidth) * 100);
   return Math.max(minPercent, Math.min(100 - minPercent, percent));
+}
+
+function projectErrorMessage(error: unknown) {
+  return error instanceof ApiError && error.code === 'CHANNEL_PROJECT_BUSY'
+    ? t('channelProjectBusy')
+    : error instanceof Error ? error.message : t('channelProjectSaveError');
 }
 
 // SOLO-63-F: Lazy-load ThreadPanel (only rendered when a thread is open)
@@ -283,7 +289,7 @@ export function ChannelView({
       setProject(next);
       showToast(t('channelProjectSaved'), 'success');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : t('channelProjectSaveError'), 'error');
+      showToast(projectErrorMessage(error), 'error');
     } finally {
       setProjectBusy(false);
     }
@@ -300,7 +306,7 @@ export function ChannelView({
       setProjectAccessMode('read_write');
       showToast(t('channelProjectCleared'), 'success');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : t('channelProjectSaveError'), 'error');
+      showToast(projectErrorMessage(error), 'error');
     } finally {
       setProjectBusy(false);
     }
@@ -316,7 +322,7 @@ export function ChannelView({
       setProject(next);
       showToast(t('channelProjectDetailsSaved'), 'success');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : t('channelProjectSaveError'), 'error');
+      showToast(projectErrorMessage(error), 'error');
     } finally {
       setProjectBusy(false);
     }

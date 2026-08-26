@@ -7,7 +7,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { useWebSocket } from '@/lib/ws-context';
-import type { InboxItem } from '@/lib/types';
+import type { InboxAction, InboxItem } from '@/lib/types';
 
 interface InboxResponse {
   items: InboxItem[];
@@ -137,4 +137,39 @@ export function useInbox() {
     senderFilter,
     setSenderFilter,
   } as const;
+}
+
+export function useInboxActions(state: 'pending' | 'handled') {
+  const [items, setItems] = useState<InboxAction[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const mountedRef = useRef(true);
+  const { onEvent } = useWebSocket();
+
+  const refetch = useCallback(async () => {
+    setIsLoading(true);
+    setError(false);
+    try {
+      const response = await apiClient.get<{ items: InboxAction[] }>(`/api/v1/inbox/actions?state=${state}`);
+      if (mountedRef.current) setItems(Array.isArray(response.items) ? response.items : []);
+    } catch {
+      if (mountedRef.current) setError(true);
+    } finally {
+      if (mountedRef.current) setIsLoading(false);
+    }
+  }, [state]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    refetch();
+    return () => { mountedRef.current = false; };
+  }, [refetch]);
+
+  useEffect(() => onEvent((event) => {
+    if (event.type === 'task.updated' || event.type === 'agent.run.updated' || event.type === 'agent.run.finished') {
+      refetch();
+    }
+  }), [onEvent, refetch]);
+
+  return { items, isLoading, error, refetch } as const;
 }

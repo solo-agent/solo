@@ -24,11 +24,13 @@ type AgentConfig struct {
 	Env                   map[string]string `json:"env,omitempty"`
 	CustomArgs            []string          `json:"custom_args,omitempty"`
 	// Runtime context for system prompt.
-	WorkspacePath string `json:"workspace_path,omitempty"`
-	ProjectPath   string `json:"project_path,omitempty"`
-	ServerID      string `json:"server_id,omitempty"`
-	Hostname      string `json:"hostname,omitempty"`
-	OS            string `json:"os,omitempty"`
+	WorkspacePath   string `json:"workspace_path,omitempty"`
+	ProjectPath     string `json:"project_path,omitempty"`
+	ProjectSource   string `json:"project_source,omitempty"`
+	ProjectBaseline string `json:"project_baseline,omitempty"`
+	ServerID        string `json:"server_id,omitempty"`
+	Hostname        string `json:"hostname,omitempty"`
+	OS              string `json:"os,omitempty"`
 }
 
 // ChannelContext provides channel-level context for InjectConfig.

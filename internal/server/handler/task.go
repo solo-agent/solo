@@ -1224,6 +1224,15 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create task")
 		return
 	}
+	if req.Description != "" {
+		description := req.Description
+		task, err = h.svc.UpdateTask(r.Context(), req.ChannelID, task.ID, userID, service.TaskUpdateRequest{Description: &description})
+		if err != nil {
+			slog.Error("failed to preserve task description", "error", err, "task_id", task.ID)
+			writeError(w, http.StatusInternalServerError, "failed to create task")
+			return
+		}
+	}
 
 	// Create thread for the task message
 	var threadID string

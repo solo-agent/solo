@@ -69,6 +69,30 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *InboxHandler) ListActions(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	state := r.URL.Query().Get("state")
+	if state == "" {
+		state = "pending"
+	}
+	if state != "pending" && state != "handled" {
+		writeError(w, http.StatusBadRequest, "state must be pending or handled")
+		return
+	}
+
+	items, err := h.svc.ListActions(r.Context(), userID, state)
+	if err != nil {
+		slog.Error("inbox actions: query failed", "request_id", middleware.GetRequestID(r.Context()), "user_id", userID, "state", state, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list inbox actions")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
 func (h *InboxHandler) UnreadCount(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(r)
 	if !ok {

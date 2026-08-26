@@ -34,6 +34,7 @@ import {
   Pin,
   PinOff,
   UserRoundCheck,
+  FolderSync,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { buildValidNames } from '@/lib/utils/highlight';
@@ -64,7 +65,7 @@ import { canGroupMessages, MessageDateSeparator } from './message-layout';
 import { ThreadPreview } from './thread-preview';
 import type { AgentDetailTarget, ChannelMember, Message } from '@/lib/types';
 import { sanitizeHtml } from '@/lib/sanitize';
-import { t } from '@/lib/i18n';
+import { t, type TranslationKey } from '@/lib/i18n';
 import {
   formatMessageTime,
   formatMessageTimestamp,
@@ -269,6 +270,28 @@ const MessageItem = memo(function MessageItem({
     },
     [handleSaveEdit, handleCancelEdit],
   );
+
+  const projectEvent = typeof message.metadata?.event === 'string' ? message.metadata.event : '';
+  if (projectEvent.startsWith('channel.project.')) {
+    const actor = typeof message.metadata?.actor_name === 'string' ? message.metadata.actor_name : t('unknown');
+    const source = typeof message.metadata?.source === 'string' && message.metadata.source
+      ? message.metadata.source : t('channelProjectUnnamed');
+    const key: TranslationKey = projectEvent === 'channel.project.unlinked'
+      ? 'channelProjectEventUnlinked'
+      : projectEvent === 'channel.project.folder_changed'
+        ? 'channelProjectEventFolderChanged'
+        : projectEvent === 'channel.project.folder_unlinked'
+          ? 'channelProjectEventFolderUnlinked'
+          : 'channelProjectEventChanged';
+    return (
+      <div data-message-id={message.id} className="px-6 py-2" role="listitem">
+        <div className="flex items-center gap-2 rounded-lg border border-brutal-border bg-brutal-cream/70 px-3 py-2 font-body text-sm text-brutal-text-muted">
+          <FolderSync className="h-4 w-4 shrink-0" />
+          <span>{t(key, { name: actor, project: source })}</span>
+        </div>
+      </div>
+    );
+  }
 
   if (message.content_type === 'channel_created') {
     const channelId = typeof message.metadata?.channel_id === 'string' ? message.metadata.channel_id : '';

@@ -45,6 +45,171 @@ type UnreadCount struct {
 	DM            int `json:"dm"`
 }
 
+type InboxAction struct {
+	ID              string    `json:"id"`
+	State           string    `json:"state"`
+	Type            string    `json:"type"`
+	WorkspaceName   string    `json:"workspace_name"`
+	ChannelID       string    `json:"channel_id"`
+	ChannelName     string    `json:"channel_name"`
+	TaskID          string    `json:"task_id"`
+	TaskNumber      int       `json:"task_number"`
+	TaskTitle       string    `json:"task_title"`
+	TaskDescription string    `json:"task_description,omitempty"`
+	TaskStatus      string    `json:"task_status"`
+	MessageID       *string   `json:"message_id,omitempty"`
+	RunID           *string   `json:"run_id,omitempty"`
+	RunStatus       *string   `json:"run_status,omitempty"`
+	AgentName       *string   `json:"agent_name,omitempty"`
+	ActivityText    *string   `json:"activity_text,omitempty"`
+	Source          *string   `json:"source,omitempty"`
+	ArtifactID      *string   `json:"artifact_id,omitempty"`
+	ArtifactTitle   *string   `json:"artifact_title,omitempty"`
+	Decision        *string   `json:"decision,omitempty"`
+	Reason          *string   `json:"reason,omitempty"`
+	ReviewerName    *string   `json:"reviewer_name,omitempty"`
+	NextOwnerName   *string   `json:"next_owner_name,omitempty"`
+	WaitingSince    time.Time `json:"waiting_since"`
+}
+
+const listPendingInboxActionsQuery = `
+	WITH latest_runs AS (
+		SELECT DISTINCT ON (link.task_id)
+		       link.task_id, run.id, run.status, run.activity_text, run.source,
+		       run.updated_at, agent.name AS agent_name
+		FROM agent_run_task_links link
+		JOIN agent_runs run ON run.id = link.run_id
+		JOIN agents agent ON agent.id = run.agent_id
+		WHERE link.role = 'primary'
+		ORDER BY link.task_id, run.started_at DESC, run.id DESC
+	), latest_artifacts AS (
+		SELECT DISTINCT ON (task_id) task_id, id, title
+		FROM artifacts
+		WHERE COALESCE(summary, '') <> 'pending'
+		ORDER BY task_id, updated_at DESC, id DESC
+	)
+	SELECT t.id::text,
+	       CASE
+	         WHEN t.creator_id = $1 AND t.status = 'in_review' THEN 'review'
+	         WHEN t.creator_id = $1 AND latest_run.status = 'waiting_input' THEN 'waiting_input'
+	         WHEN t.creator_id = $1 AND latest_run.status = 'waiting_approval' THEN 'waiting_approval'
+	         WHEN t.creator_id = $1 AND latest_run.status IN ('failed', 'timeout') THEN 'failed'
+	         ELSE 'assigned'
+	       END AS action_type,
+	       workspace.name, channel.id::text, channel.name,
+	       t.id::text, t.task_number, t.title, COALESCE(t.description, ''), t.status, t.message_id::text,
+	       latest_run.id::text, latest_run.status, latest_run.agent_name,
+	       NULLIF(latest_run.activity_text, ''), NULLIF(latest_run.source, ''),
+	       artifact.id::text, artifact.title,
+	       COALESCE(claimer_user.display_name, claimer_agent.name),
+	       CASE
+	         WHEN t.creator_id = $1 AND t.status = 'in_review' THEN t.updated_at
+	         WHEN t.creator_id = $1 AND latest_run.status IN ('waiting_input', 'waiting_approval', 'failed', 'timeout') THEN latest_run.updated_at
+	         ELSE t.updated_at
+	       END AS waiting_since
+	FROM tasks t
+	JOIN channels channel ON channel.id = t.channel_id AND channel.is_archived = false
+	JOIN workspaces workspace ON workspace.id = channel.workspace_id
+	JOIN channel_members member ON member.channel_id = channel.id
+	  AND member.member_type = 'user' AND member.member_id = $1
+	LEFT JOIN latest_runs latest_run ON latest_run.task_id = t.id
+	LEFT JOIN latest_artifacts artifact ON artifact.task_id = t.id
+	LEFT JOIN users claimer_user ON claimer_user.id = t.claimer_id
+	LEFT JOIN agents claimer_agent ON claimer_agent.id = t.claimer_id
+	WHERE channel.workspace_id = $2
+	  AND t.status NOT IN ('done', 'closed')
+	  AND (
+	    (t.creator_id = $1 AND t.status = 'in_review')
+	    OR (t.creator_id = $1 AND latest_run.status IN ('waiting_input', 'waiting_approval', 'failed', 'timeout'))
+	    OR (t.claimer_id = $1 AND t.status IN ('todo', 'in_progress'))
+	  )
+	ORDER BY
+	  CASE
+	    WHEN t.creator_id = $1 AND t.status = 'in_review' THEN 1
+	    WHEN t.creator_id = $1 AND latest_run.status IN ('waiting_input', 'waiting_approval') THEN 2
+	    WHEN t.creator_id = $1 AND latest_run.status IN ('failed', 'timeout') THEN 3
+	    ELSE 4
+	  END,
+	  waiting_since ASC
+	LIMIT 100
+`
+
+const listHandledInboxActionsQuery = `
+	SELECT review.id::text, review.decision,
+	       workspace.name, channel.id::text, channel.name,
+	       task.id::text, task.task_number, task.title, COALESCE(task.description, ''), task.status, task.message_id::text,
+	       artifact.id::text, artifact.title, review.reason,
+	       COALESCE(reviewer.display_name, 'Unknown'),
+	       COALESCE(next_user.display_name, next_agent.name),
+	       review.created_at
+	FROM task_reviews review
+	JOIN tasks task ON task.id = review.task_id
+	JOIN channels channel ON channel.id = task.channel_id AND channel.is_archived = false
+	JOIN workspaces workspace ON workspace.id = channel.workspace_id
+	JOIN channel_members member ON member.channel_id = channel.id
+	  AND member.member_type = 'user' AND member.member_id = $1
+	LEFT JOIN artifacts artifact ON artifact.id = review.artifact_id
+	LEFT JOIN users reviewer ON reviewer.id = review.reviewer_id
+	LEFT JOIN users next_user ON next_user.id = review.next_owner_id
+	LEFT JOIN agents next_agent ON next_agent.id = review.next_owner_id
+	WHERE review.reviewer_id = $1 AND channel.workspace_id = $2
+	ORDER BY review.created_at DESC
+	LIMIT 100
+`
+
+func (s *InboxService) ListActions(ctx context.Context, userID, state string) ([]InboxAction, error) {
+	workspaceID := serverworkspace.ContextID(ctx)
+	if state == "handled" {
+		return s.listHandledActions(ctx, userID, workspaceID)
+	}
+	rows, err := s.pool.Query(ctx, listPendingInboxActionsQuery, userID, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("list pending inbox actions: %w", err)
+	}
+	defer rows.Close()
+
+	actions := make([]InboxAction, 0)
+	for rows.Next() {
+		var action InboxAction
+		action.State = "pending"
+		if err := rows.Scan(
+			&action.ID, &action.Type, &action.WorkspaceName, &action.ChannelID, &action.ChannelName,
+			&action.TaskID, &action.TaskNumber, &action.TaskTitle, &action.TaskDescription, &action.TaskStatus, &action.MessageID,
+			&action.RunID, &action.RunStatus, &action.AgentName, &action.ActivityText, &action.Source,
+			&action.ArtifactID, &action.ArtifactTitle, &action.NextOwnerName, &action.WaitingSince,
+		); err != nil {
+			return nil, fmt.Errorf("scan pending inbox action: %w", err)
+		}
+		actions = append(actions, action)
+	}
+	return actions, rows.Err()
+}
+
+func (s *InboxService) listHandledActions(ctx context.Context, userID, workspaceID string) ([]InboxAction, error) {
+	rows, err := s.pool.Query(ctx, listHandledInboxActionsQuery, userID, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("list handled inbox actions: %w", err)
+	}
+	defer rows.Close()
+
+	actions := make([]InboxAction, 0)
+	for rows.Next() {
+		var action InboxAction
+		action.State = "handled"
+		action.Type = "review"
+		if err := rows.Scan(
+			&action.ID, &action.Decision, &action.WorkspaceName, &action.ChannelID, &action.ChannelName,
+			&action.TaskID, &action.TaskNumber, &action.TaskTitle, &action.TaskDescription, &action.TaskStatus, &action.MessageID,
+			&action.ArtifactID, &action.ArtifactTitle, &action.Reason, &action.ReviewerName,
+			&action.NextOwnerName, &action.WaitingSince,
+		); err != nil {
+			return nil, fmt.Errorf("scan handled inbox action: %w", err)
+		}
+		actions = append(actions, action)
+	}
+	return actions, rows.Err()
+}
+
 const listInboxQuery = `
 	SELECT id, item_type, channel_id, channel_name, thread_id, dm_id,
 	       sender_name, sender_avatar, content_preview, is_mention, created_at,
