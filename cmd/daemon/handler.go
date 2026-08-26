@@ -931,10 +931,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	if req.AgentToken != "" {
 		agentEnv["SOLO_AUTH_TOKEN"] = req.AgentToken
 	}
-	// Merge agent-level custom_env over base agentEnv (agent wins).
-	for k, v := range agentInfo.CustomEnv {
-		agentEnv[k] = v
-	}
+	mergeAgentCustomEnv(agentEnv, agentInfo.CustomEnv)
 	// SOLO_NODE_ID is runtime-owned routing state. Agent custom environment
 	// must not redirect a normal or node-scoped session into another node.
 	if req.NodeID != "" {
@@ -1326,6 +1323,16 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	// subscribers in order, eliminating the need for a delay.
 	h.pushEventJSON(req.TaskID, "done", map[string]interface{}{})
 	h.taskManager.CloseAllSubscribers(req.TaskID)
+}
+
+func mergeAgentCustomEnv(base, custom map[string]string) {
+	for key, value := range custom {
+		switch key {
+		case "SOLO_AGENT_ID", "SOLO_AGENT_NAME", "SOLO_API_URL", "SOLO_DAEMON_URL", "SOLO_AUTH_TOKEN", "SOLO_NODE_ID", "SOLO_RUN_ID":
+			continue
+		}
+		base[key] = value
+	}
 }
 
 func (h *daemonHandler) materializeMessageAttachments(ctx context.Context, token string, messages []llmMessage, workDir string, executionDirs ...string) []llmMessage {

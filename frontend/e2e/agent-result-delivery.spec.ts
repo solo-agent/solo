@@ -435,6 +435,7 @@ test.describe('real Agent result delivery contract', () => {
 
   test.beforeAll(async ({ request }) => {
     const auth = await authenticate(request);
+    databaseJSON(`WITH updated AS (UPDATE users SET onboarding_completed_at=now() WHERE email='${credentials.email}' RETURNING 1) SELECT to_json(EXISTS(SELECT 1 FROM updated))::text`);
     localComputer = await acquireLocalComputer(request, apiBase, auth.access_token);
   });
 
@@ -616,7 +617,7 @@ test.describe('real Agent result delivery contract', () => {
         auth.access_token,
         'post',
         `/api/v1/channels/${channel.id}/messages`,
-        { content: 'LIST_AGAIN' },
+        { content: `@${agent.name} LIST_AGAIN` },
       );
       await expect.poll(() => {
         const state = channelSessionState(secondTrigger.id);
@@ -667,7 +668,7 @@ test.describe('real Agent result delivery contract', () => {
       )).filter((content) => (
         content.type === 'tool_use'
         && content.name === 'Bash'
-        && content.input?.command === 'solo template list --json'
+        && content.input?.command?.endsWith('solo template list --json')
         && content.id
       )).map((content) => content.id!));
       const successfulTemplateResults = transcriptEntries.flatMap((entry) => (

@@ -84,6 +84,17 @@ func TestAgentRunAttachmentTokenIsLimitedToRunChannel(t *testing.T) {
 	if !authorized() {
 		t.Fatal("Run token could not read an attachment from its own channel")
 	}
+	localDaemonID := "local-daemon-" + uuid.NewString()
+	if _, err := pool.Exec(ctx, `UPDATE agent_runs SET computer_id = NULL, daemon_id = $2 WHERE id = $1`, runID, localDaemonID); err != nil {
+		t.Fatal(err)
+	}
+	token, err = auth.GenerateAgentRunToken(agentID, "Agent", runID, localDaemonID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !authorized() {
+		t.Fatal("Local daemon Run token could not read an attachment from its own channel")
+	}
 }
 
 func TestUserAvatarAttachmentIsVisibleOnlyInsideSharedWorkspace(t *testing.T) {

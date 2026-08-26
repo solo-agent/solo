@@ -46,7 +46,8 @@ func Auth(pools ...*pgxpool.Pool) func(http.Handler) http.Handler {
 				err = pool.QueryRow(r.Context(), `
 					SELECT EXISTS (
 					 SELECT 1 FROM agent_runs
-					  WHERE id = $1 AND agent_id = $2 AND computer_id = $3 AND finished_at IS NULL
+					  WHERE id = $1 AND agent_id = $2 AND finished_at IS NULL
+					    AND (computer_id::text = $3 OR (computer_id IS NULL AND daemon_id = $3))
 					)`, claims.RunID, claims.Subject, claims.ComputerID).Scan(&active)
 				if err != nil || !active {
 					writeAuthError(w, http.StatusUnauthorized, "unauthorized", "Agent Run credential is no longer active")
