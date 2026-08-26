@@ -295,7 +295,8 @@ func (h *AttachmentHandler) authorize(r *http.Request) bool {
 		         SELECT 1 FROM agent_runs r
 		         JOIN messages m ON m.channel_id = r.channel_id
 		          AND $1::uuid = ANY(m.attachment_ids)
-		          WHERE r.id = $4 AND r.agent_id = $2 AND r.computer_id = $5 AND r.finished_at IS NULL
+		          WHERE r.id = $4 AND r.agent_id = $2 AND r.finished_at IS NULL
+		            AND (r.computer_id::text = $5 OR (r.computer_id IS NULL AND r.daemon_id = $5))
 		       ))
 		       OR ($3 <> 'agent_run' AND (
 		         a.user_id = $2

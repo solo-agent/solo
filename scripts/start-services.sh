@@ -154,7 +154,7 @@ else
     if ! kill -0 "$FRONTEND_PID" 2>/dev/null; then
       break
     fi
-    if curl -sf "$FRONTEND_URL" >/dev/null 2>&1; then ok=1; break; fi
+    if curl -sS "$FRONTEND_URL" >/dev/null 2>&1; then ok=1; break; fi
     sleep 0.5
   done
   if [ "$ok" -ne 1 ]; then

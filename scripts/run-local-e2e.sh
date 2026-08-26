@@ -29,11 +29,17 @@ E2E_CORS_ORIGINS="http://localhost:$E2E_FRONTEND_PORT,http://127.0.0.1:$E2E_FRON
 RESTORE_STATE_DIR="$E2E_TMP_ROOT/solo-restored-daemon-$E2E_SERVER_PORT"
 ORDINARY_DAEMON_ID="$(sed -n 's/^DAEMON_ID=//p' "$REPO_ROOT/.env" 2>/dev/null | tail -1 | tr -d '"'"'"'[:space:]')"
 ORDINARY_DAEMON_ID="${ORDINARY_DAEMON_ID:-daemon-01}"
+ORDINARY_CREDENTIAL_FILE="${SOLO_DAEMON_CREDENTIAL_FILE:-$HOME/.solo/daemon/credentials.json}"
+ORDINARY_COMPUTER_ID="$(sed -n 's/.*"computer_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$ORDINARY_CREDENTIAL_FILE" 2>/dev/null | head -1)"
 case "$ORDINARY_DAEMON_ID" in
   *[!a-zA-Z0-9_-]*)
     echo "ERROR: ordinary DAEMON_ID contains unsupported characters" >&2
     exit 2
     ;;
+esac
+case "$ORDINARY_COMPUTER_ID" in
+  ????????-????-????-????-????????????) ;;
+  *) echo "ERROR: ordinary Daemon credential does not contain a Computer ID" >&2; exit 2 ;;
 esac
 RESTORED=0
 
@@ -82,7 +88,7 @@ restore_local_stack() {
       ordinary_health="$(curl -sf "http://127.0.0.1:$E2E_DAEMON_PORT/health" 2>/dev/null || true)"
       ordinary_online="$(docker exec "${SOLO_POSTGRES_CONTAINER:-solo-postgres}" \
         psql -U "${POSTGRES_USER:-solo}" -d "${POSTGRES_DB:-solo}" -tA \
-        -c "SELECT count(*) FROM computers WHERE daemon_id = '$ORDINARY_DAEMON_ID' AND status = 'online';" 2>/dev/null | tr -d '[:space:]')"
+        -c "SELECT count(*) FROM computers WHERE id = '$ORDINARY_COMPUTER_ID'::uuid AND status = 'online';" 2>/dev/null | tr -d '[:space:]')"
       isolated_remaining="$(docker exec "${SOLO_POSTGRES_CONTAINER:-solo-postgres}" \
         psql -U "${POSTGRES_USER:-solo}" -d "${POSTGRES_DB:-solo}" -tA \
         -c "SELECT count(*) FROM computers WHERE daemon_id = '$E2E_DAEMON_ID';" 2>/dev/null | tr -d '[:space:]')"

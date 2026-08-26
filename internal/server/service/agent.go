@@ -1003,9 +1003,9 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 	var eventCh <-chan SSEDaemonEvent
 	var err error
 	if daemon.ComputerID == "" && taskReq.AgentToken == "" {
-		taskReq.AgentToken, err = auth.GenerateAgentToken(ag.ID, agentName)
+		taskReq.AgentToken, err = auth.GenerateAgentRunToken(ag.ID, agentName, run.ID, daemon.ID)
 		if err != nil {
-			slog.Warn("failed to issue legacy local Agent credential", "run_id", run.ID, "error", err)
+			slog.Warn("failed to issue local Agent Run credential", "run_id", run.ID, "error", err)
 			finishRun(AgentRunStatusFailed)
 			return
 		}

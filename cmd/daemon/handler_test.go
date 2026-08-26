@@ -346,6 +346,29 @@ func TestCloneHTTPClientWithTimeoutPreservesTransport(t *testing.T) {
 	}
 }
 
+func TestMergeAgentCustomEnvProtectsRuntimeIdentity(t *testing.T) {
+	base := map[string]string{
+		"SOLO_AGENT_ID":   "agent-1",
+		"SOLO_AUTH_TOKEN": "run-token",
+		"SOLO_RUN_ID":     "run-1",
+		"PATH":            "/base/bin",
+	}
+	mergeAgentCustomEnv(base, map[string]string{
+		"SOLO_AGENT_ID":   "other-agent",
+		"SOLO_AUTH_TOKEN": "stolen-token",
+		"SOLO_RUN_ID":     "other-run",
+		"PATH":            "/custom/bin",
+		"CUSTOM_FLAG":     "enabled",
+	})
+
+	if base["SOLO_AGENT_ID"] != "agent-1" || base["SOLO_AUTH_TOKEN"] != "run-token" || base["SOLO_RUN_ID"] != "run-1" {
+		t.Fatalf("runtime-owned environment was overwritten: %#v", base)
+	}
+	if base["PATH"] != "/custom/bin" || base["CUSTOM_FLAG"] != "enabled" {
+		t.Fatalf("ordinary custom environment was not preserved: %#v", base)
+	}
+}
+
 func TestCleanupThinkingSessionsValidatesNodeIDs(t *testing.T) {
 	h := newDaemonHandler(newTaskManager(), fakeStreamProvider{}, "", "")
 
