@@ -647,6 +647,7 @@ export function DMView({
                 members={members}
                 onOpenArtifactReference={handleOpenArtifactReference}
                 onAgentClick={openAgentDetail}
+                contextLabel={name}
               />
             )}
 
@@ -750,6 +751,7 @@ export function DMView({
               onViewInChannel={handleViewThreadInDM}
               onOpenArtifactReference={handleOpenArtifactReference}
               onAgentClick={openAgentDetail}
+              contextLabel={name}
             />
           </Suspense>
         )}

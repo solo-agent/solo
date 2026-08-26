@@ -1145,6 +1145,7 @@ export function ChannelView({
               onViewInChannel={handleViewThreadInChannel}
               onOpenArtifactReference={handleOpenArtifactReference}
               onAgentClick={openAgentDetail}
+              contextLabel={`#${channel.name}`}
             />
           </Suspense>
         ) : (mainPanel === 'agent' || mainPanel === 'relationship') && workspaceDetail ? (
@@ -1236,6 +1237,7 @@ export function ChannelView({
               onAgentClick={openAgentDetail}
               onPin={moderation?.can_manage ? togglePin : undefined}
               pinnedMessageIds={new Set(pinnedMessages.map((item) => item.message_id))}
+              contextLabel={`#${channel.name}`}
             />
             {channel.type === 'lucy' && !isThinking && showLucyQuickStart && (
               <div className="border-t-2 border-black bg-brutal-cream px-4 py-2">

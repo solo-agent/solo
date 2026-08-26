@@ -35,6 +35,8 @@ import {
   PinOff,
   UserRoundCheck,
   FolderSync,
+  Copy,
+  ListChecks,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { buildValidNames } from '@/lib/utils/highlight';
@@ -43,6 +45,7 @@ import { UserAvatar } from '@/components/ui/user-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import { motionScrollBehavior } from '@/lib/motion';
 import {
   Dialog,
@@ -63,6 +66,13 @@ import {
 } from './message-reactions';
 import { canGroupMessages, MessageDateSeparator } from './message-layout';
 import { ThreadPreview } from './thread-preview';
+import {
+  copyMessageText,
+  MessageSelectionToolbar,
+  MessageSelectMark,
+  ShareMessagesDialog,
+  type ShareableMessage,
+} from './message-share';
 import type { AgentDetailTarget, ChannelMember, Message } from '@/lib/types';
 import { sanitizeHtml } from '@/lib/sanitize';
 import { t, type TranslationKey } from '@/lib/i18n';
@@ -96,6 +106,7 @@ interface MessageListProps {
   onAgentClick?: (agent: AgentDetailTarget) => void;
   onPin?: (message: Message) => void | Promise<void>;
   pinnedMessageIds?: Set<string>;
+  contextLabel?: string;
 }
 
 // ---- Task header config (SOLO-225-F) ----
@@ -146,6 +157,10 @@ interface MessageItemProps {
   onOpenArtifactReference?: (ref: string) => void;
   onPin?: (message: Message) => void | Promise<void>;
   pinned?: boolean;
+  onCopy?: (message: Message) => void;
+  onSelect?: (message: Message) => void;
+  selectionMode?: boolean;
+  selected?: boolean;
 }
 
 const MessageItem = memo(function MessageItem({
@@ -161,6 +176,10 @@ const MessageItem = memo(function MessageItem({
   onOpenArtifactReference,
   onPin,
   pinned,
+  onCopy,
+  onSelect,
+  selectionMode,
+  selected,
 }: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content || '');
@@ -346,19 +365,26 @@ const MessageItem = memo(function MessageItem({
         isFailed && 'bg-brutal-danger-light/30',
         isEditing && 'border-l-[3px] border-l-brutal-primary bg-brutal-primary-light/30',
         isHighlighted && 'bg-brutal-primary-light ring-2 ring-brutal-accent',
+        selected && 'bg-brutal-primary-light/60 ring-2 ring-brutal-accent',
         isTaskMessage && 'border-l-4',
         isTaskMessage && headerConfig?.accentClass,
         isTaskMessage && headerConfig?.bgClass,
-        isTaskMessage && 'cursor-pointer',
+        (isTaskMessage || selectionMode) && 'cursor-pointer',
       )}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       role="listitem"
-      onClick={isTaskMessage && onReply ? () => onReply(message) : undefined}
-      onKeyDown={isTaskMessage && onReply ? (e) => { if (e.key === 'Enter') onReply(message); } : undefined}
-      tabIndex={isTaskMessage ? 0 : undefined}
+      onClick={selectionMode ? () => onSelect?.(message) : isTaskMessage && onReply ? () => onReply(message) : undefined}
+      onKeyDown={(selectionMode || (isTaskMessage && onReply)) ? (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        if (selectionMode) onSelect?.(message);
+        else onReply?.(message);
+      } : undefined}
+      tabIndex={(selectionMode || isTaskMessage) ? 0 : undefined}
       aria-label={isTaskMessage ? `Task #${message.task_number} — ${headerConfig?.label || ''}` : undefined}
     >
+      {selectionMode && <MessageSelectMark selected={Boolean(selected)} />}
       {/* P25-08-F: Unread thread red dot */}
       {hasUnreadThread && onReply && (
         <button
@@ -584,6 +610,30 @@ const MessageItem = memo(function MessageItem({
             isSaving={reactionState.isSaving}
             toggleReaction={reactionState.toggleReaction}
           />
+          {onCopy && (
+            <button
+              data-message-copy
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onCopy(message); }}
+              className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
+              aria-label={t('copyMessage')}
+              title={t('copyMessage')}
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {onSelect && (
+            <button
+              data-message-select
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onSelect(message); }}
+              className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
+              aria-label={t('selectMessage')}
+              title={t('selectMessage')}
+            >
+              <ListChecks className="h-3.5 w-3.5" />
+            </button>
+          )}
           {onEdit && (
             <button
               type="button"
@@ -852,7 +902,9 @@ export function MessageList({
   onAgentClick,
   onPin,
   pinnedMessageIds = new Set(),
+  contextLabel = 'Solo',
 }: MessageListProps) {
+  const { showToast } = useToast();
   const validNames = buildValidNames(members);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -861,6 +913,47 @@ export function MessageList({
   const prevMessageCountRef = useRef(0);
   const scrollRestoreRef = useRef<number | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [shareOpen, setShareOpen] = useState(false);
+
+  const toggleSelection = useCallback((message: Message) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(message.id)) next.delete(message.id);
+      else next.add(message.id);
+      return next;
+    });
+  }, []);
+
+  const handleCopy = useCallback(async (message: Message) => {
+    try {
+      await copyMessageText(message.content);
+      showToast(t('messageCopied'), 'success');
+    } catch {
+      showToast(t('copyFailed'), 'error');
+    }
+  }, [showToast]);
+
+  const handleShareError = useCallback(() => {
+    showToast(t('shareImageFailed'), 'error');
+  }, [showToast]);
+
+  const selectedMessages: ShareableMessage[] = messages
+    .filter((message) => selectedIds.has(message.id))
+    .map((message) => ({
+      id: message.id,
+      displayName: message.display_name,
+      content: message.content,
+      createdAt: message.created_at,
+    }));
+
+  useEffect(() => {
+    const visible = new Set(messages.map((message) => message.id));
+    setSelectedIds((current) => {
+      if ([...current].every((id) => visible.has(id))) return current;
+      return new Set([...current].filter((id) => visible.has(id)));
+    });
+  }, [messages]);
 
   // Delete confirmation state
   const [deleteTarget, setDeleteTarget] = useState<{
@@ -1070,6 +1163,10 @@ export function MessageList({
                     onPin={onPin}
                     pinned={pinnedMessageIds.has(message.id)}
                     onAgentClick={onAgentClick}
+                    onCopy={handleCopy}
+                    onSelect={toggleSelection}
+                    selectionMode={selectedIds.size > 0}
+                    selected={selectedIds.has(message.id)}
                   />
                 ) : (
                   <MessageItem
@@ -1084,6 +1181,10 @@ export function MessageList({
                     onOpenArtifactReference={onOpenArtifactReference}
                     onPin={onPin}
                     pinned={pinnedMessageIds.has(message.id)}
+                    onCopy={handleCopy}
+                    onSelect={toggleSelection}
+                    selectionMode={selectedIds.size > 0}
+                    selected={selectedIds.has(message.id)}
                     onDelete={
                       onDelete
                         ? (id) => {
@@ -1113,6 +1214,12 @@ export function MessageList({
         <ScrollToBottom onClick={scrollToBottom} />
       )}
 
+      <MessageSelectionToolbar
+        count={selectedIds.size}
+        onCancel={() => setSelectedIds(new Set())}
+        onCreateImage={() => setShareOpen(true)}
+      />
+
       {/* Delete confirmation dialog */}
       <DeleteConfirmDialog
         open={!!deleteTarget}
@@ -1121,6 +1228,14 @@ export function MessageList({
         }}
         onConfirm={handleDeleteConfirm}
         messageAuthor={deleteTarget?.displayName ?? ''}
+      />
+      <ShareMessagesDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        messages={selectedMessages}
+        contextLabel={contextLabel}
+        onError={handleShareError}
+        onCopied={() => showToast(t('imageCopied'), 'success')}
       />
     </div>
   );
