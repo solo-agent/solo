@@ -556,6 +556,8 @@ type runTaskRequest struct {
 	ChannelName           string             `json:"channel_name,omitempty"`
 	ProjectComputerID     string             `json:"project_computer_id,omitempty"`
 	ProjectPath           string             `json:"project_path,omitempty"`
+	ProjectSource         string             `json:"project_source,omitempty"`
+	ProjectBaseline       string             `json:"project_baseline,omitempty"`
 	CustomEnv             map[string]string  `json:"custom_env,omitempty"`
 	CustomArgs            []string           `json:"custom_args,omitempty"`
 }
@@ -968,6 +970,8 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		Env:                   agentEnv,
 		WorkspacePath:         ws.WorkDir,
 		ProjectPath:           boundProjectPath,
+		ProjectSource:         req.ProjectSource,
+		ProjectBaseline:       req.ProjectBaseline,
 		ServerID:              h.serverURL,
 		Hostname:              hostname,
 		OS:                    runtime.GOOS + " " + runtime.GOARCH,

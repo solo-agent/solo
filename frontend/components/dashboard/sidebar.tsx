@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { ChevronDown, Plus, Sparkles } from 'lucide-react';
 import { ChannelList } from './channel-list';
+import { InboxBadge } from '@/components/inbox/inbox-badge';
 import { NAV_ITEMS } from '@/components/ui/navbar';
 import { PanelToggleIcon, panelToggleButtonClass } from '@/components/ui/button';
 import { selectableRowClass, selectableRowIconClass } from '@/components/ui/selectable-row';
@@ -17,6 +18,7 @@ import { cn } from '@/lib/utils';
 import type { Channel, DMChannel } from '@/lib/types';
 import { WorkspaceSwitcher } from '@/components/workspaces/workspace-switcher';
 import { WorkspacePeople } from '@/components/workspaces/workspace-people';
+import { useInboxUnread } from '@/lib/hooks/use-inbox-unread';
 
 interface SidebarProps {
   channels: Channel[];
@@ -47,10 +49,13 @@ export function Sidebar({
   onSelectChannel,
   onCreateChannel,
   onDeleteChannel,
+  inboxSelected,
+  onSelectInbox,
   isCollapsed = false,
   onToggleCollapsed,
 }: SidebarProps) {
   const pathname = usePathname();
+  const { unreadCount, isLoading: unreadLoading } = useInboxUnread();
   const [channelsExpanded, setChannelsExpanded] = useState(true);
 
   if (isCollapsed) {
@@ -115,6 +120,11 @@ export function Sidebar({
               </span>
             </button>
           )}
+          <InboxBadge
+            unreadCount={unreadLoading ? 0 : unreadCount.total}
+            isSelected={inboxSelected}
+            onClick={onSelectInbox}
+          />
           {NAV_ITEMS.map((item) => {
             const isActive = item.key === 'dashboard'
               ? pathname.startsWith('/observability')

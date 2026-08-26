@@ -484,7 +484,10 @@ func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, age
 	m.mu.RUnlock()
 	if exists && m.isSessionAlive(entry) {
 		previous, _, _ := entry.snapshot()
-		if entry.AgentConfig.Model == agentCfg.Model && entry.AgentConfig.ProjectPath == agentCfg.ProjectPath {
+		if entry.AgentConfig.Model == agentCfg.Model &&
+			entry.AgentConfig.ProjectPath == agentCfg.ProjectPath &&
+			entry.AgentConfig.ProjectSource == agentCfg.ProjectSource &&
+			entry.AgentConfig.ProjectBaseline == agentCfg.ProjectBaseline {
 			ps, err := m.backend.Send(ctx, previous, messages)
 			if err != nil {
 				return nil, err
@@ -518,7 +521,10 @@ func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, age
 	if len(startMessages) == 0 {
 		startMessages = messages
 	}
-	if exists && (entry.AgentConfig.Model != agentCfg.Model || entry.AgentConfig.ProjectPath != agentCfg.ProjectPath) {
+	if exists && (entry.AgentConfig.Model != agentCfg.Model ||
+		entry.AgentConfig.ProjectPath != agentCfg.ProjectPath ||
+		entry.AgentConfig.ProjectSource != agentCfg.ProjectSource ||
+		entry.AgentConfig.ProjectBaseline != agentCfg.ProjectBaseline) {
 		// Never resume a provider session created with another model. Codex
 		// thread/resume, for example, does not accept a new model override.
 		prevSessionID = ""

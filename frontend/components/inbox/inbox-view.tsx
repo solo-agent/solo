@@ -2,17 +2,17 @@
 
 import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, InboxIcon, Mail } from 'lucide-react';
-import { useInbox } from '@/lib/hooks/use-inbox';
+import { CheckCircle2, ClipboardCheck, InboxIcon, Loader2, Mail } from 'lucide-react';
+import { useInbox, useInboxActions } from '@/lib/hooks/use-inbox';
 import { useInboxUnread } from '@/lib/hooks/use-inbox-unread';
-import { InboxItem } from './inbox-item';
+import { InboxActionItem, InboxItem } from './inbox-item';
 import { Button } from '@/components/ui/button';
 import { TabBar } from '@/components/ui/tab-bar';
 import { apiClient } from '@/lib/api-client';
 import { buildDashboardHref } from '@/lib/dashboard-url';
 import { useToast } from '@/components/ui/toast';
 import type { TabBarTab } from '@/components/ui/tab-bar';
-import type { InboxItem as InboxItemType, Message, TaskArtifact } from '@/lib/types';
+import type { InboxAction, InboxItem as InboxItemType, Message, TaskArtifact } from '@/lib/types';
 import { t } from '@/lib/i18n';
 
 const ThreadPanel = lazy(() =>
@@ -20,13 +20,6 @@ const ThreadPanel = lazy(() =>
 );
 
 type ArtifactPreview = TaskArtifact & { previewUrl: string };
-
-const INBOX_TABS: TabBarTab[] = [
-  { key: 'all', label: t('inboxTabAll') },
-  { key: 'mention', label: t('inboxTabMentions') },
-  { key: 'thread_reply', label: t('inboxTabReplies') },
-  { key: 'dm', label: t('inboxTabDMs') },
-];
 
 const KEY_TO_TYPE_FILTER: Record<string, string[]> = {
   all: [],
@@ -41,10 +34,27 @@ function typeFilterToKey(tf: string[]) {
 }
 
 export function InboxView() {
+  const inboxTabs: TabBarTab[] = [
+    { key: 'all', label: t('inboxTabAll') },
+    { key: 'mention', label: t('inboxTabMentions') },
+    { key: 'thread_reply', label: t('inboxTabReplies') },
+    { key: 'dm', label: t('inboxTabDMs') },
+  ];
+  const sectionTabs: TabBarTab[] = [
+    { key: 'pending', label: t('inboxSectionPending') },
+    { key: 'messages', label: t('inboxSectionMessages') },
+    { key: 'handled', label: t('inboxSectionHandled') },
+  ];
   const router = useRouter();
   const { showToast } = useToast();
   const { items, hasMore, isLoading, isLoadingMore, loadMore, markRead, markAllRead, clearAll, typeFilter, setTypeFilter, senderFilter, setSenderFilter } = useInbox();
+  const pendingActions = useInboxActions('pending');
+  const handledActions = useInboxActions('handled');
+  const refetchPendingActions = pendingActions.refetch;
+  const refetchHandledActions = handledActions.refetch;
   useInboxUnread();
+
+  const [section, setSection] = useState('pending');
 
   const handleClearAll = useCallback(async () => {
     await clearAll();
@@ -163,9 +173,38 @@ export function InboxView() {
       artifactPreviewUrlRef.current = blobUrl;
       setArtifactPreview({ ...artifact, previewUrl: blobUrl });
     } catch {
-      showToast('Could not open artifact link.', 'error');
+      showToast(t('inboxArtifactOpenFailed'), 'error');
     }
   }, [showToast]);
+
+  const handleOpenActionTask = useCallback((item: InboxAction) => {
+    router.push(buildDashboardHref(item.channel_id, item.message_id
+      ? { view: 'task', panel: 'thread', taskId: item.task_id, threadId: item.message_id }
+      : { view: 'task', panel: 'conversation' }));
+  }, [router]);
+
+  const handleOpenActionArtifact = useCallback((item: InboxAction) => {
+    if (item.artifact_id) void handleOpenArtifactReference(`/api/v1/artifacts/${item.artifact_id}`);
+  }, [handleOpenArtifactReference]);
+
+  const handleActionReview = useCallback(async (
+    item: InboxAction,
+    decision: 'accept' | 'reject',
+    reason?: string,
+  ) => {
+    try {
+      await apiClient.post(
+        `/api/v1/tasks/${item.task_id}/${decision}`,
+        decision === 'reject' ? { reason } : undefined,
+      );
+      await Promise.all([refetchPendingActions(), refetchHandledActions()]);
+      showToast(decision === 'accept' ? t('inboxActionHandledAccepted') : t('inboxActionHandledRejected'), 'success');
+    } catch (error) {
+      await refetchPendingActions();
+      showToast(t('inboxActionUpdated'), 'error');
+      throw error;
+    }
+  }, [refetchHandledActions, refetchPendingActions, showToast]);
 
   useEffect(() => {
     if (!artifactPreview) return;
@@ -181,7 +220,7 @@ export function InboxView() {
 
       const reason = typeof data.reason === 'string' ? data.reason.trim() : '';
       if (data.action === 'reject' && reason === '') {
-        showToast('Reject comment is required.', 'error');
+        showToast(t('inboxRejectReasonRequired'), 'error');
         return;
       }
 
@@ -189,10 +228,11 @@ export function InboxView() {
       try {
         const path = `/api/v1/tasks/${taskId}/${data.action === 'accept' ? 'accept' : 'reject'}`;
         await apiClient.post(path, data.action === 'reject' ? { reason } : undefined);
+        await Promise.all([refetchPendingActions(), refetchHandledActions()]);
         closeArtifactPreview();
-        showToast(data.action === 'accept' ? 'Task accepted.' : 'Task rejected.', 'success');
+        showToast(data.action === 'accept' ? t('inboxActionHandledAccepted') : t('inboxActionHandledRejected'), 'success');
       } catch {
-        showToast(data.action === 'accept' ? 'Could not accept task.' : 'Could not reject task.', 'error');
+        showToast(data.action === 'accept' ? t('inboxAcceptFailed') : t('inboxRejectFailed'), 'error');
       } finally {
         setArtifactReviewBusy(false);
       }
@@ -200,7 +240,9 @@ export function InboxView() {
 
     window.addEventListener('message', handleArtifactMessage);
     return () => window.removeEventListener('message', handleArtifactMessage);
-  }, [artifactPreview, artifactReviewBusy, closeArtifactPreview, showToast]);
+  }, [artifactPreview, artifactReviewBusy, closeArtifactPreview, refetchHandledActions, refetchPendingActions, showToast]);
+
+  const activeActions = section === 'handled' ? handledActions : pendingActions;
 
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -208,9 +250,9 @@ export function InboxView() {
         <div className="sidebar-collapse-offset flex h-14 flex-shrink-0 items-center border-b-2 border-black px-4">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <Mail className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
-            <h2 className="font-bold text-foreground truncate">Inbox</h2>
+            <h2 className="font-bold text-foreground truncate">{t('sidebarInbox')}</h2>
           </div>
-          {items.length > 0 && (
+          {section === 'messages' && items.length > 0 && (
             <div className="flex items-center gap-2">
               <Button
                 type="button"
@@ -234,71 +276,70 @@ export function InboxView() {
           )}
         </div>
 
-        {/* Filter bar */}
         <TabBar
-          tabs={INBOX_TABS}
-          activeKey={typeFilterToKey(typeFilter)}
-          onChange={(key) => setTypeFilter(KEY_TO_TYPE_FILTER[key])}
+          tabs={sectionTabs}
+          activeKey={section}
+          onChange={setSection}
           variant="pill"
-        >
-          <input
-            type="text"
-            placeholder={t('filterSender')}
-            value={senderFilter}
-            onChange={(e) => setSenderFilter(e.target.value)}
-            className="focus-brutal-compact ml-auto h-7 w-36 border-2 border-black bg-white px-2 py-1 font-body text-xs shadow-brutal-sm outline-none transition-shadow placeholder:text-muted-foreground"
-          />
-        </TabBar>
+        />
 
-        <div key={typeFilterToKey(typeFilter)} className="flex flex-1 flex-col overflow-hidden bg-brutal-cream animate-fade-in">
-          {isLoading ? (
-            <div className="flex flex-1 items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : items.length === 0 ? (
-            <div className="flex flex-1 flex-col items-center justify-center px-4">
-              <div className="mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm">
-                <InboxIcon className="h-8 w-8 text-black" />
-              </div>
-              <h2 className="font-heading text-lg font-bold text-foreground">
-                {t('noNewMessages')}
-              </h2>
-              <p className="mt-1 font-body text-sm text-muted-foreground">
-                {t('inboxEmptyDesc')}
-              </p>
-            </div>
-          ) : (
-            <div className="flex-1 overflow-y-auto">
-              {items.map((item) => (
-                <InboxItem
-                  key={`${item.type}-${item.id}`}
-                  item={item}
-                  onClick={handleItemClick}
-                />
-              ))}
+        {section === 'messages' ? (
+          <>
+            <TabBar
+              tabs={inboxTabs}
+              activeKey={typeFilterToKey(typeFilter)}
+              onChange={(key) => setTypeFilter(KEY_TO_TYPE_FILTER[key])}
+              variant="pill"
+            >
+              <input
+                type="text"
+                placeholder={t('filterSender')}
+                value={senderFilter}
+                onChange={(e) => setSenderFilter(e.target.value)}
+                className="focus-brutal-compact ml-auto h-7 w-36 border-2 border-black bg-white px-2 py-1 font-body text-xs shadow-brutal-sm outline-none transition-shadow placeholder:text-muted-foreground"
+              />
+            </TabBar>
 
-              {hasMore && (
-                <div className="flex justify-center py-4">
-                  <button
-                    type="button"
-                    onClick={loadMore}
-                    disabled={isLoadingMore}
-                    className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                  >
-                    {isLoadingMore ? (
-                      <span className="flex items-center gap-1.5">
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        {t('loading')}
-                      </span>
-                    ) : (
-                      t('loadMore')
-                    )}
-                  </button>
+            <div key={typeFilterToKey(typeFilter)} className="flex flex-1 flex-col overflow-hidden bg-brutal-cream animate-fade-in">
+              {isLoading ? (
+                <div className="flex flex-1 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+              ) : items.length === 0 ? (
+                <InboxEmpty icon={<InboxIcon className="h-8 w-8 text-black" />} title={t('noNewMessages')} description={t('inboxEmptyDesc')} />
+              ) : (
+                <div className="flex-1 overflow-y-auto">
+                  {items.map((item) => <InboxItem key={`${item.type}-${item.id}`} item={item} onClick={handleItemClick} />)}
+                  {hasMore && (
+                    <div className="flex justify-center py-4">
+                      <button type="button" onClick={loadMore} disabled={isLoadingMore} className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50">
+                        {isLoadingMore ? <span className="flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" />{t('loading')}</span> : t('loadMore')}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
-        </div>
+          </>
+        ) : (
+          <div className="flex flex-1 flex-col overflow-hidden bg-brutal-cream animate-fade-in">
+            {activeActions.isLoading ? (
+              <div className="flex flex-1 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+            ) : activeActions.error ? (
+              <InboxEmpty icon={<InboxIcon className="h-8 w-8 text-black" />} title={t('inboxActionsLoadFailed')} description="" />
+            ) : activeActions.items.length === 0 ? (
+              <InboxEmpty
+                icon={section === 'handled' ? <CheckCircle2 className="h-8 w-8 text-black" /> : <ClipboardCheck className="h-8 w-8 text-black" />}
+                title={t(section === 'handled' ? 'inboxNoHandled' : 'inboxNoPending')}
+                description={t(section === 'handled' ? 'inboxNoHandledDesc' : 'inboxNoPendingDesc')}
+              />
+            ) : (
+              <div className="flex-1 overflow-y-auto">
+                {activeActions.items.map((item) => (
+                  <InboxActionItem key={item.id} item={item} onOpenTask={handleOpenActionTask} onOpenArtifact={handleOpenActionArtifact} onReview={handleActionReview} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ThreadPanel */}
@@ -359,14 +400,24 @@ export function InboxView() {
               type="button"
               onClick={closeArtifactPreview}
               className="border-2 border-black bg-white px-2 py-1 font-mono text-xs font-bold uppercase shadow-brutal-sm"
-              aria-label="Close artifact preview"
+              aria-label={t('inboxCloseArtifactPreview')}
             >
-              Close
+              {t('close')}
             </button>
           </div>
           <iframe ref={artifactFrameRef} title={artifactPreview.title} src={artifactPreview.previewUrl} className="min-h-0 flex-1 bg-white" />
         </div>
       )}
+    </div>
+  );
+}
+
+function InboxEmpty({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
+      <div className="mb-4 flex h-16 w-16 items-center justify-center border-2 border-black bg-brutal-primary shadow-brutal-sm">{icon}</div>
+      <h2 className="font-heading text-lg font-bold text-foreground">{title}</h2>
+      {description && <p className="mt-1 font-body text-sm text-muted-foreground">{description}</p>}
     </div>
   );
 }

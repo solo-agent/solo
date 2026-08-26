@@ -36,7 +36,7 @@ func TestAgentUsesOwnersProjectMappingForActualComputer(t *testing.T) {
 	if err := svc.applyChannelProjectBinding(ctx, &DaemonInfo{ComputerID: computerID}, &req); err != nil {
 		t.Fatalf("apply project mapping: %v", err)
 	}
-	if req.ProjectComputerID != computerID || req.ProjectPath != "/tmp/project-owner" || req.ProjectVersion != "v1" {
+	if req.ProjectComputerID != computerID || req.ProjectPath != "/tmp/project-owner" || req.ProjectVersion != "v1" || req.ProjectSource != "repo" || req.ProjectBaseline != "v1" {
 		t.Fatalf("project mapping = %+v", req)
 	}
 
@@ -53,7 +53,29 @@ func TestAgentUsesOwnersProjectMappingForActualComputer(t *testing.T) {
 		t.Fatalf("version mismatch error = %v, want %s", err, agentErrorProjectVersion)
 	}
 	otherComputerID := uuid.NewString()
-	if err := svc.applyChannelProjectBinding(ctx, &DaemonInfo{ComputerID: otherComputerID}, &req); err == nil || err.Error() != agentErrorProjectMapping {
-		t.Fatalf("missing mapping error = %v, want %s", err, agentErrorProjectMapping)
+	if err := svc.applyChannelProjectBinding(ctx, &DaemonInfo{ComputerID: otherComputerID}, &req); err != nil {
+		t.Fatalf("missing mapping should use Agent workspace: %v", err)
+	}
+	if req.ProjectPath != "" || req.ProjectComputerID != "" || req.ProjectSource != "repo" || req.ProjectBaseline != "v1" {
+		t.Fatalf("fallback project context = %+v", req)
+	}
+}
+
+func TestAgentUsesPrivateWorkspaceWhenChannelOnlyHasProjectSource(t *testing.T) {
+	pool := taskSubmitTestPool(t)
+	ctx := context.Background()
+	ownerID := taskSubmitUser(t, pool)
+	agentID := taskSubmitAgent(t, pool, ownerID)
+	channelID := taskSubmitChannel(t, pool, ownerID)
+	if _, err := pool.Exec(ctx, `UPDATE channels SET project_source='https://example.test/repo.git',project_baseline='main' WHERE id=$1`, channelID); err != nil {
+		t.Fatalf("set Channel project: %v", err)
+	}
+
+	req := daemonTaskRequest{AgentID: agentID, ChannelID: channelID}
+	if err := (&AgentService{pool: pool}).applyChannelProjectBinding(ctx, nil, &req); err != nil {
+		t.Fatalf("source-only project should not block Agent: %v", err)
+	}
+	if req.ProjectPath != "" || req.ProjectSource != "https://example.test/repo.git" || req.ProjectBaseline != "main" {
+		t.Fatalf("source-only project context = %+v", req)
 	}
 }

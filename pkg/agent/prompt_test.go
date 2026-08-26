@@ -235,6 +235,17 @@ func TestBuildSystemPrompt_ProjectFolderOverridesWorkspaceCWD(t *testing.T) {
 	assertNotHas(t, p, "working directory (cwd) is your **persistent, agent-owned workspace**")
 }
 
+func TestBuildSystemPrompt_ProjectSourceWithoutLocalFolder(t *testing.T) {
+	p := BuildSystemPrompt(AgentConfig{
+		Name: "Bot", WorkspacePath: "/agents/bot/workspace",
+		ProjectSource: "https://example.test/repo.git", ProjectBaseline: "main",
+	}, ChannelContext{TriggerType: TriggerChat}, "", nil)
+	assertHas(t, p, "Channel project source: https://example.test/repo.git")
+	assertHas(t, p, "Channel project version: main")
+	assertHas(t, p, "no local project folder is connected")
+	assertHas(t, p, "working directory (cwd) is your **persistent, agent-owned workspace**")
+}
+
 func TestBuildSystemPrompt_AllTriggers(t *testing.T) {
 	for _, trigger := range []TriggerType{TriggerChat, TriggerMention, TriggerDM, TriggerThread} {
 		t.Run(string(trigger), func(t *testing.T) {

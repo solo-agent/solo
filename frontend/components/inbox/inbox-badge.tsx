@@ -8,6 +8,7 @@
 'use client';
 
 import { Mail } from 'lucide-react';
+import { selectableRowClass, selectableRowIconClass } from '@/components/ui/selectable-row';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 
@@ -22,21 +23,20 @@ export function InboxBadge({ unreadCount, isSelected, onClick }: InboxBadgeProps
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        'flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider font-heading transition-all border-2',
-        isSelected
-          ? 'bg-brutal-primary text-black border-black shadow-brutal-sm'
-          : 'text-muted-foreground border-transparent hover:border-black',
+      className={selectableRowClass(
+        isSelected,
+        cn('w-full text-left', isSelected ? 'bg-white' : 'hover:bg-white/50'),
       )}
       aria-label={t('inboxAriaLabel', { n: unreadCount })}
+      aria-current={isSelected ? 'page' : undefined}
     >
-      <Mail className="h-3.5 w-3.5" />
-      <span>{t('sidebarInbox')}</span>
+      <span className={selectableRowIconClass('bg-white')}>
+        <Mail className="h-4 w-4" />
+      </span>
+      <span className="truncate font-body">{t('sidebarInbox')}</span>
       {unreadCount > 0 && (
         <span
-          // v3.1: bounce-slow draws the eye to unread state without
-          // being frantic. Killed by prefers-reduced-motion.
-          className="ml-auto flex h-5 min-w-[20px] items-center justify-center border-2 border-black bg-brutal-danger px-1.5 font-mono text-[11px] font-bold text-white animate-bounce-slow"
+          className="ml-auto flex h-5 min-w-5 items-center justify-center border border-black/20 bg-brutal-accent-light px-1.5 font-mono text-[10px] font-bold"
           aria-label={t('inboxUnread', { n: unreadCount })}
         >
           {unreadCount > 99 ? '99+' : unreadCount}

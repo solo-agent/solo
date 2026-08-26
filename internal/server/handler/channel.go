@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/solo-ai/solo/internal/realtime"
 	"github.com/solo-ai/solo/internal/server/service"
 	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
 )
@@ -19,16 +20,17 @@ import (
 type ChannelHandler struct {
 	pool      *pgxpool.Pool
 	dm        *service.DaemonManager
+	hub       realtime.Broadcaster
 	templates *service.TemplateService
 }
 
 // NewChannelHandler creates a new ChannelHandler.
-func NewChannelHandler(pool *pgxpool.Pool, dm *service.DaemonManager, templates ...*service.TemplateService) *ChannelHandler {
+func NewChannelHandler(pool *pgxpool.Pool, dm *service.DaemonManager, hub realtime.Broadcaster, templates ...*service.TemplateService) *ChannelHandler {
 	templateSvc := service.NewTemplateService(pool)
 	if len(templates) > 0 && templates[0] != nil {
 		templateSvc = templates[0]
 	}
-	return &ChannelHandler{pool: pool, dm: dm, templates: templateSvc}
+	return &ChannelHandler{pool: pool, dm: dm, hub: hub, templates: templateSvc}
 }
 
 // --- Request/Response types ---

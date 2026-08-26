@@ -152,6 +152,7 @@ test.describe('A Channel owns a real project folder', () => {
       const loadedProject = await projectResponse;
       expect(loadedProject.status()).toBe(200);
       expect(((await loadedProject.json()) as ChannelProject).can_manage).toBe(true);
+      const projectDialog = page.getByRole('dialog', { name: `项目 · ${channelName}` });
       const projectSource = page.getByLabel('代码来源（可选）');
       await expect(projectSource).toBeVisible({ timeout: 10_000 });
       await projectSource.fill('https://example.invalid/course-project.git');
@@ -164,7 +165,8 @@ test.describe('A Channel owns a real project folder', () => {
       await page.getByRole('button', { name: '保存项目文件夹' }).click();
       await expect(page.getByText('项目文件夹已保存。')).toBeVisible();
       await expect(page.getByText('已准备好')).toBeVisible();
-      await page.keyboard.press('Escape');
+      await projectDialog.getByRole('button', { name: '关闭' }).click();
+      await expect(projectDialog).toBeHidden();
 
       expect(databaseJSON<{ source: string; baseline: string; computer: string; path: string; version: string }>(`
         SELECT json_build_object(
@@ -197,7 +199,7 @@ test.describe('A Channel owns a real project folder', () => {
         computer_id: computerID,
         model_provider: runtime!.type,
         model_name: runtime!.type === 'claude' ? 'sonnet' : '',
-        system_prompt: 'Follow the user request using the real current working directory. Always deliver a visible final result with solo message send.',
+        system_prompt: `Follow the user request using the real current working directory. Always deliver the final result with solo message send --target '#${channelName}'.`,
       });
 
       await expect.poll(() => databaseJSON<string>(`
@@ -233,6 +235,68 @@ test.describe('A Channel owns a real project folder', () => {
       const agentWorkspace = join(homedir(), '.solo', 'agents', agent.id, 'workspace');
       expect(existsSync(agentWorkspace)).toBe(true);
       expect(agentWorkspace).not.toBe(projectDir);
+
+      // A running Agent protects the current project from being switched.
+      // Once that work is finished, the same Channel can switch projects and
+      // shows the change in the conversation.
+      const completedRunID = databaseJSON<string>(`
+        SELECT to_json(id::text)::text FROM agent_runs
+        WHERE agent_id='${agent.id}' AND trigger_message_id='${trigger.id}'
+        ORDER BY started_at DESC LIMIT 1
+      `);
+      databaseExec(`UPDATE agent_runs SET status='running' WHERE id='${completedRunID}';`);
+      const blockedSwitch = await request.patch(`${apiBase}/api/v1/channels/${channel.id}/project`, {
+        headers: {
+          authorization: `Bearer ${auth.access_token}`,
+          'x-workspace-id': auth.workspace_id,
+        },
+        data: { source: 'https://example.invalid/blocked.git', baseline_version: 'main' },
+      });
+      expect(blockedSwitch.status()).toBe(409);
+      expect((await blockedSwitch.json()).code).toBe('CHANNEL_PROJECT_BUSY');
+      expect(databaseJSON<string>(`SELECT to_json(project_source)::text FROM channels WHERE id='${channel.id}'`))
+        .toBe('https://example.invalid/course-project.git');
+      databaseExec(`UPDATE agent_runs SET status='completed' WHERE id='${completedRunID}';`);
+
+      const nextProjectSource = 'https://example.invalid/next-course-project.git';
+      const fallbackMarker = `SOLO_PRIVATE_WORKSPACE_${suffix}`;
+      const projectReload = page.waitForResponse((response) => response.url().endsWith(`/api/v1/channels/${channel!.id}/project`));
+      await page.getByRole('button', { name: '项目', exact: true }).click();
+      await projectReload;
+      await projectSource.fill(nextProjectSource);
+      await page.getByRole('button', { name: '保存项目信息' }).click();
+      await expect(page.getByText('项目信息已保存。')).toBeVisible();
+      await page.getByRole('button', { name: '取消使用文件夹' }).click();
+      await expect(page.getByText('已取消项目文件夹。')).toBeVisible();
+      await projectDialog.getByRole('button', { name: '关闭' }).click();
+      await expect(projectDialog).toBeHidden();
+      await expect(page.getByText(`大学新生 已将本频道切换到 ${nextProjectSource}`, { exact: false })).toBeVisible();
+      expect(databaseJSON<string>(`SELECT to_json(project_source)::text FROM channels WHERE id='${channel.id}'`))
+        .toBe(nextProjectSource);
+
+      const fallbackTrigger = await call<{ id: string }>(request, auth, 'post', `/api/v1/channels/${channel.id}/messages`, {
+        content: `Create private-fallback-proof.txt in the current working directory with exactly this text: ${fallbackMarker}. Then send a visible reply that includes both ${fallbackMarker} and ${nextProjectSource}.`,
+      });
+      await expect.poll(() => databaseJSON<{ status: string; reply: string }>(`
+        SELECT json_build_object(
+          'status', COALESCE((SELECT status FROM agent_runs WHERE agent_id='${agent!.id}' AND trigger_message_id='${fallbackTrigger.id}' ORDER BY started_at DESC LIMIT 1),''),
+          'reply', COALESCE((SELECT m.content FROM messages m JOIN agent_runs r ON m.metadata->>'agent_run_id'=r.id::text WHERE r.agent_id='${agent!.id}' AND r.trigger_message_id='${fallbackTrigger.id}' ORDER BY m.created_at DESC LIMIT 1),'')
+        )::text
+      `), { timeout: 180000, intervals: [500, 1000, 2000] }).toMatchObject({
+        status: 'completed',
+        reply: expect.stringContaining(fallbackMarker),
+      });
+      expect(readFileSync(join(agentWorkspace, 'private-fallback-proof.txt'), 'utf8').trim()).toBe(fallbackMarker);
+      expect(existsSync(join(projectDir, 'private-fallback-proof.txt'))).toBe(false);
+      expect(databaseJSON<{ computer: string; path: string }>(`
+        SELECT json_build_object(
+          'computer', COALESCE(project_computer_id::text,''),
+          'path', COALESCE(project_path,'')
+        )::text
+        FROM agent_runs
+        WHERE agent_id='${agent.id}' AND trigger_message_id='${fallbackTrigger.id}'
+        ORDER BY started_at DESC LIMIT 1
+      `)).toEqual({ computer: '', path: '' });
     } finally {
       if (auth && agent) await call(request, auth, 'delete', `/api/v1/agents/${agent.id}`).catch(() => undefined);
       if (auth && channel) await call(request, auth, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
