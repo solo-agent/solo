@@ -20,7 +20,7 @@ import {
   useState,
   useCallback,
 } from 'react';
-import { X, AlertCircle, RefreshCw, Send, MessageSquare } from 'lucide-react';
+import { X, AlertCircle, Copy, ListChecks, RefreshCw, Send, MessageSquare } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -49,6 +49,13 @@ import { t } from '@/lib/i18n';
 import { formatMessageTime, formatMessageTimestamp, messageDateKey } from '@/lib/utils/time';
 import type { AgentDetailTarget, Message, ChannelMember, Task, TaskStatus } from '@/lib/types';
 import { canGroupMessages, MessageDateSeparator } from './message-layout';
+import {
+  copyMessageText,
+  MessageSelectionToolbar,
+  MessageSelectMark,
+  ShareMessagesDialog,
+  type ShareableMessage,
+} from './message-share';
 
 interface ThreadPanelProps {
   parentMessage: Message;
@@ -65,6 +72,7 @@ interface ThreadPanelProps {
   onViewInChannel?: () => void;
   onOpenArtifactReference?: (ref: string) => void;
   onAgentClick?: (agent: AgentDetailTarget) => void;
+  contextLabel?: string;
 }
 
 // ---- Parent message display ----
@@ -74,11 +82,19 @@ function ParentMessageBlock({
   task,
   onOpenArtifactReference,
   onAgentClick,
+  onCopy,
+  onSelect,
+  selectionMode,
+  selected,
 }: {
   message: Message;
   task?: Task;
   onOpenArtifactReference?: (ref: string) => void;
   onAgentClick?: (agent: AgentDetailTarget) => void;
+  onCopy?: (message: Message) => void;
+  onSelect?: (message: Message) => void;
+  selectionMode?: boolean;
+  selected?: boolean;
 }) {
   const isAgent = message.sender_type === 'agent';
   const displayName = task?.creator_name || message.display_name;
@@ -87,7 +103,22 @@ function ParentMessageBlock({
   const reactionState = useMessageReactions(message.id, message.reactions);
 
   return (
-    <div className="group relative flex gap-3 border-b border-brutal-muted px-6 py-4">
+    <div
+      data-message-id={message.id}
+      className={cn(
+        'group relative flex gap-3 border-b border-brutal-muted px-6 py-4',
+        selected && 'bg-brutal-primary-light/60 ring-2 ring-inset ring-brutal-accent',
+        selectionMode && 'cursor-pointer',
+      )}
+      onClick={selectionMode ? () => onSelect?.(message) : undefined}
+      onKeyDown={selectionMode ? (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onSelect?.(message);
+      } : undefined}
+      tabIndex={selectionMode ? 0 : undefined}
+    >
+      {selectionMode && <MessageSelectMark selected={Boolean(selected)} />}
       {isAgent ? (
         <PixelAvatar
           agentId={message.user_id || message.id}
@@ -141,6 +172,26 @@ function ParentMessageBlock({
           isSaving={reactionState.isSaving}
           toggleReaction={reactionState.toggleReaction}
         />
+        {onCopy && <button
+          data-message-copy
+          type="button"
+          onClick={(event) => { event.stopPropagation(); onCopy(message); }}
+          className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
+          aria-label={t('copyMessage')}
+          title={t('copyMessage')}
+        >
+          <Copy className="h-3.5 w-3.5" />
+        </button>}
+        {onSelect && <button
+          data-message-select
+          type="button"
+          onClick={(event) => { event.stopPropagation(); onSelect(message); }}
+          className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
+          aria-label={t('selectMessage')}
+          title={t('selectMessage')}
+        >
+          <ListChecks className="h-3.5 w-3.5" />
+        </button>}
       </div>
     </div>
   );
@@ -291,6 +342,19 @@ function createMdComponents(onOpenArtifactReference?: (ref: string) => void) {
 
 // ---- Reply item ----
 
+type ThreadReplyMessage = {
+  id: string;
+  display_name?: string;
+  sender_id?: string;
+  sender_avatar?: string | null;
+  sender_active?: boolean;
+  content: string;
+  created_at: string;
+  status?: string;
+  sender_type?: string;
+  reactions?: import('@/lib/types').MessageReaction[];
+};
+
 function ReplyItem({
   message,
   isGrouped,
@@ -298,13 +362,21 @@ function ReplyItem({
   isHighlighted,
   onOpenArtifactReference,
   onAgentClick,
+  onCopy,
+  onSelect,
+  selectionMode,
+  selected,
 }: {
-  message: { id: string; display_name?: string; sender_id?: string; sender_avatar?: string | null; sender_active?: boolean; content: string; created_at: string; status?: string; sender_type?: string; reactions?: import('@/lib/types').MessageReaction[] };
+  message: ThreadReplyMessage;
   isGrouped?: boolean;
   validNames?: string[];
   isHighlighted?: boolean;
   onOpenArtifactReference?: (ref: string) => void;
   onAgentClick?: (agent: AgentDetailTarget) => void;
+  onCopy?: (message: ThreadReplyMessage) => void;
+  onSelect?: (message: ThreadReplyMessage) => void;
+  selectionMode?: boolean;
+  selected?: boolean;
 }) {
   const isFailed = message.status === 'failed';
   const isSending = message.status === 'sending';
@@ -325,8 +397,18 @@ function ReplyItem({
         'group relative flex gap-3 px-6',
         isGrouped ? 'py-1' : 'pb-1.5 pt-3',
         isHighlighted && 'bg-brutal-primary-light ring-2 ring-brutal-accent',
+        selected && 'bg-brutal-primary-light/60 ring-2 ring-inset ring-brutal-accent',
+        selectionMode && 'cursor-pointer',
       )}
+      onClick={selectionMode ? () => onSelect?.(message) : undefined}
+      onKeyDown={selectionMode ? (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onSelect?.(message);
+      } : undefined}
+      tabIndex={selectionMode ? 0 : undefined}
     >
+      {selectionMode && <MessageSelectMark selected={Boolean(selected)} />}
       {isGrouped ? (
         <div className="mt-0.5 flex w-7 flex-shrink-0 justify-center">
           <time
@@ -424,6 +506,26 @@ function ReplyItem({
           isSaving={reactionState.isSaving}
           toggleReaction={reactionState.toggleReaction}
         />
+        {onCopy && <button
+          data-message-copy
+          type="button"
+          onClick={(event) => { event.stopPropagation(); onCopy(message); }}
+          className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
+          aria-label={t('copyMessage')}
+          title={t('copyMessage')}
+        >
+          <Copy className="h-3.5 w-3.5" />
+        </button>}
+        {onSelect && <button
+          data-message-select
+          type="button"
+          onClick={(event) => { event.stopPropagation(); onSelect(message); }}
+          className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
+          aria-label={t('selectMessage')}
+          title={t('selectMessage')}
+        >
+          <ListChecks className="h-3.5 w-3.5" />
+        </button>}
       </div>
     </div>
   );
@@ -780,6 +882,7 @@ export function ThreadPanel({
   onViewInChannel,
   onOpenArtifactReference,
   onAgentClick,
+  contextLabel = 'Solo',
 }: ThreadPanelProps) {
   const router = useRouter();
   const { showToast } = useToast();
@@ -811,6 +914,50 @@ export function ThreadPanel({
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevMessageCount = useRef(0);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [shareOpen, setShareOpen] = useState(false);
+
+  const toggleSelection = useCallback((message: { id: string }) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(message.id)) next.delete(message.id);
+      else next.add(message.id);
+      return next;
+    });
+  }, []);
+
+  const handleCopy = useCallback(async (message: { content: string }) => {
+    try {
+      await copyMessageText(message.content);
+      showToast(t('messageCopied'), 'success');
+    } catch {
+      showToast(t('copyFailed'), 'error');
+    }
+  }, [showToast]);
+
+  const handleShareError = useCallback(() => {
+    showToast(t('shareImageFailed'), 'error');
+  }, [showToast]);
+
+  const selectedMessages: ShareableMessage[] = [
+    {
+      id: parentMessage.id,
+      displayName: parentMessage.display_name,
+      content: parentMessage.content,
+      createdAt: parentMessage.created_at,
+    },
+    ...messages.map((message) => ({
+      id: message.id,
+      displayName: message.display_name || t('user'),
+      content: message.content,
+      createdAt: message.created_at,
+    })),
+  ].filter((message) => selectedIds.has(message.id));
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setShareOpen(false);
+  }, [parentMessage.id]);
 
   useEffect(() => {
     loadThreadMessages(parentMessage.channel_id, parentMessage.id);
@@ -899,7 +1046,7 @@ export function ThreadPanel({
     <div
       data-thread-panel
       className={cn(
-        'flex h-full flex-col bg-brutal-cream border-l-2 border-r-2 border-b-2 border-black shadow-brutal-sm',
+        'relative flex h-full flex-col bg-brutal-cream border-l-2 border-r-2 border-b-2 border-black shadow-brutal-sm',
         'animate-slide-in-from-right',
       )}
     >
@@ -949,6 +1096,10 @@ export function ThreadPanel({
             task={task}
             onOpenArtifactReference={onOpenArtifactReference}
             onAgentClick={onAgentClick}
+            onCopy={handleCopy}
+            onSelect={toggleSelection}
+            selectionMode={selectedIds.size > 0}
+            selected={selectedIds.has(parentMessage.id)}
           />
 
           {/* Reply list */}
@@ -977,6 +1128,10 @@ export function ThreadPanel({
                         isHighlighted={highlightedMessageId === reply.id}
                         onOpenArtifactReference={onOpenArtifactReference}
                         onAgentClick={onAgentClick}
+                        onCopy={handleCopy}
+                        onSelect={toggleSelection}
+                        selectionMode={selectedIds.size > 0}
+                        selected={selectedIds.has(reply.id)}
                       />
                     </Fragment>
                   );
@@ -994,6 +1149,19 @@ export function ThreadPanel({
         onSend={handleSendReply}
         disabled={!!error || isLoading}
         members={members}
+      />
+      <MessageSelectionToolbar
+        count={selectedIds.size}
+        onCancel={() => setSelectedIds(new Set())}
+        onCreateImage={() => setShareOpen(true)}
+      />
+      <ShareMessagesDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        messages={selectedMessages}
+        contextLabel={contextLabel}
+        onError={handleShareError}
+        onCopied={() => showToast(t('imageCopied'), 'success')}
       />
     </div>
   );

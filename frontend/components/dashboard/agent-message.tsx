@@ -9,7 +9,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2, MessageSquare, Pin, PinOff } from 'lucide-react';
+import { Copy, ListChecks, Loader2, MessageSquare, Pin, PinOff } from 'lucide-react';
 import type { AgentDetailTarget, Message } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
@@ -22,6 +22,7 @@ import {
   MessageReactionPicker,
   useMessageReactions,
 } from './message-reactions';
+import { MessageSelectMark } from './message-share';
 
 interface AgentMessageProps {
   message: Message;
@@ -34,9 +35,13 @@ interface AgentMessageProps {
   onAgentClick?: (agent: AgentDetailTarget) => void;
   onPin?: (message: Message) => void | Promise<void>;
   pinned?: boolean;
+  onCopy?: (message: Message) => void;
+  onSelect?: (message: Message) => void;
+  selectionMode?: boolean;
+  selected?: boolean;
 }
 
-export function AgentMessage({ message, isGrouped, onReply, validNames = [], isHighlighted, onOpenArtifactReference, onAgentClick, onPin, pinned }: AgentMessageProps) {
+export function AgentMessage({ message, isGrouped, onReply, validNames = [], isHighlighted, onOpenArtifactReference, onAgentClick, onPin, pinned, onCopy, onSelect, selectionMode, selected }: AgentMessageProps) {
   const time = formatMessageTimestamp(message.created_at);
   const compactTime = formatMessageTime(message.created_at);
   const [isTogglingPin, setIsTogglingPin] = useState(false);
@@ -52,9 +57,19 @@ export function AgentMessage({ message, isGrouped, onReply, validNames = [], isH
         'group relative flex gap-3 px-6 agent-message',
         isGrouped ? 'py-1' : 'pt-3 pb-1.5',
         isHighlighted && 'bg-brutal-primary-light ring-2 ring-brutal-accent',
+        selected && 'bg-brutal-primary-light/60 ring-2 ring-brutal-accent',
+        selectionMode && 'cursor-pointer',
       )}
       role="listitem"
+      onClick={selectionMode ? () => onSelect?.(message) : undefined}
+      onKeyDown={selectionMode ? (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onSelect?.(message);
+      } : undefined}
+      tabIndex={selectionMode ? 0 : undefined}
     >
+      {selectionMode && <MessageSelectMark selected={Boolean(selected)} />}
       {isGrouped ? (
         <div className="mt-0.5 w-8 flex-shrink-0 text-center">
           <time
@@ -130,6 +145,26 @@ export function AgentMessage({ message, isGrouped, onReply, validNames = [], isH
           isSaving={reactionState.isSaving}
           toggleReaction={reactionState.toggleReaction}
         />
+        {onCopy && <button
+          data-message-copy
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onCopy(message); }}
+          className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
+          aria-label={t('copyMessage')}
+          title={t('copyMessage')}
+        >
+          <Copy className="h-3.5 w-3.5" />
+        </button>}
+        {onSelect && <button
+          data-message-select
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onSelect(message); }}
+          className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
+          aria-label={t('selectMessage')}
+          title={t('selectMessage')}
+        >
+          <ListChecks className="h-3.5 w-3.5" />
+        </button>}
         {onPin && <button
           type="button"
           onClick={async (e) => {
