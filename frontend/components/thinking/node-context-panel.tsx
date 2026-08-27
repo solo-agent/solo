@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Check, ChevronDown, ChevronRight, Clock3, RefreshCw } from 'lucide-react';
+import Link from 'next/link';
+import { Check, ChevronDown, ChevronRight, Clock3, ExternalLink, RefreshCw } from 'lucide-react';
 import { MessageMarkdown } from '@/components/dashboard/message-markdown';
 import { Button } from '@/components/ui/button';
 import { agentRunShowsHalo } from '@/lib/agent-activity';
@@ -143,6 +144,12 @@ export function NodeContextPanel({
 
       {open && (
         <div className="max-h-[46vh] space-y-4 overflow-y-auto border-t-2 border-black p-4">
+          {node.source_message_id && (
+            <Link href={`/dashboard?channel=${encodeURIComponent(space.channel_id)}&message=${encodeURIComponent(node.source_message_id)}`} className="flex items-center justify-between rounded-lg border border-brutal-border bg-white px-3 py-2 font-body text-xs font-semibold shadow-card hover:bg-brutal-muted-light">
+              {t('thinkingSourceMessage')}
+              <ExternalLink className="h-3.5 w-3.5" />
+            </Link>
+          )}
           {node.parent_id && (
             <div className="space-y-2">
               <h3 className="font-heading text-xs font-bold text-muted-foreground">{t('thinkingContextFromParent')}</h3>

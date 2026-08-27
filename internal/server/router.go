@@ -234,6 +234,7 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 		r.Get("/api/v1/server/info", channelHandler.ServerInfo)
 
 		r.Get("/api/v1/messages/check", messageHandler.Check)
+		r.Get("/api/v1/favorites", messageHandler.ListFavorites)
 		r.Post("/api/v1/messages/{messageID}/reactions", messageHandler.ToggleReaction)
 		r.Post("/api/v1/channels/join", channelHandler.JoinByTarget)
 
@@ -318,6 +319,10 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 					// Message edit/delete (W3-02-BE)
 					r.Patch("/{messageID}", messageHandler.Update)
 					r.Delete("/{messageID}", messageHandler.Delete)
+					r.Post("/{messageID}/favorite", messageHandler.Favorite)
+					r.Delete("/{messageID}/favorite", messageHandler.Unfavorite)
+					r.Post("/{messageID}/forward", messageHandler.Forward)
+					r.Post("/{messageID}/branch", thinkingHandler.CreateFromMessage)
 
 					// Convert message to task (Phase 1)
 					r.Post("/{messageID}/convert-to-task", taskHandler.ConvertToTask)

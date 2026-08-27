@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Monitor, Settings } from 'lucide-react';
+import { Bookmark, Home, Monitor, Settings } from 'lucide-react';
 import { WorkspaceRail } from '@/components/workspaces/workspace-rail';
 import { GlobalAccountBar } from '@/components/layout/global-account-bar';
 import { t } from '@/lib/i18n';
@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 const items = [
   { href: '/home', icon: Home, label: 'personalHome' },
   { href: '/computers', icon: Monitor, label: 'personalComputers' },
+  { href: '/favorites', icon: Bookmark, label: 'personalFavorites' },
   { href: '/settings', icon: Settings, label: 'personalSettings' },
 ] as const;
 

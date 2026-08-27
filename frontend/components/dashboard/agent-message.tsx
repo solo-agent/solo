@@ -9,7 +9,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Copy, ListChecks, Loader2, MessageSquare, Pin, PinOff } from 'lucide-react';
+import Link from 'next/link';
+import { Copy, GitBranch, ListChecks, Loader2, MessageSquare, Pin, PinOff } from 'lucide-react';
 import type { AgentDetailTarget, Message } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
@@ -23,6 +24,7 @@ import {
   useMessageReactions,
 } from './message-reactions';
 import { MessageSelectMark } from './message-share';
+import { MessageReuseMenu } from './message-reuse-menu';
 
 interface AgentMessageProps {
   message: Message;
@@ -39,9 +41,12 @@ interface AgentMessageProps {
   onSelect?: (message: Message) => void;
   selectionMode?: boolean;
   selected?: boolean;
+  onFavorite?: (message: Message) => void;
+  onForward?: (message: Message) => void;
+  onBranch?: (message: Message) => void;
 }
 
-export function AgentMessage({ message, isGrouped, onReply, validNames = [], isHighlighted, onOpenArtifactReference, onAgentClick, onPin, pinned, onCopy, onSelect, selectionMode, selected }: AgentMessageProps) {
+export function AgentMessage({ message, isGrouped, onReply, validNames = [], isHighlighted, onOpenArtifactReference, onAgentClick, onPin, pinned, onCopy, onSelect, selectionMode, selected, onFavorite, onForward, onBranch }: AgentMessageProps) {
   const time = formatMessageTimestamp(message.created_at);
   const compactTime = formatMessageTime(message.created_at);
   const [isTogglingPin, setIsTogglingPin] = useState(false);
@@ -130,6 +135,15 @@ export function AgentMessage({ message, isGrouped, onReply, validNames = [], isH
             onOpen={() => onReply(message)}
           />
         )}
+        {(message.branch_count ?? 0) > 0 && message.latest_branch_node_id && (
+          <Link
+            href={`/dashboard?channel=${encodeURIComponent(message.channel_id)}&view=thinking&panel=conversation&node=${encodeURIComponent(message.latest_branch_node_id)}`}
+            className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-brutal-border bg-brutal-cream px-2.5 py-1 font-body text-xs font-semibold text-muted-foreground hover:bg-brutal-muted-light hover:text-foreground"
+          >
+            <GitBranch className="h-3.5 w-3.5" />
+            {t('messageBranches', { n: message.branch_count ?? 0 })}
+          </Link>
+        )}
       </div>
 
       {/* Hover reply button */}
@@ -194,6 +208,7 @@ export function AgentMessage({ message, isGrouped, onReply, validNames = [], isH
         >
           <MessageSquare className="h-3.5 w-3.5" />
         </button>}
+        <MessageReuseMenu message={message} onFavorite={onFavorite} onForward={onForward} onBranch={onBranch} />
       </div>
     </div>
   );

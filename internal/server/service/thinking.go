@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -42,6 +43,7 @@ type ThinkingNode struct {
 	AgentSessionID      string     `json:"agent_session_id,omitempty"`
 	Title               string     `json:"title"`
 	Source              string     `json:"source"`
+	SourceMessageID     string     `json:"source_message_id,omitempty"`
 	CheckpointHandoff   string     `json:"checkpoint_handoff,omitempty"`
 	CheckpointHandoffAt *time.Time `json:"checkpoint_handoff_at,omitempty"`
 	CheckpointStatus    string     `json:"checkpoint_status"`
@@ -96,6 +98,7 @@ func (s *ThinkingService) Get(ctx context.Context, channelID string) (*ThinkingS
 	rows, err := s.pool.Query(ctx, `
 		SELECT n.id::text, n.space_id::text, COALESCE(n.parent_id::text, ''),
 		       COALESCE(n.agent_id::text, ''), COALESCE(a.name, ''), COALESCE(n.agent_session_id::text, ''), n.title, n.source,
+		       COALESCE(n.source_message_id::text, ''),
 		       n.checkpoint_handoff, n.checkpoint_handoff_at, n.inherited_handoff,
 		       CASE
 		         WHEN n.returned_at IS NOT NULL THEN 'final'
@@ -127,7 +130,7 @@ func (s *ThinkingService) Get(ctx context.Context, channelID string) (*ThinkingS
 		var node ThinkingNode
 		if err := rows.Scan(
 			&node.ID, &node.SpaceID, &node.ParentID, &node.AgentID, &node.AgentName, &node.AgentSessionID,
-			&node.Title, &node.Source, &node.CheckpointHandoff, &node.CheckpointHandoffAt, &node.InheritedHandoff,
+			&node.Title, &node.Source, &node.SourceMessageID, &node.CheckpointHandoff, &node.CheckpointHandoffAt, &node.InheritedHandoff,
 			&node.CheckpointStatus,
 			&node.ForkHandoffPending, &node.ForkHandoffAt, &node.ReturnedHandoff,
 			&node.ReturningAt, &node.ReturnedAt, &node.Depth, &node.SortOrder,
@@ -312,6 +315,7 @@ func (s *ThinkingService) GetNodeForChannel(ctx context.Context, channelID, node
 	err := s.pool.QueryRow(ctx, `
 		SELECT n.id::text, n.space_id::text, COALESCE(n.parent_id::text, ''),
 		       COALESCE(n.agent_id::text, ''), COALESCE(a.name, ''), COALESCE(n.agent_session_id::text, ''), n.title, n.source,
+		       COALESCE(n.source_message_id::text, ''),
 		       n.checkpoint_handoff, n.checkpoint_handoff_at, n.inherited_handoff,
 		       CASE
 		         WHEN n.returned_at IS NOT NULL THEN 'final'
@@ -336,7 +340,7 @@ func (s *ThinkingService) GetNodeForChannel(ctx context.Context, channelID, node
 		 WHERE n.id = $2`, channelID, nodeID,
 	).Scan(
 		&node.ID, &node.SpaceID, &node.ParentID, &node.AgentID, &node.AgentName, &node.AgentSessionID,
-		&node.Title, &node.Source, &node.CheckpointHandoff, &node.CheckpointHandoffAt, &node.InheritedHandoff,
+		&node.Title, &node.Source, &node.SourceMessageID, &node.CheckpointHandoff, &node.CheckpointHandoffAt, &node.InheritedHandoff,
 		&node.CheckpointStatus,
 		&node.ForkHandoffPending, &node.ForkHandoffAt, &node.ReturnedHandoff,
 		&node.ReturningAt, &node.ReturnedAt, &node.Depth, &node.SortOrder,
@@ -346,6 +350,82 @@ func (s *ThinkingService) GetNodeForChannel(ctx context.Context, channelID, node
 		return nil, ErrThinkingNotFound
 	}
 	return &node, err
+}
+
+// CreateFromMessage creates a manual root branch with an immutable source snapshot.
+func (s *ThinkingService) CreateFromMessage(ctx context.Context, channelID, messageID, title, actorID string) (*ThinkingNode, error) {
+	title = strings.TrimSpace(title)
+	if title == "" || utf8.RuneCountInString(title) > 100 {
+		return nil, errors.New("thinking node title must be between 1 and 100 characters")
+	}
+	if _, err := s.Ensure(ctx, channelID, actorID); err != nil {
+		return nil, err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var senderName, content string
+	var createdAt time.Time
+	err = tx.QueryRow(ctx, `
+		SELECT CASE WHEN m.sender_type = 'system' THEN 'Solo' ELSE COALESCE(u.display_name, a.name, 'Unknown') END,
+		       m.content, m.created_at
+		  FROM messages m
+		  LEFT JOIN users u ON m.sender_type = 'user' AND u.id = m.sender_id
+		  LEFT JOIN agents a ON m.sender_type = 'agent' AND a.id = m.sender_id
+		 WHERE m.id = $1 AND m.channel_id = $2
+		   AND m.thread_id IS NULL AND m.thinking_node_id IS NULL
+		   AND COALESCE(m.is_deleted, false) = false`, messageID, channelID,
+	).Scan(&senderName, &content, &createdAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrThinkingNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var root ThinkingNode
+	err = tx.QueryRow(ctx, `
+		SELECT n.id::text, n.space_id::text, COALESCE(n.agent_id::text, '')
+		  FROM thinking_nodes n
+		  JOIN thinking_spaces s ON s.id = n.space_id AND s.channel_id = $1
+		 WHERE n.parent_id IS NULL
+		 FOR UPDATE OF n`, channelID,
+	).Scan(&root.ID, &root.SpaceID, &root.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	var childCount int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM thinking_nodes WHERE parent_id = $1`, root.ID).Scan(&childCount); err != nil {
+		return nil, err
+	}
+	if childCount >= maxThinkingChildren {
+		return nil, ErrThinkingLimit
+	}
+
+	nodeID := uuid.NewString()
+	snapshot := fmt.Sprintf("Source message from %s at %s:\n%s", senderName, createdAt.Format(time.RFC3339), content)
+	_, err = tx.Exec(ctx, `
+		INSERT INTO thinking_nodes
+		    (id, space_id, parent_id, agent_id, source_message_id, title, source,
+		     inherited_handoff, depth, sort_order, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, 'manual', $7, 1, $8, $9)`,
+		nodeID, root.SpaceID, root.ID, nullableUUID(root.AgentID), messageID, title, snapshot, childCount, actorID,
+	)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_thinking_nodes_sibling_title" {
+			return nil, ErrThinkingDuplicate
+		}
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.GetNodeForChannel(ctx, channelID, nodeID)
 }
 
 func (s *ThinkingService) CreateChild(ctx context.Context, channelID, parentID, title, actorID, source string) (*ThinkingNode, error) {

@@ -42,7 +42,7 @@ import { t } from '@/lib/i18n';
 import { useWorkspace } from '@/lib/workspace-context';
 import { useAuth } from '@/lib/auth-context';
 import { useComputers } from '@/lib/hooks/use-computers';
-import type { AgentDetailTarget, AgentRelationship, Channel, Message, Task, TaskArtifact, TaskStatus } from '@/lib/types';
+import type { AgentDetailTarget, AgentRelationship, Channel, Message, Task, TaskArtifact, TaskStatus, ThinkingNode } from '@/lib/types';
 
 type ArtifactPreview = TaskArtifact & { previewUrl: string };
 type WorkspaceDetail = { relationship: AgentRelationship | null; agent: AgentDetailTarget | null };
@@ -92,6 +92,7 @@ const ThreadPanel = lazy(() =>
 
 interface ChannelViewProps {
   channel: Channel;
+  channels?: Channel[];
   /** Optional message ID to open ThreadPanel for on mount */
   initialThreadMessageId?: string;
   /** Optional message ID to scroll to on mount */
@@ -113,6 +114,7 @@ interface ChannelViewProps {
 
 export function ChannelView({
   channel,
+  channels = [],
   initialThreadMessageId,
   initialScrollToMessageId,
   onThreadChange,
@@ -216,6 +218,33 @@ export function ChannelView({
   });
 
   const { showToast } = useToast();
+  const favoriteMessage = useCallback(async (message: Message) => {
+    try {
+      await apiClient.post<void>(`/api/v1/channels/${channel.id}/messages/${message.id}/favorite`);
+      showToast(t('messageFavorited'), 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : t('messageReuseFailed'), 'error');
+    }
+  }, [channel.id, showToast]);
+  const forwardMessage = useCallback(async (message: Message, targetChannelId: string) => {
+    try {
+      await apiClient.post(`/api/v1/channels/${channel.id}/messages/${message.id}/forward`, { target_channel_id: targetChannelId });
+      showToast(t('messageForwarded'), 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : t('messageReuseFailed'), 'error');
+      throw error;
+    }
+  }, [channel.id, showToast]);
+  const branchFromMessage = useCallback(async (message: Message, title: string) => {
+    try {
+      const node = await apiClient.post<ThinkingNode>(`/api/v1/channels/${channel.id}/messages/${message.id}/branch`, { title });
+      showToast(t('branchCreated'), 'success');
+      pushDashboardState({ view: 'thinking', panel: 'conversation', threadId: null, messageId: null, nodeId: node.id });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : t('messageReuseFailed'), 'error');
+      throw error;
+    }
+  }, [channel.id, pushDashboardState, showToast]);
   const { activeWorkspace } = useWorkspace();
   const { user } = useAuth();
   const { computers } = useComputers();
@@ -1238,6 +1267,10 @@ export function ChannelView({
               onPin={moderation?.can_manage ? togglePin : undefined}
               pinnedMessageIds={new Set(pinnedMessages.map((item) => item.message_id))}
               contextLabel={`#${channel.name}`}
+              forwardChannels={channels}
+              onFavorite={favoriteMessage}
+              onForward={forwardMessage}
+              onBranch={branchFromMessage}
             />
             {channel.type === 'lucy' && !isThinking && showLucyQuickStart && (
               <div className="border-t-2 border-black bg-brutal-cream px-4 py-2">

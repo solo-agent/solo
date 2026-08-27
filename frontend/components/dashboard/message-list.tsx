@@ -35,6 +35,7 @@ import {
   PinOff,
   UserRoundCheck,
   FolderSync,
+  GitBranch,
   Copy,
   ListChecks,
 } from 'lucide-react';
@@ -73,7 +74,7 @@ import {
   ShareMessagesDialog,
   type ShareableMessage,
 } from './message-share';
-import type { AgentDetailTarget, ChannelMember, Message } from '@/lib/types';
+import type { AgentDetailTarget, Channel, ChannelMember, Message } from '@/lib/types';
 import { sanitizeHtml } from '@/lib/sanitize';
 import { t, type TranslationKey } from '@/lib/i18n';
 import {
@@ -81,6 +82,7 @@ import {
   formatMessageTimestamp,
   messageDateKey,
 } from '@/lib/utils/time';
+import { MessageReuseMenu } from './message-reuse-menu';
 // Agent activity now lives in team/observability surfaces, not inline typing badges.
 interface MessageListProps {
   messages: Message[];
@@ -107,6 +109,10 @@ interface MessageListProps {
   onPin?: (message: Message) => void | Promise<void>;
   pinnedMessageIds?: Set<string>;
   contextLabel?: string;
+  forwardChannels?: Channel[];
+  onFavorite?: (message: Message) => Promise<void>;
+  onForward?: (message: Message, targetChannelId: string) => Promise<void>;
+  onBranch?: (message: Message, title: string) => Promise<void>;
 }
 
 // ---- Task header config (SOLO-225-F) ----
@@ -161,6 +167,9 @@ interface MessageItemProps {
   onSelect?: (message: Message) => void;
   selectionMode?: boolean;
   selected?: boolean;
+  onFavorite?: (message: Message) => void;
+  onForward?: (message: Message) => void;
+  onBranch?: (message: Message) => void;
 }
 
 const MessageItem = memo(function MessageItem({
@@ -180,6 +189,9 @@ const MessageItem = memo(function MessageItem({
   onSelect,
   selectionMode,
   selected,
+  onFavorite,
+  onForward,
+  onBranch,
 }: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content || '');
@@ -502,6 +514,8 @@ const MessageItem = memo(function MessageItem({
               </button>
             </div>
           </div>
+        ) : message.content_type === 'forwarded' ? (
+          <ForwardedMessageCard message={message} />
         ) : isThinkingHandoff ? (
           <MessageMarkdown
             content={message.content}
@@ -593,6 +607,15 @@ const MessageItem = memo(function MessageItem({
             hasUnread={hasUnreadThread}
             onOpen={() => onReply(message)}
           />
+        )}
+        {(message.branch_count ?? 0) > 0 && message.latest_branch_node_id && (
+          <Link
+            href={`/dashboard?channel=${encodeURIComponent(message.channel_id)}&view=thinking&panel=conversation&node=${encodeURIComponent(message.latest_branch_node_id)}`}
+            className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-brutal-border bg-brutal-cream px-2.5 py-1 font-body text-xs font-semibold text-muted-foreground hover:bg-brutal-muted-light hover:text-foreground"
+          >
+            <GitBranch className="h-3.5 w-3.5" />
+            {t('messageBranches', { n: message.branch_count ?? 0 })}
+          </Link>
         )}
       </div>
 
@@ -704,6 +727,7 @@ const MessageItem = memo(function MessageItem({
               <SquareCheckBig className="h-3.5 w-3.5" />
             </button>
           )}
+          <MessageReuseMenu message={message} onFavorite={onFavorite} onForward={onForward} onBranch={onBranch} />
         </div>
       )}
     </div>
@@ -903,6 +927,10 @@ export function MessageList({
   onPin,
   pinnedMessageIds = new Set(),
   contextLabel = 'Solo',
+  forwardChannels = [],
+  onFavorite,
+  onForward,
+  onBranch,
 }: MessageListProps) {
   const { showToast } = useToast();
   const validNames = buildValidNames(members);
@@ -915,6 +943,48 @@ export function MessageList({
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [shareOpen, setShareOpen] = useState(false);
+  const [forwardTarget, setForwardTarget] = useState<Message | null>(null);
+  const [forwardChannelId, setForwardChannelId] = useState('');
+  const [branchTarget, setBranchTarget] = useState<Message | null>(null);
+  const [branchTitle, setBranchTitle] = useState('');
+  const [reuseBusy, setReuseBusy] = useState(false);
+
+  const openForward = useCallback((message: Message) => {
+    const first = forwardChannels.find((item) => item.id !== message.channel_id);
+    setForwardChannelId(first?.id ?? '');
+    setForwardTarget(message);
+  }, [forwardChannels]);
+
+  const openBranch = useCallback((message: Message) => {
+    setBranchTitle(message.content.trim().split('\n')[0].slice(0, 100));
+    setBranchTarget(message);
+  }, []);
+
+  const submitForward = useCallback(async () => {
+    if (!forwardTarget || !forwardChannelId || !onForward || reuseBusy) return;
+    setReuseBusy(true);
+    try {
+      await onForward(forwardTarget, forwardChannelId);
+      setForwardTarget(null);
+    } catch {
+      // The parent already shows the server error; keep the dialog open for retry.
+    } finally {
+      setReuseBusy(false);
+    }
+  }, [forwardChannelId, forwardTarget, onForward, reuseBusy]);
+
+  const submitBranch = useCallback(async () => {
+    if (!branchTarget || !branchTitle.trim() || !onBranch || reuseBusy) return;
+    setReuseBusy(true);
+    try {
+      await onBranch(branchTarget, branchTitle.trim());
+      setBranchTarget(null);
+    } catch {
+      // The parent already shows the server error; keep the dialog open for retry.
+    } finally {
+      setReuseBusy(false);
+    }
+  }, [branchTarget, branchTitle, onBranch, reuseBusy]);
 
   const toggleSelection = useCallback((message: Message) => {
     setSelectedIds((current) => {
@@ -1167,6 +1237,9 @@ export function MessageList({
                     onSelect={toggleSelection}
                     selectionMode={selectedIds.size > 0}
                     selected={selectedIds.has(message.id)}
+                    onFavorite={onFavorite ? (item) => { void onFavorite(item); } : undefined}
+                    onForward={onForward ? openForward : undefined}
+                    onBranch={onBranch ? openBranch : undefined}
                   />
                 ) : (
                   <MessageItem
@@ -1185,6 +1258,9 @@ export function MessageList({
                     onSelect={toggleSelection}
                     selectionMode={selectedIds.size > 0}
                     selected={selectedIds.has(message.id)}
+                    onFavorite={onFavorite ? (item) => { void onFavorite(item); } : undefined}
+                    onForward={onForward ? openForward : undefined}
+                    onBranch={onBranch ? openBranch : undefined}
                     onDelete={
                       onDelete
                         ? (id) => {
@@ -1237,6 +1313,53 @@ export function MessageList({
         onError={handleShareError}
         onCopied={() => showToast(t('imageCopied'), 'success')}
       />
+      <Dialog open={!!forwardTarget} onOpenChange={(open) => { if (!open && !reuseBusy) setForwardTarget(null); }}>
+        <DialogHeader>
+          <DialogTitle>{t('forwardMessage')}</DialogTitle>
+          <DialogCloseButton onClick={() => setForwardTarget(null)} />
+        </DialogHeader>
+        <DialogDescription>{t('forwardMessageDescription')}</DialogDescription>
+        <label className="mt-4 block font-body text-sm font-semibold" htmlFor="forward-channel">{t('forwardToChannel')}</label>
+        <select id="forward-channel" value={forwardChannelId} onChange={(event) => setForwardChannelId(event.target.value)} className="input-brutal mt-2" autoFocus>
+          {forwardChannels.filter((item) => item.id !== forwardTarget?.channel_id && item.type !== 'lucy').map((item) => (
+            <option key={item.id} value={item.id}>#{item.name}</option>
+          ))}
+        </select>
+        {!forwardChannelId && <p className="mt-2 font-body text-xs text-muted-foreground">{t('noForwardChannel')}</p>}
+        <DialogFooter>
+          <Button type="button" variant="outline" size="sm" onClick={() => setForwardTarget(null)} disabled={reuseBusy}>{t('cancel')}</Button>
+          <Button type="button" size="sm" onClick={() => { void submitForward(); }} disabled={!forwardChannelId || reuseBusy}>{reuseBusy ? t('submitting') : t('forwardMessage')}</Button>
+        </DialogFooter>
+      </Dialog>
+      <Dialog open={!!branchTarget} onOpenChange={(open) => { if (!open && !reuseBusy) setBranchTarget(null); }}>
+        <DialogHeader>
+          <DialogTitle>{t('branchFromMessage')}</DialogTitle>
+          <DialogCloseButton onClick={() => setBranchTarget(null)} />
+        </DialogHeader>
+        <DialogDescription>{t('branchFromMessageDescription')}</DialogDescription>
+        <label className="mt-4 block font-body text-sm font-semibold" htmlFor="branch-title">{t('branchTitle')}</label>
+        <input id="branch-title" value={branchTitle} onChange={(event) => setBranchTitle(event.target.value)} maxLength={100} className="input-brutal mt-2" autoFocus />
+        <DialogFooter>
+          <Button type="button" variant="outline" size="sm" onClick={() => setBranchTarget(null)} disabled={reuseBusy}>{t('cancel')}</Button>
+          <Button type="button" size="sm" onClick={() => { void submitBranch(); }} disabled={!branchTitle.trim() || reuseBusy}>{reuseBusy ? t('submitting') : t('createBranch')}</Button>
+        </DialogFooter>
+      </Dialog>
     </div>
+  );
+}
+
+function ForwardedMessageCard({ message }: { message: Message }) {
+  const channelId = typeof message.metadata?.forwarded_channel_id === 'string' ? message.metadata.forwarded_channel_id : '';
+  const channelName = typeof message.metadata?.forwarded_channel_name === 'string' ? message.metadata.forwarded_channel_name : t('unknown');
+  const senderName = typeof message.metadata?.forwarded_sender_name === 'string' ? message.metadata.forwarded_sender_name : t('unknown');
+  const sourceMessageId = typeof message.metadata?.forwarded_message_id === 'string' ? message.metadata.forwarded_message_id : '';
+  return (
+    <Link
+      href={channelId ? `/dashboard?channel=${encodeURIComponent(channelId)}${sourceMessageId ? `&message=${encodeURIComponent(sourceMessageId)}` : ''}` : '#'}
+      className="block rounded-lg border-l-4 border-brutal-accent bg-brutal-muted-light/60 px-3 py-2 hover:bg-brutal-muted-light"
+    >
+      <div className="mb-1 font-body text-xs font-semibold text-muted-foreground">{t('forwardedFrom', { channel: channelName, sender: senderName })}</div>
+      <p className="whitespace-pre-wrap break-words font-body text-sm leading-relaxed">{message.content}</p>
+    </Link>
   );
 }

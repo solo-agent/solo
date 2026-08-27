@@ -43,6 +43,8 @@ interface MessageResponse {
   thread_id?: string;
   thinking_node_id?: string;
   reply_count?: number;
+  branch_count?: number;
+  latest_branch_node_id?: string;
   task_number?: number;
   task_title?: string;
   task_status?: string;
@@ -79,6 +81,8 @@ function mapMessageResponse(resp: MessageResponse): Message {
     thread_id: resp.thread_id,
     thinking_node_id: resp.thinking_node_id,
     reply_count: resp.reply_count,
+    branch_count: resp.branch_count,
+    latest_branch_node_id: resp.latest_branch_node_id,
     sender_type: resp.sender_type as 'user' | 'agent' | 'system' | undefined,
     sender_active: resp.sender_active,
     task_number: resp.task_number,
