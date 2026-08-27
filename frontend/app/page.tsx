@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import HomeAuthRedirect from "@/components/home-auth-redirect";
 import HomePage from "@/components/home-page";
 
-const title = "Solo Agent — Open-Source Multi-Agent Workspace";
+const title = "Solo — The Multiplayer Workspace for AI Agents";
 const description =
-  "Solo Agent (SoloAgent) is an open-source, local-first workspace where humans and AI coding agents collaborate through channels, tasks, teams, and persistent memory.";
+  "Solo is an open-source, local-first workspace where people and AI agents collaborate through channels, tasks, teams, and reviewable work.";
 const structuredData = {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
@@ -29,11 +29,20 @@ export const metadata: Metadata = {
     siteName: "Solo Agent",
     title,
     description,
+    images: [
+      {
+        url: "https://soloagent.team/og.png",
+        width: 1200,
+        height: 630,
+        alt: "Solo — Give your ideas a team.",
+      },
+    ],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title,
     description,
+    images: ["https://soloagent.team/og.png"],
   },
 };
 
