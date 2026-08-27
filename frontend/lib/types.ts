@@ -52,7 +52,7 @@ export interface Message {
   branch_count?: number;
   latest_branch_node_id?: string;
   /** 消息来源类型（user / agent / system），用于区分渲染风格 (SOLO-48-F) */
-  sender_type?: 'user' | 'agent' | 'system';
+  sender_type?: 'user' | 'agent' | 'system' | 'external';
   /** 关联任务编号 (如果消息通过 asTask 转为任务) */
   task_number?: number;
   /** 关联任务标题 (从 tasks.title 获取) */

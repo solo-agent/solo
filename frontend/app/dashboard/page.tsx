@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
-import { MessageSquare, RefreshCw } from "lucide-react";
+import { Menu, MessageSquare, RefreshCw, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { t } from '@/lib/i18n';
 import { useChannels } from "@/lib/hooks/use-channels";
@@ -124,6 +124,7 @@ function DashboardContent() {
   } = useDMTasks(selectedDmId);
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // ---- DM AsTask handler (SOLO-232-F) ----
   const handleDMAsTask = useCallback(
@@ -171,6 +172,7 @@ function DashboardContent() {
 
   // ---- URL-driven channel selection ----
   const handleSelectChannel = useCallback((channelId: string) => {
+    setMobileNavOpen(false);
     router.push(`/dashboard?channel=${channelId}`);
   }, [router]);
 
@@ -189,6 +191,7 @@ function DashboardContent() {
 
   // ---- URL-driven DM selection ----
   const handleSelectDM = useCallback((dmId: string) => {
+    setMobileNavOpen(false);
     router.push(`/dashboard?dm=${dmId}`);
     selectDM(dmId);
     markAsRead(dmId);
@@ -196,6 +199,7 @@ function DashboardContent() {
 
   // ---- URL-driven Inbox selection ----
   const handleSelectInbox = useCallback(() => {
+    setMobileNavOpen(false);
     router.push('/dashboard?inbox');
   }, [router]);
 
@@ -392,9 +396,13 @@ function DashboardContent() {
   };
 
   return (
-    <div className="flex h-screen min-w-[1024px] overflow-hidden bg-brutal-cream">
+    <div className="flex h-[100dvh] min-w-0 overflow-hidden bg-brutal-cream">
+      <button type="button" className="fixed left-3 top-3 z-50 flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-white shadow-sm lg:hidden" onClick={() => setMobileNavOpen((open) => !open)} aria-label={t(mobileNavOpen ? 'mobileNavigationClose' : 'mobileNavigationOpen')}>
+        {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+      </button>
+      {mobileNavOpen && <button type="button" className="fixed inset-0 z-30 bg-black/35 lg:hidden" onClick={() => setMobileNavOpen(false)} aria-label={t('mobileNavigationClose')} />}
       {/* Left meta column — WorkspaceRail (col 1) + Sidebar (col 2) + GlobalAccountBar (spans 1+2) */}
-      <div className="flex flex-shrink-0 flex-col border-r border-border bg-skin-primary">
+      <div className={`fixed inset-y-0 left-0 z-40 flex flex-shrink-0 flex-col border-r border-border bg-skin-primary transition-transform lg:static lg:translate-x-0 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex flex-1 overflow-hidden">
           <WorkspaceRail />
           <Sidebar
