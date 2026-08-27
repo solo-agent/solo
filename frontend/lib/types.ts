@@ -49,6 +49,8 @@ export interface Message {
   thread_id?: string;
   /** 线程回复数 (如果已有线程) */
   reply_count?: number;
+  branch_count?: number;
+  latest_branch_node_id?: string;
   /** 消息来源类型（user / agent / system），用于区分渲染风格 (SOLO-48-F) */
   sender_type?: 'user' | 'agent' | 'system';
   /** 关联任务编号 (如果消息通过 asTask 转为任务) */
@@ -83,6 +85,7 @@ export interface ThinkingNode {
   agent_session_id?: string;
   title: string;
   source: ThinkingNodeSource;
+  source_message_id?: string;
   checkpoint_handoff?: string;
   checkpoint_handoff_at?: string;
   checkpoint_status: 'missing' | 'fresh' | 'stale' | 'final';

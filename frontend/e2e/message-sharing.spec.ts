@@ -61,11 +61,13 @@ test('copies messages and exports selected channel and thread messages as PNG wi
     const first = page.locator(`[data-message-id="${roots[0].id}"]`);
     const second = page.locator(`[data-message-id="${roots[1].id}"]`);
     await first.hover();
-    await first.locator('[data-message-copy]').click();
+    await first.getByLabel('更多消息操作').click();
+    await page.getByRole('menu').getByRole('menuitem', { name: '复制消息' }).click();
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(roots[0].content);
 
     await first.hover();
-    await first.locator('[data-message-select]').click();
+    await first.getByLabel('更多消息操作').click();
+    await page.getByRole('menu').getByRole('menuitem', { name: '选择消息' }).click();
     await expect(page.locator('[data-message-selection-toolbar]')).toContainText('已选择 1 条消息');
     await second.click();
     await expect(page.locator('[data-message-selection-toolbar]')).toContainText('已选择 2 条消息');

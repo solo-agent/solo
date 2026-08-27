@@ -128,6 +128,8 @@ type MessageResponse struct {
 	Attachments        []AttachmentMeta  `json:"attachments,omitempty"`
 	CreatedAt          string            `json:"created_at"`
 	ReplyCount         int               `json:"reply_count,omitempty"`
+	BranchCount        int               `json:"branch_count,omitempty"`
+	LatestBranchNodeID string            `json:"latest_branch_node_id,omitempty"`
 	TaskStatus         string            `json:"task_status,omitempty"`
 	TaskClaimerName    string            `json:"task_claimer_name,omitempty"`
 	TaskClaimerDeleted bool              `json:"task_claimer_deleted"`
@@ -1077,6 +1079,8 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 	                 m.content, m.content_type, m.metadata,
 	                 COALESCE(m.attachment_ids, '{}') as attachment_ids, m.created_at,
 		                 COALESCE(t.reply_count, 0) AS reply_count,
+		                 (SELECT COUNT(*) FROM thinking_nodes branch WHERE branch.source_message_id = m.id) AS branch_count,
+		                 COALESCE((SELECT branch.id::text FROM thinking_nodes branch WHERE branch.source_message_id = m.id ORDER BY branch.created_at DESC LIMIT 1), '') AS latest_branch_node_id,
 		                 COALESCE(tasks.task_number, 0) AS task_number,
 		                 COALESCE(tasks.status, '') AS task_status,
 		                 COALESCE(u_claimer.display_name, a_claimer.name, '') AS task_claimer_name,
@@ -1133,7 +1137,8 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		err := rows.Scan(&msg.ID, &msg.ChannelID, &msg.SenderType, &msg.SenderID,
 			&msg.SenderName, &msg.SenderAvatar, &msg.SenderActive, &msg.ThinkingNodeID,
 			&msg.Content, &msg.ContentType, &metadataBytes, &msg.AttachmentIDs, &createdAt,
-			&msg.ReplyCount, &msg.TaskNumber, &msg.TaskStatus, &msg.TaskClaimerName, &msg.TaskClaimerDeleted, &msg.HasUnreadThread)
+			&msg.ReplyCount, &msg.BranchCount, &msg.LatestBranchNodeID,
+			&msg.TaskNumber, &msg.TaskStatus, &msg.TaskClaimerName, &msg.TaskClaimerDeleted, &msg.HasUnreadThread)
 		if err != nil {
 			slog.Error("failed to scan message row", "error", err)
 			continue

@@ -290,6 +290,7 @@ function DashboardContent() {
         <ChannelView
           key={`chan-${selectedChannel.id}`}
           channel={selectedChannel}
+          channels={channels}
           initialThreadMessageId={threadFromUrl ?? undefined}
           initialScrollToMessageId={messageFromUrl ?? undefined}
           onChannelCreated={refetchChannels}
