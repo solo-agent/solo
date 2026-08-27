@@ -11,6 +11,7 @@ export default function robots(): MetadataRoute.Robots {
         "/computers",
         "/dashboard",
         "/guest/",
+        "/home",
         "/observability",
         "/settings",
         "/templates",
