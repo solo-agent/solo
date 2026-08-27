@@ -29,7 +29,7 @@ export interface Workspace {
   updated_at: string;
 }
 
-export type ManageTabKey = 'overview' | 'members' | 'invites';
+export type ManageTabKey = 'overview' | 'members' | 'invites' | 'external';
 
 interface ManageDialogState {
   open: boolean;

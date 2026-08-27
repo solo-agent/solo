@@ -74,10 +74,11 @@ type MessageHandler struct {
 	agentSvc   *service.AgentService
 	taskSvc    *service.TaskService
 	sendDedupe *service.SendDedupe
+	larkSvc    *service.LarkService
 }
 
 // NewMessageHandler creates a new MessageHandler.
-func NewMessageHandler(pool *pgxpool.Pool, hub *ws.Hub, agentSvc *service.AgentService, taskSvc *service.TaskService, sendDedupe *service.SendDedupe) *MessageHandler {
+func NewMessageHandler(pool *pgxpool.Pool, hub *ws.Hub, agentSvc *service.AgentService, taskSvc *service.TaskService, sendDedupe *service.SendDedupe, larkSvc *service.LarkService) *MessageHandler {
 	return &MessageHandler{
 		pool:       pool,
 		hub:        hub,
@@ -85,6 +86,7 @@ func NewMessageHandler(pool *pgxpool.Pool, hub *ws.Hub, agentSvc *service.AgentS
 		agentSvc:   agentSvc,
 		taskSvc:    taskSvc,
 		sendDedupe: sendDedupe,
+		larkSvc:    larkSvc,
 	}
 }
 
@@ -260,7 +262,6 @@ func (h *MessageHandler) ToggleReaction(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to update reaction")
 		return
 	}
-
 	reactions, err := queryMessageReactionMap(r.Context(), h.pool, []string{messageID}, userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load reactions")
@@ -732,6 +733,9 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to send message")
 		return
 	}
+	if senderType == "agent" && h.larkSvc != nil {
+		go h.larkSvc.DeliverAgentReply(context.Background(), messageID)
+	}
 	if deliveryRunID != "" {
 		if _, err := service.NewAgentRunService(h.pool).AppendEvent(r.Context(), service.AppendRunEventInput{
 			RunID: deliveryRunID, Type: service.AgentRunEventVisibleMessageSent,
@@ -1071,6 +1075,7 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 	query := `SELECT m.id, m.channel_id, m.sender_type, m.sender_id,
 	                 CASE
 		                   WHEN m.sender_type = 'system' THEN 'Solo'
+		                   WHEN m.sender_type = 'external' THEN COALESCE(m.metadata->>'external_sender_name', '飞书成员')
 		                   ELSE COALESCE(u.display_name, a.name, m.sender_id::text)
 		                 END as sender_name,
 		                 COALESCE(u.avatar_url, a.avatar_url, '') AS sender_avatar,

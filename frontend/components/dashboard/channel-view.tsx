@@ -1153,7 +1153,7 @@ export function ChannelView({
       <div
         ref={conversationPanelRef}
         id="channel-conversation-panel"
-        className="flex min-w-0 flex-1 flex-col overflow-hidden"
+        className="flex min-w-0 flex-1 flex-col overflow-hidden max-lg:!basis-full max-lg:!grow"
         style={!isWorkspaceCollapsed && !isWorkspaceFullscreen ? { flexBasis: `${conversationPanelPercent}%`, flexGrow: 0 } : undefined}
       >
         {mainPanel === 'thread' && threadMessage ? (
@@ -1203,7 +1203,7 @@ export function ChannelView({
             key={isThinking ? `thinking-${thinking.selectedNodeId ?? 'root'}` : `channel-${channel.id}`}
             className="flex min-h-0 flex-1 flex-col animate-fade-in"
           >
-            <div className="sidebar-collapse-offset flex h-14 flex-shrink-0 items-center border-b border-border px-4">
+            <div className="sidebar-collapse-offset flex h-14 flex-shrink-0 items-center border-b border-border pl-14 pr-4 lg:px-4">
               <div className="flex min-w-0 flex-1 items-center gap-2">
                 <span className="font-heading text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   {isThinking ? t('thinkingCurrentBranch') : t('taskChannel')}
@@ -1228,6 +1228,11 @@ export function ChannelView({
               {moderation?.can_manage && !isThinking && (
                 <button type="button" className="btn-brutal btn-brutal-sm flex h-8 w-8 items-center justify-center p-0" onClick={() => setModerationOpen(true)} aria-label={t('channelModeration')} title={t('channelModeration')}>
                   <Settings2 className="h-4 w-4" />
+                </button>
+              )}
+              {!isThinking && (
+                <button type="button" className="btn-brutal btn-brutal-sm ml-2 flex h-8 w-8 items-center justify-center p-0 lg:hidden" onClick={() => setIsMemberPopoverOpen(true)} aria-label={t('members')} title={t('members')}>
+                  <Users className="h-4 w-4" />
                 </button>
               )}
             </div>
@@ -1302,7 +1307,7 @@ export function ChannelView({
                 </div>
               </div>
             )}
-            <div data-onboarding="message-composer">
+            <div data-onboarding="message-composer" className="pb-[env(safe-area-inset-bottom)]">
             <MessageInput
               onSend={async (content, _mentionedAgentIds, asTask, taskTitle, attachmentIds) => {
                 if (asTask) {
@@ -1362,7 +1367,7 @@ export function ChannelView({
           aria-valuemax={100}
           aria-valuenow={Math.round(conversationPanelPercent)}
           tabIndex={0}
-          className="group relative z-20 -mx-1 w-2 shrink-0 cursor-col-resize touch-none outline-none"
+          className="group relative z-20 -mx-1 hidden w-2 shrink-0 cursor-col-resize touch-none outline-none lg:block"
           onKeyDown={handleSplitKeyDown}
           onPointerDown={(event) => {
             const bounds = splitContainerRef.current?.getBoundingClientRect();
@@ -1403,7 +1408,7 @@ export function ChannelView({
       {/* Right: channel workspace */}
       {!isWorkspaceCollapsed && (
       <div className={cn(
-        'flex min-w-0 flex-1 flex-col overflow-hidden bg-brutal-cream',
+        'hidden min-w-0 flex-1 flex-col overflow-hidden bg-brutal-cream lg:flex',
         isWorkspaceFullscreen && 'fixed inset-0 z-[80] h-screen border-4 border-black',
       )} id="channel-workspace-panel">
         <div className="flex h-14 flex-shrink-0 items-center justify-between gap-3 border-b-2 border-black px-4">
@@ -1811,17 +1816,6 @@ export function ChannelView({
         </div>
       </Dialog>
 
-      {/* Mobile: member button */}
-      <div className="lg:hidden">
-        <button
-          type="button"
-          onClick={() => setIsMemberPopoverOpen(true)}
-          className="btn-brutal fixed bottom-4 right-4 z-40 flex h-10 w-10 items-center justify-center shadow-brutal"
-          aria-label={t('members')}
-        >
-          <Users className="h-4 w-4" />
-        </button>
-      </div>
     </div>
   );
 }

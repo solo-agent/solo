@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Link2, Settings, UserPlus, UsersRound } from 'lucide-react';
+import { ChevronDown, Link2, MessageCircleMore, Settings, UserPlus, UsersRound } from 'lucide-react';
 import { useWorkspace, type ManageTabKey } from '@/lib/workspace-context';
 import { t } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -15,13 +15,14 @@ const ROLE_KEY = {
 interface MenuItem {
   key: ManageTabKey;
   icon: typeof Settings;
-  label: 'workspaceMenuOverview' | 'workspaceMenuMembers' | 'workspaceMenuInvites';
+  label: 'workspaceMenuOverview' | 'workspaceMenuMembers' | 'workspaceMenuInvites' | 'workspaceMenuExternal';
 }
 
 const MENU_ITEMS: MenuItem[] = [
   { key: 'overview', icon: Settings, label: 'workspaceMenuOverview' },
   { key: 'members', icon: UsersRound, label: 'workspaceMenuMembers' },
   { key: 'invites', icon: Link2, label: 'workspaceMenuInvites' },
+  { key: 'external', icon: MessageCircleMore, label: 'workspaceMenuExternal' },
 ];
 
 // Sidebar header: workspace name + chevron. Click reveals a menu with
@@ -74,7 +75,7 @@ export function WorkspaceSwitcher() {
           className="absolute left-0 top-[calc(100%+10px)] z-40 w-[220px] rounded-xl border border-border bg-white p-2 shadow-lg"
           role="menu"
         >
-          {MENU_ITEMS.map((item) => (
+          {MENU_ITEMS.filter((item) => item.key !== 'external' || activeWorkspace?.role === 'owner' || activeWorkspace?.role === 'admin').map((item) => (
             <button
               key={item.label}
               type="button"

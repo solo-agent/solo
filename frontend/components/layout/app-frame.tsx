@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Menu, X } from 'lucide-react';
 import { Sidebar } from '@/components/dashboard/sidebar';
 import { useChannels } from '@/lib/hooks/use-channels';
 import { useDM } from '@/lib/hooks/use-dm';
@@ -9,6 +10,7 @@ import { CreateChannelModal } from '@/components/dashboard/create-channel-modal'
 import { WorkspaceManageDialog } from '@/components/workspaces/workspace-manage-dialog';
 import { WorkspaceRail } from '@/components/workspaces/workspace-rail';
 import { GlobalAccountBar } from '@/components/layout/global-account-bar';
+import { t } from '@/lib/i18n';
 import type { CreateChannelInput } from '@/lib/types';
 
 /**
@@ -29,10 +31,12 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isCreateChannelOpen, setIsCreateChannelOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { channels, lucyChannel, isLoading: channelsLoading, createChannel, deleteChannel } = useChannels();
   const { dmChannels, isLoadingDMs } = useDM();
 
   const handleSelectChannel = (channelId: string) => {
+    setMobileNavOpen(false);
     router.push(`/dashboard?channel=${channelId}`);
   };
 
@@ -42,13 +46,18 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
   };
 
   const handleSelectDM = (dmId: string) => {
+    setMobileNavOpen(false);
     router.push(`/dashboard?dm=${dmId}`);
   };
 
   return (
-    <div className="flex h-screen min-w-[1024px] overflow-hidden bg-brutal-cream">
+    <div className="flex h-[100dvh] min-w-0 overflow-hidden bg-brutal-cream">
+      <button type="button" className="fixed left-3 top-3 z-50 flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-white shadow-sm lg:hidden" onClick={() => setMobileNavOpen((open) => !open)} aria-label={t(mobileNavOpen ? 'mobileNavigationClose' : 'mobileNavigationOpen')}>
+        {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+      </button>
+      {mobileNavOpen && <button type="button" className="fixed inset-0 z-30 bg-black/35 lg:hidden" onClick={() => setMobileNavOpen(false)} aria-label={t('mobileNavigationClose')} />}
       {/* Left meta column — WorkspaceRail (col 1) + Sidebar (col 2) + GlobalAccountBar (spans 1+2) */}
-      <div className="flex flex-shrink-0 flex-col border-r border-border bg-skin-primary">
+      <div className={`fixed inset-y-0 left-0 z-40 flex flex-shrink-0 flex-col border-r border-border bg-skin-primary transition-transform lg:static lg:translate-x-0 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex flex-1 overflow-hidden">
           <WorkspaceRail />
           <Sidebar
@@ -66,7 +75,10 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
             selectedDmId={null}
             onSelectDM={handleSelectDM}
             inboxSelected={false}
-            onSelectInbox={() => router.push('/dashboard?inbox')}
+            onSelectInbox={() => {
+              setMobileNavOpen(false);
+              router.push('/dashboard?inbox');
+            }}
           />
         </div>
         <GlobalAccountBar />

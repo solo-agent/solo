@@ -58,6 +58,7 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 	teamFormationSvc := service.NewTeamFormationService(pool, relationshipMD, hub, templateSvc)
 	computerSvc := service.NewComputerService(pool)
 	inboxSvc := service.NewInboxService(pool)
+	larkSvc := service.NewLarkService(pool, hub, agentSvc)
 	artifactRoot := os.Getenv("ARTIFACTS_DIR")
 	if artifactRoot == "" {
 		if home, err := os.UserHomeDir(); err == nil {
@@ -85,7 +86,7 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 	authHandler := handler.NewAuthHandler(pool, agentSvc)
 	channelHandler := handler.NewChannelHandler(pool, dm, hub, templateSvc)
 	memberHandler := handler.NewMemberHandler(pool, agentSvc, dm)
-	messageHandler := handler.NewMessageHandler(pool, hub, agentSvc, taskSvc, sendDedupe)
+	messageHandler := handler.NewMessageHandler(pool, hub, agentSvc, taskSvc, sendDedupe, larkSvc)
 	agentHandler := handler.NewAgentHandler(pool, dm, hub, agentSvc)
 	agentRunHandler := handler.NewAgentRunHandler(pool, dm)
 	budgetHandler := handler.NewBudgetHandler(service.NewBudgetService(pool))
@@ -104,6 +105,7 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 	searchHandler := handler.NewSearchHandler(pool)
 	computerHandler := handler.NewComputerHandler(computerSvc, dm, pool)
 	inboxHandler := handler.NewInboxHandler(inboxSvc)
+	larkHandler := handler.NewLarkHandler(larkSvc)
 	artifactHandler := handler.NewArtifactHandler(artifactSvc)
 	artifactHandler.SetTaskBroadcaster(taskSvc, hub)
 	onboardingHandler := handler.NewOnboardingHandler(pool, agentSvc)
@@ -181,6 +183,8 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 		r.Get("/{token}", workspaceHandler.InviteLinkInfo)
 		r.With(middleware.Auth(pool)).Post("/{token}/accept", workspaceHandler.AcceptInviteLink)
 	})
+	r.With(middleware.RateLimiter(60.0/60.0, 20), chimw.AllowContentType("application/json")).
+		Post("/api/v1/lark/events/{bindingID}/{signature}", larkHandler.Events)
 
 	// ---- Protected routes (rate-limited: 100 req/s) ----
 	r.Group(func(r chi.Router) {
@@ -225,6 +229,12 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 					r.Put("/", workspaceHandler.UpdateEmbedSettings)
 					r.Post("/tokens", workspaceHandler.CreateGuestToken)
 					r.Delete("/tokens/{tokenID}", workspaceHandler.RevokeGuestToken)
+				})
+				r.Route("/lark-binding", func(r chi.Router) {
+					r.Get("/", larkHandler.Get)
+					r.Put("/", larkHandler.Save)
+					r.Delete("/", larkHandler.Delete)
+					r.Post("/retry", larkHandler.Retry)
 				})
 			})
 		})

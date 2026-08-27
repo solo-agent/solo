@@ -461,6 +461,9 @@ const MessageItem = memo(function MessageItem({
               {t('deleted')}
             </span>
           )}
+          {message.sender_type === 'external' && (
+            <span className="badge-brutal bg-brutal-cream text-black">{t('externalSender')}</span>
+          )}
           <time dateTime={message.created_at} className="font-mono text-[11px] text-muted-foreground">
             {time}
           </time>

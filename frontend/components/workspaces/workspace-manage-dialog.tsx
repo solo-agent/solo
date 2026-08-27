@@ -13,6 +13,7 @@ import { Button, iconActionClass } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useWorkspace, type ManageTabKey } from '@/lib/workspace-context';
 import { WorkspaceSettingsCard } from '@/components/workspaces/workspace-members-dialog';
+import { WorkspaceLarkSettings } from '@/components/workspaces/workspace-lark-settings';
 import { useToast } from '@/components/ui/toast';
 import { t } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -21,6 +22,7 @@ const TABS = [
   { key: 'overview' as const, labelKey: 'workspaceManageOverview' },
   { key: 'members' as const, labelKey: 'workspaceManageMembers' },
   { key: 'invites' as const, labelKey: 'workspaceManageInvitations' },
+  { key: 'external' as const, labelKey: 'workspaceManageExternal' },
 ] as const;
 
 // Dialog driven by WorkspaceContext. Overview shows read-only summary;
@@ -89,9 +91,9 @@ export function WorkspaceManageDialog() {
         <DialogCloseButton onClick={closeManage} />
       </DialogHeader>
 
-      <div className="flex min-h-[320px] gap-4">
-        <div role="tablist" className="flex w-[140px] flex-shrink-0 flex-col gap-1 border-r-2 border-black pr-3">
-          {TABS.map((item) => (
+      <div className="flex min-h-[320px] flex-col gap-4 sm:flex-row">
+        <div role="tablist" className="flex w-full flex-shrink-0 gap-1 overflow-x-auto border-b-2 border-black pb-3 sm:w-[140px] sm:flex-col sm:overflow-visible sm:border-b-0 sm:border-r-2 sm:pb-0 sm:pr-3">
+          {TABS.filter((item) => item.key !== 'external' || canEdit).map((item) => (
             <button
               key={item.key}
               type="button"
@@ -99,7 +101,7 @@ export function WorkspaceManageDialog() {
               aria-selected={tab === item.key}
               onClick={() => setTab(item.key)}
               className={cn(
-                'border-2 px-3 py-2 text-left font-heading text-xs font-black',
+                'shrink-0 border-2 px-3 py-2 text-left font-heading text-xs font-black',
                 tab === item.key
                   ? 'border-black bg-brutal-primary shadow-brutal-sm'
                   : 'border-transparent hover:border-black hover:bg-white',
@@ -171,6 +173,7 @@ export function WorkspaceManageDialog() {
 
           {tab === 'members' && <WorkspaceSettingsCard bare view="members" />}
           {tab === 'invites' && <WorkspaceSettingsCard bare view="invites" />}
+          {tab === 'external' && canEdit && <WorkspaceLarkSettings workspaceId={activeWorkspace.id} />}
         </div>
       </div>
     </Dialog>
