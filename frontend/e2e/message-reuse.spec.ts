@@ -64,7 +64,14 @@ test('saves, forwards, and branches a real channel message', async ({ page, requ
     await expect(sourceMessage).toContainText(content);
     await sourceMessage.hover();
     await sourceMessage.getByLabel('更多消息操作').click();
-    await sourceMessage.getByRole('button', { name: '收藏消息' }).click();
+    const menu = page.getByRole('menu');
+    const menuBox = await menu.boundingBox();
+    const viewport = page.viewportSize();
+    expect(menuBox).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect(menuBox!.y).toBeGreaterThanOrEqual(0);
+    expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(viewport!.height);
+    await menu.getByRole('menuitem', { name: '收藏消息' }).click();
     await expect(page.getByText('消息已收藏')).toBeVisible();
     expect(psql(`SELECT count(*) FROM message_favorites WHERE message_id='${message.id}'`)).toBe('1');
 
@@ -77,7 +84,7 @@ test('saves, forwards, and branches a real channel message', async ({ page, requ
 
     await sourceMessage.hover();
     await sourceMessage.getByLabel('更多消息操作').click();
-    await sourceMessage.getByRole('button', { name: '转发消息' }).click();
+    await page.getByRole('menu').getByRole('menuitem', { name: '转发消息' }).click();
     await page.getByLabel('转发到频道').selectOption(target.id);
     await page.getByRole('button', { name: '转发消息', exact: true }).last().click();
     await expect(page.getByText('消息已转发')).toBeVisible();
@@ -91,7 +98,7 @@ test('saves, forwards, and branches a real channel message', async ({ page, requ
     await page.goto(`/dashboard?channel=${source.id}`);
     await sourceMessage.hover();
     await sourceMessage.getByLabel('更多消息操作').click();
-    await sourceMessage.getByRole('button', { name: '从消息创建分支' }).click();
+    await page.getByRole('menu').getByRole('menuitem', { name: '从消息创建分支' }).click();
     await page.getByLabel('分支标题').fill(branchTitle);
     await page.getByRole('button', { name: '创建分支', exact: true }).last().click();
     await expect(page.getByText('分支已创建')).toBeVisible();

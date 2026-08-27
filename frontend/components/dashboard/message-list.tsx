@@ -26,18 +26,12 @@ import {
   ChevronDown,
   Loader2,
   MessageSquare,
-  Pencil,
-  Trash2,
   SquareCheckBig,
   ArrowUpRight,
   CheckCircle2,
-  Pin,
-  PinOff,
   UserRoundCheck,
   FolderSync,
   GitBranch,
-  Copy,
-  ListChecks,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { buildValidNames } from '@/lib/utils/highlight';
@@ -633,78 +627,6 @@ const MessageItem = memo(function MessageItem({
             isSaving={reactionState.isSaving}
             toggleReaction={reactionState.toggleReaction}
           />
-          {onCopy && (
-            <button
-              data-message-copy
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onCopy(message); }}
-              className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
-              aria-label={t('copyMessage')}
-              title={t('copyMessage')}
-            >
-              <Copy className="h-3.5 w-3.5" />
-            </button>
-          )}
-          {onSelect && (
-            <button
-              data-message-select
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onSelect(message); }}
-              className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
-              aria-label={t('selectMessage')}
-              title={t('selectMessage')}
-            >
-              <ListChecks className="h-3.5 w-3.5" />
-            </button>
-          )}
-          {onEdit && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setEditContent(message.content || '');
-                setIsEditing(true);
-              }}
-              className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
-              aria-label={t('editMessage')}
-              title={t('edit')}
-            >
-              <Pencil className="h-3.5 w-3.5" />
-            </button>
-          )}
-          {onPin && (
-            <button
-              type="button"
-              onClick={async (e) => {
-                e.stopPropagation();
-                if (isTogglingPin) return;
-                setIsTogglingPin(true);
-                try {
-                  await onPin(message);
-                } finally {
-                  setIsTogglingPin(false);
-                }
-              }}
-              disabled={isTogglingPin}
-              aria-pressed={Boolean(pinned)}
-              className={`btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0 transition-transform active:translate-x-[2px] active:translate-y-[2px] active:shadow-none disabled:cursor-wait disabled:opacity-70 ${pinned ? 'bg-brutal-warning' : ''}`}
-              aria-label={pinned ? t('channelUnpin') : t('channelPin')}
-              title={pinned ? t('channelUnpin') : t('channelPin')}
-            >
-              {isTogglingPin ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-            </button>
-          )}
-          {onDelete && (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onDelete(message.id); }}
-              className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
-              aria-label={t('deleteMessage')}
-              title={t('delete')}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          )}
           {onReply && (
             <button
               type="button"
@@ -716,18 +638,30 @@ const MessageItem = memo(function MessageItem({
               <MessageSquare className="h-3.5 w-3.5" />
             </button>
           )}
-          {onAsTask && message.sender_type !== 'system' && !isTaskMessage && (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onAsTask(message); }}
-              className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
-              aria-label={t('convertToTask')}
-              title={t('convertToTask')}
-            >
-              <SquareCheckBig className="h-3.5 w-3.5" />
-            </button>
-          )}
-          <MessageReuseMenu message={message} onFavorite={onFavorite} onForward={onForward} onBranch={onBranch} />
+          <MessageReuseMenu
+            message={message}
+            onCopy={onCopy}
+            onSelect={onSelect}
+            onEdit={onEdit ? () => {
+              setEditContent(message.content || '');
+              setIsEditing(true);
+            } : undefined}
+            onDelete={onDelete ? () => onDelete(message.id) : undefined}
+            onAsTask={onAsTask && message.sender_type !== 'system' && !isTaskMessage ? onAsTask : undefined}
+            onPin={onPin ? async () => {
+              if (isTogglingPin) return;
+              setIsTogglingPin(true);
+              try {
+                await onPin(message);
+              } finally {
+                setIsTogglingPin(false);
+              }
+            } : undefined}
+            pinned={pinned}
+            onFavorite={onFavorite}
+            onForward={onForward}
+            onBranch={onBranch}
+          />
         </div>
       )}
     </div>
