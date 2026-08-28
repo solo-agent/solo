@@ -58,7 +58,7 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 	teamFormationSvc := service.NewTeamFormationService(pool, relationshipMD, hub, templateSvc)
 	computerSvc := service.NewComputerService(pool)
 	inboxSvc := service.NewInboxService(pool)
-	larkSvc := service.NewLarkService(pool, hub, agentSvc)
+	larkSvc := service.NewLarkService(ctx, pool, hub, agentSvc)
 	artifactRoot := os.Getenv("ARTIFACTS_DIR")
 	if artifactRoot == "" {
 		if home, err := os.UserHomeDir(); err == nil {
@@ -235,6 +235,8 @@ func NewRouter(ctx context.Context, pool *pgxpool.Pool, hub *ws.Hub, dm *service
 					r.Put("/", larkHandler.Save)
 					r.Delete("/", larkHandler.Delete)
 					r.Post("/retry", larkHandler.Retry)
+					r.Post("/registration", larkHandler.StartRegistration)
+					r.Get("/registration/{sessionID}", larkHandler.RegistrationStatus)
 				})
 			})
 		})

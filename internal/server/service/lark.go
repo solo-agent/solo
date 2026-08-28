@@ -16,6 +16,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,6 +24,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	lark "github.com/larksuite/oapi-sdk-go/v3"
+	larkcontact "github.com/larksuite/oapi-sdk-go/v3/service/contact/v3"
 
 	"github.com/solo-ai/solo/internal/auth"
 	"github.com/solo-ai/solo/internal/realtime"
@@ -35,6 +38,7 @@ type LarkService struct {
 	hub      realtime.Broadcaster
 	agentSvc *AgentService
 	client   *http.Client
+	qr       *larkQRState
 }
 
 type LarkBinding struct {
@@ -48,6 +52,9 @@ type LarkBinding struct {
 	ExternalChatType string `json:"external_chat_type,omitempty"`
 	LastStatus       string `json:"last_status,omitempty"`
 	LastError        string `json:"last_error,omitempty"`
+	ConnectionMode   string `json:"connection_mode"`
+	ConnectionStatus string `json:"connection_status"`
+	ConnectionError  string `json:"connection_error,omitempty"`
 	UpdatedAt        string `json:"updated_at"`
 }
 
@@ -73,8 +80,13 @@ type LarkInboundEvent struct {
 	Mentioned    bool
 }
 
-func NewLarkService(pool *pgxpool.Pool, hub realtime.Broadcaster, agentSvc *AgentService) *LarkService {
-	return &LarkService{pool: pool, hub: hub, agentSvc: agentSvc, client: &http.Client{Timeout: 10 * time.Second}}
+func NewLarkService(ctx context.Context, pool *pgxpool.Pool, hub realtime.Broadcaster, agentSvc *AgentService) *LarkService {
+	s := &LarkService{
+		pool: pool, hub: hub, agentSvc: agentSvc, client: &http.Client{Timeout: 10 * time.Second},
+		qr: newLarkQRState(ctx),
+	}
+	go s.restoreLarkWebsocketBindings(ctx)
+	return s
 }
 
 func (s *LarkService) GetBinding(ctx context.Context, workspaceID string) (*LarkBinding, error) {
@@ -83,7 +95,8 @@ func (s *LarkService) GetBinding(ctx context.Context, workspaceID string) (*Lark
 	err := s.pool.QueryRow(ctx, `
 		SELECT b.id, b.workspace_id, b.channel_id, b.agent_id, b.platform, b.app_id,
 		       COALESCE(b.external_chat_id, ''), COALESCE(b.external_chat_type, ''),
-		       COALESCE(d.status, ''), COALESCE(d.last_error, ''), b.updated_at
+		       COALESCE(d.status, ''), COALESCE(d.last_error, ''),
+		       b.connection_mode, b.connection_status, COALESCE(b.connection_error, ''), b.updated_at
 		  FROM lark_bindings b
 		  LEFT JOIN LATERAL (
 		       SELECT status, last_error FROM lark_deliveries
@@ -92,7 +105,8 @@ func (s *LarkService) GetBinding(ctx context.Context, workspaceID string) (*Lark
 		  ) d ON true
 		 WHERE b.workspace_id = $1`, workspaceID).Scan(
 		&b.ID, &b.WorkspaceID, &b.ChannelID, &b.AgentID, &b.Platform, &b.AppID,
-		&b.ExternalChatID, &b.ExternalChatType, &b.LastStatus, &b.LastError, &updated,
+		&b.ExternalChatID, &b.ExternalChatType, &b.LastStatus, &b.LastError,
+		&b.ConnectionMode, &b.ConnectionStatus, &b.ConnectionError, &updated,
 	)
 	if err != nil {
 		return nil, err
@@ -153,6 +167,7 @@ func (s *LarkService) SaveBinding(ctx context.Context, in SaveLarkBindingInput) 
 		  platform = EXCLUDED.platform, app_id = EXCLUDED.app_id,
 		  app_secret_encrypted = EXCLUDED.app_secret_encrypted,
 		  verification_token_hash = EXCLUDED.verification_token_hash,
+		  connection_mode = 'callback', connection_status = 'connected', connection_error = NULL,
 		  external_chat_id = CASE
 		    WHEN lark_bindings.channel_id = EXCLUDED.channel_id
 		     AND lark_bindings.platform = EXCLUDED.platform
@@ -172,7 +187,12 @@ func (s *LarkService) SaveBinding(ctx context.Context, in SaveLarkBindingInput) 
 }
 
 func (s *LarkService) DeleteBinding(ctx context.Context, workspaceID string) error {
+	var bindingID string
+	_ = s.pool.QueryRow(ctx, `SELECT id FROM lark_bindings WHERE workspace_id = $1`, workspaceID).Scan(&bindingID)
 	_, err := s.pool.Exec(ctx, `DELETE FROM lark_bindings WHERE workspace_id = $1`, workspaceID)
+	if err == nil && bindingID != "" {
+		s.stopLarkWebsocket(bindingID)
+	}
 	return err
 }
 
@@ -213,6 +233,18 @@ func (s *LarkService) HandleInbound(ctx context.Context, b *LarkBinding, event L
 	if strings.TrimSpace(event.ChatID) == "" || strings.TrimSpace(event.SenderOpenID) == "" {
 		return errors.New("missing chat or sender identity")
 	}
+	senderName := strings.TrimSpace(event.SenderName)
+	senderAvatar := ""
+	if senderName == "" {
+		senderName, senderAvatar = s.larkSenderProfile(ctx, b, event.SenderOpenID)
+	}
+	if senderName == "" {
+		suffix := event.SenderOpenID
+		if len(suffix) > 4 {
+			suffix = suffix[len(suffix)-4:]
+		}
+		senderName = "飞书成员 " + suffix
+	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -239,29 +271,15 @@ func (s *LarkService) HandleInbound(ctx context.Context, b *LarkBinding, event L
 		return err
 	}
 
-	var currentChat string
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(external_chat_id, '') FROM lark_bindings WHERE id = $1 FOR UPDATE`, b.ID).Scan(&currentChat); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE lark_bindings SET external_chat_id=$2, external_chat_type=$3, updated_at=now() WHERE id=$1 AND external_chat_id IS NULL`, b.ID, event.ChatID, event.ChatType); err != nil {
 		return err
-	}
-	if currentChat != "" && currentChat != event.ChatID {
-		_, _ = tx.Exec(ctx, `UPDATE lark_deliveries SET status='failed', last_error='another chat is already connected', attempts=1, updated_at=now() WHERE id=$1`, deliveryID)
-		return tx.Commit(ctx)
-	}
-	if currentChat == "" {
-		if _, err := tx.Exec(ctx, `UPDATE lark_bindings SET external_chat_id=$2, external_chat_type=$3, updated_at=now() WHERE id=$1`, b.ID, event.ChatID, event.ChatType); err != nil {
-			return err
-		}
 	}
 
 	senderID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("solo:lark:"+b.Platform+":"+event.SenderOpenID)).String()
-	senderName := strings.TrimSpace(event.SenderName)
-	if senderName == "" {
-		senderName = "飞书成员"
-	}
 	metadata := map[string]any{
 		"source": "lark", "platform": b.Platform, "lark_binding_id": b.ID,
 		"external_chat_id": event.ChatID, "external_message_id": externalID,
-		"external_sender_name": senderName, "trust": "external",
+		"external_sender_name": senderName, "external_sender_avatar": senderAvatar, "trust": "external",
 	}
 	metadataJSON, _ := json.Marshal(metadata)
 	messageID := uuid.New().String()
@@ -281,7 +299,7 @@ func (s *LarkService) HandleInbound(ctx context.Context, b *LarkBinding, event L
 	if s.hub != nil {
 		s.hub.BroadcastToChannel(b.ChannelID, realtime.Envelope("message.new", map[string]any{
 			"id": messageID, "channel_id": b.ChannelID, "sender_type": "external", "sender_id": senderID,
-			"sender_name": senderName, "sender_avatar": "", "content": text, "content_type": "text",
+			"sender_name": senderName, "sender_avatar": senderAvatar, "content": text, "content_type": "text",
 			"metadata": metadata, "mentioned_agent_ids": []string{b.AgentID}, "created_at": time.Now().UTC().Format(time.RFC3339),
 		}))
 	}
@@ -294,7 +312,9 @@ func (s *LarkService) HandleInbound(ctx context.Context, b *LarkBinding, event L
 func (s *LarkService) DeliverAgentReply(ctx context.Context, messageID string) {
 	var bindingID, platform, appID, encryptedSecret, chatID, content, agentName string
 	err := s.pool.QueryRow(ctx, `
-		SELECT b.id, b.platform, b.app_id, b.app_secret_encrypted, COALESCE(b.external_chat_id,''), m.content, COALESCE(a.name,'Agent')
+		SELECT b.id, b.platform, b.app_id, b.app_secret_encrypted,
+		       COALESCE(NULLIF(trigger.metadata->>'external_chat_id',''), b.external_chat_id, ''),
+		       m.content, COALESCE(a.name,'Agent')
 		  FROM messages m
 		  JOIN agents a ON a.id = m.sender_id
 		  JOIN agent_runs r ON r.id = NULLIF(m.metadata->>'agent_run_id','')::uuid
@@ -313,7 +333,7 @@ func (s *LarkService) DeliverAgentReply(ctx context.Context, messageID string) {
 	if err != nil {
 		return
 	}
-	externalID, sendErr := s.sendText(ctx, platform, appID, encryptedSecret, chatID, agentName+"：\n"+content)
+	externalID, sendErr := s.sendReply(ctx, platform, appID, encryptedSecret, chatID, agentName, content)
 	status, lastError := "sent", ""
 	if sendErr != nil {
 		status, lastError = "failed", sendErr.Error()
@@ -322,6 +342,33 @@ func (s *LarkService) DeliverAgentReply(ctx context.Context, messageID string) {
 	if sendErr != nil {
 		slog.Warn("failed to deliver Agent reply to Lark", "message_id", messageID, "error", sendErr)
 	}
+}
+
+func (s *LarkService) larkSenderProfile(ctx context.Context, b *LarkBinding, openID string) (string, string) {
+	// ponytail: fetch per message; cache by binding/openID only when external traffic makes this measurable.
+	var encryptedSecret string
+	if err := s.pool.QueryRow(ctx, `SELECT app_secret_encrypted FROM lark_bindings WHERE id=$1`, b.ID).Scan(&encryptedSecret); err != nil {
+		return "", ""
+	}
+	secret, err := decryptLarkSecret(encryptedSecret)
+	if err != nil {
+		return "", ""
+	}
+	opts := []lark.ClientOptionFunc{lark.WithReqTimeout(5 * time.Second)}
+	if b.Platform == "lark" {
+		opts = append(opts, lark.WithOpenBaseUrl(lark.LarkBaseUrl))
+	}
+	client := lark.NewClient(b.AppID, secret, opts...)
+	resp, err := client.Contact.User.Get(ctx, larkcontact.NewGetUserReqBuilder().UserId(openID).UserIdType("open_id").Build())
+	if err != nil || !resp.Success() || resp.Data == nil || resp.Data.User == nil {
+		return "", ""
+	}
+	user := resp.Data.User
+	avatar := ""
+	if user.Avatar != nil {
+		avatar = value(user.Avatar.Avatar72)
+	}
+	return value(user.Name), avatar
 }
 
 func (s *LarkService) RetryFailed(ctx context.Context, bindingID string) (int, error) {
@@ -345,7 +392,7 @@ func (s *LarkService) RetryFailed(ctx context.Context, bindingID string) (int, e
 	return len(ids), rows.Err()
 }
 
-func (s *LarkService) sendText(ctx context.Context, platform, appID, encryptedSecret, chatID, text string) (string, error) {
+func (s *LarkService) sendReply(ctx context.Context, platform, appID, encryptedSecret, chatID, agentName, content string) (string, error) {
 	secret, err := decryptLarkSecret(encryptedSecret)
 	if err != nil {
 		return "", err
@@ -373,8 +420,8 @@ func (s *LarkService) sendText(ctx context.Context, platform, appID, encryptedSe
 	if resp.StatusCode != http.StatusOK || tokenResp.Code != 0 || tokenResp.Token == "" {
 		return "", fmt.Errorf("tenant token rejected: %s", tokenResp.Msg)
 	}
-	contentJSON, _ := json.Marshal(map[string]string{"text": text})
-	body, _ := json.Marshal(map[string]string{"receive_id": chatID, "msg_type": "text", "content": string(contentJSON)})
+	messageType, messageContent := larkReplyPayload(agentName, content)
+	body, _ := json.Marshal(map[string]string{"receive_id": chatID, "msg_type": messageType, "content": messageContent})
 	req, _ = http.NewRequestWithContext(ctx, http.MethodPost, base+"/open-apis/im/v1/messages?receive_id_type=chat_id", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+tokenResp.Token)
@@ -397,6 +444,23 @@ func (s *LarkService) sendText(ctx context.Context, platform, appID, encryptedSe
 		return "", fmt.Errorf("message rejected: %s", sendResp.Msg)
 	}
 	return sendResp.Data.MessageID, nil
+}
+
+var larkMarkdownPattern = regexp.MustCompile("(?m)(^#{1,6}[ \\t]|^[ \\t]*[-*+][ \\t]|^[ \\t]*\\d+\\.[ \\t]|^>[ \\t]|\\*\\*[^*\\n]+\\*\\*|__[^_\\n]+__|`[^`\\n]+`|\\[[^\\]\\n]+\\]\\([^)\\n]+\\)|^[ \\t]*\\|.+\\|[ \\t]*$)")
+
+func larkReplyPayload(agentName, content string) (string, string) {
+	text := agentName + "：\n" + content
+	if !strings.Contains(content, "```") && !larkMarkdownPattern.MatchString(content) {
+		encoded, _ := json.Marshal(map[string]string{"text": text})
+		return "text", string(encoded)
+	}
+	card, _ := json.Marshal(map[string]any{
+		"schema": "2.0",
+		"body": map[string]any{"elements": []any{
+			map[string]any{"tag": "markdown", "content": agentName + "：\n\n" + content},
+		}},
+	})
+	return "interactive", string(card)
 }
 
 func larkCallbackSignature(bindingID string) string {

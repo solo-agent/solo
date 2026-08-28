@@ -27,7 +27,7 @@ type saveLarkBindingRequest struct {
 
 type larkBindingResponse struct {
 	*service.LarkBinding
-	CallbackURL string `json:"callback_url"`
+	CallbackURL string `json:"callback_url,omitempty"`
 }
 
 func (h *LarkHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -45,7 +45,51 @@ func (h *LarkHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load Lark connection")
 		return
 	}
-	writeJSON(w, http.StatusOK, larkBindingResponse{LarkBinding: binding, CallbackURL: callbackURL(r, binding.ID, h.svc.CallbackSignature(binding.ID))})
+	response := larkBindingResponse{LarkBinding: binding}
+	if binding.ConnectionMode == "callback" {
+		response.CallbackURL = callbackURL(r, binding.ID, h.svc.CallbackSignature(binding.ID))
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+type startLarkRegistrationRequest struct {
+	ChannelID string `json:"channel_id"`
+	AgentID   string `json:"agent_id"`
+	Platform  string `json:"platform"`
+}
+
+func (h *LarkHandler) StartRegistration(w http.ResponseWriter, r *http.Request) {
+	workspaceID, userID, ok := h.authorizeAdmin(w, r)
+	if !ok {
+		return
+	}
+	var req startLarkRegistrationRequest
+	if json.NewDecoder(r.Body).Decode(&req) != nil || strings.TrimSpace(req.ChannelID) == "" || strings.TrimSpace(req.AgentID) == "" {
+		writeError(w, http.StatusBadRequest, "channel and Agent are required")
+		return
+	}
+	session, err := h.svc.StartRegistration(r.Context(), service.StartLarkRegistrationInput{
+		WorkspaceID: workspaceID, Platform: req.Platform, ChannelID: req.ChannelID,
+		AgentID: req.AgentID, UserID: userID,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, session)
+}
+
+func (h *LarkHandler) RegistrationStatus(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, ok := h.authorizeAdmin(w, r)
+	if !ok {
+		return
+	}
+	session, err := h.svc.RegistrationStatus(workspaceID, chi.URLParam(r, "sessionID"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, session)
 }
 
 func (h *LarkHandler) Save(w http.ResponseWriter, r *http.Request) {

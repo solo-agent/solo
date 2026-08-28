@@ -1078,7 +1078,9 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		                   WHEN m.sender_type = 'external' THEN COALESCE(m.metadata->>'external_sender_name', '飞书成员')
 		                   ELSE COALESCE(u.display_name, a.name, m.sender_id::text)
 		                 END as sender_name,
-		                 COALESCE(u.avatar_url, a.avatar_url, '') AS sender_avatar,
+		                 CASE WHEN m.sender_type = 'external'
+		                      THEN COALESCE(m.metadata->>'external_sender_avatar', '')
+		                      ELSE COALESCE(u.avatar_url, a.avatar_url, '') END AS sender_avatar,
 		                 COALESCE(a.is_active, false) AS sender_active,
 		                 COALESCE(m.thinking_node_id::text, '') AS thinking_node_id,
 	                 m.content, m.content_type, m.metadata,

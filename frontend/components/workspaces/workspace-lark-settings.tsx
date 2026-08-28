@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { Check, Copy, MessageCircleMore, RefreshCw, Unplug } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { CheckCircle2, ChevronDown, LoaderCircle, MessageCircleMore, QrCode, RefreshCw, Unplug } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { apiClient } from '@/lib/api-client';
 import { useAgents } from '@/lib/hooks/use-agents';
 import { useChannels } from '@/lib/hooks/use-channels';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 
 interface LarkBinding {
@@ -15,24 +15,29 @@ interface LarkBinding {
   channel_id: string;
   agent_id: string;
   platform: 'feishu' | 'lark';
-  app_id: string;
   external_chat_id?: string;
-  external_chat_type?: string;
   last_status?: string;
   last_error?: string;
-  callback_url: string;
+  connection_status: 'connecting' | 'connected' | 'error';
+  connection_error?: string;
+}
+
+interface LarkRegistration {
+  session_id: string;
+  status: 'starting' | 'waiting' | 'connected' | 'expired' | 'error';
+  qr_code_url?: string;
+  expires_at?: string;
+  error?: string;
 }
 
 export function WorkspaceLarkSettings({ workspaceId }: { workspaceId: string }) {
   const { showToast } = useToast();
   const { channels, lucyChannel, isLoading: channelsLoading } = useChannels();
   const [binding, setBinding] = useState<LarkBinding | null>(null);
+  const [registration, setRegistration] = useState<LarkRegistration | null>(null);
   const [platform, setPlatform] = useState<'feishu' | 'lark'>('feishu');
   const [channelId, setChannelId] = useState('');
   const [agentId, setAgentId] = useState('');
-  const [appId, setAppId] = useState('');
-  const [appSecret, setAppSecret] = useState('');
-  const [verificationToken, setVerificationToken] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const availableChannels = useMemo(
@@ -41,22 +46,24 @@ export function WorkspaceLarkSettings({ workspaceId }: { workspaceId: string }) 
   );
   const { agents, isLoading: agentsLoading } = useAgents(channelId);
 
+  const loadBinding = useCallback(async () => {
+    const value = await apiClient.get<LarkBinding | null>(`/api/v1/workspaces/${workspaceId}/lark-binding`);
+    setBinding(value);
+    if (value) {
+      setPlatform(value.platform);
+      setChannelId(value.channel_id);
+      setAgentId(value.agent_id);
+    }
+  }, [workspaceId]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    apiClient.get<LarkBinding | null>(`/api/v1/workspaces/${workspaceId}/lark-binding`)
-      .then((value) => {
-        if (cancelled || !value) return;
-        setBinding(value);
-        setPlatform(value.platform);
-        setChannelId(value.channel_id);
-        setAgentId(value.agent_id);
-        setAppId(value.app_id);
-      })
-      .catch((error) => showToast(error instanceof Error ? error.message : t('larkLoadFailed'), 'error'))
+    loadBinding()
+      .catch((error) => { if (!cancelled) showToast(error instanceof Error ? error.message : t('larkLoadFailed'), 'error'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [showToast, workspaceId]);
+  }, [loadBinding, showToast]);
 
   useEffect(() => {
     if (!channelId && availableChannels[0]) setChannelId(availableChannels[0].id);
@@ -66,19 +73,32 @@ export function WorkspaceLarkSettings({ workspaceId }: { workspaceId: string }) 
     if (agents.length && !agents.some((agent) => agent.id === agentId)) setAgentId(agents[0].id);
   }, [agentId, agents]);
 
-  const save = async () => {
+  useEffect(() => {
+    if (!registration || !['starting', 'waiting'].includes(registration.status)) return;
+    const timer = window.setTimeout(async () => {
+      try {
+        const value = await apiClient.get<LarkRegistration>(`/api/v1/workspaces/${workspaceId}/lark-binding/registration/${registration.session_id}`);
+        setRegistration(value);
+        if (value.status === 'connected') {
+          await loadBinding();
+          showToast(t('larkQRConnected'), 'success');
+        }
+      } catch (error) {
+        setRegistration((value) => value ? { ...value, status: 'error', error: error instanceof Error ? error.message : t('larkQRFailed') } : null);
+      }
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [loadBinding, registration, showToast, workspaceId]);
+
+  const startRegistration = async () => {
     setBusy(true);
     try {
-      const value = await apiClient.put<LarkBinding>(`/api/v1/workspaces/${workspaceId}/lark-binding`, {
-        platform, channel_id: channelId, agent_id: agentId, app_id: appId,
-        app_secret: appSecret, verification_token: verificationToken,
+      const value = await apiClient.post<LarkRegistration>(`/api/v1/workspaces/${workspaceId}/lark-binding/registration`, {
+        platform, channel_id: channelId, agent_id: agentId,
       });
-      setBinding(value);
-      setAppSecret('');
-      setVerificationToken('');
-      showToast(t('larkSaved'), 'success');
+      setRegistration(value);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : t('larkSaveFailed'), 'error');
+      showToast(error instanceof Error ? error.message : t('larkQRFailed'), 'error');
     } finally {
       setBusy(false);
     }
@@ -90,18 +110,13 @@ export function WorkspaceLarkSettings({ workspaceId }: { workspaceId: string }) 
     try {
       await apiClient.delete(`/api/v1/workspaces/${workspaceId}/lark-binding`);
       setBinding(null);
+      setRegistration(null);
       showToast(t('larkDisconnected'), 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : t('larkDisconnectFailed'), 'error');
     } finally {
       setBusy(false);
     }
-  };
-
-  const copyCallback = async () => {
-    if (!binding?.callback_url) return;
-    await navigator.clipboard.writeText(binding.callback_url);
-    showToast(t('larkCallbackCopied'), 'success');
   };
 
   const retry = async () => {
@@ -118,6 +133,9 @@ export function WorkspaceLarkSettings({ workspaceId }: { workspaceId: string }) 
 
   if (loading || channelsLoading) return <p className="text-sm text-muted-foreground">{t('loading')}</p>;
 
+  const connectionError = registration?.error || binding?.connection_error;
+  const waitingForScan = registration?.status === 'starting' || registration?.status === 'waiting';
+
   return (
     <div className="space-y-5">
       <div>
@@ -125,58 +143,69 @@ export function WorkspaceLarkSettings({ workspaceId }: { workspaceId: string }) 
           <MessageCircleMore className="h-5 w-5" />
           {t('larkSettingsTitle')}
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">{t('larkSettingsDesc')}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{t('larkQRSettingsDesc')}</p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="space-y-1">
           <span className="text-xs font-bold">{t('larkPlatform')}</span>
-          <select className="input-brutal h-9 w-full px-3 text-sm" value={platform} onChange={(event) => setPlatform(event.target.value as 'feishu' | 'lark')}>
-            <option value="feishu">{t('larkPlatformFeishu')}</option>
-            <option value="lark">{t('larkPlatformLark')}</option>
-          </select>
+          <div className="relative">
+            <select className="input-brutal h-9 w-full appearance-none px-3 pr-11 text-sm" value={platform} onChange={(event) => setPlatform(event.target.value as 'feishu' | 'lark')}>
+              <option value="feishu">{t('larkPlatformFeishu')}</option>
+              <option value="lark">{t('larkPlatformLark')}</option>
+            </select>
+            <ChevronDown aria-hidden className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2" />
+          </div>
         </label>
         <label className="space-y-1">
           <span className="text-xs font-bold">{t('larkChannel')}</span>
-          <select className="input-brutal h-9 w-full px-3 text-sm" value={channelId} onChange={(event) => { setChannelId(event.target.value); setAgentId(''); }}>
-            {availableChannels.map((channel) => <option key={channel.id} value={channel.id}># {channel.name}</option>)}
-          </select>
+          <div className="relative">
+            <select className="input-brutal h-9 w-full appearance-none px-3 pr-11 text-sm" value={channelId} onChange={(event) => { setChannelId(event.target.value); setAgentId(''); }}>
+              {availableChannels.map((channel) => <option key={channel.id} value={channel.id}># {channel.name}</option>)}
+            </select>
+            <ChevronDown aria-hidden className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2" />
+          </div>
         </label>
         <label className="space-y-1 sm:col-span-2">
           <span className="text-xs font-bold">{t('larkAgent')}</span>
-          <select className="input-brutal h-9 w-full px-3 text-sm" value={agentId} onChange={(event) => setAgentId(event.target.value)} disabled={agentsLoading || agents.length === 0}>
-            {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
-          </select>
+          <div className="relative">
+            <select className="input-brutal h-9 w-full appearance-none px-3 pr-11 text-sm" value={agentId} onChange={(event) => setAgentId(event.target.value)} disabled={agentsLoading || agents.length === 0}>
+              {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+            </select>
+            <ChevronDown aria-hidden className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2" />
+          </div>
           {!agentsLoading && agents.length === 0 && <p className="text-xs text-red-700">{t('larkNoAgent')}</p>}
-        </label>
-        <label className="space-y-1 sm:col-span-2">
-          <span className="text-xs font-bold">{t('larkAppID')}</span>
-          <Input value={appId} onChange={(event) => setAppId(event.target.value)} autoComplete="off" />
-        </label>
-        <label className="space-y-1">
-          <span className="text-xs font-bold">{t('larkAppSecret')}</span>
-          <Input type="password" value={appSecret} onChange={(event) => setAppSecret(event.target.value)} placeholder={binding ? t('larkSecretKeep') : ''} autoComplete="new-password" />
-        </label>
-        <label className="space-y-1">
-          <span className="text-xs font-bold">{t('larkVerificationToken')}</span>
-          <Input type="password" value={verificationToken} onChange={(event) => setVerificationToken(event.target.value)} placeholder={binding ? t('larkSecretKeep') : ''} autoComplete="new-password" />
         </label>
       </div>
 
       <div className="flex flex-wrap justify-end gap-2">
         {binding && <Button variant="outline" onClick={() => void disconnect()} disabled={busy}><Unplug className="mr-2 h-4 w-4" />{t('larkDisconnect')}</Button>}
-        <Button onClick={() => void save()} disabled={busy || !channelId || !agentId || !appId.trim() || (!binding && (!appSecret.trim() || !verificationToken.trim()))}>{binding ? <Check className="mr-2 h-4 w-4" /> : null}{t('larkSave')}</Button>
+        <Button onClick={() => void startRegistration()} disabled={busy || !channelId || !agentId || waitingForScan}>
+          {waitingForScan ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <QrCode className="mr-2 h-4 w-4" />}
+          {binding ? t('larkQRReconnect') : t('larkQRConnect')}
+        </Button>
       </div>
+
+      {registration?.qr_code_url && waitingForScan && (
+        <div className="rounded-2xl border border-border bg-brutal-cream p-6 text-center">
+          <div className="font-heading text-lg font-bold">{t('larkQRTitle')}</div>
+          <p className="mt-1 text-sm text-muted-foreground">{t('larkQRDesc')}</p>
+          <div className="mx-auto mt-5 w-fit rounded-2xl border border-border bg-white p-4 shadow-sm">
+            <QRCodeSVG value={registration.qr_code_url} size={220} />
+          </div>
+          <p className="mt-4 flex items-center justify-center gap-2 text-sm font-medium">
+            <LoaderCircle className="h-4 w-4 animate-spin" />{t('larkQRWaiting')}
+          </p>
+        </div>
+      )}
 
       {binding && (
         <div className="rounded-xl border border-border bg-brutal-cream p-4">
-          <div className="text-sm font-bold">{t('larkCallbackTitle')}</div>
-          <p className="mt-1 text-xs text-muted-foreground">{t('larkCallbackDesc')}</p>
-          <div className="mt-3 flex gap-2">
-            <Input readOnly value={binding.callback_url} className="font-mono text-xs" />
-            <Button variant="outline" size="icon" onClick={() => void copyCallback()} aria-label={t('larkCopyCallback')}><Copy className="h-4 w-4" /></Button>
+          <div className="flex items-center gap-2 text-sm font-bold">
+            {binding.connection_status === 'connected' ? <CheckCircle2 className="h-4 w-4 text-green-700" /> : <LoaderCircle className="h-4 w-4 animate-spin" />}
+            {binding.connection_status === 'connected' ? t('larkConnectionConnected') : t('larkConnectionConnecting')}
           </div>
-          <p className="mt-3 text-sm font-medium">{binding.external_chat_id ? t('larkConnectedChat') : t('larkWaitingChat')}</p>
+          <p className="mt-2 text-sm text-muted-foreground">{binding.external_chat_id ? t('larkConnectedChat') : t('larkWaitingChat')}</p>
           {binding.last_status === 'failed' && (
             <div className="mt-3 flex items-start justify-between gap-3 rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-800">
               <span className="break-all">{binding.last_error || t('larkDeliveryFailed')}</span>
@@ -186,11 +215,12 @@ export function WorkspaceLarkSettings({ workspaceId }: { workspaceId: string }) 
         </div>
       )}
 
-      <ol className="space-y-1 text-sm text-muted-foreground">
-        <li>1. {t('larkSetupStep1')}</li>
-        <li>2. {t('larkSetupStep2')}</li>
-        <li>3. {t('larkSetupStep3')}</li>
-      </ol>
+      {(registration?.status === 'expired' || registration?.status === 'error' || binding?.connection_status === 'error') && (
+        <div className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-800">
+          <div className="font-bold">{registration?.status === 'expired' ? t('larkQRExpired') : t('larkQRFailed')}</div>
+          {connectionError && <p className="mt-1 break-all text-xs">{connectionError}</p>}
+        </div>
+      )}
     </div>
   );
 }
