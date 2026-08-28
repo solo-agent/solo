@@ -99,8 +99,8 @@ func (h *MessageHandler) ListFavorites(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.pool.Query(r.Context(), `
 		SELECT m.id::text, m.channel_id::text, m.sender_type, m.sender_id::text,
-		       CASE WHEN m.sender_type = 'system' THEN 'Solo' ELSE COALESCE(u.display_name, a.name, 'Unknown') END,
-		       COALESCE(u.avatar_url, a.avatar_url, ''), COALESCE(a.is_active, false),
+		       CASE WHEN m.sender_type = 'system' THEN 'Solo' WHEN m.sender_type = 'external' THEN COALESCE(m.metadata->>'external_sender_name', '飞书成员') ELSE COALESCE(u.display_name, a.name, 'Unknown') END,
+		       CASE WHEN m.sender_type = 'external' THEN COALESCE(m.metadata->>'external_sender_avatar', '') ELSE COALESCE(u.avatar_url, a.avatar_url, '') END, COALESCE(a.is_active, false),
 		       m.content, m.content_type, m.metadata, COALESCE(m.attachment_ids, '{}'), m.created_at,
 		       w.id::text, w.name, c.name, favorite.created_at
 		  FROM message_favorites favorite
