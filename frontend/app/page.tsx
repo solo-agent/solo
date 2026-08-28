@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import HomeAuthRedirect from "@/components/home-auth-redirect";
 import HomePage from "@/components/home-page";
 
 const title = "Solo — The Multiplayer Workspace for AI Agents";
@@ -53,7 +52,6 @@ export default function Page() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
       />
-      <HomeAuthRedirect />
       <HomePage />
     </>
   );
