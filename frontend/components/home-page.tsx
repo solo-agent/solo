@@ -24,7 +24,7 @@ export default function HomePage() {
   return (
     <main id="main-content" className="min-h-screen bg-skin-canvas text-skin-ink">
       <header className="border-b border-skin-rule bg-skin-canvas/95">
-        <nav className="mx-auto flex h-20 max-w-[1360px] items-center justify-between gap-6 px-5 lg:px-10" aria-label={t('homeNavLabel')}>
+        <nav className="mx-auto flex h-20 max-w-[1280px] items-center justify-between gap-6 px-5 lg:px-10" aria-label={t('homeNavLabel')}>
           <Link href="/" className="flex items-center gap-3" aria-label={t('homeLogoLabel')}>
             <Image src="/favicon.svg" width={42} height={42} alt="" priority />
             <span className="font-display text-2xl font-bold tracking-[-0.04em]">Solo</span>
@@ -78,17 +78,17 @@ export default function HomePage() {
         </nav>
       </header>
 
-      <section className="relative overflow-hidden border-b border-skin-rule" aria-labelledby="home-hero-title">
-        <div className="pointer-events-none absolute inset-0 bg-noise opacity-[0.12]" aria-hidden />
-        <div className="relative mx-auto grid max-w-[1360px] gap-14 px-5 py-20 lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:px-10 lg:py-28">
-          <div className="max-w-[650px]">
-            <p className="mb-6 font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-skin-subtle-text">
+      <section className="relative overflow-hidden border-b border-skin-rule bg-skin-primary-light" aria-labelledby="home-hero-title">
+        <div className="pointer-events-none absolute inset-0 bg-halftone opacity-[0.1]" aria-hidden />
+        <div className="relative mx-auto grid max-w-[1280px] gap-12 px-5 py-16 lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:px-10 lg:py-20">
+          <div className="relative z-10 max-w-[580px]">
+            <p className="mb-7 inline-flex rounded-full border border-skin-rule bg-skin-surface px-4 py-2 font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-skin-subtle-text shadow-[0_4px_12px_var(--skin-shadow)]">
               {t('homeHeroEyebrow')}
             </p>
-            <h1 id="home-hero-title" className="font-display text-[clamp(3.5rem,7vw,7rem)] font-bold leading-[0.9] tracking-[-0.065em]">
+            <h1 id="home-hero-title" className="font-display text-[clamp(3.25rem,5vw,4.5rem)] font-bold leading-[0.98] tracking-[-0.045em]">
               {t('homeHeroTitle')}
             </h1>
-            <p className="mt-7 max-w-[590px] font-body text-lg leading-8 text-skin-subtle-text lg:text-xl lg:leading-9">
+            <p className="mt-7 max-w-[560px] font-body text-base leading-7 text-skin-subtle-text lg:text-lg lg:leading-8">
               {t('homeHeroDescription')}
             </p>
             <div className="mt-9 flex flex-wrap items-center gap-4">
@@ -110,13 +110,22 @@ export default function HomePage() {
             <p className="mt-6 font-mono text-[11px] uppercase tracking-[0.13em] text-skin-subtle-text">
               {t('homeHeroProof')}
             </p>
+            <div className="mt-8 grid max-w-[500px] grid-cols-3 gap-5">
+              {[
+                ['02', 'humans'],
+                ['03', 'agents'],
+                ['02', 'computers'],
+              ].map(([value, label], index) => (
+                <div key={label} className={`py-2 ${index > 0 ? 'border-l border-skin-rule pl-5' : ''}`}>
+                  <p className="font-display text-xl font-bold">{value}</p>
+                  <p className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-skin-subtle-text">{label}</p>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="relative mx-auto w-full max-w-[720px]" id="product">
-            <div className="absolute -left-5 -top-5 z-10 rounded-full border border-skin-rule bg-skin-warning px-4 py-2 font-mono text-[10px] font-bold uppercase tracking-[0.14em] shadow-[0_4px_12px_var(--skin-shadow)]">
-              {t('homeDemoLive')}
-            </div>
-            <div className="overflow-hidden rounded-[28px] border border-skin-rule bg-skin-surface shadow-[0_26px_70px_var(--skin-shadow)]">
+            <div className="relative z-10 overflow-hidden rounded-[28px] border border-skin-rule bg-skin-surface shadow-[0_26px_70px_var(--skin-shadow)]">
               <div className="flex items-center justify-between border-b border-skin-rule px-5 py-4">
                 <div className="flex items-center gap-2">
                   <span className="h-2.5 w-2.5 rounded-full bg-skin-accent" />
@@ -210,10 +219,10 @@ export default function HomePage() {
       </section>
 
       <section className="border-b border-skin-rule bg-skin-surface" aria-labelledby="home-thesis-title">
-        <div className="mx-auto grid max-w-[1360px] gap-10 px-5 py-20 lg:grid-cols-[1.25fr_0.75fr] lg:items-end lg:px-10 lg:py-28">
+        <div className="mx-auto grid max-w-[1280px] gap-10 px-5 py-16 lg:grid-cols-[1.2fr_0.8fr] lg:items-end lg:px-10 lg:py-24">
           <div>
             <p className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-skin-subtle-text">{t('homeThesisEyebrow')}</p>
-            <h2 id="home-thesis-title" className="mt-5 max-w-[970px] font-display text-[clamp(2.4rem,5vw,5.4rem)] font-bold leading-[0.98] tracking-[-0.055em]">
+            <h2 id="home-thesis-title" className="mt-5 max-w-[780px] font-display text-[clamp(2.2rem,3.6vw,3.25rem)] font-bold leading-[1.04] tracking-[-0.04em]">
               {t('homeThesisTitle')}
             </h2>
           </div>
@@ -229,10 +238,10 @@ export default function HomePage() {
       </section>
 
       <section id="workflow" className="border-b border-skin-rule" aria-labelledby="home-workflow-title">
-        <div className="mx-auto max-w-[1360px] px-5 py-20 lg:px-10 lg:py-28">
+        <div className="mx-auto max-w-[1280px] px-5 py-16 lg:px-10 lg:py-24">
           <div className="max-w-[820px]">
             <p className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-skin-subtle-text">{t('homeWorkflowEyebrow')}</p>
-            <h2 id="home-workflow-title" className="mt-5 font-display text-[clamp(2.6rem,5vw,5rem)] font-bold leading-[0.98] tracking-[-0.055em]">
+            <h2 id="home-workflow-title" className="mt-5 font-display text-[clamp(2.2rem,3.6vw,3.25rem)] font-bold leading-[1.04] tracking-[-0.04em]">
               {t('homeWorkflowTitle')}
             </h2>
             <p className="mt-6 max-w-[680px] font-body text-lg leading-8 text-skin-subtle-text">{t('homeWorkflowDescription')}</p>
@@ -260,11 +269,11 @@ export default function HomePage() {
       </section>
 
       <section className="overflow-hidden border-b border-skin-rule bg-skin-primary-light" aria-labelledby="home-workspace-title">
-        <div className="mx-auto max-w-[1360px] px-5 py-20 lg:px-10 lg:py-28">
+        <div className="mx-auto max-w-[1280px] px-5 py-16 lg:px-10 lg:py-24">
           <div className="grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-end">
             <div>
               <p className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-skin-subtle-text">{t('homeWorkspaceEyebrow')}</p>
-              <h2 id="home-workspace-title" className="mt-5 font-display text-[clamp(2.6rem,5vw,5rem)] font-bold leading-[0.98] tracking-[-0.055em]">
+              <h2 id="home-workspace-title" className="mt-5 font-display text-[clamp(2.2rem,3.6vw,3.25rem)] font-bold leading-[1.04] tracking-[-0.04em]">
                 {t('homeWorkspaceTitle')}
               </h2>
             </div>
@@ -276,7 +285,7 @@ export default function HomePage() {
               src="/marketing/workspace.png"
               width={1908}
               height={1096}
-              sizes="(max-width: 1360px) 94vw, 1280px"
+              sizes="(max-width: 1280px) 94vw, 1200px"
               alt={t('homeWorkspaceImageAlt')}
               className="h-auto w-full rounded-[20px] border border-skin-rule"
             />
@@ -290,10 +299,10 @@ export default function HomePage() {
       </section>
 
       <section className="border-b border-skin-rule" aria-labelledby="home-capabilities-title">
-        <div className="mx-auto max-w-[1360px] px-5 py-20 lg:px-10 lg:py-28">
+        <div className="mx-auto max-w-[1280px] px-5 py-16 lg:px-10 lg:py-24">
           <div className="max-w-[850px]">
             <p className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-skin-subtle-text">{t('homeCapabilitiesEyebrow')}</p>
-            <h2 id="home-capabilities-title" className="mt-5 font-display text-[clamp(2.6rem,5vw,5rem)] font-bold leading-[0.98] tracking-[-0.055em]">
+            <h2 id="home-capabilities-title" className="mt-5 font-display text-[clamp(2.2rem,3.6vw,3.25rem)] font-bold leading-[1.04] tracking-[-0.04em]">
               {t('homeCapabilitiesTitle')}
             </h2>
           </div>
@@ -318,13 +327,13 @@ export default function HomePage() {
       </section>
 
       <section className="overflow-hidden border-b border-skin-rule bg-skin-surface" aria-labelledby="home-templates-title">
-        <div className="mx-auto grid max-w-[1360px] gap-12 px-5 py-20 lg:grid-cols-[0.7fr_1.3fr] lg:items-center lg:px-10 lg:py-28">
+        <div className="mx-auto grid max-w-[1280px] gap-12 px-5 py-16 lg:grid-cols-[0.7fr_1.3fr] lg:items-center lg:px-10 lg:py-24">
           <div>
             <span className="inline-flex h-12 w-12 items-center justify-center rounded-xl border border-skin-rule bg-skin-warning-light">
               <Bot className="h-5 w-5" aria-hidden />
             </span>
             <p className="mt-8 font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-skin-subtle-text">{t('homeTemplatesEyebrow')}</p>
-            <h2 id="home-templates-title" className="mt-5 font-display text-[clamp(2.6rem,5vw,4.8rem)] font-bold leading-[0.98] tracking-[-0.055em]">
+            <h2 id="home-templates-title" className="mt-5 font-display text-[clamp(2.2rem,3.6vw,3.25rem)] font-bold leading-[1.04] tracking-[-0.04em]">
               {t('homeTemplatesTitle')}
             </h2>
             <p className="mt-6 max-w-[520px] font-body text-lg leading-8 text-skin-subtle-text">{t('homeTemplatesDescription')}</p>
@@ -343,13 +352,13 @@ export default function HomePage() {
       </section>
 
       <section id="open-source" className="border-b border-skin-rule" aria-labelledby="home-open-source-title">
-        <div className="mx-auto max-w-[1360px] px-5 py-20 lg:px-10 lg:py-28">
+        <div className="mx-auto max-w-[1280px] px-5 py-16 lg:px-10 lg:py-24">
           <div className="relative overflow-hidden rounded-[30px] border border-skin-rule bg-skin-ink px-6 py-12 text-skin-canvas shadow-[0_24px_65px_var(--skin-shadow)] sm:px-10 lg:px-14 lg:py-16">
             <div className="pointer-events-none absolute inset-0 bg-halftone opacity-[0.08]" aria-hidden />
             <div className="relative grid gap-12 lg:grid-cols-[1fr_0.9fr] lg:items-end">
               <div>
                 <p className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-skin-muted">{t('homeOpenSourceEyebrow')}</p>
-                <h2 id="home-open-source-title" className="mt-5 max-w-[720px] font-display text-[clamp(2.8rem,5vw,5.2rem)] font-bold leading-[0.96] tracking-[-0.055em]">
+                <h2 id="home-open-source-title" className="mt-5 max-w-[650px] font-display text-[clamp(2.3rem,3.8vw,3.5rem)] font-bold leading-[1.02] tracking-[-0.04em]">
                   {t('homeOpenSourceTitle')}
                 </h2>
                 <p className="mt-6 max-w-[650px] font-body text-lg leading-8 text-skin-muted-light">{t('homeOpenSourceDescription')}</p>
@@ -375,11 +384,11 @@ export default function HomePage() {
 
       <section className="relative overflow-hidden" aria-labelledby="home-final-title">
         <div className="pointer-events-none absolute inset-0 bg-noise opacity-[0.1]" aria-hidden />
-        <div className="relative mx-auto max-w-[1000px] px-5 py-24 text-center lg:py-36">
+        <div className="relative mx-auto max-w-[900px] px-5 py-20 text-center lg:py-28">
           <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-skin-rule bg-skin-accent-light shadow-[0_6px_18px_var(--skin-shadow)]">
             <ShieldCheck className="h-6 w-6" aria-hidden />
           </span>
-          <h2 id="home-final-title" className="mt-8 font-display text-[clamp(3rem,7vw,6.6rem)] font-bold leading-[0.9] tracking-[-0.065em]">{t('homeFinalTitle')}</h2>
+          <h2 id="home-final-title" className="mt-8 font-display text-[clamp(2.5rem,4.4vw,4rem)] font-bold leading-[1] tracking-[-0.045em]">{t('homeFinalTitle')}</h2>
           <p className="mx-auto mt-7 max-w-[660px] font-body text-lg leading-8 text-skin-subtle-text">{t('homeFinalDescription')}</p>
           <div className="mt-9 flex flex-wrap justify-center gap-4">
             <Link href="/auth/register" className="inline-flex h-13 items-center gap-2 rounded-xl border border-skin-rule bg-skin-accent px-6 font-heading text-base font-bold text-skin-accent-foreground shadow-[0_5px_14px_var(--skin-shadow)] transition-transform hover:-translate-y-0.5">
@@ -393,7 +402,7 @@ export default function HomePage() {
       </section>
 
       <footer className="border-t border-skin-rule bg-skin-surface">
-        <div className="mx-auto flex max-w-[1360px] flex-col gap-6 px-5 py-8 sm:flex-row sm:items-center sm:justify-between lg:px-10">
+        <div className="mx-auto flex max-w-[1280px] flex-col gap-6 px-5 py-8 sm:flex-row sm:items-center sm:justify-between lg:px-10">
           <div className="flex items-center gap-3">
             <Image src="/favicon.svg" width={34} height={34} alt="" />
             <div>

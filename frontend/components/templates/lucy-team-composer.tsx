@@ -7,7 +7,6 @@ import { ArrowRight, LayoutTemplate, Sparkles, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
-import { Textarea } from '@/components/ui/textarea';
 import { apiClient } from '@/lib/api-client';
 import { getLocale, t } from '@/lib/i18n';
 import { useChannel } from '@/lib/use-channel';
@@ -142,8 +141,8 @@ export function LucyTeamComposer({
   };
 
   return (
-    <section className="mx-auto mb-4 max-w-6xl border-2 border-black bg-warm-stone shadow-brutal">
-      <div className="grid gap-3 p-3 lg:grid-cols-[150px_minmax(0,1fr)_auto] lg:items-center">
+    <section className="mb-4 border-2 border-black bg-warm-stone shadow-brutal">
+      <div className="grid gap-3 p-3 lg:grid-cols-[max-content_minmax(0,1fr)_auto] lg:items-center">
         <div>
           <div className="flex items-center gap-2 font-heading text-base font-black">
             <span className="flex h-9 w-9 items-center justify-center border-2 border-black bg-white shadow-brutal-sm">
@@ -152,13 +151,12 @@ export function LucyTeamComposer({
             {t('templatesLucyComposerTitle')}
           </div>
         </div>
-        <Textarea
+        <Input
           value={goal}
           onChange={(event) => setGoal(event.target.value)}
           placeholder={t('templatesLucyComposerPlaceholder')}
-          rows={2}
           disabled={isMatching || isCreating}
-          className="min-h-14 resize-none bg-white"
+          className="h-14 bg-white"
         />
         <Button
           type="button"
