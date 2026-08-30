@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { Menu, X } from 'lucide-react';
 import { Sidebar } from '@/components/dashboard/sidebar';
 import { useChannels } from '@/lib/hooks/use-channels';
-import { useDM } from '@/lib/hooks/use-dm';
 import { CreateChannelModal } from '@/components/dashboard/create-channel-modal';
 import { WorkspaceManageDialog } from '@/components/workspaces/workspace-manage-dialog';
 import { WorkspaceRail } from '@/components/workspaces/workspace-rail';
@@ -33,7 +32,6 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
   const [isCreateChannelOpen, setIsCreateChannelOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { channels, lucyChannel, isLoading: channelsLoading, createChannel, deleteChannel } = useChannels();
-  const { dmChannels, isLoadingDMs } = useDM();
 
   const handleSelectChannel = (channelId: string) => {
     setMobileNavOpen(false);
@@ -43,11 +41,6 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
   const handleCreateChannel = async (input: CreateChannelInput) => {
     const channel = await createChannel(input);
     router.push(`/dashboard?channel=${channel.id}`);
-  };
-
-  const handleSelectDM = (dmId: string) => {
-    setMobileNavOpen(false);
-    router.push(`/dashboard?dm=${dmId}`);
   };
 
   return (
@@ -70,10 +63,8 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
             onSelectChannel={handleSelectChannel}
             onCreateChannel={() => setIsCreateChannelOpen(true)}
             onDeleteChannel={(id) => deleteChannel(id)}
-            dms={dmChannels}
-            dmsLoading={isLoadingDMs}
+            dms={[]}
             selectedDmId={null}
-            onSelectDM={handleSelectDM}
             inboxSelected={false}
             onSelectInbox={() => {
               setMobileNavOpen(false);

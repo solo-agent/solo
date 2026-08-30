@@ -20,7 +20,7 @@ import {
   useState,
   useCallback,
 } from 'react';
-import { X, AlertCircle, Copy, ListChecks, RefreshCw, Send, MessageSquare } from 'lucide-react';
+import { X, AlertCircle, RefreshCw, Send, MessageSquare } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -31,7 +31,15 @@ import { buildDashboardHref } from '@/lib/dashboard-url';
 import { displayAgentErrorReason } from '@/lib/agent-activity';
 import { Avatar } from '@/components/ui/avatar';
 import { UserAvatar } from '@/components/ui/user-avatar';
-import { panelToggleButtonClass } from '@/components/ui/button';
+import { Button, panelToggleButtonClass } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogCloseButton,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { PixelAvatar } from '@/components/ui/pixel-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useThread } from '@/lib/hooks/use-thread';
@@ -47,7 +55,7 @@ import {
 } from './message-reactions';
 import { t } from '@/lib/i18n';
 import { formatMessageTime, formatMessageTimestamp, messageDateKey } from '@/lib/utils/time';
-import type { AgentDetailTarget, Message, ChannelMember, Task, TaskStatus } from '@/lib/types';
+import type { AgentDetailTarget, Channel, Message, ChannelMember, Task, TaskStatus } from '@/lib/types';
 import { canGroupMessages, MessageDateSeparator } from './message-layout';
 import {
   copyMessageText,
@@ -56,6 +64,7 @@ import {
   ShareMessagesDialog,
   type ShareableMessage,
 } from './message-share';
+import { MessageReuseMenu } from './message-reuse-menu';
 
 interface ThreadPanelProps {
   parentMessage: Message;
@@ -73,6 +82,10 @@ interface ThreadPanelProps {
   onOpenArtifactReference?: (ref: string) => void;
   onAgentClick?: (agent: AgentDetailTarget) => void;
   contextLabel?: string;
+  forwardChannels?: Channel[];
+  onFavorite?: (message: Message) => Promise<void>;
+  onForward?: (message: Message, targetChannelId: string) => Promise<void>;
+  onBranch?: (message: Message, title: string) => Promise<void>;
 }
 
 // ---- Parent message display ----
@@ -84,6 +97,9 @@ function ParentMessageBlock({
   onAgentClick,
   onCopy,
   onSelect,
+  onFavorite,
+  onForward,
+  onBranch,
   selectionMode,
   selected,
 }: {
@@ -93,6 +109,9 @@ function ParentMessageBlock({
   onAgentClick?: (agent: AgentDetailTarget) => void;
   onCopy?: (message: Message) => void;
   onSelect?: (message: Message) => void;
+  onFavorite?: (message: Message) => void;
+  onForward?: (message: Message) => void;
+  onBranch?: (message: Message) => void;
   selectionMode?: boolean;
   selected?: boolean;
 }) {
@@ -175,26 +194,14 @@ function ParentMessageBlock({
           isSaving={reactionState.isSaving}
           toggleReaction={reactionState.toggleReaction}
         />
-        {onCopy && <button
-          data-message-copy
-          type="button"
-          onClick={(event) => { event.stopPropagation(); onCopy(message); }}
-          className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
-          aria-label={t('copyMessage')}
-          title={t('copyMessage')}
-        >
-          <Copy className="h-3.5 w-3.5" />
-        </button>}
-        {onSelect && <button
-          data-message-select
-          type="button"
-          onClick={(event) => { event.stopPropagation(); onSelect(message); }}
-          className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
-          aria-label={t('selectMessage')}
-          title={t('selectMessage')}
-        >
-          <ListChecks className="h-3.5 w-3.5" />
-        </button>}
+        <MessageReuseMenu
+          message={message}
+          onCopy={onCopy}
+          onSelect={onSelect}
+          onFavorite={onFavorite}
+          onForward={onForward}
+          onBranch={onBranch}
+        />
       </div>
     </div>
   );
@@ -345,19 +352,6 @@ function createMdComponents(onOpenArtifactReference?: (ref: string) => void) {
 
 // ---- Reply item ----
 
-type ThreadReplyMessage = {
-  id: string;
-  display_name?: string;
-  sender_id?: string;
-  sender_avatar?: string | null;
-  sender_active?: boolean;
-  content: string;
-  created_at: string;
-  status?: string;
-  sender_type?: string;
-  reactions?: import('@/lib/types').MessageReaction[];
-};
-
 function ReplyItem({
   message,
   isGrouped,
@@ -367,17 +361,23 @@ function ReplyItem({
   onAgentClick,
   onCopy,
   onSelect,
+  onFavorite,
+  onForward,
+  onBranch,
   selectionMode,
   selected,
 }: {
-  message: ThreadReplyMessage;
+  message: Message;
   isGrouped?: boolean;
   validNames?: string[];
   isHighlighted?: boolean;
   onOpenArtifactReference?: (ref: string) => void;
   onAgentClick?: (agent: AgentDetailTarget) => void;
-  onCopy?: (message: ThreadReplyMessage) => void;
-  onSelect?: (message: ThreadReplyMessage) => void;
+  onCopy?: (message: Message) => void;
+  onSelect?: (message: Message) => void;
+  onFavorite?: (message: Message) => void;
+  onForward?: (message: Message) => void;
+  onBranch?: (message: Message) => void;
   selectionMode?: boolean;
   selected?: boolean;
 }) {
@@ -423,11 +423,11 @@ function ReplyItem({
         </div>
       ) : isAgent ? (
         <PixelAvatar
-          agentId={message.sender_id || message.id}
-          avatarUrl={message.sender_avatar}
+          agentId={message.user_id || message.id}
+          avatarUrl={message.avatar_url}
           size="sm"
           onClick={onAgentClick ? () => onAgentClick?.({
-            id: message.sender_id || message.id,
+            id: message.user_id || message.id,
             name: message.display_name || t('agent'),
             is_active: message.sender_active,
           }) : undefined}
@@ -435,9 +435,9 @@ function ReplyItem({
         />
       ) : message.sender_type === 'user' ? (
         <UserAvatar
-          userId={message.sender_id || message.id}
+          userId={message.user_id || message.id}
           name={message.display_name || '?'}
-          avatarUrl={message.sender_avatar}
+          avatarUrl={message.avatar_url}
           size="sm"
           className="mt-0.5"
         />
@@ -512,26 +512,14 @@ function ReplyItem({
           isSaving={reactionState.isSaving}
           toggleReaction={reactionState.toggleReaction}
         />
-        {onCopy && <button
-          data-message-copy
-          type="button"
-          onClick={(event) => { event.stopPropagation(); onCopy(message); }}
-          className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
-          aria-label={t('copyMessage')}
-          title={t('copyMessage')}
-        >
-          <Copy className="h-3.5 w-3.5" />
-        </button>}
-        {onSelect && <button
-          data-message-select
-          type="button"
-          onClick={(event) => { event.stopPropagation(); onSelect(message); }}
-          className="btn-brutal btn-brutal-sm flex h-7 w-7 items-center justify-center p-0"
-          aria-label={t('selectMessage')}
-          title={t('selectMessage')}
-        >
-          <ListChecks className="h-3.5 w-3.5" />
-        </button>}
+        <MessageReuseMenu
+          message={message}
+          onCopy={onCopy}
+          onSelect={onSelect}
+          onFavorite={onFavorite}
+          onForward={onForward}
+          onBranch={onBranch}
+        />
       </div>
     </div>
   );
@@ -889,6 +877,10 @@ export function ThreadPanel({
   onOpenArtifactReference,
   onAgentClick,
   contextLabel = 'Solo',
+  forwardChannels = [],
+  onFavorite,
+  onForward,
+  onBranch,
 }: ThreadPanelProps) {
   const router = useRouter();
   const { showToast } = useToast();
@@ -922,6 +914,47 @@ export function ThreadPanel({
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [shareOpen, setShareOpen] = useState(false);
+  const [forwardTarget, setForwardTarget] = useState<Message | null>(null);
+  const [forwardChannelId, setForwardChannelId] = useState('');
+  const [branchTarget, setBranchTarget] = useState<Message | null>(null);
+  const [branchTitle, setBranchTitle] = useState('');
+  const [reuseBusy, setReuseBusy] = useState(false);
+
+  const openForward = useCallback((message: Message) => {
+    setForwardChannelId(forwardChannels.find((item) => item.id !== message.channel_id)?.id ?? '');
+    setForwardTarget(message);
+  }, [forwardChannels]);
+
+  const openBranch = useCallback((message: Message) => {
+    setBranchTitle(message.content.trim().split('\n')[0].slice(0, 100));
+    setBranchTarget(message);
+  }, []);
+
+  const submitForward = useCallback(async () => {
+    if (!forwardTarget || !forwardChannelId || !onForward || reuseBusy) return;
+    setReuseBusy(true);
+    try {
+      await onForward(forwardTarget, forwardChannelId);
+      setForwardTarget(null);
+    } catch {
+      // The parent shows the API error and leaves the dialog open for retry.
+    } finally {
+      setReuseBusy(false);
+    }
+  }, [forwardChannelId, forwardTarget, onForward, reuseBusy]);
+
+  const submitBranch = useCallback(async () => {
+    if (!branchTarget || !branchTitle.trim() || !onBranch || reuseBusy) return;
+    setReuseBusy(true);
+    try {
+      await onBranch(branchTarget, branchTitle.trim());
+      setBranchTarget(null);
+    } catch {
+      // The parent shows the API error and leaves the dialog open for retry.
+    } finally {
+      setReuseBusy(false);
+    }
+  }, [branchTarget, branchTitle, onBranch, reuseBusy]);
 
   const toggleSelection = useCallback((message: { id: string }) => {
     setSelectedIds((current) => {
@@ -1104,6 +1137,9 @@ export function ThreadPanel({
             onAgentClick={onAgentClick}
             onCopy={handleCopy}
             onSelect={toggleSelection}
+            onFavorite={onFavorite}
+            onForward={onForward ? openForward : undefined}
+            onBranch={onBranch ? openBranch : undefined}
             selectionMode={selectedIds.size > 0}
             selected={selectedIds.has(parentMessage.id)}
           />
@@ -1124,11 +1160,21 @@ export function ThreadPanel({
                 {messages.map((reply, index) => {
                   const previous = messages[index - 1];
                   const startsDay = !previous || messageDateKey(previous.created_at) !== messageDateKey(reply.created_at);
+                  const reuseMessage: Message = {
+                    ...reply,
+                    user_id: reply.sender_id,
+                    display_name: reply.display_name || reply.sender_name || t('user'),
+                    avatar_url: reply.sender_avatar,
+                    status: reply.status || 'sent',
+                    sender_type: reply.sender_type as Message['sender_type'],
+                    thread_id: threadId || undefined,
+                    thread_parent_id: parentMessage.id,
+                  };
                   return (
                     <Fragment key={reply.id}>
                       {startsDay && <MessageDateSeparator createdAt={reply.created_at} />}
                       <ReplyItem
-                        message={reply}
+                        message={reuseMessage}
                         isGrouped={!startsDay && canGroupMessages(previous, reply)}
                         validNames={validNames}
                         isHighlighted={highlightedMessageId === reply.id}
@@ -1136,6 +1182,9 @@ export function ThreadPanel({
                         onAgentClick={onAgentClick}
                         onCopy={handleCopy}
                         onSelect={toggleSelection}
+                        onFavorite={onFavorite}
+                        onForward={onForward ? openForward : undefined}
+                        onBranch={onBranch ? openBranch : undefined}
                         selectionMode={selectedIds.size > 0}
                         selected={selectedIds.has(reply.id)}
                       />
@@ -1169,6 +1218,37 @@ export function ThreadPanel({
         onError={handleShareError}
         onCopied={() => showToast(t('imageCopied'), 'success')}
       />
+      <Dialog open={!!forwardTarget} onOpenChange={(open) => { if (!open && !reuseBusy) setForwardTarget(null); }}>
+        <DialogHeader>
+          <DialogTitle>{t('forwardMessage')}</DialogTitle>
+          <DialogCloseButton onClick={() => setForwardTarget(null)} />
+        </DialogHeader>
+        <DialogDescription>{t('forwardMessageDescription')}</DialogDescription>
+        <label className="mt-4 block font-body text-sm font-semibold" htmlFor="thread-forward-channel">{t('forwardToChannel')}</label>
+        <select id="thread-forward-channel" value={forwardChannelId} onChange={(event) => setForwardChannelId(event.target.value)} className="input-brutal mt-2" autoFocus>
+          {forwardChannels.filter((item) => item.id !== forwardTarget?.channel_id && item.type !== 'lucy').map((item) => (
+            <option key={item.id} value={item.id}>#{item.name}</option>
+          ))}
+        </select>
+        {!forwardChannelId && <p className="mt-2 font-body text-xs text-muted-foreground">{t('noForwardChannel')}</p>}
+        <DialogFooter>
+          <Button type="button" variant="outline" size="sm" onClick={() => setForwardTarget(null)} disabled={reuseBusy}>{t('cancel')}</Button>
+          <Button type="button" size="sm" onClick={() => { void submitForward(); }} disabled={!forwardChannelId || reuseBusy}>{reuseBusy ? t('submitting') : t('forwardMessage')}</Button>
+        </DialogFooter>
+      </Dialog>
+      <Dialog open={!!branchTarget} onOpenChange={(open) => { if (!open && !reuseBusy) setBranchTarget(null); }}>
+        <DialogHeader>
+          <DialogTitle>{t('branchFromMessage')}</DialogTitle>
+          <DialogCloseButton onClick={() => setBranchTarget(null)} />
+        </DialogHeader>
+        <DialogDescription>{t('branchFromMessageDescription')}</DialogDescription>
+        <label className="mt-4 block font-body text-sm font-semibold" htmlFor="thread-branch-title">{t('branchTitle')}</label>
+        <input id="thread-branch-title" value={branchTitle} onChange={(event) => setBranchTitle(event.target.value)} maxLength={100} className="input-brutal mt-2" autoFocus />
+        <DialogFooter>
+          <Button type="button" variant="outline" size="sm" onClick={() => setBranchTarget(null)} disabled={reuseBusy}>{t('cancel')}</Button>
+          <Button type="button" size="sm" onClick={() => { void submitBranch(); }} disabled={!branchTitle.trim() || reuseBusy}>{reuseBusy ? t('submitting') : t('createBranch')}</Button>
+        </DialogFooter>
+      </Dialog>
     </div>
   );
 }

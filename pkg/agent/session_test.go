@@ -148,32 +148,6 @@ func TestSessionManagerRestartsScopedSessionWhenModelChanges(t *testing.T) {
 	}
 }
 
-func TestSessionManagerRestartsScopedSessionWhenProjectContextChanges(t *testing.T) {
-	backend := &scopedRecordingBackend{}
-	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
-	sessionKey := ChannelSessionKey("agent-1", "channel-1")
-	cfg := AgentConfig{AgentID: "agent-1", Name: "Agent", Provider: "claude", ProjectSource: "repo-a", ProjectBaseline: "main"}
-
-	first, err := mgr.GetOrCreateScopedSession(context.Background(), sessionKey, "agent-1", cfg, ChannelContext{}, []Message{{Role: RoleUser, Content: "first"}}, nil, "", nil)
-	if err != nil {
-		t.Fatalf("start first project context: %v", err)
-	}
-	<-first.Result
-
-	cfg.ProjectSource = "repo-b"
-	second, err := mgr.GetOrCreateScopedSession(context.Background(), sessionKey, "agent-1", cfg, ChannelContext{}, []Message{{Role: RoleUser, Content: "second"}}, nil, "", nil)
-	if err != nil {
-		t.Fatalf("restart with new project context: %v", err)
-	}
-	<-second.Result
-
-	backend.mu.Lock()
-	defer backend.mu.Unlock()
-	if backend.closeCount != 1 || len(backend.startOptions) != 2 || !strings.Contains(backend.startOptions[1].SystemPrompt, "Channel project source: repo-b") {
-		t.Fatalf("close/start/prompt = %d/%d/%q", backend.closeCount, len(backend.startOptions), backend.startOptions[1].SystemPrompt)
-	}
-}
-
 func TestSessionManagerClosesReturnedThinkingSession(t *testing.T) {
 	backend := &scopedRecordingBackend{}
 	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())

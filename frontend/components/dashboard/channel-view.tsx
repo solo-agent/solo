@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Users, Loader2, SquareCheckBig, Plus, Network, Maximize2, Minimize2, BrainCircuit, Sparkles, CalendarClock, Pin, Settings2, FolderOpen, X } from 'lucide-react';
+import { Users, Loader2, SquareCheckBig, Plus, Network, Maximize2, Minimize2, BrainCircuit, Sparkles, CalendarClock, Pin, Settings2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useMessages } from '@/lib/hooks/use-messages';
 import { useThinkingSpace } from '@/lib/hooks/use-thinking-space';
@@ -15,7 +15,7 @@ import { useWebSocket } from '@/lib/ws-context';
 import { useTasks } from '@/lib/hooks/use-tasks';
 import { TaskArtifactStillPendingError, useTaskArtifact } from '@/lib/hooks/use-task-artifact';
 import { getTaskArtifactAction } from '@/lib/utils/task-artifact';
-import { apiClient, ApiError } from '@/lib/api-client';
+import { apiClient } from '@/lib/api-client';
 import { displayAgentErrorReason } from '@/lib/agent-activity';
 import { MessageList } from './message-list';
 import { MessageInput } from './message-input';
@@ -41,7 +41,6 @@ import { useToast } from '@/components/ui/toast';
 import { t } from '@/lib/i18n';
 import { useWorkspace } from '@/lib/workspace-context';
 import { useAuth } from '@/lib/auth-context';
-import { useComputers } from '@/lib/hooks/use-computers';
 import type { AgentDetailTarget, AgentRelationship, Channel, Message, Task, TaskArtifact, TaskStatus, ThinkingNode } from '@/lib/types';
 
 type ArtifactPreview = TaskArtifact & { previewUrl: string };
@@ -49,26 +48,6 @@ type WorkspaceDetail = { relationship: AgentRelationship | null; agent: AgentDet
 type ModerationStatus = { posting_policy: 'everyone' | 'admins_only'; role: 'owner' | 'admin' | 'member'; muted: boolean; can_manage: boolean; can_post: boolean };
 type MutedMember = { user_id: string; display_name: string; workspace_role: 'owner' | 'admin' | 'member' };
 type PinnedMessage = { message_id: string; content: string; sender_name: string; pinned_at: string };
-type ChannelProjectMapping = {
-  user_id: string;
-  user_name: string;
-  computer_id?: string;
-  computer_name?: string;
-  local_path?: string;
-  version?: string;
-  access_mode?: 'read_only' | 'read_write';
-  computer_status?: string;
-  available: boolean;
-  reason?: 'missing' | 'computer_offline' | 'read_only' | 'version_mismatch';
-};
-type ChannelProject = {
-  channel_id: string;
-  name: string;
-  source?: string;
-  baseline_version?: string;
-  can_manage: boolean;
-  mappings: ChannelProjectMapping[];
-};
 const TEAM_TASK_VISIBLE_STATUSES = new Set<TaskStatus>(['in_progress', 'in_review']);
 const MIN_SPLIT_PANE_WIDTH = 320;
 const SPLIT_KEYBOARD_STEP = 2;
@@ -76,12 +55,6 @@ const SPLIT_KEYBOARD_STEP = 2;
 function clampSplitPercent(percent: number, containerWidth: number) {
   const minPercent = Math.min(50, (MIN_SPLIT_PANE_WIDTH / containerWidth) * 100);
   return Math.max(minPercent, Math.min(100 - minPercent, percent));
-}
-
-function projectErrorMessage(error: unknown) {
-  return error instanceof ApiError && error.code === 'CHANNEL_PROJECT_BUSY'
-    ? t('channelProjectBusy')
-    : error instanceof Error ? error.message : t('channelProjectSaveError');
 }
 
 // SOLO-63-F: Lazy-load ThreadPanel (only rendered when a thread is open)
@@ -247,7 +220,6 @@ export function ChannelView({
   }, [channel.id, pushDashboardState, showToast]);
   const { activeWorkspace } = useWorkspace();
   const { user } = useAuth();
-  const { computers } = useComputers();
   const quickStartDismissKey = `solo:lucy-quick-start-dismissed:${channel.id}`;
 
   useEffect(() => {
@@ -263,100 +235,6 @@ export function ChannelView({
   const [mutedMembers, setMutedMembers] = useState<MutedMember[]>([]);
   const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>([]);
   const [moderationOpen, setModerationOpen] = useState(false);
-  const [projectOpen, setProjectOpen] = useState(false);
-  const [project, setProject] = useState<ChannelProject | null>(null);
-  const [projectComputerId, setProjectComputerId] = useState('');
-  const [projectPath, setProjectPath] = useState('');
-  const [projectVersion, setProjectVersion] = useState('');
-  const [projectAccessMode, setProjectAccessMode] = useState<'read_only' | 'read_write'>('read_write');
-  const [projectSource, setProjectSource] = useState('');
-  const [projectBaseline, setProjectBaseline] = useState('');
-  const [projectBusy, setProjectBusy] = useState(false);
-
-  const loadProject = useCallback(async () => {
-    if (channel.type !== 'channel') return;
-    try {
-      const next = await apiClient.get<ChannelProject>(`/api/v1/channels/${channel.id}/project`);
-      setProject(next);
-      setProjectSource(next.source ?? '');
-      setProjectBaseline(next.baseline_version ?? '');
-      const own = next.mappings.find((mapping) => mapping.user_id === user?.id && mapping.computer_id === projectComputerId)
-        ?? next.mappings.find((mapping) => mapping.user_id === user?.id && mapping.computer_id);
-      const computerID = own?.computer_id ?? computers.find((computer) => computer.status === 'online')?.id ?? computers[0]?.id ?? '';
-      setProjectComputerId(computerID);
-      setProjectPath(own?.local_path ?? '');
-      setProjectVersion(own?.version ?? next.baseline_version ?? '');
-      setProjectAccessMode(own?.access_mode ?? 'read_write');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : t('channelProjectLoadError'), 'error');
-    }
-  }, [channel.id, channel.type, computers, projectComputerId, showToast, user?.id]);
-
-  useEffect(() => {
-    setProject(null);
-    setProjectComputerId('');
-    setProjectPath('');
-  }, [channel.id]);
-
-  const selectProjectComputer = (computerID: string) => {
-    const own = project?.mappings.find((mapping) => mapping.user_id === user?.id && mapping.computer_id === computerID);
-    setProjectComputerId(computerID);
-    setProjectPath(own?.local_path ?? '');
-    setProjectVersion(own?.version ?? project?.baseline_version ?? '');
-    setProjectAccessMode(own?.access_mode ?? 'read_write');
-  };
-
-  const saveProjectMapping = useCallback(async () => {
-    if (!projectComputerId || !projectPath.trim()) return;
-    setProjectBusy(true);
-    try {
-      const next = await apiClient.put<ChannelProject>(`/api/v1/channels/${channel.id}/project/mappings/${projectComputerId}`, {
-        local_path: projectPath.trim(),
-        version: projectVersion.trim(),
-        access_mode: projectAccessMode,
-      });
-      setProject(next);
-      showToast(t('channelProjectSaved'), 'success');
-    } catch (error) {
-      showToast(projectErrorMessage(error), 'error');
-    } finally {
-      setProjectBusy(false);
-    }
-  }, [channel.id, projectAccessMode, projectComputerId, projectPath, projectVersion, showToast]);
-
-  const removeProjectMapping = useCallback(async () => {
-    if (!projectComputerId) return;
-    setProjectBusy(true);
-    try {
-      const next = await apiClient.delete<ChannelProject>(`/api/v1/channels/${channel.id}/project/mappings/${projectComputerId}`);
-      setProject(next);
-      setProjectPath('');
-      setProjectVersion(next.baseline_version ?? '');
-      setProjectAccessMode('read_write');
-      showToast(t('channelProjectCleared'), 'success');
-    } catch (error) {
-      showToast(projectErrorMessage(error), 'error');
-    } finally {
-      setProjectBusy(false);
-    }
-  }, [channel.id, projectComputerId, showToast]);
-
-  const saveProjectDetails = useCallback(async () => {
-    setProjectBusy(true);
-    try {
-      const next = await apiClient.patch<ChannelProject>(`/api/v1/channels/${channel.id}/project`, {
-        source: projectSource.trim(),
-        baseline_version: projectBaseline.trim(),
-      });
-      setProject(next);
-      showToast(t('channelProjectDetailsSaved'), 'success');
-    } catch (error) {
-      showToast(projectErrorMessage(error), 'error');
-    } finally {
-      setProjectBusy(false);
-    }
-  }, [channel.id, projectBaseline, projectSource, showToast]);
-
   const loadModeration = useCallback(async () => {
     if (channel.type !== 'channel') return;
     try {
@@ -1175,6 +1053,10 @@ export function ChannelView({
               onOpenArtifactReference={handleOpenArtifactReference}
               onAgentClick={openAgentDetail}
               contextLabel={`#${channel.name}`}
+              forwardChannels={channels}
+              onFavorite={favoriteMessage}
+              onForward={forwardMessage}
+              onBranch={branchFromMessage}
             />
           </Suspense>
         ) : (mainPanel === 'agent' || mainPanel === 'relationship') && workspaceDetail ? (
@@ -1213,18 +1095,6 @@ export function ChannelView({
                   <span className="truncate rounded-md border border-border bg-brutal-primary-light px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase text-muted-foreground">{selectedThinkingNode.agent_name}</span>
                 )}
               </div>
-              {!isThinking && channel.type === 'channel' && (
-                <button
-                  type="button"
-                  className="btn-brutal btn-brutal-sm mr-2 flex h-8 items-center gap-1.5 px-2"
-                  onClick={() => { setProjectOpen(true); void loadProject(); }}
-                  aria-label={t('channelProject')}
-                  title={t('channelProject')}
-                >
-                  <FolderOpen className="h-4 w-4" />
-                  <span className="hidden sm:inline">{t('channelProject')}</span>
-                </button>
-              )}
               {moderation?.can_manage && !isThinking && (
                 <button type="button" className="btn-brutal btn-brutal-sm flex h-8 w-8 items-center justify-center p-0" onClick={() => setModerationOpen(true)} aria-label={t('channelModeration')} title={t('channelModeration')}>
                   <Settings2 className="h-4 w-4" />
@@ -1656,118 +1526,6 @@ export function ChannelView({
             mutedUserIds={new Set(mutedMembers.map((member) => member.user_id))}
             onToggleMute={toggleMute}
           />
-        </div>
-      </Dialog>
-
-      <Dialog open={projectOpen} onOpenChange={setProjectOpen}>
-        <DialogHeader>
-          <DialogTitle>{t('channelProject')} · {channel.name}</DialogTitle>
-          <DialogCloseButton onClick={() => setProjectOpen(false)} />
-        </DialogHeader>
-        <div className="max-h-[70vh] space-y-4 overflow-y-auto p-1">
-          <p className="font-body text-sm text-muted-foreground">{t('channelProjectDesc')}</p>
-
-          {project?.can_manage && (
-            <section className="space-y-2 rounded-lg border border-border bg-brutal-primary-light p-3">
-              <div className="font-heading text-sm font-bold">{t('channelProjectIdentity')}</div>
-              <label className="block font-heading text-xs font-bold" htmlFor="channel-project-source">{t('channelProjectSource')}</label>
-              <input
-                id="channel-project-source"
-                className="w-full rounded-md border border-border bg-white p-2 font-body text-sm"
-                value={projectSource}
-                onChange={(event) => setProjectSource(event.target.value)}
-                placeholder={t('channelProjectSourcePlaceholder')}
-                maxLength={2000}
-              />
-              <label className="block font-heading text-xs font-bold" htmlFor="channel-project-baseline">{t('channelProjectBaseline')}</label>
-              <input
-                id="channel-project-baseline"
-                className="w-full rounded-md border border-border bg-white p-2 font-mono text-sm"
-                value={projectBaseline}
-                onChange={(event) => setProjectBaseline(event.target.value)}
-                placeholder={t('channelProjectBaselinePlaceholder')}
-                maxLength={200}
-              />
-              <div className="flex justify-end">
-                <Button type="button" variant="outline" size="sm" disabled={projectBusy} onClick={() => void saveProjectDetails()}>
-                  {projectBusy ? t('saving') : t('channelProjectSaveDetails')}
-                </Button>
-              </div>
-            </section>
-          )}
-
-          <section>
-            <div className="mb-2 font-heading text-sm font-bold">{t('channelProjectTeamStatus')}</div>
-            <div className="space-y-2">
-              {(project?.mappings ?? []).map((mapping, index) => (
-                <div key={`${mapping.user_id}-${mapping.computer_id ?? index}`} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-white px-3 py-2">
-                  <div className="min-w-0">
-                    <div className="truncate font-heading text-sm font-bold">{mapping.user_name}</div>
-                    <div className="truncate font-body text-xs text-muted-foreground">
-                      {mapping.computer_name || t('channelProjectNoComputer')}
-                      {mapping.version ? ` · ${mapping.version}` : ''}
-                      {mapping.local_path ? ` · ${mapping.local_path}` : ''}
-                    </div>
-                  </div>
-                  <span className={cn('shrink-0 rounded-full border px-2 py-0.5 font-heading text-[10px] font-bold', mapping.available ? 'border-brutal-success/40 bg-brutal-success-light' : 'border-border bg-brutal-muted-light text-muted-foreground')}>
-                    {mapping.available ? t('channelProjectReady')
-                      : mapping.reason === 'computer_offline' ? t('channelProjectComputerOffline')
-                        : mapping.reason === 'read_only' ? t('channelProjectReadOnly')
-                          : mapping.reason === 'version_mismatch' ? t('channelProjectVersionMismatch')
-                            : t('channelProjectNotConfigured')}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="space-y-2 border-t border-border pt-4">
-            <div className="font-heading text-sm font-bold">{t('channelProjectMyFolder')}</div>
-            <p className="font-body text-xs text-muted-foreground">{t('channelProjectPrivacy')}</p>
-            <label className="block font-heading text-xs font-bold" htmlFor="channel-project-computer">{t('channelProjectComputer')}</label>
-            <select
-              id="channel-project-computer"
-              className="w-full rounded-md border border-border bg-white p-2 font-body text-sm"
-              value={projectComputerId}
-              onChange={(event) => selectProjectComputer(event.target.value)}
-            >
-              <option value="">{t('channelProjectChooseComputer')}</option>
-              {computers.map((computer) => (
-                <option key={computer.id} value={computer.id}>{computer.status === 'online' ? '●' : '○'} {computer.name}</option>
-              ))}
-            </select>
-            <label className="block font-heading text-xs font-bold" htmlFor="channel-project-path">{t('channelProjectPath')}</label>
-            <input
-              id="channel-project-path"
-              className="w-full rounded-md border border-border bg-white p-2 font-mono text-sm"
-              value={projectPath}
-              onChange={(event) => setProjectPath(event.target.value)}
-              placeholder={t('channelProjectPathPlaceholder')}
-              maxLength={2048}
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="mb-1 block font-heading text-xs font-bold" htmlFor="channel-project-version">{t('channelProjectVersion')}</label>
-                <input id="channel-project-version" className="w-full rounded-md border border-border bg-white p-2 font-mono text-sm" value={projectVersion} onChange={(event) => setProjectVersion(event.target.value)} placeholder={project?.baseline_version || t('channelProjectVersionPlaceholder')} maxLength={200} />
-              </div>
-              <div>
-                <label className="mb-1 block font-heading text-xs font-bold" htmlFor="channel-project-access">{t('channelProjectAccess')}</label>
-                <select id="channel-project-access" className="w-full rounded-md border border-border bg-white p-2 font-body text-sm" value={projectAccessMode} onChange={(event) => setProjectAccessMode(event.target.value as 'read_only' | 'read_write')}>
-                  <option value="read_write">{t('channelProjectReadWrite')}</option>
-                  <option value="read_only">{t('channelProjectReadOnly')}</option>
-                </select>
-              </div>
-            </div>
-            <p className="font-body text-[11px] text-muted-foreground">{t('channelProjectPathHint')}</p>
-            <div className="flex justify-end gap-2 pt-1">
-              {project?.mappings.some((mapping) => mapping.user_id === user?.id && mapping.computer_id === projectComputerId) && (
-                <Button type="button" variant="outline" size="sm" disabled={projectBusy} onClick={() => void removeProjectMapping()}>{t('channelProjectClear')}</Button>
-              )}
-              <Button type="button" variant="primary" size="sm" disabled={projectBusy || !projectComputerId || !projectPath.trim()} onClick={() => void saveProjectMapping()}>
-                {projectBusy ? t('saving') : t('channelProjectSave')}
-              </Button>
-            </div>
-          </section>
         </div>
       </Dialog>
 

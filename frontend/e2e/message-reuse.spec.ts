@@ -24,7 +24,7 @@ function psql(sql: string) {
   ], { encoding: 'utf8' }).trim();
 }
 
-test('saves, forwards, and branches a real channel message', async ({ page, request }) => {
+test('keeps Agent DMs, channel messages, and thread replies consistent', async ({ page, request }) => {
   const auth = await authenticate(request);
   psql(`UPDATE users SET onboarding_completed_at=now() WHERE email='${credentials.email}'`);
   const headers = { authorization: `Bearer ${auth.access_token}` };
@@ -43,6 +43,12 @@ test('saves, forwards, and branches a real channel message', async ({ page, requ
   const target = await targetResponse.json() as Entity;
   const content = `REUSE_MESSAGE_${suffix}`;
   const branchTitle = `复用分支 ${suffix}`;
+  const agentName = `reuse-agent-${suffix}`;
+  const userID = psql(`SELECT id FROM users WHERE email='${credentials.email}'`);
+  const agentID = psql('SELECT gen_random_uuid()');
+  psql(`INSERT INTO agents (id, name, owner_id, model_name, home_channel_id) VALUES ('${agentID}', '${agentName}', '${userID}', 'e2e', '${source.id}')`);
+  psql(`INSERT INTO channel_members (channel_id, member_type, member_id, role) VALUES ('${source.id}', 'agent', '${agentID}', 'member')`);
+  let dmID = '';
 
   try {
     const messageResponse = await request.post(`${apiBase}/api/v1/channels/${source.id}/messages`, {
@@ -58,6 +64,36 @@ test('saves, forwards, and branches a real channel message', async ({ page, requ
       localStorage.setItem('solo.locale', 'zh-CN');
       localStorage.setItem('solo.message-shortcuts-seen', '1');
     }, { accessToken: auth.access_token, refreshToken: auth.refresh_token });
+    await page.goto(`/dashboard?channel=${source.id}`);
+
+    await page.getByRole('button', { name: agentName, exact: true }).click();
+    await expect(page).toHaveURL(/\?dm=[0-9a-f-]+/);
+    await expect(page.getByRole('button', { name: agentName, exact: true })).toHaveAttribute('aria-current', 'true');
+    dmID = new URL(page.url()).searchParams.get('dm') ?? '';
+    expect(dmID).toBeTruthy();
+    expect(psql(`SELECT count(*) FROM dm_members WHERE channel_id='${dmID}'`)).toBe('2');
+
+    const dmContent = `REUSE_DM_${suffix}`;
+    const dmMessageID = psql('SELECT gen_random_uuid()');
+    psql(`INSERT INTO messages (id, channel_id, sender_type, sender_id, content) VALUES ('${dmMessageID}', '${dmID}', 'user', '${userID}', '${dmContent}')`);
+    await page.goto(`/dashboard?dm=${dmID}`);
+    const dmMessage = page.locator(`[data-message-id="${dmMessageID}"]`);
+    await expect(dmMessage).toContainText(dmContent);
+    await dmMessage.hover();
+    await dmMessage.getByLabel('更多消息操作').click();
+    await page.getByRole('menu').getByRole('menuitem', { name: '收藏消息' }).click();
+    await expect(page.getByText('消息已收藏')).toBeVisible();
+    expect(psql(`SELECT count(*) FROM message_favorites WHERE message_id='${dmMessageID}'`)).toBe('1');
+
+    await dmMessage.hover();
+    await dmMessage.getByLabel('更多消息操作').click();
+    await page.getByRole('menu').getByRole('menuitem', { name: '转发消息' }).click();
+    await page.getByLabel('转发到频道').selectOption(target.id);
+    await page.getByRole('button', { name: '转发消息', exact: true }).last().click();
+    await expect(page.getByText('消息已转发')).toBeVisible();
+    expect(psql(`SELECT concat_ws(':', metadata->>'forwarded_message_id', metadata->>'forwarded_channel_type') FROM messages WHERE channel_id='${target.id}' AND content='${dmContent}'`))
+      .toBe(`${dmMessageID}:dm`);
+
     await page.goto(`/dashboard?channel=${source.id}`);
 
     const sourceMessage = page.locator(`[data-message-id="${message.id}"]`);
@@ -79,7 +115,7 @@ test('saves, forwards, and branches a real channel message', async ({ page, requ
     await page.getByRole('link', { name: '收藏消息' }).click();
     await expect(page).toHaveURL('/favorites');
     await expect(page.getByText(content)).toBeVisible();
-    await page.getByRole('button', { name: '打开原消息' }).click();
+    await page.locator('article').filter({ hasText: content }).getByRole('button', { name: '打开原消息' }).click();
     await expect(page).toHaveURL(new RegExp(`channel=${source.id}.*message=${message.id}`));
 
     await sourceMessage.hover();
@@ -111,7 +147,49 @@ test('saves, forwards, and branches a real channel message', async ({ page, requ
     await page.getByRole('link', { name: '来源消息' }).click();
     await expect(page).toHaveURL(new RegExp(`channel=${source.id}.*message=${message.id}`));
     await expect(page.locator(`[data-message-id="${message.id}"]`).getByRole('link', { name: '1 个分支' })).toBeVisible();
+
+    const threadRootResponse = await request.post(`${apiBase}/api/v1/channels/${source.id}/messages`, {
+      headers,
+      data: { content: `THREAD_ROOT_${suffix}` },
+    });
+    expect(threadRootResponse.ok()).toBe(true);
+    const threadRoot = await threadRootResponse.json() as Entity;
+    const threadContent = `THREAD_REPLY_${suffix}`;
+    const threadReplyResponse = await request.post(`${apiBase}/api/v1/channels/${source.id}/messages/${threadRoot.id}/thread`, {
+      headers,
+      data: { content: threadContent },
+    });
+    expect(threadReplyResponse.ok()).toBe(true);
+    const threadReply = await threadReplyResponse.json() as Entity;
+
+    await page.goto(`/dashboard?channel=${source.id}&panel=thread&thread=${threadRoot.id}`);
+    const replyMessage = page.locator(`[data-message-id="${threadReply.id}"]`);
+    await expect(replyMessage).toContainText(threadContent);
+    await replyMessage.hover();
+    await replyMessage.getByLabel('更多消息操作').click();
+    await page.getByRole('menu').getByRole('menuitem', { name: '收藏消息' }).click();
+    await expect(page.getByText('消息已收藏')).toBeVisible();
+    expect(psql(`SELECT count(*) FROM message_favorites WHERE message_id='${threadReply.id}'`)).toBe('1');
+
+    await replyMessage.hover();
+    await replyMessage.getByLabel('更多消息操作').click();
+    await page.getByRole('menu').getByRole('menuitem', { name: '转发消息' }).click();
+    await page.getByLabel('转发到频道').selectOption(target.id);
+    await page.getByRole('button', { name: '转发消息', exact: true }).last().click();
+    await expect(page.getByText('消息已转发')).toBeVisible();
+    expect(psql(`SELECT concat_ws(':', metadata->>'forwarded_message_id', metadata->>'forwarded_thread_root_message_id') FROM messages WHERE channel_id='${target.id}' AND content='${threadContent}'`))
+      .toBe(`${threadReply.id}:${threadRoot.id}`);
+
+    await replyMessage.hover();
+    await replyMessage.getByLabel('更多消息操作').click();
+    await page.getByRole('menu').getByRole('menuitem', { name: '从消息创建分支' }).click();
+    await page.getByLabel('分支标题').fill(`讨论串分支 ${suffix}`);
+    await page.getByRole('button', { name: '创建分支', exact: true }).last().click();
+    await expect(page.getByText('分支已创建')).toBeVisible();
+    expect(psql(`SELECT count(*) FROM thinking_nodes WHERE source_message_id='${threadReply.id}'`)).toBe('1');
   } finally {
+    if (dmID) psql(`DELETE FROM channels WHERE id='${dmID}'`);
+    psql(`DELETE FROM agents WHERE id='${agentID}'`);
     await request.delete(`${apiBase}/api/v1/channels/${target.id}`, { headers });
     await request.delete(`${apiBase}/api/v1/channels/${source.id}`, { headers });
   }

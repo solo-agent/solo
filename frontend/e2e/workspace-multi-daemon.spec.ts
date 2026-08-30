@@ -31,10 +31,6 @@ interface Computer { id: string; name: string; status: string; enrollment_token?
 interface Runtime { type: string; available: boolean }
 interface Agent { id: string; name: string; owner_id: string; home_channel_id: string; system_prompt: string; computer_id?: string }
 interface ChannelMember { member_id: string; agent_owner_id?: string; agent_home_channel_id?: string }
-interface ChannelProject {
-  baseline_version: string;
-  mappings: Array<{ user_id: string; computer_id?: string; local_path?: string; available: boolean }>;
-}
 interface GuestToken { id: string; token: string; url: string; expires_at: string }
 interface GuestInfo { workspace_id: string; channels: Channel[] }
 interface LucyResponse { agent_id: string; channel_id: string }
@@ -247,10 +243,6 @@ test.describe('Workspace and multi-Daemon product flow', () => {
     const profileB = `e2e-b-${suffix}`;
     const markerA = `PROFILE_A_${suffix.toUpperCase()}`;
     const markerB = `PROFILE_B_${suffix.toUpperCase()}`;
-    const projectMarkerA = `PROJECT_A_${suffix.toUpperCase()}`;
-    const projectMarkerB = `PROJECT_B_${suffix.toUpperCase()}`;
-    const projectDirA = mkdtempSync(join(tmpdir(), 'solo-project-a-'));
-    const projectDirB = mkdtempSync(join(tmpdir(), 'solo-project-b-'));
     let alpha: Workspace | undefined;
     let beta: Workspace | undefined;
     let alphaProject: Channel | undefined;
@@ -383,34 +375,13 @@ test.describe('Workspace and multi-Daemon product flow', () => {
       expect(daemon(profileB, ['status'])).toContain(computerB.id);
 
       const runtimeB = await availableRuntime(request, userB, alpha!.id, computerB.id);
-      await call<ChannelProject>(request, userA, 'patch', `/api/v1/channels/${alphaGeneral!.id}/project`, alpha!.id, {
-        source: 'https://example.invalid/shared-project.git',
-        baseline_version: 'main',
-      });
-      await call<ChannelProject>(request, userA, 'put', `/api/v1/channels/${alphaGeneral!.id}/project/mappings/${computerA.id}`, alpha!.id, {
-        local_path: projectDirA,
-        version: 'main',
-        access_mode: 'read_write',
-      });
-      await call<ChannelProject>(request, userB, 'put', `/api/v1/channels/${alphaGeneral!.id}/project/mappings/${computerB.id}`, alpha!.id, {
-        local_path: projectDirB,
-        version: 'main',
-        access_mode: 'read_write',
-      });
-      const projectAsA = await call<ChannelProject>(request, userA, 'get', `/api/v1/channels/${alphaGeneral!.id}/project`, alpha!.id);
-      const projectAsB = await call<ChannelProject>(request, userB, 'get', `/api/v1/channels/${alphaGeneral!.id}/project`, alpha!.id);
-      expect(projectAsA.baseline_version).toBe('main');
-      expect(projectAsA.mappings.find((mapping) => mapping.user_id === userA.user.id)).toMatchObject({ computer_id: computerA.id, local_path: projectDirA, available: true });
-      expect(projectAsA.mappings.find((mapping) => mapping.user_id === userB.user.id)?.local_path).toBeUndefined();
-      expect(projectAsB.mappings.find((mapping) => mapping.user_id === userB.user.id)).toMatchObject({ computer_id: computerB.id, local_path: projectDirB, available: true });
-      expect(projectAsB.mappings.find((mapping) => mapping.user_id === userA.user.id)?.local_path).toBeUndefined();
 
       agentA = await call<Agent>(request, userA, 'post', `/api/v1/channels/${alphaGeneral!.id}/agents`, alpha!.id, {
         name: `ProfileA${suffix}`,
         computer_id: computerA.id,
         model_provider: runtimeA.type,
         model_name: runtimeA.type === 'claude' ? 'sonnet' : '',
-        system_prompt: `When you introduce yourself, use solo message send exactly once with ${markerA}. When a message contains PROJECT_MAPPING_PROOF, create agent-a-proof.txt with exactly ${projectMarkerA}, then send a visible reply containing ${projectMarkerA}.`,
+        system_prompt: `When you introduce yourself, use solo message send exactly once with ${markerA}.`,
       });
       await expect.poll(() => databaseJSON<{ completed: number; messages: number }>(`
         SELECT json_build_object(
@@ -424,7 +395,7 @@ test.describe('Workspace and multi-Daemon product flow', () => {
         computer_id: computerB.id,
         model_provider: runtimeB.type,
         model_name: runtimeB.type === 'claude' ? 'sonnet' : '',
-        system_prompt: `When you introduce yourself, use solo message send exactly once with ${markerB}. When a message contains PROJECT_MAPPING_PROOF, create agent-b-proof.txt with exactly ${projectMarkerB}, then send a visible reply containing ${projectMarkerB}.`,
+        system_prompt: `When you introduce yourself, use solo message send exactly once with ${markerB}.`,
       });
 
       const directoryAsA = await call<Agent[]>(request, userA, 'get', '/api/v1/agents', alpha!.id);
@@ -480,25 +451,10 @@ test.describe('Workspace and multi-Daemon product flow', () => {
       await expect(connectOwnAgent.getByText(agentB.name, { exact: true })).toHaveCount(0);
       await page.keyboard.press('Escape');
 
-      const projectTrigger = await call<{ id: string }>(request, userA, 'post', `/api/v1/channels/${alphaGeneral!.id}/messages`, alpha!.id, {
-        content: 'PROJECT_MAPPING_PROOF',
-      });
-      await expect.poll(() => databaseJSON<{ completed: number; mapped: number }>(`
-        SELECT json_build_object(
-          'completed', count(*) FILTER (WHERE status='completed'),
-          'mapped', count(*) FILTER (WHERE
-            (agent_id='${agentA.id}' AND project_computer_id='${computerA.id}' AND project_path='${projectDirA}' AND project_version='main') OR
-            (agent_id='${agentB.id}' AND project_computer_id='${computerB.id}' AND project_path='${projectDirB}' AND project_version='main')
-          )
-        )::text
-        FROM agent_runs
-        WHERE agent_id IN ('${agentA.id}','${agentB.id}') AND trigger_message_id='${projectTrigger.id}'
-      `), { timeout: 240000, intervals: [1000, 2000, 5000] }).toEqual({ completed: 2, mapped: 2 });
-      await expect.poll(() => existsSync(join(projectDirA, 'agent-a-proof.txt')) && existsSync(join(projectDirB, 'agent-b-proof.txt')), {
-        timeout: 15000,
-      }).toBe(true);
-      expect(readFileSync(join(projectDirA, 'agent-a-proof.txt'), 'utf8').trim()).toBe(projectMarkerA);
-      expect(readFileSync(join(projectDirB, 'agent-b-proof.txt'), 'utf8').trim()).toBe(projectMarkerB);
+      const daemonLogA = readFileSync(join(daemonProfileDir(profileA), 'daemon.log'), 'utf8');
+      const daemonLogB = readFileSync(join(daemonProfileDir(profileB), 'daemon.log'), 'utf8');
+      expect(daemonLogA).toContain(`\"cwd\":\"${join(homedir(), '.solo', 'agents', agentA.id, 'workspace')}\"`);
+      expect(daemonLogB).toContain(`\"cwd\":\"${join(homedir(), '.solo', 'agents', agentB.id, 'workspace')}\"`);
 
       const agentMessages = await call<MessageList>(request, userA, 'get', `/api/v1/channels/${alphaGeneral.id}/messages?limit=100`, alpha.id);
       const agentAContent = agentMessages.messages.find((message) => message.sender_id === agentA!.id)?.content;
@@ -594,8 +550,6 @@ test.describe('Workspace and multi-Daemon product flow', () => {
         try { daemon(profile, ['stop']); } catch { /* test assertion reports the primary failure */ }
         rmSync(directory, { recursive: true, force: true });
       }
-      rmSync(projectDirA, { recursive: true, force: true });
-      rmSync(projectDirB, { recursive: true, force: true });
       finishTestRuns(userA, userB, outsider);
       if (alpha) await call(request, userA, 'delete', `/api/v1/workspaces/${alpha.id}`).catch(() => undefined);
       deactivateTestUsers(userA, userB, outsider);

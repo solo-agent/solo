@@ -377,7 +377,7 @@ func (s *ThinkingService) CreateFromMessage(ctx context.Context, channelID, mess
 		  LEFT JOIN users u ON m.sender_type = 'user' AND u.id = m.sender_id
 		  LEFT JOIN agents a ON m.sender_type = 'agent' AND a.id = m.sender_id
 		 WHERE m.id = $1 AND m.channel_id = $2
-		   AND m.thread_id IS NULL AND m.thinking_node_id IS NULL
+		   AND m.thinking_node_id IS NULL
 		   AND COALESCE(m.is_deleted, false) = false`, messageID, channelID,
 	).Scan(&senderName, &content, &createdAt)
 	if errors.Is(err, pgx.ErrNoRows) {

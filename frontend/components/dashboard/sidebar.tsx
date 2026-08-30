@@ -5,7 +5,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { ChevronDown, Plus, Sparkles } from 'lucide-react';
 import { ChannelList } from './channel-list';
@@ -19,6 +19,8 @@ import type { Channel, DMChannel } from '@/lib/types';
 import { WorkspaceSwitcher } from '@/components/workspaces/workspace-switcher';
 import { WorkspacePeople } from '@/components/workspaces/workspace-people';
 import { useInboxUnread } from '@/lib/hooks/use-inbox-unread';
+import { useChannelMembers } from '@/lib/hooks/use-channel-members';
+import { PixelAvatar } from '@/components/ui/pixel-avatar';
 
 interface SidebarProps {
   channels: Channel[];
@@ -28,12 +30,9 @@ interface SidebarProps {
   onSelectChannel: (channelId: string) => void;
   onCreateChannel: () => void;
   onDeleteChannel: (channelId: string) => void;
-  /** DM props */
   dms: DMChannel[];
-  dmsLoading: boolean;
   selectedDmId: string | null;
-  onSelectDM: (dmId: string) => void;
-  onCreateDM?: () => void;
+  onStartAgentDM?: (agentId: string) => void | Promise<void>;
   /** Inbox props */
   inboxSelected: boolean;
   onSelectInbox: () => void;
@@ -49,6 +48,9 @@ export function Sidebar({
   onSelectChannel,
   onCreateChannel,
   onDeleteChannel,
+  dms,
+  selectedDmId,
+  onStartAgentDM,
   inboxSelected,
   onSelectInbox,
   isCollapsed = false,
@@ -57,6 +59,12 @@ export function Sidebar({
   const pathname = usePathname();
   const { unreadCount, isLoading: unreadLoading } = useInboxUnread();
   const [channelsExpanded, setChannelsExpanded] = useState(true);
+  const [agentsExpanded, setAgentsExpanded] = useState(true);
+  const [agentChannelId, setAgentChannelId] = useState(selectedChannelId);
+  useEffect(() => {
+    if (selectedChannelId) setAgentChannelId(selectedChannelId);
+  }, [selectedChannelId]);
+  const { agents } = useChannelMembers(agentChannelId);
 
   if (isCollapsed) {
     return (
@@ -196,6 +204,49 @@ export function Sidebar({
           </div>
         )}
         <WorkspacePeople />
+        {agentChannelId && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setAgentsExpanded((value) => !value)}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left"
+              aria-expanded={agentsExpanded}
+              aria-label={t('expandOrCollapseAgents')}
+            >
+              <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', !agentsExpanded && '-rotate-90')} />
+              <span className="min-w-0 flex-1 font-heading text-xs font-black uppercase tracking-wider text-black/70">
+                {t('observabilityAgents')}
+              </span>
+              <span className="font-mono text-xs font-bold tabular-nums text-black/45">{agents.length}</span>
+            </button>
+            {agentsExpanded && (
+              <div className="space-y-0.5 pb-1">
+                {agents.length === 0 ? (
+                  <p className="px-8 py-2 font-body text-xs text-black/45">{t('noAgentsHint')}</p>
+                ) : agents.map((agent) => {
+                  const dm = dms.find((item) => item.other_agent?.id === agent.member_id);
+                  const isSelected = dm?.id === selectedDmId;
+                  return (
+                    <button
+                      key={agent.member_id}
+                      type="button"
+                      onClick={() => { void onStartAgentDM?.(agent.member_id); }}
+                      className={selectableRowClass(isSelected, 'w-full text-left hover:bg-white/50')}
+                      aria-label={agent.display_name}
+                      aria-current={isSelected ? 'true' : undefined}
+                    >
+                      <PixelAvatar agentId={agent.member_id} avatarUrl={agent.avatar_url} size="sm" />
+                      <span className="min-w-0 flex-1 truncate font-body text-sm">{agent.display_name}</span>
+                      {!!dm?.unread_count && (
+                        <span className="font-mono text-xs font-bold tabular-nums text-black/55">{dm.unread_count}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </aside>
   );

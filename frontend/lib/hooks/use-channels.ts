@@ -20,8 +20,6 @@ interface ChannelResponse {
   created_by: string;
   is_archived: boolean;
   source_template_id?: string;
-  project_computer_id?: string;
-  project_path?: string;
   created_at: string;
   updated_at: string;
 }
@@ -35,8 +33,6 @@ function mapChannel(resp: ChannelResponse): Channel {
     description: resp.description || '',
     type: resp.type as Channel['type'],
     source_template_id: resp.source_template_id,
-    project_computer_id: resp.project_computer_id,
-    project_path: resp.project_path,
     member_count: 0, // Backend channel list doesn't include member_count
     created_at: resp.created_at,
     created_by: resp.created_by,

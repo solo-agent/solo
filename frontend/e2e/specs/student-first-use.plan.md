@@ -2,7 +2,7 @@
 
 ## Application Overview
 
-Solo should let a first-time non-programmer understand the product, register, reach a useful personal conversation, and see a small recommended starting point before any local runtime setup. Returning users must keep their own Workspace and seven-day login, while project Channels can intentionally run a real local Agent inside one selected folder.
+Solo should let a first-time non-programmer understand the product, register, reach a useful personal conversation, and see a small recommended starting point before any local runtime setup. Returning users must keep their own Workspace and seven-day login.
 
 ## Test Scenarios
 
@@ -42,23 +42,3 @@ Solo should let a first-time non-programmer understand the product, register, re
   2. Simulate a browser that previously remembered the public Workspace, then log in as the test account.
     - expect: Solo selects that user’s personal Workspace.
     - expect: The dashboard opens Lucy instead of a blank or unrelated public Channel.
-
-### 3. A real project Channel
-
-**Seed:** `e2e/student-first-use-seed.spec.ts`
-
-#### 3.1. chinese-channel-binds-real-project-folder
-
-**File:** `e2e/student-first-use-project.spec.ts`
-
-**Steps:**
-  1. Create a Channel named “课程小项目”.
-    - expect: The Chinese name is accepted and persisted.
-  2. Open “Add Agent” at a 1366×768 viewport.
-    - expect: The dialog stays inside the viewport and its primary action remains reachable.
-    - expect: System prompt is directly available; environment variables and CLI arguments are collapsed by default.
-  3. Open Channel management and bind an existing folder on an accessible online Computer.
-    - expect: The selected Computer and full path persist in PostgreSQL and appear in the Channel header.
-  4. Create a real Codex Agent on that Computer and ask it to create a proof file.
-    - expect: The real local Agent run completes and writes the proof file inside the bound project folder.
-    - expect: The Agent’s own memory Workspace remains separate from the project folder.

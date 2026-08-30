@@ -30,7 +30,6 @@ import {
   ArrowUpRight,
   CheckCircle2,
   UserRoundCheck,
-  FolderSync,
   GitBranch,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -70,7 +69,7 @@ import {
 } from './message-share';
 import type { AgentDetailTarget, Channel, ChannelMember, Message } from '@/lib/types';
 import { sanitizeHtml } from '@/lib/sanitize';
-import { t, type TranslationKey } from '@/lib/i18n';
+import { t } from '@/lib/i18n';
 import {
   formatMessageTime,
   formatMessageTimestamp,
@@ -295,28 +294,6 @@ const MessageItem = memo(function MessageItem({
     },
     [handleSaveEdit, handleCancelEdit],
   );
-
-  const projectEvent = typeof message.metadata?.event === 'string' ? message.metadata.event : '';
-  if (projectEvent.startsWith('channel.project.')) {
-    const actor = typeof message.metadata?.actor_name === 'string' ? message.metadata.actor_name : t('unknown');
-    const source = typeof message.metadata?.source === 'string' && message.metadata.source
-      ? message.metadata.source : t('channelProjectUnnamed');
-    const key: TranslationKey = projectEvent === 'channel.project.unlinked'
-      ? 'channelProjectEventUnlinked'
-      : projectEvent === 'channel.project.folder_changed'
-        ? 'channelProjectEventFolderChanged'
-        : projectEvent === 'channel.project.folder_unlinked'
-          ? 'channelProjectEventFolderUnlinked'
-          : 'channelProjectEventChanged';
-    return (
-      <div data-message-id={message.id} className="px-6 py-2" role="listitem">
-        <div className="flex items-center gap-2 rounded-lg border border-brutal-border bg-brutal-cream/70 px-3 py-2 font-body text-sm text-brutal-text-muted">
-          <FolderSync className="h-4 w-4 shrink-0" />
-          <span>{t(key, { name: actor, project: source })}</span>
-        </div>
-      </div>
-    );
-  }
 
   if (message.content_type === 'channel_created') {
     const channelId = typeof message.metadata?.channel_id === 'string' ? message.metadata.channel_id : '';
@@ -1288,14 +1265,18 @@ export function MessageList({
 function ForwardedMessageCard({ message }: { message: Message }) {
   const channelId = typeof message.metadata?.forwarded_channel_id === 'string' ? message.metadata.forwarded_channel_id : '';
   const channelName = typeof message.metadata?.forwarded_channel_name === 'string' ? message.metadata.forwarded_channel_name : t('unknown');
+  const channelType = typeof message.metadata?.forwarded_channel_type === 'string' ? message.metadata.forwarded_channel_type : 'channel';
+  const threadRootMessageId = typeof message.metadata?.forwarded_thread_root_message_id === 'string' ? message.metadata.forwarded_thread_root_message_id : '';
   const senderName = typeof message.metadata?.forwarded_sender_name === 'string' ? message.metadata.forwarded_sender_name : t('unknown');
   const sourceMessageId = typeof message.metadata?.forwarded_message_id === 'string' ? message.metadata.forwarded_message_id : '';
+  const source = channelType === 'dm' ? `dm=${encodeURIComponent(channelId)}` : `channel=${encodeURIComponent(channelId)}`;
+  const thread = threadRootMessageId ? `&thread=${encodeURIComponent(threadRootMessageId)}` : '';
   return (
     <Link
-      href={channelId ? `/dashboard?channel=${encodeURIComponent(channelId)}${sourceMessageId ? `&message=${encodeURIComponent(sourceMessageId)}` : ''}` : '#'}
+      href={channelId ? `/dashboard?${source}${thread}${sourceMessageId ? `&message=${encodeURIComponent(sourceMessageId)}` : ''}` : '#'}
       className="block rounded-lg border-l-4 border-brutal-accent bg-brutal-muted-light/60 px-3 py-2 hover:bg-brutal-muted-light"
     >
-      <div className="mb-1 font-body text-xs font-semibold text-muted-foreground">{t('forwardedFrom', { channel: channelName, sender: senderName })}</div>
+      <div className="mb-1 font-body text-xs font-semibold text-muted-foreground">{t('forwardedFrom', { channel: channelType === 'dm' ? t('directMessages') : channelName, sender: senderName })}</div>
       <p className="whitespace-pre-wrap break-words font-body text-sm leading-relaxed">{message.content}</p>
     </Link>
   );

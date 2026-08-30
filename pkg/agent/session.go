@@ -484,10 +484,7 @@ func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, age
 	m.mu.RUnlock()
 	if exists && m.isSessionAlive(entry) {
 		previous, _, _ := entry.snapshot()
-		if entry.AgentConfig.Model == agentCfg.Model &&
-			entry.AgentConfig.ProjectPath == agentCfg.ProjectPath &&
-			entry.AgentConfig.ProjectSource == agentCfg.ProjectSource &&
-			entry.AgentConfig.ProjectBaseline == agentCfg.ProjectBaseline {
+		if entry.AgentConfig.Model == agentCfg.Model {
 			ps, err := m.backend.Send(ctx, previous, messages)
 			if err != nil {
 				return nil, err
@@ -504,7 +501,7 @@ func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, age
 			return ps, nil
 		}
 
-		m.logger.Info("session: runtime context changed, restarting", "agent_id", agentID, "session_key", sessionKey, "old_model", entry.AgentConfig.Model, "new_model", agentCfg.Model, "old_project_path", entry.AgentConfig.ProjectPath, "new_project_path", agentCfg.ProjectPath)
+		m.logger.Info("session: model changed, restarting", "agent_id", agentID, "session_key", sessionKey, "old_model", entry.AgentConfig.Model, "new_model", agentCfg.Model)
 		if err := m.backend.Close(previous); err != nil {
 			return nil, fmt.Errorf("close session for model change: %w", err)
 		}
@@ -521,10 +518,7 @@ func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, age
 	if len(startMessages) == 0 {
 		startMessages = messages
 	}
-	if exists && (entry.AgentConfig.Model != agentCfg.Model ||
-		entry.AgentConfig.ProjectPath != agentCfg.ProjectPath ||
-		entry.AgentConfig.ProjectSource != agentCfg.ProjectSource ||
-		entry.AgentConfig.ProjectBaseline != agentCfg.ProjectBaseline) {
+	if exists && entry.AgentConfig.Model != agentCfg.Model {
 		// Never resume a provider session created with another model. Codex
 		// thread/resume, for example, does not accept a new model override.
 		prevSessionID = ""
@@ -552,7 +546,7 @@ func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, age
 	}
 	executeOpts := &ExecuteOptions{
 		SystemPrompt: systemPrompt,
-		WorkspaceDir: firstNonEmpty(agentCfg.ProjectPath, ws.WorkDir),
+		WorkspaceDir: ws.WorkDir,
 		Model:        agentCfg.Model,
 		Env:          agentCfg.Env,
 		CustomArgs:   agentCfg.CustomArgs,

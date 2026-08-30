@@ -16,18 +16,20 @@ import (
 )
 
 type favoriteMessageResponse struct {
-	Message       MessageResponse `json:"message"`
-	WorkspaceID   string          `json:"workspace_id"`
-	WorkspaceName string          `json:"workspace_name"`
-	ChannelName   string          `json:"channel_name"`
-	FavoritedAt   string          `json:"favorited_at"`
+	Message             MessageResponse `json:"message"`
+	WorkspaceID         string          `json:"workspace_id"`
+	WorkspaceName       string          `json:"workspace_name"`
+	ChannelName         string          `json:"channel_name"`
+	ChannelType         string          `json:"channel_type"`
+	ThreadRootMessageID string          `json:"thread_root_message_id,omitempty"`
+	FavoritedAt         string          `json:"favorited_at"`
 }
 
 type forwardMessageRequest struct {
 	TargetChannelID string `json:"target_channel_id"`
 }
 
-func (h *MessageHandler) requireChannelMessage(w http.ResponseWriter, r *http.Request) (string, string, string, bool) {
+func (h *MessageHandler) requireMessage(w http.ResponseWriter, r *http.Request) (string, string, string, bool) {
 	userID, ok := requireUserID(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
@@ -46,12 +48,21 @@ func (h *MessageHandler) requireChannelMessage(w http.ResponseWriter, r *http.Re
 	err := h.pool.QueryRow(r.Context(), `
 		SELECT EXISTS(
 			SELECT 1 FROM messages message
-			JOIN channels channel ON channel.id = message.channel_id AND channel.type = 'channel'
-			JOIN channel_members member ON member.channel_id = channel.id
+			JOIN channels channel ON channel.id = message.channel_id
 			 WHERE message.id = $1 AND message.channel_id = $2
-			   AND message.thread_id IS NULL AND message.thinking_node_id IS NULL
+			   AND channel.type IN ('channel', 'dm')
+			   AND message.thinking_node_id IS NULL
 			   AND COALESCE(message.is_deleted, false) = false
-			   AND member.member_type = 'user' AND member.member_id = $3
+			   AND (
+			     (channel.type = 'channel' AND EXISTS (
+			       SELECT 1 FROM channel_members member
+			        WHERE member.channel_id = channel.id AND member.member_type = 'user' AND member.member_id = $3
+			     )) OR
+			     (channel.type = 'dm' AND EXISTS (
+			       SELECT 1 FROM dm_members member
+			        WHERE member.channel_id = channel.id AND member.member_type = 'user' AND member.member_id = $3
+			     ))
+			   )
 		)`, messageID, channelID, userID).Scan(&allowed)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check message access")
@@ -65,7 +76,7 @@ func (h *MessageHandler) requireChannelMessage(w http.ResponseWriter, r *http.Re
 }
 
 func (h *MessageHandler) Favorite(w http.ResponseWriter, r *http.Request) {
-	userID, _, messageID, ok := h.requireChannelMessage(w, r)
+	userID, _, messageID, ok := h.requireMessage(w, r)
 	if !ok {
 		return
 	}
@@ -80,7 +91,7 @@ func (h *MessageHandler) Favorite(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *MessageHandler) Unfavorite(w http.ResponseWriter, r *http.Request) {
-	userID, _, messageID, ok := h.requireChannelMessage(w, r)
+	userID, _, messageID, ok := h.requireMessage(w, r)
 	if !ok {
 		return
 	}
@@ -102,15 +113,25 @@ func (h *MessageHandler) ListFavorites(w http.ResponseWriter, r *http.Request) {
 		       CASE WHEN m.sender_type = 'system' THEN 'Solo' WHEN m.sender_type = 'external' THEN COALESCE(m.metadata->>'external_sender_name', '飞书成员') ELSE COALESCE(u.display_name, a.name, 'Unknown') END,
 		       CASE WHEN m.sender_type = 'external' THEN COALESCE(m.metadata->>'external_sender_avatar', '') ELSE COALESCE(u.avatar_url, a.avatar_url, '') END, COALESCE(a.is_active, false),
 		       m.content, m.content_type, m.metadata, COALESCE(m.attachment_ids, '{}'), m.created_at,
-		       w.id::text, w.name, c.name, favorite.created_at
+		       w.id::text, w.name, c.name, c.type, COALESCE(thread.root_message_id::text, ''), favorite.created_at
 		  FROM message_favorites favorite
 		  JOIN messages m ON m.id = favorite.message_id AND COALESCE(m.is_deleted, false) = false
 		  JOIN channels c ON c.id = m.channel_id
 		  JOIN workspaces w ON w.id = c.workspace_id
-		  JOIN channel_members member ON member.channel_id = c.id AND member.member_type = 'user' AND member.member_id = favorite.user_id
+		  LEFT JOIN threads thread ON thread.id = m.thread_id
 		  LEFT JOIN users u ON m.sender_type = 'user' AND u.id = m.sender_id
 		  LEFT JOIN agents a ON m.sender_type = 'agent' AND a.id = m.sender_id
 		 WHERE favorite.user_id = $1
+		   AND (
+		     (c.type = 'channel' AND EXISTS (
+		       SELECT 1 FROM channel_members member
+		        WHERE member.channel_id = c.id AND member.member_type = 'user' AND member.member_id = favorite.user_id
+		     )) OR
+		     (c.type = 'dm' AND EXISTS (
+		       SELECT 1 FROM dm_members member
+		        WHERE member.channel_id = c.id AND member.member_type = 'user' AND member.member_id = favorite.user_id
+		     ))
+		   )
 		 ORDER BY favorite.created_at DESC
 		 LIMIT 200`, userID)
 	if err != nil {
@@ -127,7 +148,7 @@ func (h *MessageHandler) ListFavorites(w http.ResponseWriter, r *http.Request) {
 			&item.Message.ID, &item.Message.ChannelID, &item.Message.SenderType, &item.Message.SenderID,
 			&item.Message.SenderName, &item.Message.SenderAvatar, &item.Message.SenderActive,
 			&item.Message.Content, &item.Message.ContentType, &metadata, &item.Message.AttachmentIDs, &createdAt,
-			&item.WorkspaceID, &item.WorkspaceName, &item.ChannelName, &favoritedAt,
+			&item.WorkspaceID, &item.WorkspaceName, &item.ChannelName, &item.ChannelType, &item.ThreadRootMessageID, &favoritedAt,
 		); err != nil {
 			continue
 		}
@@ -157,7 +178,7 @@ func (h *MessageHandler) ListFavorites(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *MessageHandler) Forward(w http.ResponseWriter, r *http.Request) {
-	userID, sourceChannelID, messageID, ok := h.requireChannelMessage(w, r)
+	userID, sourceChannelID, messageID, ok := h.requireMessage(w, r)
 	if !ok {
 		return
 	}
@@ -188,28 +209,31 @@ func (h *MessageHandler) Forward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var content, sourceChannelName, sourceSenderID, sourceSenderType, sourceSenderName string
+	var content, sourceChannelName, sourceChannelType, sourceThreadRootMessageID, sourceSenderID, sourceSenderType, sourceSenderName string
 	var attachmentIDs []string
 	var sourceCreatedAt time.Time
 	err = h.pool.QueryRow(r.Context(), `
-		SELECT message.content, COALESCE(message.attachment_ids, '{}'), channel.name,
-		       message.sender_id::text, message.sender_type,
+		SELECT message.content, COALESCE(message.attachment_ids, '{}'), channel.name, channel.type,
+		       COALESCE(thread.root_message_id::text, ''),
+		       COALESCE(message.sender_id::text, ''), message.sender_type,
 		       CASE WHEN message.sender_type = 'system' THEN 'Solo' ELSE COALESCE(u.display_name, a.name, 'Unknown') END,
 		       message.created_at
 		  FROM messages message
 		  JOIN channels channel ON channel.id = message.channel_id
+		  LEFT JOIN threads thread ON thread.id = message.thread_id
 		  LEFT JOIN users u ON message.sender_type = 'user' AND u.id = message.sender_id
 		  LEFT JOIN agents a ON message.sender_type = 'agent' AND a.id = message.sender_id
 		 WHERE message.id = $1 AND message.channel_id = $2
 		   AND COALESCE(message.is_deleted, false) = false`, messageID, sourceChannelID,
-	).Scan(&content, &attachmentIDs, &sourceChannelName, &sourceSenderID, &sourceSenderType, &sourceSenderName, &sourceCreatedAt)
+	).Scan(&content, &attachmentIDs, &sourceChannelName, &sourceChannelType, &sourceThreadRootMessageID, &sourceSenderID, &sourceSenderType, &sourceSenderName, &sourceCreatedAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load source message")
 		return
 	}
 	metadata := map[string]any{
 		"forwarded_message_id": messageID, "forwarded_channel_id": sourceChannelID,
-		"forwarded_channel_name": sourceChannelName, "forwarded_sender_id": sourceSenderID,
+		"forwarded_channel_name": sourceChannelName, "forwarded_channel_type": sourceChannelType,
+		"forwarded_thread_root_message_id": sourceThreadRootMessageID, "forwarded_sender_id": sourceSenderID,
 		"forwarded_sender_type": sourceSenderType, "forwarded_sender_name": sourceSenderName,
 		"forwarded_created_at": sourceCreatedAt.Format(time.RFC3339),
 	}

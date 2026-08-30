@@ -40,7 +40,7 @@ func TestBuildSystemPrompt_RuntimeContext(t *testing.T) {
 	)
 	assertHas(t, p, "Runtime Context")
 	assertHas(t, p, "Agent ID: agent-2")
-	assertHas(t, p, "Workspace: /tmp/ws")
+	assertHas(t, p, "Workspace (current working directory): /tmp/ws")
 	assertHas(t, p, "Handle: @Bot")
 	assertHas(t, p, "Server ID: https://solo.example.com")
 	assertHas(t, p, "Hostname: my-mac.local")
@@ -228,24 +228,14 @@ func TestBuildSystemPrompt_Workspace(t *testing.T) {
 	assertNotHas(t, p, "Deliverable: ./path/to/result.html")
 }
 
-func TestBuildSystemPrompt_ProjectFolderOverridesWorkspaceCWD(t *testing.T) {
-	p := BuildSystemPrompt(AgentConfig{
-		Name: "Bot", WorkspacePath: "/agents/bot/workspace", ProjectPath: "/projects/shared",
-	}, ChannelContext{TriggerType: TriggerChat}, "", nil)
-	assertHas(t, p, "working directory (cwd) is the Channel project folder **/projects/shared**")
-	assertHas(t, p, "private Agent workspace **/agents/bot/workspace** is only for memory")
-	assertNotHas(t, p, "working directory (cwd) is your **persistent, agent-owned workspace**")
-}
-
-func TestBuildSystemPrompt_ProjectSourceWithoutLocalFolder(t *testing.T) {
+func TestBuildSystemPrompt_UsesStableAgentWorkspace(t *testing.T) {
 	p := BuildSystemPrompt(AgentConfig{
 		Name: "Bot", WorkspacePath: "/agents/bot/workspace",
-		ProjectSource: "https://example.test/repo.git", ProjectBaseline: "main",
 	}, ChannelContext{TriggerType: TriggerChat}, "", nil)
-	assertHas(t, p, "Channel project source: https://example.test/repo.git")
-	assertHas(t, p, "Channel project version: main")
-	assertHas(t, p, "no local project folder is connected")
+	assertHas(t, p, "Workspace (current working directory): /agents/bot/workspace")
 	assertHas(t, p, "working directory (cwd) is your **persistent, agent-owned workspace**")
+	assertHas(t, p, "folder path or repository URL mentioned in a message is task context")
+	assertHas(t, p, "record the durable reference in MEMORY.md")
 }
 
 func TestBuildSystemPrompt_AllTriggers(t *testing.T) {
