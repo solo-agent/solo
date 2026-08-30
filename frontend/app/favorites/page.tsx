@@ -26,6 +26,8 @@ type Favorite = {
   workspace_id: string;
   workspace_name: string;
   channel_name: string;
+  channel_type: 'channel' | 'dm';
+  thread_root_message_id?: string;
   favorited_at: string;
 };
 
@@ -76,7 +78,9 @@ export default function FavoritesPage() {
 
   const openOriginal = (item: Favorite) => {
     switchWorkspace(item.workspace_id);
-    router.push(`/dashboard?channel=${encodeURIComponent(item.message.channel_id)}&message=${encodeURIComponent(item.message.id)}`);
+    const source = item.channel_type === 'dm' ? 'dm' : 'channel';
+    const thread = item.thread_root_message_id ? `&thread=${encodeURIComponent(item.thread_root_message_id)}` : '';
+    router.push(`/dashboard?${source}=${encodeURIComponent(item.message.channel_id)}${thread}&message=${encodeURIComponent(item.message.id)}`);
   };
 
   if (authLoading || !isAuthenticated) return <div className="flex h-screen items-center justify-center bg-brutal-cream"><Spinner size="md" /></div>;
@@ -108,7 +112,7 @@ export default function FavoritesPage() {
                         <span className="font-mono text-[11px] text-muted-foreground">{formatDateTime(item.message.created_at)}</span>
                       </div>
                       <p className="mt-2 whitespace-pre-wrap break-words font-body text-sm leading-relaxed">{item.message.content}</p>
-                      <p className="mt-3 font-body text-xs text-muted-foreground">{item.workspace_name} / #{item.channel_name}</p>
+                      <p className="mt-3 font-body text-xs text-muted-foreground">{item.workspace_name} / {item.channel_type === 'dm' ? t('directMessages') : `#${item.channel_name}`}</p>
                     </div>
                   </div>
                   <div className="mt-4 flex justify-end gap-2">

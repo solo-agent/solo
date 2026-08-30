@@ -40,16 +40,7 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 		fmt.Fprintf(&b, "- OS: %s\n", agent.OS)
 	}
 	if agent.WorkspacePath != "" {
-		fmt.Fprintf(&b, "- Workspace: %s (Agent memory and Solo files)\n", agent.WorkspacePath)
-	}
-	if agent.ProjectPath != "" {
-		fmt.Fprintf(&b, "- Project folder (current working directory): %s\n", agent.ProjectPath)
-	}
-	if agent.ProjectSource != "" {
-		fmt.Fprintf(&b, "- Channel project source: %s\n", agent.ProjectSource)
-	}
-	if agent.ProjectBaseline != "" {
-		fmt.Fprintf(&b, "- Channel project version: %s\n", agent.ProjectBaseline)
+		fmt.Fprintf(&b, "- Workspace (current working directory): %s\n", agent.WorkspacePath)
 	}
 	if agent.Name != "" {
 		fmt.Fprintf(&b, "- Handle: @%s\n", agent.Name)
@@ -280,14 +271,8 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 
 	// Workspace & Memory
 	b.WriteString("## Workspace & Memory\n\n")
-	if agent.ProjectPath != "" {
-		fmt.Fprintf(&b, "Your working directory (cwd) is the Channel project folder **%s**. Create and edit project files there unless the user explicitly gives another path. Your private Agent workspace **%s** is only for memory and Solo support files; do not put project deliverables there.\n\n", agent.ProjectPath, agent.WorkspacePath)
-	} else {
-		b.WriteString("Your working directory (cwd) is your **persistent, agent-owned workspace**; files you create here survive across sessions. Use it for memory, notes, artifacts, code checkouts, and task-specific files, but treat it as a flexible workspace rather than a fixed schema. Keep **MEMORY.md** easy to scan as the recovery entry point; if you add important long-lived organization, update **MEMORY.md** or a note index so future sessions can find it. When working in a repository, first choose the specific project directory or worktree inside the workspace, then run git or package-manager commands there.\n\n")
-		if agent.ProjectSource != "" {
-			b.WriteString("The Channel has a project source reference, but no local project folder is connected to this computer. You may use the source reference as context, but do not claim to have inspected its files unless you explicitly obtain them.\n\n")
-		}
-	}
+	b.WriteString("Your working directory (cwd) is your **persistent, agent-owned workspace**; files you create here survive across sessions. Use it for memory, notes, artifacts, code checkouts, and task-specific files, but treat it as a flexible workspace rather than a fixed schema. Keep **MEMORY.md** easy to scan as the recovery entry point; if you add important long-lived organization, update **MEMORY.md** or a note index so future sessions can find it. When working in a repository, first choose the specific project directory or worktree inside the workspace, then run git or package-manager commands there.\n\n")
+	b.WriteString("A folder path or repository URL mentioned in a message is task context, not a persistent Channel working-directory binding. Inspect or use it only when the user asks and it is available. If it becomes a recurring resource, keep a checkout or worktree inside your Agent workspace and record the durable reference in MEMORY.md or its note index. Do not claim to have inspected a resource until you have actually obtained it.\n\n")
 
 	// MEMORY.md
 	b.WriteString("### MEMORY.md — Your Memory Index (CRITICAL)\n\n")

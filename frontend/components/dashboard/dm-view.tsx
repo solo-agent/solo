@@ -31,12 +31,13 @@ const ThreadPanel = lazy(() =>
   import('./thread-panel').then((m) => ({ default: m.ThreadPanel })),
 );
 import { t } from '@/lib/i18n';
-import type { AgentDetailTarget, DMChannel, ChannelMember, Message, Task, TaskArtifact } from '@/lib/types';
+import type { AgentDetailTarget, Channel, DMChannel, ChannelMember, Message, Task, TaskArtifact } from '@/lib/types';
 
 type ArtifactPreview = TaskArtifact & { previewUrl: string };
 
 interface DMViewProps {
   dm: DMChannel;
+  channels: Channel[];
   messages: Message[];
   isLoading: boolean;
   error: string | null;
@@ -82,6 +83,7 @@ function isAgentDeleted(dm: DMChannel): boolean {
 
 export function DMView({
   dm,
+  channels,
   messages,
   isLoading,
   error,
@@ -124,6 +126,23 @@ export function DMView({
   const [activeRightPanel, setActiveRightPanel] = useState<'thread' | 'agent' | null>(null);
   const rightPanelOpen = activeRightPanel !== null;
   const { showToast } = useToast();
+  const favoriteMessage = useCallback(async (message: Message) => {
+    try {
+      await apiClient.post<void>(`/api/v1/channels/${dm.id}/messages/${message.id}/favorite`);
+      showToast(t('messageFavorited'), 'success');
+    } catch (reason) {
+      showToast(reason instanceof Error ? reason.message : t('messageReuseFailed'), 'error');
+    }
+  }, [dm.id, showToast]);
+  const forwardMessage = useCallback(async (message: Message, targetChannelId: string) => {
+    try {
+      await apiClient.post(`/api/v1/channels/${dm.id}/messages/${message.id}/forward`, { target_channel_id: targetChannelId });
+      showToast(t('messageForwarded'), 'success');
+    } catch (reason) {
+      showToast(reason instanceof Error ? reason.message : t('messageReuseFailed'), 'error');
+      throw reason;
+    }
+  }, [dm.id, showToast]);
   const { generateArtifact, regenerateArtifact, fetchArtifactHTML, listArtifacts, isGeneratingTask } = useTaskArtifact();
   const artifactOpenLinkRef = useRef<HTMLAnchorElement>(null);
   const artifactRegenerateButtonRef = useRef<HTMLButtonElement>(null);
@@ -648,6 +667,9 @@ export function DMView({
                 onOpenArtifactReference={handleOpenArtifactReference}
                 onAgentClick={openAgentDetail}
                 contextLabel={name}
+                forwardChannels={channels}
+                onFavorite={favoriteMessage}
+                onForward={forwardMessage}
               />
             )}
 
@@ -752,6 +774,9 @@ export function DMView({
               onOpenArtifactReference={handleOpenArtifactReference}
               onAgentClick={openAgentDetail}
               contextLabel={name}
+              forwardChannels={channels}
+              onFavorite={favoriteMessage}
+              onForward={forwardMessage}
             />
           </Suspense>
         )}

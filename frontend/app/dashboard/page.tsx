@@ -14,7 +14,6 @@ import { WorkspaceRail } from "@/components/workspaces/workspace-rail";
 import { GlobalAccountBar } from "@/components/layout/global-account-bar";
 import { WorkspaceManageDialog } from "@/components/workspaces/workspace-manage-dialog";
 import { CreateChannelModal } from "@/components/dashboard/create-channel-modal";
-import { CreateDMModal } from "@/components/dashboard/create-dm-modal";
 import { DeleteChannelDialog } from "@/components/dashboard/delete-channel-dialog";
 
 import { Button } from "@/components/ui/button";
@@ -43,7 +42,7 @@ const DMView = dynamic(
   },
 );
 import { InboxView } from "@/components/inbox/inbox-view";
-import type { Channel, DMChannel, CreateChannelInput, CreateDMInput, Message, Task } from "@/lib/types";
+import type { Channel, DMChannel, CreateChannelInput, Message, Task } from "@/lib/types";
 import { useToast } from "@/components/ui/toast";
 
 export default function DashboardPage() {
@@ -197,6 +196,11 @@ function DashboardContent() {
     markAsRead(dmId);
   }, [router, selectDM, markAsRead]);
 
+  const handleStartAgentDM = useCallback(async (agentId: string) => {
+    const dm = await createOrGetDM({ agent_id: agentId });
+    handleSelectDM(dm.id);
+  }, [createOrGetDM, handleSelectDM]);
+
   // ---- URL-driven Inbox selection ----
   const handleSelectInbox = useCallback(() => {
     setMobileNavOpen(false);
@@ -224,18 +228,6 @@ function DashboardContent() {
       handleSelectChannel(channel.id);
     },
     [createChannel, handleSelectChannel],
-  );
-
-  // ---- create DM modal ----
-  const [isCreateDMModalOpen, setIsCreateDMModalOpen] = useState(false);
-
-  const handleCreateDM = useCallback(
-    async (input: CreateDMInput): Promise<string> => {
-      const dm = await createOrGetDM(input);
-      handleSelectDM(dm.id);
-      return dm.id;
-    },
-    [createOrGetDM, handleSelectDM],
   );
 
   // ---- delete channel dialog ----
@@ -314,6 +306,7 @@ function DashboardContent() {
         <DMView
           key={`dm-${selectedDM.id}`}
           dm={selectedDM}
+          channels={channels}
           initialThreadMessageId={threadFromUrl ?? undefined}
           initialScrollToMessageId={messageFromUrl ?? undefined}
           messages={dmMessages}
@@ -416,10 +409,8 @@ function DashboardContent() {
             onCreateChannel={() => setIsCreateModalOpen(true)}
             onDeleteChannel={(id) => setDeleteTargetId(id)}
             dms={dmChannels}
-            dmsLoading={isLoadingDMs}
             selectedDmId={selectedDmId}
-            onSelectDM={handleSelectDM}
-            onCreateDM={() => setIsCreateDMModalOpen(true)}
+            onStartAgentDM={handleStartAgentDM}
             inboxSelected={inboxFromUrl}
             onSelectInbox={handleSelectInbox}
           />
@@ -441,13 +432,6 @@ function DashboardContent() {
         onSubmit={handleCreateChannel}
         onChooseTemplate={() => router.push('/templates?create=1')}
         onAskLucy={() => router.push('/dashboard?lucy=1')}
-      />
-
-      <CreateDMModal
-        open={isCreateDMModalOpen}
-        onOpenChange={setIsCreateDMModalOpen}
-        onCreateDM={handleCreateDM}
-        dms={dmChannels}
       />
 
       {deleteTarget && (

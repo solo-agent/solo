@@ -25,8 +25,6 @@ export interface Channel {
   description: string;
   type?: 'channel' | 'lucy';
   source_template_id?: string;
-  project_computer_id?: string;
-  project_path?: string;
   member_count: number;
   created_at: string;
   created_by: string;

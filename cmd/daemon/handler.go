@@ -554,10 +554,6 @@ type runTaskRequest struct {
 	AgentToken            string             `json:"agent_token,omitempty"`
 	AgentName             string             `json:"agent_name,omitempty"`
 	ChannelName           string             `json:"channel_name,omitempty"`
-	ProjectComputerID     string             `json:"project_computer_id,omitempty"`
-	ProjectPath           string             `json:"project_path,omitempty"`
-	ProjectSource         string             `json:"project_source,omitempty"`
-	ProjectBaseline       string             `json:"project_baseline,omitempty"`
 	CustomEnv             map[string]string  `json:"custom_env,omitempty"`
 	CustomArgs            []string           `json:"custom_args,omitempty"`
 }
@@ -876,21 +872,6 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		h.taskManager.CloseAllSubscribers(req.TaskID)
 		return
 	}
-	executionDir := ws.WorkDir
-	if req.ProjectPath != "" {
-		executionDir, err = resolveProjectDirectory(req.ProjectPath)
-		if err != nil {
-			slog.Error("task: project folder is unavailable", "task_id", req.TaskID, "project_path", req.ProjectPath, "error", err)
-			h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
-			h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
-				"agent_id": req.AgentID, "error": "agent.error.project_folder_unavailable",
-				"failure_code": "configuration", "retryable": false,
-			})
-			h.taskManager.CloseAllSubscribers(req.TaskID)
-			return
-		}
-	}
-
 	// Load memory content
 	memoryContent, _ := h.memoryManager.Load(req.AgentID)
 
@@ -952,10 +933,6 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 
 	// Build system prompt using PromptBuilder
 	hostname, _ := os.Hostname()
-	boundProjectPath := ""
-	if req.ProjectPath != "" {
-		boundProjectPath = executionDir
-	}
 	agentCfg := agent.AgentConfig{
 		AgentID:               req.AgentID,
 		Name:                  agentInfo.Name,
@@ -966,9 +943,6 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		CustomArgs:            agentInfo.CustomArgs,
 		Env:                   agentEnv,
 		WorkspacePath:         ws.WorkDir,
-		ProjectPath:           boundProjectPath,
-		ProjectSource:         req.ProjectSource,
-		ProjectBaseline:       req.ProjectBaseline,
 		ServerID:              h.serverURL,
 		Hostname:              hostname,
 		OS:                    runtime.GOOS + " " + runtime.GOARCH,
@@ -989,8 +963,8 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		slog.Warn("task: sync solo skills failed (non-fatal)", "task_id", req.TaskID, "error", err)
 	}
 
-	materializedMessages := h.materializeMessageAttachments(ctx, req.AgentToken, req.Messages, ws.WorkDir, executionDir)
-	materializedColdStartMessages := h.materializeMessageAttachments(ctx, req.AgentToken, req.ColdStartMessages, ws.WorkDir, executionDir)
+	materializedMessages := h.materializeMessageAttachments(ctx, req.AgentToken, req.Messages, ws.WorkDir)
+	materializedColdStartMessages := h.materializeMessageAttachments(ctx, req.AgentToken, req.ColdStartMessages, ws.WorkDir)
 
 	// Convert messages to agent.Message format
 	msgs := make([]agent.Message, len(materializedMessages))
@@ -1035,7 +1009,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 
 	executeOpts := &agent.ExecuteOptions{
 		SystemPrompt: systemPrompt,
-		WorkspaceDir: executionDir,
+		WorkspaceDir: ws.WorkDir,
 		Model:        req.ModelConfig.Model,
 		Env:          agentEnv,
 		CustomArgs:   agentInfo.CustomArgs,
@@ -1062,7 +1036,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		ps, psErr := sm.GetOrCreateScopedSession(ctx, sessionKey, req.AgentID, agentCfg, channelCtx, msgs, coldStartMsgs, req.ResumeSessionID, req.MentionedNames)
 		if psErr == nil {
 			providerSessionID = ps.SessionID
-			transcriptPath = transcriptPathForProvider(req.ModelConfig.Provider, executionDir, providerSessionID)
+			transcriptPath = transcriptPathForProvider(req.ModelConfig.Provider, ws.WorkDir, providerSessionID)
 			session = &agent.Session{Messages: ps.Messages, Result: ps.Result, Stop: ps.Stop, SessionID: providerSessionID}
 		} else {
 			slog.Warn("task: persistent session failed, falling back to Execute", "agent_id", req.AgentID, "session_key", sessionKey, "error", psErr)
@@ -1335,13 +1309,9 @@ func mergeAgentCustomEnv(base, custom map[string]string) {
 	}
 }
 
-func (h *daemonHandler) materializeMessageAttachments(ctx context.Context, token string, messages []llmMessage, workDir string, executionDirs ...string) []llmMessage {
+func (h *daemonHandler) materializeMessageAttachments(ctx context.Context, token string, messages []llmMessage, workDir string) []llmMessage {
 	if len(messages) == 0 || workDir == "" {
 		return messages
-	}
-	executionDir := workDir
-	if len(executionDirs) > 0 && executionDirs[0] != "" {
-		executionDir = executionDirs[0]
 	}
 
 	out := make([]llmMessage, len(messages))
@@ -1359,43 +1329,12 @@ func (h *daemonHandler) materializeMessageAttachments(ctx context.Context, token
 				slog.Warn("task: failed to materialize attachment", "attachment_id", attachments[j].ID, "filename", attachments[j].Filename, "error", err)
 				continue
 			}
-			if executionDir != workDir {
-				attachments[j].LocalPath = filepath.Join(workDir, filepath.FromSlash(localPath))
-			} else {
-				attachments[j].LocalPath = localPath
-			}
+			attachments[j].LocalPath = localPath
 		}
 		out[i].Attachments = attachments
 		out[i].Content = appendMaterializedAttachmentPaths(out[i].Content, attachments)
 	}
 	return out
-}
-
-func resolveProjectDirectory(rawPath string) (string, error) {
-	projectPath := strings.TrimSpace(rawPath)
-	if projectPath == "~" || strings.HasPrefix(projectPath, "~"+string(filepath.Separator)) {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("project folder cannot expand the home directory: %w", err)
-		}
-		projectPath = filepath.Join(home, strings.TrimPrefix(projectPath, "~"+string(filepath.Separator)))
-	}
-	if !filepath.IsAbs(projectPath) {
-		return "", errors.New("project folder must use a full path")
-	}
-	projectPath = filepath.Clean(projectPath)
-	info, err := os.Stat(projectPath)
-	if err != nil {
-		return "", fmt.Errorf("project folder is unavailable: %w", err)
-	}
-	if !info.IsDir() {
-		return "", errors.New("project folder path is not a folder")
-	}
-	resolved, err := filepath.EvalSymlinks(projectPath)
-	if err != nil {
-		return "", fmt.Errorf("project folder cannot be resolved: %w", err)
-	}
-	return resolved, nil
 }
 
 func (h *daemonHandler) materializeAttachment(ctx context.Context, workDir, token string, attachment *agent.Attachment) (string, error) {
