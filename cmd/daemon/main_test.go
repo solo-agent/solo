@@ -21,6 +21,16 @@ func TestResolveInternalToken(t *testing.T) {
 	})
 }
 
+func TestDaemonDeclaresContextRolloverCapability(t *testing.T) {
+	want := contextRolloverCapability
+	for _, capability := range daemonCapabilities() {
+		if capability == want {
+			return
+		}
+	}
+	t.Fatalf("daemon capabilities %v do not include %q", daemonCapabilities(), want)
+}
+
 func TestDaemonProcessRecordOnlyRemovesItsOwnPID(t *testing.T) {
 	dir := t.TempDir()
 	path, err := writeDaemonProcessRecord(dir, os.Getpid())

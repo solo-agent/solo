@@ -303,8 +303,81 @@ func (s *ChannelService) RemoveMember(ctx context.Context, channelID, requesterI
 			return "", ErrMemberNotFound
 		}
 		if homeChannelID != channelID {
-			_, err = s.pool.Exec(ctx, `DELETE FROM channel_members WHERE channel_id=$1 AND member_type='agent' AND member_id=$2`, channelID, memberID)
-			return memberType, err
+			tx, txErr := s.pool.Begin(ctx)
+			if txErr != nil {
+				return "", txErr
+			}
+			defer tx.Rollback(ctx)
+			if _, txErr = tx.Exec(ctx, `DELETE FROM channel_members WHERE channel_id=$1 AND member_type='agent' AND member_id=$2`, channelID, memberID); txErr != nil {
+				return "", txErr
+			}
+			if _, txErr = tx.Exec(ctx, `
+				UPDATE tasks
+				   SET status = 'todo', claimer_id = NULL, updated_at = now()
+				 WHERE channel_id = $1
+				   AND claimer_id = $2
+				   AND status IN ('in_progress', 'in_review')
+			`, channelID, memberID); txErr != nil {
+				return "", txErr
+			}
+			cancelledRows, txErr := tx.Query(ctx, `
+				UPDATE agent_runs
+				   SET status = 'cancelled',
+				       activity_text = 'Cancelled because the Agent was removed',
+				       updated_at = now(),
+				       finished_at = COALESCE(finished_at, now())
+				 WHERE agent_id = $1
+				   AND channel_id = $2
+				   AND status IN (
+				       'queued', 'thinking', 'running', 'streaming',
+				       'waiting_input', 'waiting_approval'
+				   )
+				 RETURNING id::text
+			`, memberID, channelID)
+			if txErr != nil {
+				return "", txErr
+			}
+			cancelledRunIDs := make([]string, 0)
+			for cancelledRows.Next() {
+				var runID string
+				if txErr = cancelledRows.Scan(&runID); txErr != nil {
+					cancelledRows.Close()
+					return "", txErr
+				}
+				cancelledRunIDs = append(cancelledRunIDs, runID)
+			}
+			txErr = cancelledRows.Err()
+			cancelledRows.Close()
+			if txErr != nil {
+				return "", txErr
+			}
+			if txErr = NewBudgetService(s.pool).SettleTerminalRunsTx(ctx, tx, cancelledRunIDs); txErr != nil {
+				return "", txErr
+			}
+			if _, txErr = tx.Exec(ctx, `
+				UPDATE agent_sessions s
+				   SET status = 'closed', last_active_at = now()
+				 WHERE s.agent_id = $1
+				   AND s.status IN ('active', 'rollover_pending')
+				   AND EXISTS (
+				       SELECT 1 FROM agent_runs r
+				        WHERE r.session_id = s.id
+				          AND r.agent_id = $1
+				          AND r.channel_id = $2
+				          AND r.thinking_node_id IS NULL
+				   )
+				   AND NOT EXISTS (
+				       SELECT 1 FROM agent_runs other
+				        WHERE other.session_id = s.id
+				          AND (other.thinking_node_id IS NOT NULL OR other.channel_id IS DISTINCT FROM $2)
+				   )
+			`, memberID, channelID); txErr != nil {
+				return "", txErr
+			}
+			if txErr = tx.Commit(ctx); txErr != nil {
+				return "", txErr
+			}
+			return memberType, nil
 		}
 		tx, txErr := s.pool.Begin(ctx)
 		if txErr != nil {
@@ -328,10 +401,9 @@ func (s *ChannelService) RemoveMember(ctx context.Context, channelID, requesterI
 		if _, txErr = tx.Exec(ctx, `
 			UPDATE tasks
 			   SET status = 'todo', claimer_id = NULL, updated_at = now()
-			 WHERE channel_id = $1
-			   AND claimer_id = $2
+			 WHERE claimer_id = $1
 			   AND status IN ('in_progress', 'in_review')
-		`, channelID, memberID); txErr != nil {
+		`, memberID); txErr != nil {
 			return "", txErr
 		}
 		cancelledRows, txErr := tx.Query(ctx, `
@@ -370,7 +442,7 @@ func (s *ChannelService) RemoveMember(ctx context.Context, channelID, requesterI
 		if _, txErr = tx.Exec(ctx, `
 			UPDATE agent_sessions
 			   SET status = 'closed', last_active_at = now()
-			 WHERE agent_id = $1 AND status = 'active'
+			 WHERE agent_id = $1 AND status IN ('active', 'rollover_pending')
 		`, memberID); txErr != nil {
 			return "", txErr
 		}

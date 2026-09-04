@@ -322,7 +322,7 @@ func automaticTaskRecoveryMode(failed retryableTaskRun) (string, bool) {
 	switch failed.FailureCode {
 	case agentFailureDaemonLost, agentFailureTimeout, agentFailureProviderTransient:
 		return taskRecoveryModeResumeSession, true
-	case agentFailureMissingVisibleResult:
+	case agentFailureMissingVisibleResult, agentFailureContextExhausted:
 		return taskRecoveryModeFreshSession, true
 	default:
 		return "", false
@@ -339,6 +339,8 @@ func taskFailureName(code string) string {
 		return "模型服务临时故障"
 	case agentFailureMissingVisibleResult:
 		return "没有最终交付"
+	case agentFailureContextExhausted:
+		return "上下文窗口耗尽"
 	case agentFailureConfiguration:
 		return "配置问题"
 	default:

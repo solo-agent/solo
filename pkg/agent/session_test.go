@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -484,6 +485,371 @@ func TestChannelSessionKeyIsolatesChannels(t *testing.T) {
 	}
 }
 
+func TestCloseScopedSessionKeepsOtherChannel(t *testing.T) {
+	backend := &scopedRecordingBackend{}
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	cfg := AgentConfig{AgentID: "agent-1", Name: "Agent", Provider: "claude"}
+	messages := []Message{{Role: RoleUser, Content: "hello"}}
+	firstKey := ChannelSessionKey("agent-1", "channel-a")
+	secondKey := ChannelSessionKey("agent-1", "channel-b")
+	for _, key := range []string{firstKey, secondKey} {
+		session, err := mgr.GetOrCreateScopedSession(context.Background(), key, "agent-1", cfg, ChannelContext{}, messages, nil, "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-session.Result
+		waitForScopedTurnRelease(t, mgr, key)
+	}
+	if err := mgr.CloseScopedSession(firstKey); err != nil {
+		t.Fatal(err)
+	}
+	if mgr.IsScopedActive(firstKey) || !mgr.IsScopedActive(secondKey) {
+		t.Fatalf("scoped cleanup active states = %v/%v", mgr.IsScopedActive(firstKey), mgr.IsScopedActive(secondKey))
+	}
+	backend.mu.Lock()
+	closes := backend.closeCount
+	backend.mu.Unlock()
+	if closes != 1 {
+		t.Fatalf("closed sessions = %d, want 1", closes)
+	}
+}
+
+func TestRetireAndStartFreshScopedSessionOnlyClosesExactProviderSession(t *testing.T) {
+	backend := &scopedRecordingBackend{}
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	sessionKey := ChannelSessionKey("agent-1", "channel-1")
+	cfg := AgentConfig{AgentID: "agent-1", Name: "Agent", Provider: "claude"}
+	messages := []Message{{Role: RoleUser, Content: "continue"}}
+
+	first, err := mgr.GetOrCreateScopedSession(context.Background(), sessionKey, "agent-1", cfg, ChannelContext{}, messages, nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-first.Result
+	waitForScopedTurnRelease(t, mgr, sessionKey)
+
+	second, err := mgr.RetireAndStartFreshScopedSession(context.Background(), sessionKey, first.SessionID, "agent-1", cfg, ChannelContext{}, messages, messages, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-second.Result
+	waitForScopedTurnRelease(t, mgr, sessionKey)
+	if second.SessionID == first.SessionID {
+		t.Fatalf("fresh session reused retired id %q", first.SessionID)
+	}
+
+	current, err := mgr.RetireAndStartFreshScopedSession(context.Background(), sessionKey, first.SessionID, "agent-1", cfg, ChannelContext{}, messages, messages, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-current.Result
+	if current.SessionID != second.SessionID {
+		t.Fatalf("stale retire closed newer session: got %q, want %q", current.SessionID, second.SessionID)
+	}
+	waitForScopedTurnRelease(t, mgr, sessionKey)
+	changed := cfg
+	changed.Model = "different-model"
+	if _, err := mgr.RetireAndStartFreshScopedSession(context.Background(), sessionKey, first.SessionID, "agent-1", changed, ChannelContext{}, messages, messages, nil); err == nil {
+		t.Fatal("stale retire with incompatible runtime context unexpectedly succeeded")
+	}
+	if !mgr.IsScopedActive(sessionKey) {
+		t.Fatal("stale retire closed newer incompatible session")
+	}
+
+	backend.mu.Lock()
+	starts, sends, closes := len(backend.startOptions), backend.sendCount, backend.closeCount
+	backend.mu.Unlock()
+	if starts != 2 || sends != 1 || closes != 1 {
+		t.Fatalf("starts/sends/closes = %d/%d/%d, want 2/1/1", starts, sends, closes)
+	}
+}
+
+func TestRetireAndStartFreshKeepsSessionWhenCloseFails(t *testing.T) {
+	backend := &scopedRecordingBackend{
+		closeErr:      errors.New("close failed"),
+		forceCloseErr: errors.New("force close failed"),
+	}
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	sessionKey := ChannelSessionKey("agent-1", "channel-1")
+	cfg := AgentConfig{AgentID: "agent-1", Name: "Agent", Provider: "claude"}
+	messages := []Message{{Role: RoleUser, Content: "continue"}}
+
+	first, err := mgr.GetOrCreateScopedSession(context.Background(), sessionKey, "agent-1", cfg, ChannelContext{}, messages, nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-first.Result
+	waitForScopedTurnRelease(t, mgr, sessionKey)
+
+	if _, err := mgr.RetireAndStartFreshScopedSession(context.Background(), sessionKey, first.SessionID, "agent-1", cfg, ChannelContext{}, messages, messages, nil); err == nil {
+		t.Fatal("retire unexpectedly succeeded when close and force close failed")
+	}
+	mgr.mu.RLock()
+	retained := mgr.sessions[sessionKey]
+	mgr.mu.RUnlock()
+	if retained == nil || entryProviderSessionID(retained) != first.SessionID {
+		t.Fatal("failed close removed the exact session from the pool")
+	}
+
+	backend.mu.Lock()
+	backend.closeErr = nil
+	backend.forceCloseErr = nil
+	backend.mu.Unlock()
+	second, err := mgr.RetireAndStartFreshScopedSession(context.Background(), sessionKey, first.SessionID, "agent-1", cfg, ChannelContext{}, messages, messages, nil)
+	if err != nil {
+		t.Fatalf("retry retire: %v", err)
+	}
+	<-second.Result
+	if second.SessionID == first.SessionID {
+		t.Fatalf("retry reused retired session %q", first.SessionID)
+	}
+}
+
+func TestGetOrCreateReturnsExactSessionOnSendFailure(t *testing.T) {
+	backend := &scopedRecordingBackend{}
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	sessionKey := ChannelSessionKey("agent-1", "channel-1")
+	cfg := AgentConfig{AgentID: "agent-1", Name: "Agent", Provider: "codex"}
+	messages := []Message{{Role: RoleUser, Content: "continue"}}
+	first, err := mgr.GetOrCreateScopedSession(context.Background(), sessionKey, "agent-1", cfg, ChannelContext{}, messages, nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-first.Result
+	waitForScopedTurnRelease(t, mgr, sessionKey)
+
+	backend.mu.Lock()
+	backend.sendErr = errors.New("context_length_exceeded")
+	backend.mu.Unlock()
+	failed, err := mgr.GetOrCreateScopedSession(context.Background(), sessionKey, "agent-1", cfg, ChannelContext{}, messages, nil, "stale-server-session", nil)
+	if err == nil || failed == nil || failed.SessionID != first.SessionID {
+		t.Fatalf("failed session/error = %v/%v, want exact %q", failed, err, first.SessionID)
+	}
+}
+
+func TestRetireAndStartFreshRejectsRetiredProviderID(t *testing.T) {
+	backend := &scopedRecordingBackend{fixedSessionID: "retired-session"}
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	sessionKey := ChannelSessionKey("agent-1", "channel-1")
+	_, err := mgr.RetireAndStartFreshScopedSession(
+		context.Background(), sessionKey, "retired-session", "agent-1",
+		AgentConfig{AgentID: "agent-1", Name: "Agent", Provider: "claude"},
+		ChannelContext{}, []Message{{Role: RoleUser, Content: "continue"}}, nil, nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "returned retired provider session id") {
+		t.Fatalf("error = %v", err)
+	}
+	if mgr.IsScopedActive(sessionKey) {
+		t.Fatal("failed fresh session remained in the pool")
+	}
+}
+
+func TestRejectedFreshSessionStaysTrackedWhenCloseFails(t *testing.T) {
+	backend := &scopedRecordingBackend{
+		fixedSessionID: "retired-session",
+		closeErr:       errors.New("close failed"),
+		forceCloseErr:  errors.New("force close failed"),
+	}
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	sessionKey := ChannelSessionKey("agent-1", "channel-1")
+	_, err := mgr.RetireAndStartFreshScopedSession(
+		context.Background(), sessionKey, "retired-session", "agent-1",
+		AgentConfig{AgentID: "agent-1", Name: "Agent", Provider: "claude"},
+		ChannelContext{}, []Message{{Role: RoleUser, Content: "continue"}}, nil, nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "force close failed") {
+		t.Fatalf("error = %v", err)
+	}
+	mgr.mu.RLock()
+	retained := mgr.sessions[sessionKey]
+	mgr.mu.RUnlock()
+	if retained == nil || entryProviderSessionID(retained) != "retired-session" {
+		t.Fatal("unclosed rejected session was removed from the pool")
+	}
+}
+
+func TestEvaluateContextTurnRolloverPolicy(t *testing.T) {
+	tokens := func(value int64) *int64 { return &value }
+	compaction := func(before, after int64, accuracy string) ContextEvent {
+		return ContextEvent{Type: "compaction_end", BeforeTokens: tokens(before), AfterTokens: tokens(after), Accuracy: accuracy}
+	}
+	snapshot := func(used, window int64, accuracy string) *ContextEvent {
+		return &ContextEvent{Type: "usage", UsedTokens: tokens(used), WindowTokens: tokens(window), Accuracy: accuracy}
+	}
+
+	t.Run("two ineffective compactions", func(t *testing.T) {
+		state, first := evaluateContextTurn(contextHealthState{}, ContextTurnObservation{Compactions: []ContextEvent{compaction(100, 95, "reported")}})
+		if first.Requested {
+			t.Fatal("first ineffective compaction requested rollover")
+		}
+		_, second := evaluateContextTurn(state, ContextTurnObservation{Compactions: []ContextEvent{compaction(100, 91, "reported")}})
+		if !second.Requested || second.Reason != "ineffective_compaction" {
+			t.Fatalf("second recommendation = %+v", second)
+		}
+	})
+
+	t.Run("unknown interrupts compaction streak", func(t *testing.T) {
+		state, _ := evaluateContextTurn(contextHealthState{}, ContextTurnObservation{Compactions: []ContextEvent{compaction(100, 95, "reported")}})
+		state, _ = evaluateContextTurn(state, ContextTurnObservation{Compactions: []ContextEvent{{Type: "compaction_end", Accuracy: "reported"}}})
+		_, got := evaluateContextTurn(state, ContextTurnObservation{Compactions: []ContextEvent{compaction(100, 95, "reported")}})
+		if got.Requested {
+			t.Fatal("unknown compaction did not interrupt streak")
+		}
+	})
+
+	t.Run("reported pressure needs two turns", func(t *testing.T) {
+		state, first := evaluateContextTurn(contextHealthState{}, ContextTurnObservation{FinalSnapshot: snapshot(90, 100, "reported")})
+		if first.Requested {
+			t.Fatal("first pressure turn requested rollover")
+		}
+		_, second := evaluateContextTurn(state, ContextTurnObservation{FinalSnapshot: snapshot(95, 100, "snapshot")})
+		if !second.Requested || second.Reason != "persistent_context_pressure" {
+			t.Fatalf("second recommendation = %+v", second)
+		}
+	})
+
+	t.Run("estimated pressure needs three turns and unknown interrupts", func(t *testing.T) {
+		state, _ := evaluateContextTurn(contextHealthState{}, ContextTurnObservation{FinalSnapshot: snapshot(95, 100, "estimated")})
+		state, second := evaluateContextTurn(state, ContextTurnObservation{FinalSnapshot: snapshot(95, 100, "estimated")})
+		if second.Requested {
+			t.Fatal("second estimated pressure turn requested rollover")
+		}
+		state, _ = evaluateContextTurn(state, ContextTurnObservation{})
+		state, _ = evaluateContextTurn(state, ContextTurnObservation{FinalSnapshot: snapshot(95, 100, "estimated")})
+		state, _ = evaluateContextTurn(state, ContextTurnObservation{FinalSnapshot: snapshot(95, 100, "estimated")})
+		_, third := evaluateContextTurn(state, ContextTurnObservation{FinalSnapshot: snapshot(95, 100, "estimated")})
+		if !third.Requested {
+			t.Fatal("third consecutive estimated pressure turn did not request rollover")
+		}
+	})
+
+	t.Run("post compaction pressure requests immediately", func(t *testing.T) {
+		event := compaction(100, 95, "reported")
+		event.WindowTokens = tokens(100)
+		_, got := evaluateContextTurn(contextHealthState{}, ContextTurnObservation{Compactions: []ContextEvent{event}})
+		if !got.Requested || got.Reason != "post_compaction_pressure" {
+			t.Fatalf("recommendation = %+v", got)
+		}
+	})
+
+	t.Run("effective compaction resets streak", func(t *testing.T) {
+		state, _ := evaluateContextTurn(contextHealthState{}, ContextTurnObservation{Compactions: []ContextEvent{compaction(100, 95, "reported")}})
+		state, _ = evaluateContextTurn(state, ContextTurnObservation{Compactions: []ContextEvent{compaction(100, 90, "reported")}})
+		_, got := evaluateContextTurn(state, ContextTurnObservation{Compactions: []ContextEvent{compaction(100, 95, "reported")}})
+		if got.Requested {
+			t.Fatal("effective compaction did not reset streak")
+		}
+	})
+}
+
+func TestContextHealthSurvivesIdleProcessResume(t *testing.T) {
+	backend := &scopedRecordingBackend{}
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	sessionKey := ChannelSessionKey("agent-1", "channel-1")
+	cfg := AgentConfig{AgentID: "agent-1", Name: "Agent", Provider: "claude"}
+	first, err := mgr.GetOrCreateScopedSession(context.Background(), sessionKey, "agent-1", cfg, ChannelContext{}, []Message{{Role: RoleUser, Content: "first"}}, nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-first.Result
+	waitForScopedTurnRelease(t, mgr, sessionKey)
+	used, window := int64(95), int64(100)
+	observation := ContextTurnObservation{FinalSnapshot: &ContextEvent{
+		Type: "usage", UsedTokens: &used, WindowTokens: &window, Accuracy: "reported",
+	}}
+	if got := mgr.FinalizeContextTurn(sessionKey, first, observation); got.Requested {
+		t.Fatal("first high-pressure turn requested rollover")
+	}
+
+	mgr.mu.RLock()
+	entry := mgr.sessions[sessionKey]
+	mgr.mu.RUnlock()
+	entry.mu.Lock()
+	entry.LastActive = time.Now().Add(-time.Hour)
+	entry.mu.Unlock()
+	if slept, err := mgr.SleepIdleAgentSessions(time.Now().Add(-time.Minute)); err != nil || slept != 1 {
+		t.Fatalf("SleepIdleAgentSessions = %d, %v", slept, err)
+	}
+	resumed, err := mgr.GetOrCreateScopedSession(context.Background(), sessionKey, "agent-1", cfg, ChannelContext{}, []Message{{Role: RoleUser, Content: "second"}}, nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-resumed.Result
+	if got := mgr.FinalizeContextTurn(sessionKey, resumed, observation); !got.Requested || got.Reason != "persistent_context_pressure" {
+		t.Fatalf("resumed recommendation = %+v", got)
+	}
+}
+
+func TestFinalizeContextTurnRejectsLateTurnAfterSessionReplacement(t *testing.T) {
+	mgr := NewAgentSessionManager(nil, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	sessionKey := ChannelSessionKey("agent-1", "channel-1")
+	oldTurn := &PersistentSession{SessionID: "old"}
+	newTurn := &PersistentSession{SessionID: "new"}
+	mgr.sessions[sessionKey] = &agentSessionEntry{SessionKey: sessionKey, AgentID: "agent-1", Session: oldTurn}
+
+	replaced := make(chan struct{})
+	go func() {
+		mgr.mu.Lock()
+		mgr.sessions[sessionKey] = &agentSessionEntry{SessionKey: sessionKey, AgentID: "agent-1", Session: newTurn}
+		mgr.mu.Unlock()
+		close(replaced)
+	}()
+	<-replaced
+
+	used, window := int64(95), int64(100)
+	observation := ContextTurnObservation{FinalSnapshot: &ContextEvent{
+		Type: "usage", UsedTokens: &used, WindowTokens: &window, Accuracy: "reported",
+	}}
+	if got := mgr.FinalizeContextTurn(sessionKey, oldTurn, observation); got.Requested {
+		t.Fatalf("late old turn recommendation = %+v", got)
+	}
+	if got := mgr.FinalizeContextTurn(sessionKey, newTurn, observation); got.Requested {
+		t.Fatalf("replacement inherited stale pressure: %+v", got)
+	}
+
+	mgr.mu.RLock()
+	entry := mgr.sessions[sessionKey]
+	mgr.mu.RUnlock()
+	entry.mu.RLock()
+	pressure := entry.contextHealth.highPressureTurns
+	entry.mu.RUnlock()
+	if pressure != 1 {
+		t.Fatalf("replacement high-pressure turns = %d, want 1", pressure)
+	}
+}
+
+func TestFinalizeContextTurnAcceptsPreviousTurnFromSameProviderSession(t *testing.T) {
+	backend := &scopedRecordingBackend{}
+	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
+	sessionKey := ChannelSessionKey("agent-1", "channel-1")
+	cfg := AgentConfig{AgentID: "agent-1", Name: "Agent", Provider: "codex"}
+	messages := []Message{{Role: RoleUser, Content: "continue"}}
+	first, err := mgr.GetOrCreateScopedSession(context.Background(), sessionKey, "agent-1", cfg, ChannelContext{}, messages, nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-first.Result
+	second, err := mgr.GetOrCreateScopedSession(context.Background(), sessionKey, "agent-1", cfg, ChannelContext{}, messages, nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second || first.SessionID != second.SessionID {
+		t.Fatalf("turns/session IDs = %p/%p %q/%q, want new turn on same provider session", first, second, first.SessionID, second.SessionID)
+	}
+
+	used, window := int64(95), int64(100)
+	observation := ContextTurnObservation{FinalSnapshot: &ContextEvent{
+		Type: "usage", UsedTokens: &used, WindowTokens: &window, Accuracy: "reported",
+	}}
+	if got := mgr.FinalizeContextTurn(sessionKey, first, observation); got.Requested {
+		t.Fatalf("first turn recommendation = %+v", got)
+	}
+	if got := mgr.FinalizeContextTurn(sessionKey, second, observation); !got.Requested {
+		t.Fatalf("second turn recommendation = %+v, want rollover", got)
+	}
+	<-second.Result
+}
+
 func TestSessionManagerExposesRuntimeOwnedThinkingScopeWhileTurnIsActive(t *testing.T) {
 	backend := newEarlyReturnBackend()
 	mgr := NewAgentSessionManager(backend, NewWorkspaceManager(t.TempDir()), nil, slog.Default())
@@ -592,6 +958,10 @@ type scopedRecordingBackend struct {
 	forceCloseCount int
 	closeCount      int
 	startOptions    []ExecuteOptions
+	fixedSessionID  string
+	sendErr         error
+	closeErr        error
+	forceCloseErr   error
 }
 
 func (b *scopedRecordingBackend) Name() string { return "scoped-recording" }
@@ -609,29 +979,35 @@ func (b *scopedRecordingBackend) Start(_ context.Context, req *ExecuteRequest, o
 	if id == "" {
 		id = "session-" + fmt.Sprint(len(b.startAgentIDs))
 	}
+	if b.fixedSessionID != "" {
+		id = b.fixedSessionID
+	}
 	b.mu.Unlock()
 	return completedPersistentSession(id), nil
 }
 
 func (b *scopedRecordingBackend) Send(_ context.Context, previous *PersistentSession, _ []Message) (*PersistentSession, error) {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.sendCount++
-	b.mu.Unlock()
+	if b.sendErr != nil {
+		return nil, b.sendErr
+	}
 	return completedPersistentSession(previous.SessionID), nil
 }
 
 func (b *scopedRecordingBackend) Close(*PersistentSession) error {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.closeCount++
-	b.mu.Unlock()
-	return nil
+	return b.closeErr
 }
 
 func (b *scopedRecordingBackend) ForceClose(*PersistentSession) error {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.forceCloseCount++
-	b.mu.Unlock()
-	return nil
+	return b.forceCloseErr
 }
 
 func completedPersistentSession(id string) *PersistentSession {

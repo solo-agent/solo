@@ -685,7 +685,7 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 	if _, err = tx.Exec(r.Context(), `UPDATE agents a SET is_active=false,updated_at=now() FROM channels c WHERE a.home_channel_id=c.id AND c.workspace_id=$1`, workspaceID); err == nil {
-		_, err = tx.Exec(r.Context(), `UPDATE agent_sessions s SET status='closed',last_active_at=now() FROM agents a JOIN channels c ON c.id=a.home_channel_id WHERE s.agent_id=a.id AND c.workspace_id=$1 AND s.status='active'`, workspaceID)
+		_, err = tx.Exec(r.Context(), `UPDATE agent_sessions s SET status='closed',last_active_at=now() FROM agents a JOIN channels c ON c.id=a.home_channel_id WHERE s.agent_id=a.id AND c.workspace_id=$1 AND s.status IN ('active','rollover_pending')`, workspaceID)
 	}
 	if err == nil {
 		_, err = tx.Exec(r.Context(), `UPDATE computers SET agent_ids=array(SELECT unnest(agent_ids) EXCEPT SELECT unnest($1::uuid[])),updated_at=now() WHERE agent_ids && $1::uuid[]`, agentIDs)

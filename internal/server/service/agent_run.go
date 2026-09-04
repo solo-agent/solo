@@ -49,25 +49,35 @@ const (
 )
 
 const (
-	AgentRunEventUserMessageReceived   = "user_message_received"
-	AgentRunEventRunStarted            = "run_started"
-	AgentRunEventBackendStarted        = "backend_started"
-	AgentRunEventThinking              = "thinking"
-	AgentRunEventActivity              = "activity"
-	AgentRunEventToolStarted           = "tool_started"
-	AgentRunEventToolFinished          = "tool_finished"
-	AgentRunEventAssistantMessage      = "assistant_message"
-	AgentRunEventVisibleMessageSent    = "visible_message_sent"
-	AgentRunEventVisibleMessageHeld    = "visible_message_held"
-	AgentRunEventResultReminder        = "result_reminder"
-	AgentRunEventTaskLinked            = "task_linked"
-	AgentRunEventTaskReassigned        = "task_reassigned"
-	AgentRunEventTaskRecoveryScheduled = "task_recovery_scheduled"
-	AgentRunEventTaskRecoveryBlocked   = "task_recovery_blocked"
-	AgentRunEventTaskRetryExhausted    = "task_retry_exhausted"
-	AgentRunEventUsage                 = "usage"
-	AgentRunEventDone                  = "done"
-	AgentRunEventError                 = "error"
+	AgentRunEventUserMessageReceived      = "user_message_received"
+	AgentRunEventRunStarted               = "run_started"
+	AgentRunEventBackendStarted           = "backend_started"
+	AgentRunEventThinking                 = "thinking"
+	AgentRunEventActivity                 = "activity"
+	AgentRunEventToolStarted              = "tool_started"
+	AgentRunEventToolFinished             = "tool_finished"
+	AgentRunEventAssistantMessage         = "assistant_message"
+	AgentRunEventVisibleMessageSent       = "visible_message_sent"
+	AgentRunEventVisibleMessageHeld       = "visible_message_held"
+	AgentRunEventResultReminder           = "result_reminder"
+	AgentRunEventTaskLinked               = "task_linked"
+	AgentRunEventTaskReassigned           = "task_reassigned"
+	AgentRunEventTaskRecoveryScheduled    = "task_recovery_scheduled"
+	AgentRunEventTaskRecoveryBlocked      = "task_recovery_blocked"
+	AgentRunEventTaskRetryExhausted       = "task_retry_exhausted"
+	AgentRunEventUsage                    = "usage"
+	AgentRunEventContextSnapshot          = "context_snapshot"
+	AgentRunEventContextCompaction        = "context_compaction"
+	AgentRunEventSessionRolloverRequested = "session_rollover_requested"
+	AgentRunEventSessionRolloverCompleted = "session_rollover_completed"
+	AgentRunEventDone                     = "done"
+	AgentRunEventError                    = "error"
+)
+
+const (
+	AgentSessionStatusActive          = "active"
+	AgentSessionStatusRolloverPending = "rollover_pending"
+	AgentSessionStatusClosed          = "closed"
 )
 
 const agentRunEventTextLimit = 2048
@@ -81,6 +91,7 @@ var nonPrimaryTaskRunStatuses = []string{
 var (
 	ErrAmbiguousAgentRunScope  = errors.New("multiple executing runs for one Agent and channel")
 	ErrAgentRunAlreadyFinished = errors.New("agent run already finished")
+	ErrSessionRolloverMismatch = errors.New("session rollover state mismatch")
 )
 
 type AgentSession struct {
@@ -96,34 +107,35 @@ type AgentSession struct {
 }
 
 type AgentRun struct {
-	ID               string          `json:"id"`
-	AgentID          string          `json:"agent_id"`
-	AgentName        string          `json:"agent_name,omitempty"`
-	SessionID        string          `json:"session_id,omitempty"`
-	TriggerType      string          `json:"trigger_type"`
-	TriggerMessageID string          `json:"trigger_message_id,omitempty"`
-	ChannelID        string          `json:"channel_id,omitempty"`
-	ThreadID         string          `json:"thread_id,omitempty"`
-	ThinkingNodeID   string          `json:"thinking_node_id,omitempty"`
-	Status           AgentRunStatus  `json:"status"`
-	ActivityText     string          `json:"activity_text"`
-	ToolName         string          `json:"tool_name,omitempty"`
-	ToolInputSummary string          `json:"tool_input_summary,omitempty"`
-	Source           string          `json:"source,omitempty"`
-	TranscriptPath   string          `json:"transcript_path,omitempty"`
-	UsageJSON        json.RawMessage `json:"usage_json"`
-	StartedAt        time.Time       `json:"started_at"`
-	BackendStartedAt *time.Time      `json:"backend_started_at,omitempty"`
-	UpdatedAt        time.Time       `json:"updated_at"`
-	FinishedAt       *time.Time      `json:"finished_at,omitempty"`
-	BudgetState      string          `json:"budget_state,omitempty"`
-	ReservedTokens   int64           `json:"reserved_tokens"`
-	ActualTokens     *int64          `json:"actual_tokens,omitempty"`
-	InputTokens      int64           `json:"input_tokens"`
-	OutputTokens     int64           `json:"output_tokens"`
-	CacheReadTokens  int64           `json:"cache_read_tokens"`
-	CacheWriteTokens int64           `json:"cache_write_tokens"`
-	TokenOverrun     bool            `json:"token_overrun"`
+	ID                    string          `json:"id"`
+	AgentID               string          `json:"agent_id"`
+	AgentName             string          `json:"agent_name,omitempty"`
+	SessionID             string          `json:"session_id,omitempty"`
+	RolloverFromSessionID string          `json:"rollover_from_session_id,omitempty"`
+	TriggerType           string          `json:"trigger_type"`
+	TriggerMessageID      string          `json:"trigger_message_id,omitempty"`
+	ChannelID             string          `json:"channel_id,omitempty"`
+	ThreadID              string          `json:"thread_id,omitempty"`
+	ThinkingNodeID        string          `json:"thinking_node_id,omitempty"`
+	Status                AgentRunStatus  `json:"status"`
+	ActivityText          string          `json:"activity_text"`
+	ToolName              string          `json:"tool_name,omitempty"`
+	ToolInputSummary      string          `json:"tool_input_summary,omitempty"`
+	Source                string          `json:"source,omitempty"`
+	TranscriptPath        string          `json:"transcript_path,omitempty"`
+	UsageJSON             json.RawMessage `json:"usage_json"`
+	StartedAt             time.Time       `json:"started_at"`
+	BackendStartedAt      *time.Time      `json:"backend_started_at,omitempty"`
+	UpdatedAt             time.Time       `json:"updated_at"`
+	FinishedAt            *time.Time      `json:"finished_at,omitempty"`
+	BudgetState           string          `json:"budget_state,omitempty"`
+	ReservedTokens        int64           `json:"reserved_tokens"`
+	ActualTokens          *int64          `json:"actual_tokens,omitempty"`
+	InputTokens           int64           `json:"input_tokens"`
+	OutputTokens          int64           `json:"output_tokens"`
+	CacheReadTokens       int64           `json:"cache_read_tokens"`
+	CacheWriteTokens      int64           `json:"cache_write_tokens"`
+	TokenOverrun          bool            `json:"token_overrun"`
 }
 
 type AgentRunEvent struct {
@@ -169,24 +181,25 @@ type UpdateSessionMetadataInput struct {
 }
 
 type StartRunInput struct {
-	AgentID          string
-	DaemonID         string
-	SessionID        string
-	TriggerType      string
-	TriggerMessageID string
-	ChannelID        string
-	ThreadID         string
-	ThinkingNodeID   string
-	Status           AgentRunStatus
-	ActivityText     string
-	ToolName         string
-	ToolInputSummary string
-	Source           string
-	Usage            any
-	FreshnessSeenSeq int64
-	WakeFirstSeq     int64
-	WakeLatestSeq    int64
-	WakeVisible      bool
+	AgentID               string
+	DaemonID              string
+	SessionID             string
+	RolloverFromSessionID string
+	TriggerType           string
+	TriggerMessageID      string
+	ChannelID             string
+	ThreadID              string
+	ThinkingNodeID        string
+	Status                AgentRunStatus
+	ActivityText          string
+	ToolName              string
+	ToolInputSummary      string
+	Source                string
+	Usage                 any
+	FreshnessSeenSeq      int64
+	WakeFirstSeq          int64
+	WakeLatestSeq         int64
+	WakeVisible           bool
 }
 
 type AppendRunEventInput struct {
@@ -218,6 +231,54 @@ type BindRunSessionInput struct {
 	ThinkingNodeID string
 }
 
+type BindProviderSessionInput struct {
+	RunID             string
+	AgentID           string
+	Provider          string
+	ExternalSessionID string
+	TranscriptPath    string
+	Title             string
+	ThinkingNodeID    string
+}
+
+type BindProviderSessionResult struct {
+	Session       *AgentSession
+	Run           *AgentRun
+	RolloverEvent *AgentRunEvent
+}
+
+type RequestSessionRolloverInput struct {
+	RunID      string
+	Reason     string
+	Continuity string
+	Payload    map[string]any
+}
+
+type RequestSessionRolloverResult struct {
+	SessionID string
+	Event     *AgentRunEvent
+	Created   bool
+}
+
+type ResolveSessionDispatchInput struct {
+	RunID                   string
+	AgentID                 string
+	ChannelID               string
+	Provider                string
+	ThinkingNodeID          string
+	ResumeSessionID         string
+	ForceFreshSession       bool
+	SupportsContextRollover bool
+}
+
+type SessionDispatch struct {
+	ResumeSessionID       string
+	ForceFreshSession     bool
+	RetireSessionID       string
+	RolloverFromSessionID string
+	ColdStart             bool
+}
+
 type LinkRunTaskInput struct {
 	RunID      string
 	TaskID     string
@@ -237,6 +298,10 @@ type AgentRunService struct {
 	dm   *DaemonManager
 }
 
+type agentRunRowQuerier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
 func NewAgentRunService(pool *pgxpool.Pool, daemonManagers ...*DaemonManager) *AgentRunService {
 	svc := &AgentRunService{pool: pool}
 	if len(daemonManagers) > 0 {
@@ -246,6 +311,10 @@ func NewAgentRunService(pool *pgxpool.Pool, daemonManagers ...*DaemonManager) *A
 }
 
 func (s *AgentRunService) UpsertSession(ctx context.Context, input UpsertSessionInput) (*AgentSession, error) {
+	return upsertSession(ctx, s.pool, input)
+}
+
+func upsertSession(ctx context.Context, db agentRunRowQuerier, input UpsertSessionInput) (*AgentSession, error) {
 	if input.AgentID == "" {
 		return nil, fmt.Errorf("agent_id is required")
 	}
@@ -262,7 +331,7 @@ func (s *AgentRunService) UpsertSession(ctx context.Context, input UpsertSession
 		return nil, fmt.Errorf("external_session_id or transcript_path is required")
 	}
 
-	return scanAgentSession(s.pool.QueryRow(ctx,
+	return scanAgentSession(db.QueryRow(ctx,
 		`INSERT INTO agent_sessions (id, agent_id, provider, external_session_id, transcript_path, title, last_active_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, now())
 		 ON CONFLICT (agent_id, provider, external_session_id)
@@ -270,7 +339,6 @@ func (s *AgentRunService) UpsertSession(ctx context.Context, input UpsertSession
 		 DO UPDATE SET
 		   transcript_path = COALESCE(EXCLUDED.transcript_path, agent_sessions.transcript_path),
 		   title = COALESCE(EXCLUDED.title, agent_sessions.title),
-		   status = 'active',
 		   last_active_at = now()
 		 RETURNING id::text, agent_id::text, provider, COALESCE(external_session_id, ''),
 		       COALESCE(transcript_path, ''), COALESCE(title, ''), status, started_at, last_active_at`,
@@ -350,18 +418,18 @@ func (s *AgentRunService) startRunTx(ctx context.Context, tx pgx.Tx, input Start
 	runID := uuid.NewString()
 	run, err := scanAgentRun(tx.QueryRow(ctx,
 		`INSERT INTO agent_runs (
-		   id, agent_id, daemon_id, session_id, trigger_type, trigger_message_id, channel_id, thread_id, thinking_node_id,
+		   id, agent_id, daemon_id, session_id, rollover_from_session_id, trigger_type, trigger_message_id, channel_id, thread_id, thinking_node_id,
 		   status, activity_text, tool_name, tool_input_summary, source, usage_json, freshness_seen_seq,
 		   wake_first_message_seq, wake_latest_message_seq, wake_requires_visible_result
-		 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+		 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		 RETURNING id::text, agent_id::text,
 		       COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
-		       COALESCE(session_id::text, ''), trigger_type,
+		       COALESCE(session_id::text, ''), COALESCE(rollover_from_session_id::text, ''), trigger_type,
 		       COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
 		       COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		       COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
 		       started_at, backend_started_at, updated_at, finished_at`,
-		runID, input.AgentID, nullableStr(input.DaemonID), nullableUUID(input.SessionID), input.TriggerType,
+		runID, input.AgentID, nullableStr(input.DaemonID), nullableUUID(input.SessionID), nullableUUID(input.RolloverFromSessionID), input.TriggerType,
 		nullableUUID(input.TriggerMessageID), nullableUUID(input.ChannelID), nullableUUID(input.ThreadID), nullableUUID(input.ThinkingNodeID),
 		string(input.Status), input.ActivityText, nullableStr(input.ToolName),
 		nullableStr(input.ToolInputSummary), nullableStr(input.Source), usage, nullableInt64(input.FreshnessSeenSeq),
@@ -399,7 +467,7 @@ func (s *AgentRunService) BindRunSession(ctx context.Context, input BindRunSessi
 		    )
 		  RETURNING id::text, agent_id::text,
 		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
-		        COALESCE(session_id::text, ''), trigger_type,
+		        COALESCE(session_id::text, ''), COALESCE(rollover_from_session_id::text, ''), trigger_type,
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
 		        COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''),
@@ -433,6 +501,582 @@ func (s *AgentRunService) BindRunSession(ctx context.Context, input BindRunSessi
 	return run, nil
 }
 
+// BindProviderSession atomically records the provider Session returned by a
+// Run. For rollover Runs the same transaction also retires the exact pending
+// predecessor and records the completion event.
+func (s *AgentRunService) BindProviderSession(ctx context.Context, input BindProviderSessionInput) (*BindProviderSessionResult, error) {
+	if input.RunID == "" {
+		return nil, fmt.Errorf("run_id is required")
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if err := lockAgentRun(ctx, tx, input.RunID); err != nil {
+		return nil, err
+	}
+
+	var runAgentID, runChannelID, runThinkingNodeID, rolloverFromID, currentSessionID, runStatus string
+	var runFinished bool
+	if err := tx.QueryRow(ctx, `
+		SELECT agent_id::text, COALESCE(channel_id::text, ''), COALESCE(thinking_node_id::text, ''),
+		       COALESCE(rollover_from_session_id::text, ''), COALESCE(session_id::text, ''), status,
+		       finished_at IS NOT NULL
+		  FROM agent_runs WHERE id = $1`, input.RunID,
+	).Scan(&runAgentID, &runChannelID, &runThinkingNodeID, &rolloverFromID, &currentSessionID, &runStatus, &runFinished); err != nil {
+		return nil, err
+	}
+	if runFinished || !isActiveAgentRunStatus(AgentRunStatus(runStatus)) {
+		return nil, ErrAgentRunAlreadyFinished
+	}
+	if input.AgentID != "" && input.AgentID != runAgentID {
+		return nil, fmt.Errorf("run and session owner mismatch")
+	}
+	if input.ThinkingNodeID != "" && input.ThinkingNodeID != runThinkingNodeID {
+		return nil, fmt.Errorf("run and thinking node mismatch")
+	}
+
+	oldStatus := ""
+	oldExternalID := ""
+	if rolloverFromID != "" {
+		if err := tx.QueryRow(ctx, `
+			SELECT status, COALESCE(external_session_id, '')
+			  FROM agent_sessions
+			 WHERE id = $1 AND agent_id = $2 AND provider = $3
+			 FOR UPDATE`, rolloverFromID, runAgentID, input.Provider,
+		).Scan(&oldStatus, &oldExternalID); err != nil {
+			return nil, fmt.Errorf("%w: predecessor is missing or has another owner/provider", ErrSessionRolloverMismatch)
+		}
+	}
+
+	session, err := upsertSession(ctx, tx, UpsertSessionInput{
+		AgentID:           runAgentID,
+		Provider:          input.Provider,
+		ExternalSessionID: input.ExternalSessionID,
+		TranscriptPath:    input.TranscriptPath,
+		Title:             input.Title,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if currentSessionID != "" && currentSessionID != rolloverFromID && currentSessionID != session.ID {
+		return nil, fmt.Errorf("%w: Run is already bound to another provider session", ErrSessionRolloverMismatch)
+	}
+	replayedBinding := currentSessionID == session.ID
+	convergedRollover := false
+	if rolloverFromID != "" {
+		if session.ID == rolloverFromID || (oldExternalID != "" && session.ExternalSessionID == oldExternalID) {
+			return nil, fmt.Errorf("%w: fresh provider session reused the retired id", ErrSessionRolloverMismatch)
+		}
+		if session.Status != AgentSessionStatusActive && !replayedBinding {
+			return nil, fmt.Errorf("%w: replacement session is %s", ErrSessionRolloverMismatch, session.Status)
+		}
+		if oldStatus == AgentSessionStatusClosed && !replayedBinding && (currentSessionID == "" || currentSessionID == rolloverFromID) {
+			winnerID, _, err := findActiveRolloverReplacementTx(ctx, tx, ResolveSessionDispatchInput{
+				RunID: input.RunID, AgentID: runAgentID, ChannelID: runChannelID, Provider: input.Provider,
+			}, rolloverFromID)
+			if err != nil {
+				return nil, err
+			}
+			convergedRollover = winnerID == session.ID
+		}
+		if oldStatus != AgentSessionStatusRolloverPending && !(oldStatus == AgentSessionStatusClosed && (replayedBinding || convergedRollover)) {
+			return nil, fmt.Errorf("%w: predecessor is %s", ErrSessionRolloverMismatch, oldStatus)
+		}
+	}
+
+	run, err := scanAgentRun(tx.QueryRow(ctx,
+		`UPDATE agent_runs
+		    SET session_id = $2,
+		        transcript_path = COALESCE($3, transcript_path),
+		        rollover_from_session_id = CASE WHEN $5 THEN NULL ELSE rollover_from_session_id END,
+		        updated_at = now()
+		  WHERE id = $1
+		    AND agent_id = $4
+		  RETURNING id::text, agent_id::text,
+		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
+		        COALESCE(session_id::text, ''), COALESCE(rollover_from_session_id::text, ''), trigger_type,
+		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
+		        COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
+		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''),
+		        usage_json, started_at, backend_started_at, updated_at, finished_at`,
+		input.RunID, session.ID, nullableStr(input.TranscriptPath), runAgentID, convergedRollover,
+	))
+	if err != nil {
+		return nil, err
+	}
+	if runThinkingNodeID != "" {
+		tag, err := tx.Exec(ctx, `
+			UPDATE thinking_nodes
+			   SET agent_session_id = $1, updated_at = now()
+			 WHERE id = $2 AND agent_id = $3`, session.ID, runThinkingNodeID, runAgentID)
+		if err != nil {
+			return nil, err
+		}
+		if tag.RowsAffected() != 1 {
+			return nil, fmt.Errorf("thinking node session owner mismatch")
+		}
+	}
+
+	var rolloverEvent *AgentRunEvent
+	if rolloverFromID != "" && !convergedRollover {
+		if _, err := tx.Exec(ctx, `
+			UPDATE agent_sessions
+			   SET status = $2, last_active_at = now()
+			 WHERE id = $1 AND status = $3`, rolloverFromID, AgentSessionStatusClosed, AgentSessionStatusRolloverPending); err != nil {
+			return nil, err
+		}
+		var exists bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM agent_run_events
+				 WHERE run_id = $1 AND type = $2
+			)`, input.RunID, AgentRunEventSessionRolloverCompleted,
+		).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if !exists {
+			rolloverEvent, err = appendRunEventTx(ctx, tx, AppendRunEventInput{
+				RunID:   input.RunID,
+				Type:    AgentRunEventSessionRolloverCompleted,
+				Message: "session rollover completed",
+				Payload: map[string]any{
+					"provider":        input.Provider,
+					"from_session_id": rolloverFromID,
+					"to_session_id":   session.ID,
+					"reason":          "rollover_completed",
+				},
+			})
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &BindProviderSessionResult{Session: session, Run: run, RolloverEvent: rolloverEvent}, nil
+}
+
+// RequestSessionRollover commits one monotonic active -> rollover_pending
+// transition for the exact Session used by the completed Run.
+func (s *AgentRunService) RequestSessionRollover(ctx context.Context, input RequestSessionRolloverInput) (*RequestSessionRolloverResult, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if err := lockAgentRun(ctx, tx, input.RunID); err != nil {
+		return nil, err
+	}
+	var sessionID, agentID, thinkingNodeID string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(session_id::text, ''), agent_id::text, COALESCE(thinking_node_id::text, '')
+		  FROM agent_runs WHERE id = $1`, input.RunID,
+	).Scan(&sessionID, &agentID, &thinkingNodeID); err != nil {
+		return nil, err
+	}
+	if sessionID == "" || thinkingNodeID != "" {
+		return nil, fmt.Errorf("%w: Run has no eligible provider session", ErrSessionRolloverMismatch)
+	}
+	var status, provider string
+	if err := tx.QueryRow(ctx, `
+		SELECT status, provider
+		  FROM agent_sessions
+		 WHERE id = $1 AND agent_id = $2
+		 FOR UPDATE`, sessionID, agentID,
+	).Scan(&status, &provider); err != nil {
+		return nil, fmt.Errorf("%w: Run session is missing or owned by another agent", ErrSessionRolloverMismatch)
+	}
+	var alreadyRequested bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			  FROM agent_run_events
+			 WHERE payload->>'session_id' = $1 AND type = $2
+		)`, sessionID, AgentRunEventSessionRolloverRequested,
+	).Scan(&alreadyRequested); err != nil {
+		return nil, err
+	}
+	if status == AgentSessionStatusRolloverPending || (status == AgentSessionStatusClosed && alreadyRequested) {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return &RequestSessionRolloverResult{SessionID: sessionID}, nil
+	}
+	if status != AgentSessionStatusActive {
+		return nil, fmt.Errorf("%w: Session is %s", ErrSessionRolloverMismatch, status)
+	}
+
+	payload := make(map[string]any, len(input.Payload)+4)
+	for key, value := range input.Payload {
+		payload[key] = value
+	}
+	payload["provider"] = provider
+	payload["session_id"] = sessionID
+	payload["reason"] = input.Reason
+	if input.Continuity != "" {
+		payload["continuity"] = input.Continuity
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE agent_sessions
+		   SET status = $2, last_active_at = now()
+		 WHERE id = $1 AND status = $3`, sessionID, AgentSessionStatusRolloverPending, AgentSessionStatusActive); err != nil {
+		return nil, err
+	}
+	var event *AgentRunEvent
+	if !alreadyRequested {
+		event, err = appendRunEventTx(ctx, tx, AppendRunEventInput{
+			RunID:   input.RunID,
+			Type:    AgentRunEventSessionRolloverRequested,
+			Message: "session rollover requested",
+			Payload: payload,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &RequestSessionRolloverResult{SessionID: sessionID, Event: event, Created: !alreadyRequested}, nil
+}
+
+func (s *AgentRunService) ResolveSessionDispatch(ctx context.Context, input ResolveSessionDispatchInput) (SessionDispatch, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return SessionDispatch{}, err
+	}
+	defer tx.Rollback(ctx)
+	result, err := s.resolveSessionDispatchTx(ctx, tx, input)
+	if err != nil {
+		return SessionDispatch{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return SessionDispatch{}, err
+	}
+	return result, nil
+}
+
+func (s *AgentRunService) resolveSessionDispatchTx(ctx context.Context, tx pgx.Tx, input ResolveSessionDispatchInput) (SessionDispatch, error) {
+	if input.RunID == "" || input.AgentID == "" || input.ChannelID == "" || input.Provider == "" {
+		return SessionDispatch{}, errors.New("run_id, agent_id, channel_id, and provider are required")
+	}
+	if err := lockAgentRun(ctx, tx, input.RunID); err != nil {
+		return SessionDispatch{}, err
+	}
+	var runAgentID, runChannelID, runThinkingNodeID, rolloverFromID, currentSessionID string
+	if err := tx.QueryRow(ctx, `
+		SELECT agent_id::text, COALESCE(channel_id::text, ''), COALESCE(thinking_node_id::text, ''),
+		       COALESCE(rollover_from_session_id::text, ''), COALESCE(session_id::text, '')
+		  FROM agent_runs WHERE id = $1`, input.RunID,
+	).Scan(&runAgentID, &runChannelID, &runThinkingNodeID, &rolloverFromID, &currentSessionID); err != nil {
+		return SessionDispatch{}, err
+	}
+	if runAgentID != input.AgentID || runChannelID != input.ChannelID {
+		return SessionDispatch{}, errors.New("Run dispatch scope mismatch")
+	}
+	if rolloverFromID != "" {
+		return s.resolvePersistedRolloverTx(ctx, tx, input, rolloverFromID, currentSessionID)
+	}
+	if currentSessionID != "" {
+		var currentExternalID, currentStatus string
+		if err := tx.QueryRow(ctx, `
+			SELECT COALESCE(external_session_id, ''), status
+			  FROM agent_sessions
+			 WHERE id = $1 AND agent_id = $2 AND provider = $3
+			 FOR UPDATE`, currentSessionID, input.AgentID, input.Provider,
+		).Scan(&currentExternalID, &currentStatus); err != nil {
+			return SessionDispatch{}, fmt.Errorf("%w: current Run session is missing or has another owner/provider", ErrSessionRolloverMismatch)
+		}
+		if currentStatus == AgentSessionStatusActive && currentExternalID != "" {
+			return SessionDispatch{ResumeSessionID: currentExternalID}, nil
+		}
+		if runThinkingNodeID == "" && input.ThinkingNodeID == "" {
+			switch currentStatus {
+			case AgentSessionStatusRolloverPending:
+				tag, err := tx.Exec(ctx, `
+					UPDATE agent_runs
+					   SET rollover_from_session_id = $2, updated_at = now()
+					 WHERE id = $1 AND session_id = $2 AND rollover_from_session_id IS NULL`, input.RunID, currentSessionID)
+				if err != nil {
+					return SessionDispatch{}, err
+				}
+				if tag.RowsAffected() != 1 {
+					return SessionDispatch{}, fmt.Errorf("%w: current Run session changed", ErrSessionRolloverMismatch)
+				}
+				retireID := ""
+				if input.SupportsContextRollover {
+					retireID = currentExternalID
+				}
+				return SessionDispatch{
+					ForceFreshSession:     true,
+					RetireSessionID:       retireID,
+					RolloverFromSessionID: currentSessionID,
+					ColdStart:             true,
+				}, nil
+			case AgentSessionStatusClosed:
+				_, replacementExternalID, err := findActiveRolloverReplacementTx(ctx, tx, input, currentSessionID)
+				if err != nil {
+					return SessionDispatch{}, err
+				}
+				tag, err := tx.Exec(ctx, `
+					UPDATE agent_runs
+					   SET session_id = NULL, updated_at = now()
+					 WHERE id = $1 AND session_id = $2 AND rollover_from_session_id IS NULL`, input.RunID, currentSessionID)
+				if err != nil {
+					return SessionDispatch{}, err
+				}
+				if tag.RowsAffected() != 1 {
+					return SessionDispatch{}, fmt.Errorf("%w: current Run session changed", ErrSessionRolloverMismatch)
+				}
+				if replacementExternalID != "" {
+					return SessionDispatch{ResumeSessionID: replacementExternalID}, nil
+				}
+				return SessionDispatch{ColdStart: true}, nil
+			default:
+				return SessionDispatch{}, fmt.Errorf("%w: current Run session is %s", ErrSessionRolloverMismatch, currentStatus)
+			}
+		}
+	}
+	if runThinkingNodeID != "" || input.ThinkingNodeID != "" {
+		return SessionDispatch{
+			ResumeSessionID:   input.ResumeSessionID,
+			ForceFreshSession: input.ForceFreshSession,
+			ColdStart:         input.ResumeSessionID == "",
+		}, nil
+	}
+	if input.ForceFreshSession {
+		if input.ResumeSessionID != "" {
+			var predecessorID, predecessorStatus string
+			err := tx.QueryRow(ctx, `
+				SELECT s.id::text, s.status
+				  FROM agent_sessions s
+				 WHERE s.agent_id = $1 AND s.provider = $2 AND s.external_session_id = $3
+				   AND EXISTS (
+				       SELECT 1 FROM agent_runs r
+				        WHERE r.session_id = s.id AND r.channel_id = $4 AND r.thinking_node_id IS NULL
+				   )
+				 FOR UPDATE`, input.AgentID, input.Provider, input.ResumeSessionID, input.ChannelID,
+			).Scan(&predecessorID, &predecessorStatus)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return SessionDispatch{}, err
+			}
+			if err == nil {
+				if predecessorStatus == AgentSessionStatusActive {
+					if _, err := tx.Exec(ctx, `
+						UPDATE agent_sessions
+						   SET status = $2, last_active_at = now()
+						 WHERE id = $1 AND status = $3`, predecessorID, AgentSessionStatusRolloverPending, AgentSessionStatusActive); err != nil {
+						return SessionDispatch{}, err
+					}
+				} else if predecessorStatus != AgentSessionStatusRolloverPending && predecessorStatus != AgentSessionStatusClosed {
+					return SessionDispatch{}, fmt.Errorf("%w: recovery predecessor is %s", ErrSessionRolloverMismatch, predecessorStatus)
+				}
+				if _, err := tx.Exec(ctx, `
+					UPDATE agent_runs
+					   SET rollover_from_session_id = $2, updated_at = now()
+					 WHERE id = $1 AND rollover_from_session_id IS NULL`, input.RunID, predecessorID); err != nil {
+					return SessionDispatch{}, err
+				}
+				return s.resolvePersistedRolloverTx(ctx, tx, input, predecessorID, "")
+			}
+		}
+		return SessionDispatch{ForceFreshSession: true, ColdStart: true}, nil
+	}
+
+	candidateID := ""
+	if err := tx.QueryRow(ctx, `
+		SELECT s.id::text
+		  FROM agent_sessions s
+		 WHERE s.agent_id = $1
+		   AND s.provider = $2
+		   AND s.status = ANY($3)
+		   AND EXISTS (
+		       SELECT 1 FROM agent_runs r
+		        WHERE r.session_id = s.id
+		          AND r.channel_id = $4
+		          AND r.thinking_node_id IS NULL
+		          AND r.id <> $5
+		   )
+		 ORDER BY s.last_active_at DESC, s.started_at DESC
+		 LIMIT 1`, input.AgentID, input.Provider,
+		[]string{AgentSessionStatusActive, AgentSessionStatusRolloverPending}, input.ChannelID, input.RunID,
+	).Scan(&candidateID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return SessionDispatch{}, err
+	}
+	if candidateID == "" {
+		return SessionDispatch{ColdStart: true}, nil
+	}
+	var candidateExternalID, candidateStatus string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(external_session_id, ''), status
+		  FROM agent_sessions WHERE id = $1 FOR UPDATE`, candidateID,
+	).Scan(&candidateExternalID, &candidateStatus); err != nil {
+		return SessionDispatch{}, err
+	}
+	if candidateStatus == AgentSessionStatusRolloverPending || candidateStatus == AgentSessionStatusClosed {
+		replacementID, replacementExternalID, err := findActiveRolloverReplacementTx(ctx, tx, input, candidateID)
+		if err != nil {
+			return SessionDispatch{}, err
+		}
+		if replacementID != "" {
+			if _, err := tx.Exec(ctx, `UPDATE agent_sessions SET status = $2, last_active_at = now() WHERE id = $1 AND status = $3`, candidateID, AgentSessionStatusClosed, AgentSessionStatusRolloverPending); err != nil {
+				return SessionDispatch{}, err
+			}
+			return SessionDispatch{ResumeSessionID: replacementExternalID}, nil
+		}
+		if candidateStatus == AgentSessionStatusClosed {
+			return SessionDispatch{ColdStart: true}, nil
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE agent_runs
+			   SET rollover_from_session_id = $2, updated_at = now()
+			 WHERE id = $1 AND (rollover_from_session_id IS NULL OR rollover_from_session_id = $2)`,
+			input.RunID, candidateID); err != nil {
+			return SessionDispatch{}, err
+		}
+		retireID := ""
+		if input.SupportsContextRollover {
+			retireID = candidateExternalID
+		}
+		return SessionDispatch{
+			ForceFreshSession:     true,
+			RetireSessionID:       retireID,
+			RolloverFromSessionID: candidateID,
+			ColdStart:             true,
+		}, nil
+	}
+
+	if input.ResumeSessionID != "" {
+		var explicitStatus string
+		err := tx.QueryRow(ctx, `
+			SELECT s.status
+			  FROM agent_sessions s
+			 WHERE s.agent_id = $1 AND s.provider = $2 AND s.external_session_id = $3
+			   AND EXISTS (
+			       SELECT 1 FROM agent_runs r
+			        WHERE r.session_id = s.id AND r.channel_id = $4 AND r.thinking_node_id IS NULL
+			   )`, input.AgentID, input.Provider, input.ResumeSessionID, input.ChannelID,
+		).Scan(&explicitStatus)
+		if err == nil && explicitStatus == AgentSessionStatusActive {
+			return SessionDispatch{ResumeSessionID: input.ResumeSessionID}, nil
+		}
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return SessionDispatch{}, err
+		}
+	}
+	if candidateStatus == AgentSessionStatusActive && candidateExternalID != "" {
+		return SessionDispatch{ResumeSessionID: candidateExternalID}, nil
+	}
+	return SessionDispatch{ColdStart: true}, nil
+}
+
+func findActiveRolloverReplacementTx(ctx context.Context, tx pgx.Tx, input ResolveSessionDispatchInput, rolloverFromID string) (string, string, error) {
+	var replacementID, replacementExternalID string
+	err := tx.QueryRow(ctx, `
+		SELECT replacement.id::text, replacement.external_session_id
+		  FROM agent_runs r
+		  JOIN agent_sessions replacement ON replacement.id = r.session_id
+		 WHERE r.rollover_from_session_id = $1
+		   AND r.agent_id = $2 AND r.channel_id = $3 AND r.thinking_node_id IS NULL
+		   AND replacement.id <> $1 AND replacement.agent_id = $2
+		   AND replacement.provider = $4 AND replacement.status = $5
+		   AND replacement.external_session_id IS NOT NULL AND replacement.external_session_id <> ''
+		 ORDER BY r.started_at DESC, r.id DESC
+		 LIMIT 1
+		 FOR UPDATE OF replacement`, rolloverFromID, input.AgentID, input.ChannelID, input.Provider, AgentSessionStatusActive,
+	).Scan(&replacementID, &replacementExternalID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", nil
+	}
+	return replacementID, replacementExternalID, err
+}
+
+func (s *AgentRunService) resolvePersistedRolloverTx(ctx context.Context, tx pgx.Tx, input ResolveSessionDispatchInput, rolloverFromID, currentSessionID string) (SessionDispatch, error) {
+	var oldExternalID, oldStatus string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(external_session_id, ''), status
+		  FROM agent_sessions
+		 WHERE id = $1 AND agent_id = $2 AND provider = $3
+		 FOR UPDATE`, rolloverFromID, input.AgentID, input.Provider,
+	).Scan(&oldExternalID, &oldStatus); err != nil {
+		return SessionDispatch{}, fmt.Errorf("%w: persisted predecessor is missing", ErrSessionRolloverMismatch)
+	}
+	if oldStatus != AgentSessionStatusRolloverPending && oldStatus != AgentSessionStatusClosed {
+		return SessionDispatch{}, fmt.Errorf("%w: persisted predecessor is %s", ErrSessionRolloverMismatch, oldStatus)
+	}
+	if currentSessionID != "" && currentSessionID != rolloverFromID {
+		var currentExternalID, currentStatus string
+		if err := tx.QueryRow(ctx, `
+			SELECT COALESCE(external_session_id, ''), status
+			  FROM agent_sessions
+			 WHERE id = $1 AND agent_id = $2 AND provider = $3
+			 FOR UPDATE`,
+			currentSessionID, input.AgentID, input.Provider,
+		).Scan(&currentExternalID, &currentStatus); err != nil {
+			return SessionDispatch{}, fmt.Errorf("%w: bound replacement is missing", ErrSessionRolloverMismatch)
+		}
+		if currentStatus != AgentSessionStatusActive || currentExternalID == "" {
+			return SessionDispatch{}, fmt.Errorf("%w: bound replacement is %s", ErrSessionRolloverMismatch, currentStatus)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE agent_sessions SET status = $2, last_active_at = now() WHERE id = $1 AND status = $3`, rolloverFromID, AgentSessionStatusClosed, AgentSessionStatusRolloverPending); err != nil {
+			return SessionDispatch{}, err
+		}
+		return SessionDispatch{ResumeSessionID: currentExternalID}, nil
+	}
+	if currentSessionID == "" || currentSessionID == rolloverFromID {
+		replacementID, replacementExternalID, err := findActiveRolloverReplacementTx(ctx, tx, input, rolloverFromID)
+		if err != nil {
+			return SessionDispatch{}, err
+		}
+		if replacementID != "" {
+			if _, err := tx.Exec(ctx, `UPDATE agent_sessions SET status = $2, last_active_at = now() WHERE id = $1 AND status = $3`, rolloverFromID, AgentSessionStatusClosed, AgentSessionStatusRolloverPending); err != nil {
+				return SessionDispatch{}, err
+			}
+			tag, err := tx.Exec(ctx, `
+				UPDATE agent_runs
+				   SET session_id = CASE WHEN session_id = $2 THEN NULL ELSE session_id END,
+				       rollover_from_session_id = NULL, updated_at = now()
+				 WHERE id = $1 AND rollover_from_session_id = $2
+				   AND (session_id IS NULL OR session_id = $2)`, input.RunID, rolloverFromID)
+			if err != nil {
+				return SessionDispatch{}, err
+			}
+			if tag.RowsAffected() != 1 {
+				return SessionDispatch{}, fmt.Errorf("%w: Run rollover intent changed", ErrSessionRolloverMismatch)
+			}
+			return SessionDispatch{ResumeSessionID: replacementExternalID}, nil
+		}
+	}
+	if oldStatus == AgentSessionStatusClosed {
+		tag, err := tx.Exec(ctx, `
+			UPDATE agent_runs
+			   SET session_id = CASE WHEN session_id = $2 THEN NULL ELSE session_id END,
+			       rollover_from_session_id = NULL, updated_at = now()
+			 WHERE id = $1 AND rollover_from_session_id = $2
+			   AND (session_id IS NULL OR session_id = $2)`, input.RunID, rolloverFromID)
+		if err != nil {
+			return SessionDispatch{}, err
+		}
+		if tag.RowsAffected() != 1 {
+			return SessionDispatch{}, fmt.Errorf("%w: Run rollover intent changed", ErrSessionRolloverMismatch)
+		}
+		return SessionDispatch{ColdStart: true}, nil
+	}
+	retireID := ""
+	if input.SupportsContextRollover && oldStatus == AgentSessionStatusRolloverPending {
+		retireID = oldExternalID
+	}
+	return SessionDispatch{
+		ForceFreshSession:     true,
+		RetireSessionID:       retireID,
+		RolloverFromSessionID: rolloverFromID,
+		ColdStart:             true,
+	}, nil
+}
+
 // MarkBackendStarted records the first authoritative transition from queued to
 // provider execution. Replayed daemon events are idempotent, and terminal runs
 // are never revived.
@@ -450,7 +1094,7 @@ func (s *AgentRunService) MarkBackendStarted(ctx context.Context, runID string) 
 		    AND status = ANY($2)
 		  RETURNING id::text, agent_id::text,
 		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
-		        COALESCE(session_id::text, ''), trigger_type,
+		        COALESCE(session_id::text, ''), COALESCE(rollover_from_session_id::text, ''), trigger_type,
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
 		        COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
@@ -460,11 +1104,38 @@ func (s *AgentRunService) MarkBackendStarted(ctx context.Context, runID string) 
 }
 
 func (s *AgentRunService) AppendEvent(ctx context.Context, input AppendRunEventInput) (*AgentRunEvent, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if err := lockAgentRun(ctx, tx, input.RunID); err != nil {
+		return nil, err
+	}
+	event, err := appendRunEventTx(ctx, tx, input)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
+func lockAgentRun(ctx context.Context, tx pgx.Tx, runID string) error {
+	if strings.TrimSpace(runID) == "" {
+		return fmt.Errorf("run_id is required")
+	}
+	var ignored string
+	return tx.QueryRow(ctx, `SELECT id::text FROM agent_runs WHERE id = $1 FOR UPDATE`, runID).Scan(&ignored)
+}
+
+func appendRunEventTx(ctx context.Context, tx pgx.Tx, input AppendRunEventInput) (*AgentRunEvent, error) {
 	payload, err := marshalJSON(slimRunEventPayload(input.Payload))
 	if err != nil {
 		return nil, err
 	}
-	return scanAgentRunEvent(s.pool.QueryRow(ctx,
+	return scanAgentRunEvent(tx.QueryRow(ctx,
 		`INSERT INTO agent_run_events (id, run_id, seq, type, message, tool_name, payload)
 		 SELECT $1, $2, COALESCE(MAX(seq), 0) + 1, $3, $4, $5, $6
 		   FROM agent_run_events
@@ -492,7 +1163,7 @@ func (s *AgentRunService) UpdateStatus(ctx context.Context, input UpdateRunStatu
 		    AND finished_at IS NULL
 		  RETURNING id::text, agent_id::text,
 		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
-		        COALESCE(session_id::text, ''), trigger_type,
+		        COALESCE(session_id::text, ''), COALESCE(rollover_from_session_id::text, ''), trigger_type,
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
 		        COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
@@ -513,7 +1184,7 @@ func (s *AgentRunService) UpdateRunTranscript(ctx context.Context, input UpdateR
 		  WHERE id = $1
 		  RETURNING id::text, agent_id::text,
 		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
-		        COALESCE(session_id::text, ''), trigger_type,
+		        COALESCE(session_id::text, ''), COALESCE(rollover_from_session_id::text, ''), trigger_type,
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
 		        COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''),
@@ -560,7 +1231,7 @@ func (s *AgentRunService) FinishRun(ctx context.Context, input FinishRunInput) (
 		    AND finished_at IS NULL
 		  RETURNING id::text, agent_id::text,
 		        COALESCE((SELECT name FROM agents WHERE id = agent_runs.agent_id), ''),
-		        COALESCE(session_id::text, ''), trigger_type,
+		        COALESCE(session_id::text, ''), COALESCE(rollover_from_session_id::text, ''), trigger_type,
 		        COALESCE(trigger_message_id::text, ''), COALESCE(channel_id::text, ''),
 		        COALESCE(thread_id::text, ''), COALESCE(thinking_node_id::text, ''), status, activity_text, COALESCE(tool_name, ''),
 		        COALESCE(tool_input_summary, ''), COALESCE(source, ''), COALESCE(transcript_path, ''), usage_json,
@@ -1116,7 +1787,7 @@ func (s *AgentRunService) ListAgentTasks(ctx context.Context, agentID string) ([
 }
 
 func baseAgentRunSelect() string {
-	return `SELECT r.id::text, r.agent_id::text, COALESCE(a.name, ''), COALESCE(r.session_id::text, ''), r.trigger_type,
+	return `SELECT r.id::text, r.agent_id::text, COALESCE(a.name, ''), COALESCE(r.session_id::text, ''), COALESCE(r.rollover_from_session_id::text, ''), r.trigger_type,
 	        COALESCE(r.trigger_message_id::text, ''), COALESCE(r.channel_id::text, ''),
 	        COALESCE(r.thread_id::text, ''), COALESCE(r.thinking_node_id::text, ''), r.status, r.activity_text, COALESCE(r.tool_name, ''),
 	        COALESCE(r.tool_input_summary, ''), COALESCE(r.source, ''), COALESCE(r.transcript_path, ''), r.usage_json,
@@ -1228,7 +1899,7 @@ func scanAgentRun(row interface {
 	var status string
 	var backendStarted, finished sql.NullTime
 	if err := row.Scan(
-		&run.ID, &run.AgentID, &run.AgentName, &run.SessionID, &run.TriggerType, &run.TriggerMessageID,
+		&run.ID, &run.AgentID, &run.AgentName, &run.SessionID, &run.RolloverFromSessionID, &run.TriggerType, &run.TriggerMessageID,
 		&run.ChannelID, &run.ThreadID, &run.ThinkingNodeID, &status, &run.ActivityText, &run.ToolName,
 		&run.ToolInputSummary, &run.Source, &run.TranscriptPath, &run.UsageJSON,
 		&run.StartedAt, &backendStarted, &run.UpdatedAt, &finished,

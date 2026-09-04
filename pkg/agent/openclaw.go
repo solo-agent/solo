@@ -81,6 +81,10 @@ func (b *OpenClawBackend) Execute(ctx context.Context, req *ExecuteRequest, opts
 		defer b.Close(ps)
 
 		for chunk := range ps.Messages {
+			if chunk.Context != nil {
+				sendContextChunk(ctx.Done(), msgCh, chunk)
+				continue
+			}
 			trySend(msgCh, chunk)
 		}
 		res, ok := <-ps.Result

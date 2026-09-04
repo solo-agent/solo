@@ -48,6 +48,12 @@ var (
 	controlReady  atomic.Bool
 )
 
+const contextRolloverCapability = "context_rollover_v1"
+
+func daemonCapabilities() []string {
+	return []string{"llm", contextRolloverCapability}
+}
+
 func main() {
 	_ = config.LoadDotenv()
 	cfg := config.Load()
@@ -163,6 +169,7 @@ func main() {
 		})
 		r.Get("/skills", h.HandleSkillsList)
 		r.Post("/agents/{agentID}/cleanup", h.CleanupAgent) // server-initiated hard cleanup
+		r.Post("/agents/{agentID}/channels/{channelID}/cleanup", h.CleanupAgentChannel)
 	})
 
 	// SSE requires long-lived connections — no write timeout.
@@ -316,7 +323,7 @@ func registerWithServer(ctx context.Context) error {
 		Host:          host,
 		Port:          port,
 		Version:       version.Version,
-		Capabilities:  []string{"llm"},
+		Capabilities:  daemonCapabilities(),
 		MaxConcurrent: 10,
 		CurrentLoad:   0,
 		AgentTypes:    registeredAgentTypes(),

@@ -227,6 +227,7 @@ type turnState struct {
 	id         string
 	msgCh      chan OutputChunk
 	resCh      chan *Result
+	done       chan struct{}
 	output     strings.Builder
 	startedAt  time.Time
 	finishOnce sync.Once
@@ -239,6 +240,7 @@ func newClaudeTurn() *turnState {
 		id:        uuid.New().String(),
 		msgCh:     make(chan OutputChunk, 256),
 		resCh:     make(chan *Result, 1),
+		done:      make(chan struct{}),
 		startedAt: time.Now(),
 		usage:     make(map[string]TokenUsage),
 		usageIDs:  make(map[string]bool),
@@ -247,6 +249,9 @@ func newClaudeTurn() *turnState {
 
 func (t *turnState) finish(result *Result) {
 	t.finishOnce.Do(func() {
+		if t.done != nil {
+			close(t.done)
+		}
 		close(t.msgCh)
 		t.resCh <- result
 		close(t.resCh)
@@ -491,6 +496,10 @@ func (b *ClaudeBackend) persistentStreamLoop(
 						b.handleSystemApiRetry(retryEvt, turn.msgCh)
 					}
 				}
+			case "compact_boundary":
+				if event := parseClaudeCompactBoundary(rawLine); event != nil && turn != nil {
+					sendContextChunk(turn.done, turn.msgCh, OutputChunk{Type: string(MessageContext), Context: event})
+				}
 			}
 			updateClaudeSessionID(state, msg.SessionID)
 			if turn != nil {
@@ -722,23 +731,8 @@ func (b *ClaudeBackend) Send(ctx context.Context, ps *PersistentSession, message
 		return nil, fmt.Errorf("claude: session process has exited")
 	}
 
-	// Build the prompt from messages.
 	var promptBuilder strings.Builder
-	for _, msg := range messages {
-		if msg.Role == RoleSystem {
-			continue
-		}
-		switch msg.Role {
-		case RoleUser:
-			promptBuilder.WriteString("User: ")
-		case RoleAssistant:
-			promptBuilder.WriteString("Assistant: ")
-		default:
-			promptBuilder.WriteString(fmt.Sprintf("[%s]: ", msg.Role))
-		}
-		promptBuilder.WriteString(msg.Content)
-		promptBuilder.WriteString("\n\n")
-	}
+	promptBuilder.WriteString(buildClaudeMessagePrompt(messages))
 	promptBuilder.WriteString("Assistant:")
 
 	payload, err := buildClaudeInput(promptBuilder.String())
@@ -898,6 +892,10 @@ func (b *ClaudeBackend) streamLoop(
 				var retryEvt claudeApiRetryEvent
 				if err := json.Unmarshal(rawLine, &retryEvt); err == nil {
 					b.handleSystemApiRetry(retryEvt, msgCh)
+				}
+			case "compact_boundary":
+				if event := parseClaudeCompactBoundary(rawLine); event != nil {
+					sendContextChunk(runCtx.Done(), msgCh, OutputChunk{Type: string(MessageContext), Context: event})
 				}
 			}
 			if msg.SessionID != "" {
@@ -1109,14 +1107,20 @@ func buildClaudeArgs(req *ExecuteRequest, opts *ExecuteOptions) []string {
 
 func buildPrompt(req *ExecuteRequest, opts *ExecuteOptions) string {
 	var b strings.Builder
+	b.WriteString(buildClaudeMessagePrompt(req.Messages))
 
-	for _, msg := range req.Messages {
-		// System-prompt-level messages are handled via --append-system-prompt
-		// to avoid duplication in the text prompt.
-		if msg.Role == RoleSystem {
-			continue
-		}
+	// Signal that it is the agent's turn to respond.
+	b.WriteString("Assistant:")
+
+	return b.String()
+}
+
+func buildClaudeMessagePrompt(messages []Message) string {
+	var b strings.Builder
+	for _, msg := range messages {
 		switch msg.Role {
+		case RoleSystem:
+			b.WriteString("System: ")
 		case RoleUser:
 			b.WriteString("User: ")
 		case RoleAssistant:
@@ -1127,10 +1131,6 @@ func buildPrompt(req *ExecuteRequest, opts *ExecuteOptions) string {
 		b.WriteString(msg.Content)
 		b.WriteString("\n\n")
 	}
-
-	// Signal that it is the agent's turn to respond.
-	b.WriteString("Assistant:")
-
 	return b.String()
 }
 
@@ -1269,6 +1269,25 @@ func trySend(ch chan<- OutputChunk, chunk OutputChunk) {
 	}
 }
 
+// sendContextChunk keeps lifecycle evidence lossless while a turn is active.
+// Unlike ordinary streaming output, context events drive session-health policy
+// and therefore must not be silently dropped when the output buffer is full.
+// The per-turn done signal prevents an abandoned consumer from blocking the
+// provider reader after the turn has been cancelled or completed.
+func sendContextChunk(done <-chan struct{}, ch chan<- OutputChunk, chunk OutputChunk) (sent bool) {
+	defer func() {
+		if recover() != nil { // the terminal path may have closed ch concurrently
+			sent = false
+		}
+	}()
+	select {
+	case ch <- chunk:
+		return true
+	case <-done:
+		return false
+	}
+}
+
 // ── Claude SDK JSON types ──
 
 type claudeSDKMessage struct {
@@ -1280,6 +1299,60 @@ type claudeSDKMessage struct {
 	IsError    bool            `json:"is_error,omitempty"`
 	ErrorText  string          `json:"error,omitempty"`
 	UUID       string          `json:"uuid,omitempty"`
+}
+
+// parseClaudeCompactBoundary accepts both the SDK's snake_case wire shape and
+// the camelCase shape emitted by some Claude wrappers. Malformed or absent
+// token fields stay nil; the boundary itself is still useful evidence that a
+// compaction completed.
+func parseClaudeCompactBoundary(data []byte) *ContextEvent {
+	var envelope struct {
+		Type                  string          `json:"type"`
+		Subtype               string          `json:"subtype"`
+		CompactMetadata       json.RawMessage `json:"compactMetadata"`
+		CompactMetadataLegacy json.RawMessage `json:"compact_metadata"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil || envelope.Type != "system" || envelope.Subtype != "compact_boundary" {
+		return nil
+	}
+
+	metadata := envelope.CompactMetadata
+	if len(metadata) == 0 || string(metadata) == "null" {
+		metadata = envelope.CompactMetadataLegacy
+	}
+
+	event := &ContextEvent{Type: "compaction_end", Accuracy: "reported"}
+	if len(metadata) == 0 || string(metadata) == "null" {
+		return event
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(metadata, &fields); err != nil {
+		return event
+	}
+	if raw := fields["trigger"]; len(raw) > 0 {
+		_ = json.Unmarshal(raw, &event.Reason)
+	}
+	event.BeforeTokens = decodeContextToken(fields["preTokens"])
+	if event.BeforeTokens == nil {
+		event.BeforeTokens = decodeContextToken(fields["pre_tokens"])
+	}
+	event.AfterTokens = decodeContextToken(fields["postTokens"])
+	if event.AfterTokens == nil {
+		event.AfterTokens = decodeContextToken(fields["post_tokens"])
+	}
+	return event
+}
+
+func decodeContextToken(raw json.RawMessage) *int64 {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var value int64
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil
+	}
+	return &value
 }
 
 // claudeInitEvent is the payload of the Claude Code `system/init` event —

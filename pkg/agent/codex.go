@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -54,6 +55,16 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 
 	msgCh := make(chan OutputChunk, 256)
 	resCh := make(chan *Result, 1)
+	deliveryDone := make(chan struct{})
+	var finishOnce sync.Once
+	finish := func(result *Result) {
+		finishOnce.Do(func() {
+			resCh <- result
+			close(deliveryDone)
+			close(msgCh)
+			close(resCh)
+		})
+	}
 
 	var threadID string
 	turnStartedAt := time.Now()
@@ -61,16 +72,18 @@ func (b *CodexBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exe
 		logger:  b.logger,
 		stdin:   runner.stdin,
 		pending: make(map[int]*pendingRPC),
-		onChunk: func(chunk OutputChunk) { trySend(msgCh, chunk) },
+		onChunk: func(chunk OutputChunk) {
+			if chunk.Context != nil {
+				sendContextChunk(deliveryDone, msgCh, chunk)
+				return
+			}
+			trySend(msgCh, chunk)
+		},
 		onTurnDone: func(aborted bool) {
-			resCh <- codexPersistentTurnResult(aborted, threadID, turnStartedAt, opts.Model)
-			close(msgCh)
-			close(resCh)
+			finish(codexPersistentTurnResult(aborted, threadID, turnStartedAt, opts.Model))
 		},
 		onTurnFailed: func(err error) {
-			resCh <- &Result{Status: "failed", Error: err.Error()}
-			close(msgCh)
-			close(resCh)
+			finish(&Result{Status: "failed", Error: err.Error()})
 		},
 	}
 
@@ -173,21 +186,33 @@ func (b *CodexBackend) Send(ctx context.Context, ps *PersistentSession, messages
 
 	msgCh := make(chan OutputChunk, 256)
 	resCh := make(chan *Result, 1)
+	deliveryDone := make(chan struct{})
+	var finishOnce sync.Once
+	finish := func(result *Result) {
+		finishOnce.Do(func() {
+			resCh <- result
+			close(deliveryDone)
+			close(msgCh)
+			close(resCh)
+		})
+	}
 
 	// Redirect client callbacks to this turn's channels and reset terminal
 	// deduplication before starting the next turn.
 	turnStartedAt := time.Now()
-	state.client.onChunk = func(chunk OutputChunk) { trySend(msgCh, chunk) }
 	state.client.prepareTurn(
+		func(chunk OutputChunk) {
+			if chunk.Context != nil {
+				sendContextChunk(deliveryDone, msgCh, chunk)
+				return
+			}
+			trySend(msgCh, chunk)
+		},
 		func(aborted bool) {
-			resCh <- codexPersistentTurnResult(aborted, state.threadID, turnStartedAt, state.model)
-			close(msgCh)
-			close(resCh)
+			finish(codexPersistentTurnResult(aborted, state.threadID, turnStartedAt, state.model))
 		},
 		func(err error) {
-			resCh <- &Result{Status: "failed", Error: err.Error()}
-			close(msgCh)
-			close(resCh)
+			finish(&Result{Status: "failed", Error: err.Error()})
 		},
 	)
 
@@ -247,6 +272,7 @@ var codexBlockedArgs = map[string]blockedArgMode{
 const (
 	codexStderrTailBytes                  = 2048
 	defaultCodexSemanticInactivityTimeout = 10 * time.Minute
+	codexInterruptTerminalDrainTimeout    = 500 * time.Millisecond
 )
 
 // CodexBackend implements Backend by spawning `codex app-server --listen stdio://`
@@ -378,6 +404,10 @@ func (b *CodexBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *E
 				outputMu.Lock()
 				output.WriteString(chunk.Content)
 				outputMu.Unlock()
+			}
+			if chunk.Context != nil {
+				sendContextChunk(runCtx.Done(), msgCh, chunk)
+				return
 			}
 			trySend(msgCh, chunk)
 		},
@@ -637,6 +667,7 @@ func buildPromptFromMessages(messages []Message) string {
 	var b strings.Builder
 	for _, msg := range messages {
 		if msg.Role == RoleSystem {
+			b.WriteString(fmt.Sprintf("System: %s\n", msg.Content))
 			continue
 		}
 		b.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, msg.Content))
@@ -665,21 +696,44 @@ type codexClient struct {
 	pending              map[int]*pendingRPC
 	threadID             string
 	turnID               string
+	callbackMu           sync.Mutex
 	onChunk              func(OutputChunk)
 	onSemanticActivity   func(description string)
 	onTurnDone           turnDoneCallback
 	onTurnFailed         turnFailedCallback
 	notificationProtocol string
-	turnStarted          bool
 	completedTurnIDs     map[string]bool
 	turnDoneMu           sync.Mutex
 	turnDone             bool
+	turnFinished         chan struct{}
 
 	usageMu sync.Mutex
 	usage   TokenUsage
 
 	turnErrorMu sync.Mutex
 	turnError   string
+
+	contextMu         sync.Mutex
+	contextThreadID   string
+	contextTurnID     string
+	contextSnapshot   *codexContextSnapshot
+	contextCompaction *codexContextCompaction
+}
+
+type codexContextSnapshot struct {
+	threadID     string
+	turnID       string
+	usedTokens   *int64
+	windowTokens *int64
+}
+
+type codexContextCompaction struct {
+	threadID     string
+	turnID       string
+	itemID       string
+	beforeTokens *int64
+	windowTokens *int64
+	completed    bool
 }
 
 func (c *codexClient) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
@@ -876,7 +930,7 @@ func (c *codexClient) handleNotification(raw map[string]json.RawMessage) {
 	c.handleRawNotification(method, params)
 }
 
-func (c *codexClient) prepareTurn(onDone turnDoneCallback, onFailed turnFailedCallback) {
+func (c *codexClient) prepareTurn(onChunk func(OutputChunk), onDone turnDoneCallback, onFailed turnFailedCallback) {
 	c.turnDoneMu.Lock()
 	defer c.turnDoneMu.Unlock()
 	if c.turnDone && c.turnID != "" {
@@ -885,11 +939,66 @@ func (c *codexClient) prepareTurn(onDone turnDoneCallback, onFailed turnFailedCa
 		}
 		c.completedTurnIDs[c.turnID] = true
 	}
+	c.callbackMu.Lock()
+	c.onChunk = onChunk
 	c.onTurnDone = onDone
 	c.onTurnFailed = onFailed
+	c.callbackMu.Unlock()
 	c.turnDone = false
-	c.turnStarted = false
+	c.turnFinished = make(chan struct{})
 	c.turnID = ""
+	c.turnErrorMu.Lock()
+	c.turnError = ""
+	c.turnErrorMu.Unlock()
+}
+
+func (c *codexClient) emitChunk(chunk OutputChunk) {
+	c.callbackMu.Lock()
+	fn := c.onChunk
+	c.callbackMu.Unlock()
+	if fn != nil {
+		fn(chunk)
+	}
+}
+
+func (c *codexClient) invokeTurnDone(aborted bool) {
+	c.callbackMu.Lock()
+	fn := c.onTurnDone
+	c.callbackMu.Unlock()
+	if fn != nil {
+		fn(aborted)
+	}
+}
+
+func (c *codexClient) invokeTurnFailed(err error) {
+	c.callbackMu.Lock()
+	fn := c.onTurnFailed
+	c.callbackMu.Unlock()
+	if fn != nil {
+		fn(err)
+	}
+}
+
+func (c *codexClient) waitForTurnDone(timeout time.Duration) bool {
+	c.turnDoneMu.Lock()
+	if c.turnDone {
+		c.turnDoneMu.Unlock()
+		return true
+	}
+	if c.turnFinished == nil {
+		c.turnFinished = make(chan struct{})
+	}
+	done := c.turnFinished
+	c.turnDoneMu.Unlock()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 func (c *codexClient) recordTurnID(turnID string) {
@@ -925,36 +1034,57 @@ func (c *codexClient) interruptCurrentTurn() error {
 		// confirmation that there is nothing left to interrupt; converge the
 		// local channels so the session turn lock can be released.
 		if strings.Contains(strings.ToLower(err.Error()), "no active turn to interrupt") {
-			c.signalTurnDone(true)
+			if !c.waitForTurnDone(codexInterruptTerminalDrainTimeout) {
+				c.signalTurnDone(true)
+			}
 			return nil
 		}
 		return fmt.Errorf("codex turn/interrupt: %w", err)
 	}
-	// The JSON-RPC response acknowledges that the provider accepted the
-	// interrupt. Release the local turn immediately; a late notification is
-	// deduplicated by signalTurnDone.
-	c.signalTurnDone(true)
+	// Give the authoritative turn/completed notification a bounded window to
+	// deliver trailing usage/context evidence before falling back locally.
+	if !c.waitForTurnDone(codexInterruptTerminalDrainTimeout) {
+		c.signalTurnDone(true)
+	}
 	return nil
 }
 
 func (c *codexClient) signalTurnFailure(err error) {
+	c.signalTurnFailureForID("", err)
+}
+
+func (c *codexClient) signalTurnFailureForID(turnID string, err error) {
 	c.turnDoneMu.Lock()
+	if turnID == "" {
+		turnID = c.turnID
+	}
+	if turnID != "" {
+		if c.completedTurnIDs != nil && c.completedTurnIDs[turnID] {
+			c.turnDoneMu.Unlock()
+			return
+		}
+		if c.turnID != "" && turnID != c.turnID {
+			c.turnDoneMu.Unlock()
+			return
+		}
+	}
 	if c.turnDone {
 		c.turnDoneMu.Unlock()
 		return
 	}
 	c.turnDone = true
-	if c.turnID != "" {
+	if c.turnFinished != nil {
+		close(c.turnFinished)
+	}
+	if turnID != "" {
 		if c.completedTurnIDs == nil {
 			c.completedTurnIDs = map[string]bool{}
 		}
-		c.completedTurnIDs[c.turnID] = true
+		c.completedTurnIDs[turnID] = true
 	}
-	onFailed := c.onTurnFailed
 	c.turnDoneMu.Unlock()
-	if onFailed != nil {
-		onFailed(err)
-	}
+	c.finishContextTurn(c.threadID, turnID)
+	c.invokeTurnFailed(err)
 }
 
 func (c *codexClient) signalTurnDone(aborted bool) {
@@ -962,6 +1092,13 @@ func (c *codexClient) signalTurnDone(aborted bool) {
 }
 
 func (c *codexClient) signalTurnDoneForID(turnID string, aborted bool) {
+	if turnID == "" {
+		c.turnDoneMu.Lock()
+		turnID = c.turnID
+		c.turnDoneMu.Unlock()
+	}
+	c.finishContextTurn(c.threadID, turnID)
+
 	c.turnDoneMu.Lock()
 	completedID := turnID
 	if completedID == "" {
@@ -982,11 +1119,11 @@ func (c *codexClient) signalTurnDoneForID(turnID string, aborted bool) {
 		return
 	}
 	c.turnDone = true
-	onDone := c.onTurnDone
-	c.turnDoneMu.Unlock()
-	if onDone != nil {
-		onDone(aborted)
+	if c.turnFinished != nil {
+		close(c.turnFinished)
 	}
+	c.turnDoneMu.Unlock()
+	c.invokeTurnDone(aborted)
 }
 
 func (c *codexClient) handleEvent(msg map[string]any) {
@@ -994,54 +1131,47 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 
 	switch msgType {
 	case "task_started":
-		c.turnStarted = true
-		if c.onChunk != nil {
-			c.onChunk(OutputChunk{Type: string(MessageStatus), Content: "running"})
-		}
+		c.emitChunk(OutputChunk{Type: string(MessageStatus), Content: "running"})
 	case "agent_message":
 		text, _ := msg["message"].(string)
-		if text != "" && c.onChunk != nil {
-			c.onChunk(OutputChunk{Type: string(MessageText), Content: text})
+		if text != "" {
+			c.emitChunk(OutputChunk{Type: string(MessageText), Content: text})
 		}
 	case "exec_command_begin":
 		callID, _ := msg["call_id"].(string)
 		command, _ := msg["command"].(string)
-		if c.onChunk != nil {
-			c.onChunk(OutputChunk{
-				Type: string(MessageToolUse),
-				Tool: &ToolInfo{Name: "exec_command", CallID: callID, Input: map[string]any{"command": command}},
-			})
-		}
+		c.emitChunk(OutputChunk{
+			Type: string(MessageToolUse),
+			Tool: &ToolInfo{Name: "exec_command", CallID: callID, Input: map[string]any{"command": command}},
+		})
 	case "exec_command_end":
 		callID, _ := msg["call_id"].(string)
 		output, _ := msg["output"].(string)
-		if c.onChunk != nil {
-			c.onChunk(OutputChunk{
-				Type: string(MessageToolResult),
-				Tool: &ToolInfo{Name: "exec_command", CallID: callID, Output: output},
-			})
-		}
+		c.emitChunk(OutputChunk{
+			Type: string(MessageToolResult),
+			Tool: &ToolInfo{Name: "exec_command", CallID: callID, Output: output},
+		})
 	case "patch_apply_begin":
 		callID, _ := msg["call_id"].(string)
-		if c.onChunk != nil {
-			c.onChunk(OutputChunk{
-				Type: string(MessageToolUse),
-				Tool: &ToolInfo{Name: "patch_apply", CallID: callID},
-			})
-		}
+		c.emitChunk(OutputChunk{
+			Type: string(MessageToolUse),
+			Tool: &ToolInfo{Name: "patch_apply", CallID: callID},
+		})
 	case "patch_apply_end":
 		callID, _ := msg["call_id"].(string)
-		if c.onChunk != nil {
-			c.onChunk(OutputChunk{
-				Type: string(MessageToolResult),
-				Tool: &ToolInfo{Name: "patch_apply", CallID: callID},
-			})
-		}
+		c.emitChunk(OutputChunk{
+			Type: string(MessageToolResult),
+			Tool: &ToolInfo{Name: "patch_apply", CallID: callID},
+		})
 	case "task_complete":
 		c.extractUsageFromMap(msg)
-		c.signalTurnDone(false)
+		if c.notificationProtocol == "legacy" {
+			c.signalTurnDone(false)
+		}
 	case "turn_aborted":
-		c.signalTurnDone(true)
+		if c.notificationProtocol == "legacy" {
+			c.signalTurnDone(true)
+		}
 	}
 }
 
@@ -1052,13 +1182,15 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 
 	switch method {
 	case "turn/started":
-		c.turnStarted = true
-		if turnID := extractNestedString(params, "turn", "id"); turnID != "" {
+		turnID := extractNestedString(params, "turn", "id")
+		if turnID != "" {
 			c.recordTurnID(turnID)
+			c.beginContextTurn(extractNestedString(params, "threadId"), turnID)
 		}
-		if c.onChunk != nil {
-			c.onChunk(OutputChunk{Type: string(MessageStatus), Content: "running"})
-		}
+		c.emitChunk(OutputChunk{Type: string(MessageStatus), Content: "running"})
+
+	case "thread/tokenUsage/updated":
+		c.handleContextUsage(params)
 
 	case "turn/completed":
 		turnID := extractNestedString(params, "turn", "id")
@@ -1068,9 +1200,21 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 		if status == "failed" {
 			errMsg := extractNestedString(params, "turn", "error", "message")
 			if errMsg == "" {
+				errMsg = extractNestedString(params, "turn", "error", "code")
+			}
+			if errMsg == "" {
+				errMsg = extractNestedString(params, "turn", "error")
+			}
+			if errMsg == "" {
+				c.turnErrorMu.Lock()
+				errMsg = c.turnError
+				c.turnErrorMu.Unlock()
+			}
+			if errMsg == "" {
 				errMsg = "codex turn failed"
 			}
-			c.setTurnError(errMsg)
+			c.signalTurnFailureForID(turnID, errors.New(errMsg))
+			return
 		}
 
 		if turn, ok := params["turn"].(map[string]any); ok {
@@ -1095,10 +1239,8 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 		}
 
 	case "thread/status/changed":
-		statusType := extractNestedString(params, "status", "type")
-		if statusType == "idle" && c.turnStarted {
-			c.signalTurnDone(false)
-		}
+		// Raw and mixed protocols terminate authoritatively via turn/completed.
+		// An idle status can precede the final token-usage notification.
 
 	default:
 		if strings.HasPrefix(method, "item/") {
@@ -1115,52 +1257,264 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 	if item == nil {
 		return
 	}
+	if itemType == "contextCompaction" {
+		c.handleContextCompaction(method, params, itemID)
+		return
+	}
 
 	switch {
 	case method == "item/started" && itemType == "commandExecution":
 		command, _ := item["command"].(string)
-		if c.onChunk != nil {
-			c.onChunk(OutputChunk{
-				Type: string(MessageToolUse),
-				Tool: &ToolInfo{Name: "exec_command", CallID: itemID, Input: map[string]any{"command": command}},
-			})
-		}
+		c.emitChunk(OutputChunk{
+			Type: string(MessageToolUse),
+			Tool: &ToolInfo{Name: "exec_command", CallID: itemID, Input: map[string]any{"command": command}},
+		})
 
 	case method == "item/completed" && itemType == "commandExecution":
 		output, _ := item["aggregatedOutput"].(string)
-		if c.onChunk != nil {
-			c.onChunk(OutputChunk{
-				Type: string(MessageToolResult),
-				Tool: &ToolInfo{Name: "exec_command", CallID: itemID, Output: output},
-			})
-		}
+		c.emitChunk(OutputChunk{
+			Type: string(MessageToolResult),
+			Tool: &ToolInfo{Name: "exec_command", CallID: itemID, Output: output},
+		})
 
 	case method == "item/started" && itemType == "fileChange":
-		if c.onChunk != nil {
-			c.onChunk(OutputChunk{
-				Type: string(MessageToolUse),
-				Tool: &ToolInfo{Name: "patch_apply", CallID: itemID},
-			})
-		}
+		c.emitChunk(OutputChunk{
+			Type: string(MessageToolUse),
+			Tool: &ToolInfo{Name: "patch_apply", CallID: itemID},
+		})
 
 	case method == "item/completed" && itemType == "fileChange":
-		if c.onChunk != nil {
-			c.onChunk(OutputChunk{
-				Type: string(MessageToolResult),
-				Tool: &ToolInfo{Name: "patch_apply", CallID: itemID},
-			})
-		}
+		c.emitChunk(OutputChunk{
+			Type: string(MessageToolResult),
+			Tool: &ToolInfo{Name: "patch_apply", CallID: itemID},
+		})
 
 	case method == "item/completed" && (itemType == "agentMessage" || itemType == "agent_message"):
 		text, _ := item["text"].(string)
-		if text != "" && c.onChunk != nil {
-			c.onChunk(OutputChunk{Type: string(MessageText), Content: text})
+		if text != "" {
+			c.emitChunk(OutputChunk{Type: string(MessageText), Content: text})
 		}
-		phase, _ := item["phase"].(string)
-		if phase == "final_answer" && c.turnStarted {
-			c.signalTurnDone(false)
+		// final_answer is an item boundary, not a turn boundary. Codex reports
+		// token usage after the item and then emits turn/completed.
+	}
+}
+
+func (c *codexClient) beginContextTurn(threadID, turnID string) {
+	if threadID == "" || turnID == "" || c.threadID == "" || threadID != c.threadID {
+		return
+	}
+	var completed *ContextEvent
+	c.contextMu.Lock()
+	if c.contextThreadID == threadID && c.contextTurnID == turnID {
+		c.contextMu.Unlock()
+		return
+	}
+	if pending := c.contextCompaction; pending != nil && pending.completed {
+		completed = codexCompletedCompaction(pending, nil, nil)
+	}
+	c.contextThreadID = threadID
+	c.contextTurnID = turnID
+	c.contextSnapshot = nil
+	c.contextCompaction = nil
+	c.contextMu.Unlock()
+	if completed != nil {
+		c.emitChunk(OutputChunk{Type: string(MessageContext), Context: completed})
+	}
+}
+
+func (c *codexClient) acceptsContextEvent(threadID, turnID string) bool {
+	if threadID == "" || turnID == "" || c.threadID == "" || threadID != c.threadID {
+		return false
+	}
+	c.turnDoneMu.Lock()
+	activeTurnID, turnDone := c.turnID, c.turnDone
+	c.turnDoneMu.Unlock()
+	return !turnDone && activeTurnID == turnID
+}
+
+func (c *codexClient) handleContextUsage(params map[string]any) {
+	threadID, _ := params["threadId"].(string)
+	turnID, _ := params["turnId"].(string)
+	if !c.acceptsContextEvent(threadID, turnID) {
+		return
+	}
+	tokenUsage, _ := params["tokenUsage"].(map[string]any)
+	last, _ := tokenUsage["last"].(map[string]any)
+	used := codexContextToken(last["totalTokens"])
+	window := codexContextToken(tokenUsage["modelContextWindow"])
+	if used == nil && window == nil {
+		return
+	}
+
+	usage := &ContextEvent{
+		Type:         "usage",
+		UsedTokens:   used,
+		WindowTokens: window,
+		Accuracy:     "snapshot",
+	}
+	var completed *ContextEvent
+	c.contextMu.Lock()
+	if c.contextThreadID == "" && c.contextTurnID == "" {
+		c.contextThreadID, c.contextTurnID = threadID, turnID
+	}
+	if c.contextThreadID != threadID || c.contextTurnID != turnID {
+		c.contextMu.Unlock()
+		return
+	}
+	if pending := c.contextCompaction; used != nil && pending != nil && pending.completed && pending.threadID == threadID && pending.turnID == turnID {
+		endWindow := window
+		if endWindow == nil {
+			endWindow = pending.windowTokens
+		}
+		completed = &ContextEvent{
+			Type:         "compaction_end",
+			BeforeTokens: pending.beforeTokens,
+			AfterTokens:  used,
+			WindowTokens: endWindow,
+			Accuracy:     "snapshot",
+		}
+		c.contextCompaction = nil
+	}
+	if c.contextCompaction == nil {
+		c.contextSnapshot = &codexContextSnapshot{
+			threadID:     threadID,
+			turnID:       turnID,
+			usedTokens:   used,
+			windowTokens: window,
 		}
 	}
+	c.contextMu.Unlock()
+
+	if completed != nil {
+		c.emitChunk(OutputChunk{Type: string(MessageContext), Context: completed})
+	}
+	c.emitChunk(OutputChunk{Type: string(MessageContext), Context: usage})
+}
+
+func (c *codexClient) handleContextCompaction(method string, params map[string]any, itemID string) {
+	threadID, _ := params["threadId"].(string)
+	turnID, _ := params["turnId"].(string)
+	if itemID == "" || !c.acceptsContextEvent(threadID, turnID) {
+		return
+	}
+
+	switch method {
+	case "item/started":
+		var stale *ContextEvent
+		var started *ContextEvent
+		c.contextMu.Lock()
+		if c.contextThreadID == "" && c.contextTurnID == "" {
+			c.contextThreadID, c.contextTurnID = threadID, turnID
+		}
+		if c.contextThreadID != threadID || c.contextTurnID != turnID {
+			c.contextMu.Unlock()
+			return
+		}
+		if pending := c.contextCompaction; pending != nil {
+			if pending.threadID == threadID && pending.turnID == turnID && pending.itemID == itemID {
+				c.contextMu.Unlock()
+				return
+			}
+			if pending.completed {
+				stale = codexCompletedCompaction(pending, nil, nil)
+			}
+			c.contextSnapshot = nil
+		}
+		var before, window *int64
+		if snapshot := c.contextSnapshot; snapshot != nil && snapshot.threadID == threadID && snapshot.turnID == turnID {
+			before, window = snapshot.usedTokens, snapshot.windowTokens
+		}
+		c.contextCompaction = &codexContextCompaction{
+			threadID:     threadID,
+			turnID:       turnID,
+			itemID:       itemID,
+			beforeTokens: before,
+			windowTokens: window,
+		}
+		started = &ContextEvent{
+			Type:         "compaction_start",
+			BeforeTokens: before,
+			WindowTokens: window,
+			Accuracy:     "snapshot",
+		}
+		c.contextMu.Unlock()
+		if stale != nil {
+			c.emitChunk(OutputChunk{Type: string(MessageContext), Context: stale})
+		}
+		c.emitChunk(OutputChunk{Type: string(MessageContext), Context: started})
+
+	case "item/completed":
+		c.contextMu.Lock()
+		pending := c.contextCompaction
+		if pending != nil && pending.threadID == threadID && pending.turnID == turnID && pending.itemID == itemID {
+			pending.completed = true
+			// A pre-compaction snapshot cannot be reused after the boundary.
+			c.contextSnapshot = nil
+		}
+		c.contextMu.Unlock()
+	}
+}
+
+func (c *codexClient) finishContextTurn(threadID, turnID string) {
+	if threadID == "" || turnID == "" {
+		return
+	}
+	var completed *ContextEvent
+	c.contextMu.Lock()
+	if pending := c.contextCompaction; pending != nil && pending.completed && pending.threadID == threadID && pending.turnID == turnID {
+		completed = codexCompletedCompaction(pending, nil, nil)
+	}
+	if c.contextThreadID == threadID && c.contextTurnID == turnID {
+		c.contextSnapshot = nil
+		c.contextCompaction = nil
+	}
+	c.contextMu.Unlock()
+	if completed != nil {
+		c.emitChunk(OutputChunk{Type: string(MessageContext), Context: completed})
+	}
+}
+
+func codexCompletedCompaction(pending *codexContextCompaction, after, window *int64) *ContextEvent {
+	if window == nil {
+		window = pending.windowTokens
+	}
+	return &ContextEvent{
+		Type:         "compaction_end",
+		BeforeTokens: pending.beforeTokens,
+		AfterTokens:  after,
+		WindowTokens: window,
+		Accuracy:     "snapshot",
+	}
+}
+
+func codexContextToken(value any) *int64 {
+	var token int64
+	switch value := value.(type) {
+	case float64:
+		token = int64(value)
+		if value < 0 || float64(token) != value {
+			return nil
+		}
+	case int:
+		if value < 0 {
+			return nil
+		}
+		token = int64(value)
+	case int64:
+		if value < 0 {
+			return nil
+		}
+		token = value
+	case json.Number:
+		parsed, err := value.Int64()
+		if err != nil || parsed < 0 {
+			return nil
+		}
+		token = parsed
+	default:
+		return nil
+	}
+	return &token
 }
 
 func (c *codexClient) setTurnError(msg string) {

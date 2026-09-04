@@ -634,6 +634,31 @@ func (h *ChannelHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	}
+	channelAgentRows, err := tx.Query(r.Context(), `
+		SELECT member_id::text
+		  FROM channel_members
+		 WHERE channel_id = $1 AND member_type = 'agent'
+	`, channelID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete channel")
+		return
+	}
+	channelAgentIDs := make([]string, 0)
+	for channelAgentRows.Next() {
+		var agentID string
+		if err := channelAgentRows.Scan(&agentID); err != nil {
+			channelAgentRows.Close()
+			writeError(w, http.StatusInternalServerError, "failed to delete channel")
+			return
+		}
+		channelAgentIDs = append(channelAgentIDs, agentID)
+	}
+	err = channelAgentRows.Err()
+	channelAgentRows.Close()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete channel")
+		return
+	}
 
 	agentRows, err := tx.Query(r.Context(), `
 		SELECT id::text
@@ -678,9 +703,9 @@ func (h *ChannelHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.Exec(r.Context(), `
 		UPDATE tasks
 		   SET status = 'todo', claimer_id = NULL, updated_at = now()
-		 WHERE channel_id = $1
+		 WHERE (channel_id = $1 OR claimer_id = ANY($2::uuid[]))
 		   AND status IN ('in_progress', 'in_review')
-	`, channelID); err != nil {
+	`, channelID, agentIDs); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete channel")
 		return
 	}
@@ -690,13 +715,13 @@ func (h *ChannelHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		       activity_text = 'Cancelled because the Channel was closed',
 		       updated_at = now(),
 		       finished_at = COALESCE(finished_at, now())
-		 WHERE channel_id = $1
+		 WHERE (channel_id = $1 OR agent_id = ANY($2::uuid[]))
 		   AND status IN (
 		       'queued', 'thinking', 'running', 'streaming',
 		       'waiting_input', 'waiting_approval'
 		   )
 		 RETURNING id::text
-	`, channelID)
+	`, channelID, agentIDs)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete channel")
 		return
@@ -722,13 +747,31 @@ func (h *ChannelHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := tx.Exec(r.Context(), `
-		UPDATE agent_sessions
+		UPDATE agent_sessions s
 		   SET status = 'closed', last_active_at = now()
-		 WHERE agent_id IN (
-		       SELECT id FROM agents WHERE home_channel_id = $1
+		 WHERE s.status IN ('active', 'rollover_pending')
+		   AND (
+		       s.agent_id = ANY($2::uuid[])
+		       OR (
+		           s.agent_id IN (
+		               SELECT member_id FROM channel_members
+		                WHERE channel_id = $1 AND member_type = 'agent'
+		           )
+		           AND EXISTS (
+		               SELECT 1 FROM agent_runs r
+		                WHERE r.session_id = s.id
+		                  AND r.agent_id = s.agent_id
+		                  AND r.channel_id = $1
+		                  AND r.thinking_node_id IS NULL
+		           )
+		           AND NOT EXISTS (
+		               SELECT 1 FROM agent_runs other
+		                WHERE other.session_id = s.id
+		                  AND (other.thinking_node_id IS NOT NULL OR other.channel_id IS DISTINCT FROM $1)
+		           )
+		       )
 		   )
-		   AND status = 'active'
-	`, channelID); err != nil {
+	`, channelID, agentIDs); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete channel")
 		return
 	}
@@ -749,14 +792,26 @@ func (h *ChannelHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("channel archived", "channel_id", channelID, "user_id", userID)
 
-	if h.dm != nil && len(agentIDs) > 0 {
-		go func(ids []string) {
+	if h.dm != nil && (len(channelAgentIDs) > 0 || len(agentIDs) > 0) {
+		go func(channelIDs, deactivatedIDs []string) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			if err := h.dm.CleanupAgents(ctx, ids); err != nil {
-				slog.Warn("failed to clean Agent sessions for archived channel", "channel_id", channelID, "error", err)
+			if err := h.dm.CleanupAgents(ctx, deactivatedIDs); err != nil {
+				slog.Warn("failed to clean deactivated Agents for archived Home Channel", "channel_id", channelID, "error", err)
 			}
-		}(append([]string(nil), agentIDs...))
+			deactivated := make(map[string]struct{}, len(deactivatedIDs))
+			for _, agentID := range deactivatedIDs {
+				deactivated[agentID] = struct{}{}
+			}
+			for _, agentID := range channelIDs {
+				if _, ok := deactivated[agentID]; ok {
+					continue
+				}
+				if err := h.dm.CleanupAgentChannel(ctx, agentID, channelID); err != nil {
+					slog.Warn("failed to clean Agent session for archived channel", "agent_id", agentID, "channel_id", channelID, "error", err)
+				}
+			}
+		}(append([]string(nil), channelAgentIDs...), append([]string(nil), agentIDs...))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "channel deleted"})

@@ -733,7 +733,7 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if _, err = tx.Exec(r.Context(), `
 		UPDATE agent_sessions
 		   SET status = 'closed', last_active_at = now()
-		 WHERE agent_id = $1 AND status = 'active'
+		 WHERE agent_id = $1 AND status IN ('active', 'rollover_pending')
 	`, agentID); err != nil {
 		slog.Error("failed to close agent sessions", "agent_id", agentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to delete agent")

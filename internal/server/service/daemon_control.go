@@ -38,6 +38,7 @@ type ControlEnvelope struct {
 type DaemonHello struct {
 	DaemonID         string             `json:"daemon_id"`
 	DaemonVersion    string             `json:"daemon_version"`
+	Capabilities     []string           `json:"capabilities,omitempty"`
 	RuntimeInventory json.RawMessage    `json:"runtime_inventory"`
 	SystemInfo       ComputerSystemInfo `json:"system_info"`
 	AgentIDs         []string           `json:"agent_ids,omitempty"`
@@ -135,7 +136,7 @@ func (dm *DaemonManager) ServeControlConnection(ctx context.Context, conn *webso
 	metrics.Global.IncDaemonConnects()
 	dm.Register(&DaemonInfo{
 		ID: computerID, ComputerID: computerID, Version: hello.DaemonVersion,
-		Capabilities: []string{"llm"}, MaxConcurrent: 10, AgentTypes: availableRuntimeTypes(hello.RuntimeInventory),
+		Capabilities: remoteDaemonCapabilities(hello.Capabilities), MaxConcurrent: 10, AgentTypes: availableRuntimeTypes(hello.RuntimeInventory),
 	})
 	dm.Heartbeat(computerID, int32(len(hello.ActiveAttempts)))
 	go dm.reconcileRemoteConnection(context.Background(), computerID, hello.ActiveAttempts)
@@ -290,7 +291,7 @@ func (dm *DaemonManager) CallControlRPC(ctx context.Context, computerID, method 
 }
 
 func controlRPCTimeout(method string) time.Duration {
-	if method == "agent.cleanup" || method == "thinking.cleanup" {
+	if method == "agent.cleanup" || method == "agent.channel.cleanup" || method == "thinking.cleanup" {
 		return 30 * time.Second
 	}
 	return 10 * time.Second
@@ -354,6 +355,16 @@ func availableRuntimeTypes(inventory json.RawMessage) []string {
 		}
 	}
 	return types
+}
+
+func remoteDaemonCapabilities(reported []string) []string {
+	capabilities := []string{"llm"}
+	for _, capability := range reported {
+		if capability != "" && !hasCapability(capabilities, capability) {
+			capabilities = append(capabilities, capability)
+		}
+	}
+	return capabilities
 }
 
 func (control *DaemonControlConnection) writePump() error {

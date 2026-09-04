@@ -120,6 +120,10 @@ func (b *KimiBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *Ex
 				output.WriteString(chunk.Content)
 				outputMu.Unlock()
 			}
+			if chunk.Context != nil {
+				sendContextChunk(runCtx.Done(), msgCh, chunk)
+				return
+			}
 			trySend(msgCh, chunk)
 		},
 		onPromptDone: func(result acpPromptResult) {
@@ -389,6 +393,10 @@ func (b *KimiBackend) Start(ctx context.Context, req *ExecuteRequest, opts *Exec
 				output.WriteString(chunk.Content)
 				outputMu.Unlock()
 			}
+			if chunk.Context != nil {
+				sendContextChunk(ctx.Done(), msgCh, chunk)
+				return
+			}
 			trySend(msgCh, chunk)
 		},
 		onPromptDone: func(pr acpPromptResult) {
@@ -589,6 +597,10 @@ func (b *KimiBackend) Send(ctx context.Context, ps *PersistentSession, messages 
 				outputMu.Lock()
 				output.WriteString(chunk.Content)
 				outputMu.Unlock()
+			}
+			if chunk.Context != nil {
+				sendContextChunk(ctx.Done(), msgCh, chunk)
+				return
 			}
 			trySend(msgCh, chunk)
 		},

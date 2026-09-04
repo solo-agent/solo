@@ -204,6 +204,10 @@ func TestAutomaticTaskRecoveryMode(t *testing.T) {
 	if !ok || mode != taskRecoveryModeFreshSession {
 		t.Fatalf("missing result recovery = %q/%t", mode, ok)
 	}
+	mode, ok = automaticTaskRecoveryMode(retryableTaskRun{FailureCode: agentFailureContextExhausted, Retryable: true})
+	if !ok || mode != taskRecoveryModeFreshSession {
+		t.Fatalf("context exhausted recovery = %q/%t", mode, ok)
+	}
 	if mode, ok = automaticTaskRecoveryMode(retryableTaskRun{FailureCode: agentFailureConfiguration}); ok || mode != "" {
 		t.Fatalf("configuration recovery = %q/%t, want blocked", mode, ok)
 	}
