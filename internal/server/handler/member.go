@@ -156,11 +156,17 @@ func (h *MemberHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 	if h.agentSvc != nil {
 		h.agentSvc.BroadcastMemberEvent(channelID, "member.removed", memberType, memberID, "")
 	}
-	if memberType == "agent" && isAgentHome && h.dm != nil {
+	if memberType == "agent" && h.dm != nil {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			if err := h.dm.CleanupAgents(ctx, []string{memberID}); err != nil {
+			var err error
+			if isAgentHome {
+				err = h.dm.CleanupAgents(ctx, []string{memberID})
+			} else {
+				err = h.dm.CleanupAgentChannel(ctx, memberID, channelID)
+			}
+			if err != nil {
 				slog.Warn("failed to clean removed Agent session", "agent_id", memberID, "error", err)
 			}
 		}()

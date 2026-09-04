@@ -210,7 +210,7 @@ func TestBuildPrompt(t *testing.T) {
 		}
 	})
 
-	t.Run("system message skipped", func(t *testing.T) {
+	t.Run("system message preserved", func(t *testing.T) {
 		req := &ExecuteRequest{
 			Messages: []Message{
 				{Role: RoleSystem, Content: "you are helpful"},
@@ -218,7 +218,7 @@ func TestBuildPrompt(t *testing.T) {
 			},
 		}
 		result := buildPrompt(req, &ExecuteOptions{})
-		expected := "User: hello\n\nAssistant:"
+		expected := "System: you are helpful\n\nUser: hello\n\nAssistant:"
 		if result != expected {
 			t.Errorf("expected %q, got %q", expected, result)
 		}
@@ -268,8 +268,9 @@ func TestBuildPrompt(t *testing.T) {
 			},
 		}
 		result := buildPrompt(req, &ExecuteOptions{})
-		if result != "Assistant:" {
-			t.Errorf("expected %q, got %q", "Assistant:", result)
+		expected := "System: rule1\n\nSystem: rule2\n\nAssistant:"
+		if result != expected {
+			t.Errorf("expected %q, got %q", expected, result)
 		}
 	})
 }
@@ -682,6 +683,32 @@ func TestHandleSystemApiRetry(t *testing.T) {
 			// Good — handler returned without blocking.
 		case <-time.After(2 * time.Second):
 			t.Fatal("handleSystemApiRetry blocked on a full channel")
+		}
+	})
+}
+
+func TestParseClaudeCompactBoundary(t *testing.T) {
+	t.Run("camel case with post tokens", func(t *testing.T) {
+		event := parseClaudeCompactBoundary([]byte(`{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"auto","preTokens":1000,"postTokens":250}}`))
+		if event == nil || event.Type != "compaction_end" || event.Accuracy != "reported" || event.Reason != "auto" {
+			t.Fatalf("event = %+v", event)
+		}
+		if event.BeforeTokens == nil || *event.BeforeTokens != 1000 || event.AfterTokens == nil || *event.AfterTokens != 250 {
+			t.Fatalf("tokens = before %v, after %v", event.BeforeTokens, event.AfterTokens)
+		}
+	})
+
+	t.Run("sdk shape without post tokens", func(t *testing.T) {
+		event := parseClaudeCompactBoundary([]byte(`{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"manual","pre_tokens":800}}`))
+		if event == nil || event.BeforeTokens == nil || *event.BeforeTokens != 800 || event.AfterTokens != nil {
+			t.Fatalf("event = %+v, want known before and unknown after", event)
+		}
+	})
+
+	t.Run("malformed token stays unknown", func(t *testing.T) {
+		event := parseClaudeCompactBoundary([]byte(`{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"auto","preTokens":"bad"}}`))
+		if event == nil || event.BeforeTokens != nil || event.AfterTokens != nil {
+			t.Fatalf("event = %+v, want unknown token fields", event)
 		}
 	})
 }

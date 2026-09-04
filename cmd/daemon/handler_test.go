@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/solo-ai/solo/pkg/agent"
 	"github.com/solo-ai/solo/pkg/llm"
 )
@@ -47,6 +48,27 @@ func TestControlRPCReadsTranscriptFromLocalRuntime(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Text != "remote transcript works" || len(entries[0].Raw) != 0 {
 		t.Fatalf("entries = %#v", entries)
+	}
+}
+
+func TestAgentChannelCleanupEntrypointsRequireAndAcceptExactScope(t *testing.T) {
+	h := newDaemonHandler(newTaskManager(), nil, "", "")
+	if _, err := h.handleControlRPC(context.Background(), "agent.channel.cleanup", json.RawMessage(`{"agent_id":"agent-1"}`)); err == nil {
+		t.Fatal("remote cleanup accepted a missing channel_id")
+	}
+	if _, err := h.handleControlRPC(context.Background(), "agent.channel.cleanup", json.RawMessage(`{"agent_id":"agent-1","channel_id":"channel-a"}`)); err != nil {
+		t.Fatalf("remote scoped cleanup: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/daemon/agents/agent-1/channels/channel-a/cleanup", nil)
+	route := chi.NewRouteContext()
+	route.URLParams.Add("agentID", "agent-1")
+	route.URLParams.Add("channelID", "channel-a")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, route))
+	recorder := httptest.NewRecorder()
+	h.CleanupAgentChannel(recorder, req)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("local scoped cleanup status = %d", recorder.Code)
 	}
 }
 
@@ -143,6 +165,10 @@ func TestTaskFailureDetails(t *testing.T) {
 	}{
 		{"codex executable not found at /missing", "configuration", false},
 		{"API key is missing", "configuration", false},
+		{"Prompt is too long: 213208 tokens > 200000 maximum", "context_exhausted", true},
+		{"The input exceeds the context window of this model.", "context_exhausted", true},
+		{"context_length_exceeded", "context_exhausted", true},
+		{"This model's maximum context length is 16385 tokens.", "context_exhausted", true},
 		{"provider temporarily unavailable", "provider_transient", true},
 	}
 	for _, tt := range tests {
@@ -150,6 +176,124 @@ func TestTaskFailureDetails(t *testing.T) {
 		if got.Code != tt.wantCode || got.Retryable != tt.wantRetryable {
 			t.Fatalf("taskFailureDetails(%q) = %+v, want %s/%t", tt.message, got, tt.wantCode, tt.wantRetryable)
 		}
+	}
+}
+
+func TestResumableContextFailureUsesExactLocalSession(t *testing.T) {
+	failure := taskFailureDetails("context_length_exceeded")
+	session := &agent.PersistentSession{SessionID: "actual-local-session"}
+	if got := resumableContextFailureSessionID("stale-server-session", session, failure); got != session.SessionID {
+		t.Fatalf("session ID = %q, want %q", got, session.SessionID)
+	}
+	if got := resumableContextFailureSessionID("", session, failure); got != "" {
+		t.Fatalf("fresh request returned session ID %q", got)
+	}
+	if got := resumableContextFailureSessionID("server-session", session, taskFailure{Code: "provider_transient"}); got != "" {
+		t.Fatalf("transient failure returned session ID %q", got)
+	}
+}
+
+func TestCleanupAgentCancelsEveryChannelTaskForAgent(t *testing.T) {
+	tm := newTaskManager()
+	h := newDaemonHandler(tm, nil, "", "")
+
+	contexts := make(map[string]context.Context)
+	for _, task := range []*taskState{
+		{TaskID: "agent-channel-a", AgentID: "agent-1", ChannelID: "channel-a", Status: taskStatusThinking},
+		{TaskID: "agent-channel-b", AgentID: "agent-1", ChannelID: "channel-b", Status: taskStatusQueued},
+		{TaskID: "other-agent", AgentID: "agent-2", ChannelID: "channel-a", Status: taskStatusThinking},
+	} {
+		tm.AddTask(task.TaskID, task)
+		ctx, cancel := context.WithCancel(context.Background())
+		contexts[task.TaskID] = ctx
+		tm.SetCancelFunc(task.TaskID, cancel)
+	}
+
+	h.cleanupAgent("agent-1")
+	for _, taskID := range []string{"agent-channel-a", "agent-channel-b"} {
+		if contexts[taskID].Err() != context.Canceled {
+			t.Fatalf("task %s was not cancelled", taskID)
+		}
+	}
+	if contexts["other-agent"].Err() != nil {
+		t.Fatal("another Agent's task was cancelled")
+	}
+}
+
+func TestCleanupAgentChannelCancelsOnlyMatchingTasks(t *testing.T) {
+	tm := newTaskManager()
+	h := newDaemonHandler(tm, nil, "", "")
+
+	contexts := make(map[string]context.Context)
+	for _, task := range []*taskState{
+		{TaskID: "matching-active", AgentID: "agent-1", ChannelID: "channel-a", Status: taskStatusThinking},
+		{TaskID: "matching-queued", AgentID: "agent-1", ChannelID: "channel-a", Status: taskStatusQueued},
+		{TaskID: "other-channel", AgentID: "agent-1", ChannelID: "channel-b", Status: taskStatusThinking},
+		{TaskID: "other-agent", AgentID: "agent-2", ChannelID: "channel-a", Status: taskStatusThinking},
+	} {
+		tm.AddTask(task.TaskID, task)
+		ctx, cancel := context.WithCancel(context.Background())
+		contexts[task.TaskID] = ctx
+		tm.SetCancelFunc(task.TaskID, cancel)
+	}
+
+	h.cleanupAgentChannel("agent-1", "channel-a")
+	for _, taskID := range []string{"matching-active", "matching-queued"} {
+		if contexts[taskID].Err() != context.Canceled {
+			t.Fatalf("task %s was not cancelled", taskID)
+		}
+	}
+	for _, taskID := range []string{"other-channel", "other-agent"} {
+		if contexts[taskID].Err() != nil {
+			t.Fatalf("task %s was cancelled", taskID)
+		}
+	}
+}
+
+func TestStartTaskRejectsRetireSessionWithoutFreshStart(t *testing.T) {
+	tm := newTaskManager()
+	h := newDaemonHandler(tm, nil, "", "")
+	err := h.startTask(runTaskRequest{
+		TaskID: "task-1", AgentID: "agent-1", ChannelID: "channel-1",
+		RetireSessionID: "provider-session-1",
+	}, "")
+	if err == nil || !strings.Contains(err.Error(), "requires force_fresh_session") {
+		t.Fatalf("startTask error = %v", err)
+	}
+	if _, exists := tm.GetTask("task-1"); exists {
+		t.Fatal("invalid task was registered")
+	}
+}
+
+func TestBackendTurnFinalizerForwardsContextAndAddsTerminalSnapshot(t *testing.T) {
+	tm := newTaskManager()
+	tm.AddTask("task-1", &taskState{TaskID: "task-1", Status: taskStatusThinking})
+	h := newDaemonHandler(tm, nil, "", "")
+	used, window := int64(91), int64(100)
+	finalizer := backendTurnFinalizer{
+		h:   h,
+		req: runTaskRequest{TaskID: "task-1", AgentID: "agent-1"},
+	}
+	finalizer.observeContext(&agent.ContextEvent{
+		Type: "usage", UsedTokens: &used, WindowTokens: &window, Accuracy: "reported",
+	})
+	finalizer.finish(taskStatusCompleted, "complete", map[string]interface{}{"agent_id": "agent-1"})
+	finalizer.finalize()
+
+	events := tm.EventsAfter("task-1", 0)
+	if len(events) != 3 || events[0].Event != "context" || events[1].Event != "complete" || events[2].Event != "done" {
+		t.Fatalf("events = %+v", events)
+	}
+	var terminal map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(events[1].Data), &terminal); err != nil {
+		t.Fatal(err)
+	}
+	if len(terminal["context_snapshot"]) == 0 {
+		t.Fatalf("terminal payload missing context_snapshot: %s", events[1].Data)
+	}
+	task, _ := tm.GetTask("task-1")
+	if task.Status != taskStatusCompleted {
+		t.Fatalf("task status = %q", task.Status)
 	}
 }
 
@@ -218,6 +362,36 @@ func TestProcessTaskWithProviderFailsWhenStreamClosesWithoutDone(t *testing.T) {
 	}
 	if sawComplete {
 		t.Fatalf("unexpected complete event: %+v", tm.eventHistory[taskID])
+	}
+}
+
+func TestProcessTaskWithProviderUsesColdStartSystemPrompt(t *testing.T) {
+	taskID := "task-cold-start"
+	tm := newTaskManager()
+	tm.AddTask(taskID, &taskState{TaskID: taskID, AgentID: "agent-1", ChannelID: "channel-1", Status: taskStatusRunning})
+	var request *llm.CompletionRequest
+	h := newDaemonHandler(tm, fakeStreamProvider{
+		chunks: []llm.StreamChunk{{Done: true}},
+		onRequest: func(got *llm.CompletionRequest) {
+			copy := *got
+			request = &copy
+		},
+	}, "", "")
+
+	h.processTaskWithProvider(context.Background(), runTaskRequest{
+		TaskID: taskID, AgentID: "agent-1", ChannelID: "channel-1", SystemPrompt: "base",
+		Messages:          []llmMessage{{Role: "user", Content: "latest"}},
+		ColdStartMessages: []llmMessage{{Role: "system", Content: "# Session Continuity\nresume task"}, {Role: "user", Content: "cold history"}},
+	})
+
+	if request == nil {
+		t.Fatal("provider did not receive a request")
+	}
+	if request.SystemPrompt != "base\n\n# Session Continuity\nresume task" {
+		t.Fatalf("system prompt = %q", request.SystemPrompt)
+	}
+	if len(request.Messages) != 1 || request.Messages[0].Role != "user" || request.Messages[0].Content != "cold history" {
+		t.Fatalf("messages = %+v", request.Messages)
 	}
 }
 
@@ -301,14 +475,18 @@ func TestMaterializeMessageAttachmentsCopiesFilesIntoWorkspace(t *testing.T) {
 }
 
 type fakeStreamProvider struct {
-	chunks []llm.StreamChunk
+	chunks    []llm.StreamChunk
+	onRequest func(*llm.CompletionRequest)
 }
 
 func (p fakeStreamProvider) Complete(context.Context, *llm.CompletionRequest) (*llm.CompletionResponse, error) {
 	return &llm.CompletionResponse{}, nil
 }
 
-func (p fakeStreamProvider) CompleteStream(context.Context, *llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
+func (p fakeStreamProvider) CompleteStream(_ context.Context, request *llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
+	if p.onRequest != nil {
+		p.onRequest(request)
+	}
 	ch := make(chan llm.StreamChunk, len(p.chunks))
 	for _, chunk := range p.chunks {
 		ch <- chunk
@@ -396,4 +574,57 @@ func TestDurationFromEnv(t *testing.T) {
 	if got := durationFromEnv("TEST_THINKING_DURATION", time.Minute); got != time.Minute {
 		t.Fatalf("invalid duration fallback = %s, want 1m", got)
 	}
+}
+
+func TestBackendContextTurnDropsPreCompactionSnapshot(t *testing.T) {
+	used, window := int64(95), int64(100)
+	turn := backendContextTurn{}
+	turn.observe(&agent.ContextEvent{Type: "usage", UsedTokens: &used, WindowTokens: &window})
+	turn.observe(&agent.ContextEvent{Type: "compaction_start"})
+
+	observation := turn.observation()
+	if observation.FinalSnapshot != nil || !observation.IncompleteCompaction {
+		t.Fatalf("observation = %+v, want incomplete compaction without stale snapshot", observation)
+	}
+}
+
+func TestBackendTurnFinalizerDrainsContextOnStop(t *testing.T) {
+	tm := newTaskManager()
+	tm.AddTask("task-drain", &taskState{TaskID: "task-drain", Status: taskStatusThinking})
+	h := newDaemonHandler(tm, nil, "", "")
+	before, after, window := int64(95), int64(40), int64(100)
+	messages := make(chan agent.OutputChunk, 1)
+	messages <- agent.OutputChunk{Type: string(agent.MessageContext), Context: &agent.ContextEvent{
+		Type: "compaction_start", BeforeTokens: &before, WindowTokens: &window, Accuracy: "snapshot",
+	}}
+	session := &agent.Session{
+		Messages: messages,
+		Stop: func() error {
+			messages <- agent.OutputChunk{Type: string(agent.MessageContext), Context: &agent.ContextEvent{
+				Type: "compaction_end", BeforeTokens: &before, AfterTokens: &after, WindowTokens: &window, Accuracy: "snapshot",
+			}}
+			close(messages)
+			return nil
+		},
+	}
+	finalizer := backendTurnFinalizer{h: h, req: runTaskRequest{TaskID: "task-drain", AgentID: "agent-1"}}
+	if !finalizer.stopAndDrainContext(session, time.Second) {
+		t.Fatal("closed message stream was not an authoritative drain")
+	}
+	observation := finalizer.context.observation()
+	if observation.IncompleteCompaction || len(observation.Compactions) != 1 {
+		t.Fatalf("observation = %+v, want one completed compaction", observation)
+	}
+}
+
+func TestBackendTurnFinalizerRejectsPartialDrain(t *testing.T) {
+	tm := newTaskManager()
+	h := newDaemonHandler(tm, nil, "", "")
+	messages := make(chan agent.OutputChunk)
+	session := &agent.Session{Messages: messages, Stop: func() error { return nil }}
+	finalizer := backendTurnFinalizer{h: h, req: runTaskRequest{TaskID: "task-timeout", AgentID: "agent-1"}}
+	if finalizer.stopAndDrainContext(session, 10*time.Millisecond) {
+		t.Fatal("open message stream was treated as an authoritative drain")
+	}
+	close(messages)
 }

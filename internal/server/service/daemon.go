@@ -186,6 +186,13 @@ func (dm *DaemonManager) GetDaemon(daemonID string) (*DaemonInfo, bool) {
 	return info, true
 }
 
+func (dm *DaemonManager) DaemonHasCapability(daemonID, capability string) bool {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+	daemon, ok := dm.daemons[daemonID]
+	return ok && hasCapability(daemon.Capabilities, capability)
+}
+
 // Unregister removes a daemon and its pending tasks from tracking.
 // Called when a daemon shuts down cleanly.
 func (dm *DaemonManager) Unregister(daemonID string) {
@@ -586,6 +593,35 @@ func (dm *DaemonManager) CleanupAgents(ctx context.Context, agentIDs []string) e
 		}
 	}
 	return firstErr
+}
+
+// CleanupAgentChannel closes only one Agent's provider session for one Channel.
+func (dm *DaemonManager) CleanupAgentChannel(ctx context.Context, agentID, channelID string) error {
+	daemon, err := dm.ResolveDaemonForAgent(ctx, agentID, "")
+	if err != nil {
+		return err
+	}
+	if daemon.ComputerID != "" {
+		_, err = dm.CallControlRPC(ctx, daemon.ComputerID, "agent.channel.cleanup", map[string]string{
+			"agent_id": agentID, "channel_id": channelID,
+		})
+		return err
+	}
+	url := fmt.Sprintf("http://%s:%d/internal/daemon/agents/%s/channels/%s/cleanup", daemon.Host, daemon.Port, agentID, channelID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := dm.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("daemon %s returned status %d while cleaning agent %s channel %s", daemon.ID, resp.StatusCode, agentID, channelID)
+	}
+	return nil
 }
 
 // --- SSE Streaming task support ---

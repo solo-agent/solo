@@ -152,10 +152,12 @@ export function AgentObservabilityTab({ agentId, initialRunId }: { agentId: stri
         started_at: event.timestamp ?? new Date().toISOString(),
         updated_at: event.timestamp ?? new Date().toISOString(),
       };
+      const sessionChanged = Boolean(event.session_id) &&
+        !sessions.some((session) => session.id === event.session_id);
       setRuns((prev) => upsertRun(prev, nextRun));
       if (!selectedRunId) setSelectedRunId(event.run_id);
       if (event.run_id === selectedRunId) setTranscriptRefreshTick((tick) => tick + 1);
-      if (event.type === 'agent.run.started' || event.type === 'agent.run.finished') {
+      if (event.type === 'agent.run.started' || event.type === 'agent.run.finished' || sessionChanged) {
         apiClient.get<AgentSession[]>(`/api/v1/agents/${agentId}/sessions`)
           .then((items) => setSessions(Array.isArray(items) ? items : []))
           .catch(() => {});
@@ -165,7 +167,14 @@ export function AgentObservabilityTab({ agentId, initialRunId }: { agentId: stri
       }
       return;
     }
-    if (event.type === 'agent.run.event' && event.run_id === selectedRunId) {
+    if (event.type === 'agent.run.event') {
+      if (event.agent_id !== agentId) return;
+      if (event.event_type === 'session_rollover_requested' || event.event_type === 'session_rollover_completed') {
+        apiClient.get<AgentSession[]>(`/api/v1/agents/${agentId}/sessions`)
+          .then((items) => setSessions(Array.isArray(items) ? items : []))
+          .catch(() => {});
+      }
+      if (event.run_id !== selectedRunId) return;
       const nextEvent: AgentRunEvent = {
         id: event.id ?? `${event.run_id}-${event.seq}`,
         run_id: event.run_id,
@@ -179,7 +188,7 @@ export function AgentObservabilityTab({ agentId, initialRunId }: { agentId: stri
       setEvents((prev) => upsertEvent(prev, nextEvent));
       setTranscriptRefreshTick((tick) => tick + 1);
     }
-  }), [agentId, onEvent, selectedRunId]);
+  }), [agentId, onEvent, selectedRunId, sessions]);
 
   useEffect(() => {
     if (!selectedTaskId) {
@@ -355,6 +364,7 @@ function RunList({ runs, selectedRunId, onSelectRun }: { runs: AgentRun[]; selec
 
 function TranscriptPanel({ entries, events, selectedRun }: { entries: AgentTranscriptEntry[]; events: AgentRunEvent[]; selectedRun?: AgentRun }) {
   const fallback = <EventsTimeline events={events} />;
+  const contextEvents = events.filter((event) => ['context_snapshot', 'context_compaction', 'session_rollover_requested', 'session_rollover_completed'].includes(event.type));
   const selectedRunId = selectedRun?.id ?? null;
   const transcriptPath = selectedRun?.transcript_path;
   return (
@@ -386,6 +396,7 @@ function TranscriptPanel({ entries, events, selectedRun }: { entries: AgentTrans
               </div>
             </details>
           ))}
+          {contextEvents.length > 0 && <EventsTimeline events={contextEvents} />}
         </div>
       ) : !transcriptPath ? (
         <>
@@ -546,6 +557,7 @@ function EventsTimeline({ events }: { events: AgentRunEvent[] }) {
               <span className="ml-auto font-mono font-normal text-muted-foreground">{formatTime(event.created_at)}</span>
             </summary>
             <div className="space-y-2 border-t border-border p-2">
+              <ContextEventSummary event={event} />
               {meta.length > 0 && (
                 <div className="flex flex-wrap gap-1">
                   {meta.map(([key, value]) => (
@@ -588,9 +600,13 @@ function payloadText(payload?: Record<string, unknown>) {
 
 function eventMeta(payload?: Record<string, unknown>) {
   if (!payload) return [];
+  const contextKeys = new Set([
+    'context', 'provider', 'before_tokens', 'after_tokens', 'used_tokens', 'window_tokens',
+    'saved_ratio', 'pressure_ratio', 'accuracy', 'reason', 'continuity',
+  ]);
   return Object.entries(payload)
-    .filter(([key]) => key !== 'output' && key !== 'input' && key !== 'call_id')
-    .map(([key, value]) => [key, typeof value === 'string' ? readableEventText(value) : String(value)] as const);
+    .filter(([key]) => key !== 'output' && key !== 'input' && key !== 'call_id' && !contextKeys.has(key))
+    .map(([key, value]) => [key, formatEventMetaValue(value)] as const);
 }
 
 function eventLabel(type: string, toolName: string) {
@@ -604,9 +620,99 @@ function eventLabel(type: string, toolName: string) {
   if (type === 'task_recovery_scheduled') return t('observabilityRecoveryScheduled');
   if (type === 'task_recovery_blocked') return t('observabilityRecoveryNeedsHuman');
   if (type === 'task_retry_exhausted') return t('observabilityRecoveryExhausted');
+  if (type === 'context_snapshot') return t('observabilityContextSnapshot');
+  if (type === 'context_compaction') return t('observabilityContextCompaction');
+  if (type === 'session_rollover_requested') return t('observabilitySessionRolloverRequested');
+  if (type === 'session_rollover_completed') return t('observabilitySessionRolloverCompleted');
   if (type === 'done') return t('observabilityDone');
   if (type === 'error') return t('observabilityError');
   return type;
+}
+
+function ContextEventSummary({ event }: { event: AgentRunEvent }) {
+  if (!['context_snapshot', 'context_compaction', 'session_rollover_requested', 'session_rollover_completed'].includes(event.type)) {
+    return null;
+  }
+  const nested = asRecord(event.payload?.context);
+  const payload = { ...(event.payload ?? {}), ...(nested ?? {}) };
+  const before = optionalNumberValue(payload.before_tokens);
+  const after = optionalNumberValue(payload.after_tokens);
+  const used = optionalNumberValue(payload.used_tokens);
+  const window = optionalNumberValue(payload.window_tokens);
+  const saved = optionalNumberValue(payload.saved_ratio);
+  const pressure = optionalNumberValue(payload.pressure_ratio);
+  const accuracy = stringValue(payload.accuracy);
+  const reason = stringValue(payload.reason);
+  const provider = stringValue(payload.provider);
+  const continuity = stringValue(payload.continuity);
+  const fields = [
+    provider ? [t('observabilityContextProvider'), provider] : null,
+    before !== undefined ? [t('observabilityContextBefore'), formatTokens(before)] : null,
+    after !== undefined ? [t('observabilityContextAfter'), formatTokens(after)] : null,
+    used !== undefined ? [t('observabilityContextUsed'), formatTokens(used)] : null,
+    window !== undefined ? [t('observabilityContextWindow'), formatTokens(window)] : null,
+    saved !== undefined ? [t('observabilityContextSaved'), formatContextRatio(saved)] : null,
+    pressure !== undefined ? [t('observabilityContextPressure'), formatContextRatio(pressure)] : null,
+    accuracy ? [t('observabilityContextAccuracy'), contextAccuracyText(accuracy)] : null,
+    reason ? [t('observabilityContextReason'), contextReasonText(reason)] : null,
+  ].filter((field): field is string[] => field !== null);
+
+  if (fields.length === 0 && !continuity) return null;
+  return (
+    <div className="rounded-md border border-border bg-brutal-primary-light p-2">
+      {fields.length > 0 && (
+        <dl className="grid gap-1 text-xs sm:grid-cols-2">
+          {fields.map(([label, value]) => (
+            <div key={label} className="flex justify-between gap-3 rounded bg-white px-2 py-1">
+              <dt className="text-muted-foreground">{label}</dt>
+              <dd className="font-mono font-bold text-black">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {continuity && (
+        <details className="mt-2 rounded border border-border bg-white">
+          <summary className="cursor-pointer px-2 py-1 text-xs font-bold">{t('observabilityContextContinuity')}</summary>
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words border-t border-border p-2 font-mono text-xs">{continuity}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function optionalNumberValue(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function formatContextRatio(value: number) {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function contextAccuracyText(value: string) {
+  if (value === 'reported') return t('observabilityContextAccuracyReported');
+  if (value === 'snapshot') return t('observabilityContextAccuracySnapshot');
+  if (value === 'estimated') return t('observabilityContextAccuracyEstimated');
+  return value;
+}
+
+function contextReasonText(value: string) {
+  if (value === 'ineffective_compaction') return t('observabilityContextReasonIneffective');
+  if (value === 'post_compaction_pressure') return t('observabilityContextReasonPostPressure');
+  if (value === 'sustained_pressure' || value === 'persistent_context_pressure') {
+    return t('observabilityContextReasonSustainedPressure');
+  }
+  if (value === 'context_exhausted') return t('observabilityContextReasonExhausted');
+  return value;
+}
+
+function formatEventMetaValue(value: unknown) {
+  if (typeof value === 'string') return readableEventText(value);
+  if (value == null || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return t('observabilityNoSummary');
+  }
 }
 
 function upsertRun(runs: AgentRun[], nextRun: AgentRun) {

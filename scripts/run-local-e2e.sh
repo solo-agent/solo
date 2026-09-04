@@ -19,7 +19,6 @@ fi
 
 E2E_TMP_ROOT="${TMPDIR:-/tmp}"
 E2E_TMP_ROOT="${E2E_TMP_ROOT%/}"
-E2E_STATE_DIR="$(mktemp -d "$E2E_TMP_ROOT/solo-e2e-daemon.XXXXXX")"
 E2E_DAEMON_ID="daemon-e2e-${SCENARIO}-$(date +%s)-$$"
 E2E_SERVER_PORT="${SERVER_PORT:-8080}"
 E2E_DAEMON_PORT="${DAEMON_PORT:-8081}"
@@ -27,20 +26,21 @@ E2E_FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 E2E_GOCACHE="${GOCACHE:-$E2E_TMP_ROOT/solo-e2e-go-cache}"
 E2E_CORS_ORIGINS="http://localhost:$E2E_FRONTEND_PORT,http://127.0.0.1:$E2E_FRONTEND_PORT"
 RESTORE_STATE_DIR="$E2E_TMP_ROOT/solo-restored-daemon-$E2E_SERVER_PORT"
-ORDINARY_DAEMON_ID="$(sed -n 's/^DAEMON_ID=//p' "$REPO_ROOT/.env" 2>/dev/null | tail -1 | tr -d '"'"'"'[:space:]')"
+ORDINARY_DAEMON_ID="$(sed -n 's/^DAEMON_ID=//p' "$REPO_ROOT/.env" 2>/dev/null | tail -1 | tr -d '"'"'"'[:space:]' || true)"
 ORDINARY_DAEMON_ID="${ORDINARY_DAEMON_ID:-daemon-01}"
 ORDINARY_CREDENTIAL_FILE="${SOLO_DAEMON_CREDENTIAL_FILE:-$HOME/.solo/daemon/credentials.json}"
-ORDINARY_COMPUTER_ID="$(sed -n 's/.*"computer_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$ORDINARY_CREDENTIAL_FILE" 2>/dev/null | head -1)"
+ORDINARY_COMPUTER_ID="$(sed -n 's/.*"computer_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$ORDINARY_CREDENTIAL_FILE" 2>/dev/null | head -1 || true)"
 case "$ORDINARY_DAEMON_ID" in
   *[!a-zA-Z0-9_-]*)
     echo "ERROR: ordinary DAEMON_ID contains unsupported characters" >&2
     exit 2
     ;;
 esac
-case "$ORDINARY_COMPUTER_ID" in
-  ????????-????-????-????-????????????) ;;
-  *) echo "ERROR: ordinary Daemon credential does not contain a Computer ID" >&2; exit 2 ;;
-esac
+if [[ ! "$ORDINARY_COMPUTER_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+  echo "ERROR: ordinary Daemon credential does not contain a valid UUID Computer ID" >&2
+  exit 2
+fi
+E2E_STATE_DIR="$(mktemp -d "$E2E_TMP_ROOT/solo-e2e-daemon.XXXXXX")"
 RESTORED=0
 
 restore_local_stack() {
@@ -53,12 +53,34 @@ restore_local_stack() {
     RESTORED=1
     echo "=== Restoring ordinary local Daemon ==="
     set +e
-    (cd "$REPO_ROOT" && make SERVER_PORT="$E2E_SERVER_PORT" DAEMON_PORT="$E2E_DAEMON_PORT" FRONTEND_PORT="$E2E_FRONTEND_PORT" stop)
+    (cd "$REPO_ROOT" && make stop SERVER_PORT="$E2E_SERVER_PORT" DAEMON_PORT="$E2E_DAEMON_PORT" FRONTEND_PORT="$E2E_FRONTEND_PORT")
     cleanup_status=$?
     docker exec "${SOLO_POSTGRES_CONTAINER:-solo-postgres}" \
       psql -U "${POSTGRES_USER:-solo}" -d "${POSTGRES_DB:-solo}" \
       -v ON_ERROR_STOP=1 \
-      -c "UPDATE agents SET is_active = false, updated_at = now() WHERE runtime_id = (SELECT id::text FROM computers WHERE daemon_id = '$E2E_DAEMON_ID' AND daemon_id LIKE 'daemon-e2e-%'); DELETE FROM computers WHERE daemon_id = '$E2E_DAEMON_ID' AND daemon_id LIKE 'daemon-e2e-%';"
+      -c "BEGIN;
+          WITH e2e_agents AS (
+            SELECT a.id FROM agents a JOIN computers c ON c.id::text = a.runtime_id
+             WHERE c.daemon_id = '$E2E_DAEMON_ID' AND c.daemon_id LIKE 'daemon-e2e-%'
+          ),
+          released_tasks AS (
+            UPDATE tasks SET status = 'todo', claimer_id = NULL, updated_at = now()
+             WHERE claimer_id IN (SELECT id FROM e2e_agents) AND status IN ('in_progress', 'in_review')
+          ),
+          cancelled_runs AS (
+            UPDATE agent_runs SET status = 'cancelled', activity_text = 'Cancelled after isolated E2E cleanup',
+                   updated_at = now(), finished_at = COALESCE(finished_at, now())
+             WHERE agent_id IN (SELECT id FROM e2e_agents)
+               AND status IN ('queued', 'thinking', 'running', 'streaming', 'waiting_input', 'waiting_approval')
+          ),
+          closed_sessions AS (
+            UPDATE agent_sessions SET status = 'closed', last_active_at = now()
+             WHERE agent_id IN (SELECT id FROM e2e_agents) AND status IN ('active', 'rollover_pending')
+          )
+          UPDATE agents SET is_active = false, updated_at = now()
+           WHERE id IN (SELECT id FROM e2e_agents);
+          DELETE FROM computers WHERE daemon_id = '$E2E_DAEMON_ID' AND daemon_id LIKE 'daemon-e2e-%';
+          COMMIT;"
     if [ "$?" -ne 0 ]; then
       cleanup_status=1
       echo "ERROR: could not remove the isolated E2E Computer record" >&2
@@ -78,20 +100,31 @@ restore_local_stack() {
         AGENT_CASCADE_THRESHOLD \
         AGENT_CASCADE_WINDOW \
         AGENT_CASCADE_COOLDOWN
-      cd "$REPO_ROOT" && make \
+      cd "$REPO_ROOT" && make rebuild \
         SERVER_PORT="$E2E_SERVER_PORT" DAEMON_PORT="$E2E_DAEMON_PORT" FRONTEND_PORT="$E2E_FRONTEND_PORT" \
         DAEMON_SERVER_URL="http://127.0.0.1:$E2E_SERVER_PORT" SOLO_DAEMON_STATE_DIR="$RESTORE_STATE_DIR" \
-        CORS_ALLOWED_ORIGINS="$E2E_CORS_ORIGINS" GOCACHE="$E2E_GOCACHE" rebuild
+        CORS_ALLOWED_ORIGINS="$E2E_CORS_ORIGINS" GOCACHE="$E2E_GOCACHE"
     )
     restore_status=$?
     if [ "$restore_status" -eq 0 ]; then
-      ordinary_health="$(curl -sf "http://127.0.0.1:$E2E_DAEMON_PORT/health" 2>/dev/null || true)"
-      ordinary_online="$(docker exec "${SOLO_POSTGRES_CONTAINER:-solo-postgres}" \
-        psql -U "${POSTGRES_USER:-solo}" -d "${POSTGRES_DB:-solo}" -tA \
-        -c "SELECT count(*) FROM computers WHERE id = '$ORDINARY_COMPUTER_ID'::uuid AND status = 'online';" 2>/dev/null | tr -d '[:space:]')"
-      isolated_remaining="$(docker exec "${SOLO_POSTGRES_CONTAINER:-solo-postgres}" \
-        psql -U "${POSTGRES_USER:-solo}" -d "${POSTGRES_DB:-solo}" -tA \
-        -c "SELECT count(*) FROM computers WHERE daemon_id = '$E2E_DAEMON_ID';" 2>/dev/null | tr -d '[:space:]')"
+      ordinary_health=""
+      ordinary_online="0"
+      isolated_remaining="1"
+      for _ in $(seq 1 60); do
+        ordinary_health="$(curl --max-time 2 -sf "http://127.0.0.1:$E2E_DAEMON_PORT/health" 2>/dev/null || true)"
+        ordinary_online="$(docker exec "${SOLO_POSTGRES_CONTAINER:-solo-postgres}" \
+          psql -U "${POSTGRES_USER:-solo}" -d "${POSTGRES_DB:-solo}" -tA \
+          -c "SELECT count(*) FROM computers WHERE id = '$ORDINARY_COMPUTER_ID'::uuid AND status = 'online';" 2>/dev/null | tr -d '[:space:]')"
+        isolated_remaining="$(docker exec "${SOLO_POSTGRES_CONTAINER:-solo-postgres}" \
+          psql -U "${POSTGRES_USER:-solo}" -d "${POSTGRES_DB:-solo}" -tA \
+          -c "SELECT count(*) FROM computers WHERE daemon_id = '$E2E_DAEMON_ID';" 2>/dev/null | tr -d '[:space:]')"
+        if [[ "$ordinary_health" == *'"status":"ok"'* ]] && \
+           [[ "$ordinary_health" == *'"control_connected":true'* ]] && \
+           [ "$ordinary_online" = "1" ] && [ "$isolated_remaining" = "0" ]; then
+          break
+        fi
+        sleep 0.5
+      done
       if [[ "$ordinary_health" != *'"status":"ok"'* ]] || \
          [[ "$ordinary_health" != *'"control_connected":true'* ]] || \
          [ "$ordinary_online" != "1" ] || \

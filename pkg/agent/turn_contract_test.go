@@ -58,6 +58,130 @@ func TestACPTurnControllerSerializesAndTargetsActiveTurn(t *testing.T) {
 	}
 }
 
+func TestACPRuntimeTurnFinishUnblocksContextSender(t *testing.T) {
+	turn := newACPRuntimeTurn("model")
+	for range cap(turn.msgCh) {
+		turn.msgCh <- OutputChunk{Type: string(MessageText), Content: "buffered"}
+	}
+
+	emitted := make(chan struct{})
+	go func() {
+		turn.emit(OutputChunk{Type: string(MessageContext), Context: &ContextEvent{Type: "usage"}})
+		close(emitted)
+	}()
+
+	finished := make(chan bool, 1)
+	go func() { finished <- turn.finish("completed", "") }()
+	select {
+	case <-emitted:
+	case <-time.After(time.Second):
+		t.Fatal("context sender did not unblock when turn finished")
+	}
+	select {
+	case ok := <-finished:
+		if !ok {
+			t.Fatal("finish returned false")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("finish blocked behind context sender")
+	}
+	for range turn.msgCh {
+	}
+	if result := readTurnResult(t, turn.resCh); result.Status != "completed" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestACPRuntimeTurnConcurrentEmitAndFinish(t *testing.T) {
+	for range 100 {
+		turn := newACPRuntimeTurn("model")
+		start := make(chan struct{})
+		emitted := make(chan struct{})
+		go func() {
+			<-start
+			turn.emit(OutputChunk{Type: string(MessageText), Content: "output"})
+			close(emitted)
+		}()
+		finished := make(chan struct{})
+		go func() {
+			<-start
+			turn.finish("completed", "")
+			close(finished)
+		}()
+		close(start)
+		<-emitted
+		<-finished
+		for range turn.msgCh {
+		}
+		readTurnResult(t, turn.resCh)
+	}
+}
+
+func TestACPContextUsageNormalization(t *testing.T) {
+	t.Run("flat usage is estimated by default", func(t *testing.T) {
+		event := parseACPContextUsage([]byte(`{"sessionUpdate":"usage_update","used":900,"size":1000}`))
+		if event == nil || event.Type != "usage" || event.Accuracy != "estimated" {
+			t.Fatalf("event = %+v", event)
+		}
+		if event.UsedTokens == nil || *event.UsedTokens != 900 || event.WindowTokens == nil || *event.WindowTokens != 1000 {
+			t.Fatalf("usage = used %v, window %v", event.UsedTokens, event.WindowTokens)
+		}
+	})
+
+	t.Run("opaque metadata cannot promote estimated usage", func(t *testing.T) {
+		event := parseACPContextUsage([]byte(`{"used":12,"size":100,"_meta":{"approximate":false}}`))
+		if event == nil || event.Accuracy != "estimated" {
+			t.Fatalf("event = %+v", event)
+		}
+	})
+
+	t.Run("invalid flat fields are ignored", func(t *testing.T) {
+		if event := parseACPContextUsage([]byte(`{"used":"unknown","size":null}`)); event != nil {
+			t.Fatalf("event = %+v, want nil", event)
+		}
+	})
+}
+
+func TestContextChunkWaitsForBufferAndStopsOnCancellation(t *testing.T) {
+	t.Run("full buffer does not drop context", func(t *testing.T) {
+		ch := make(chan OutputChunk, 1)
+		ch <- OutputChunk{Type: string(MessageText), Content: "buffered"}
+		done := make(chan struct{})
+		started := make(chan struct{})
+		result := make(chan bool, 1)
+		go func() {
+			close(started)
+			result <- sendContextChunk(done, ch, OutputChunk{
+				Type:    string(MessageContext),
+				Context: &ContextEvent{Type: "usage"},
+			})
+		}()
+		<-started
+		select {
+		case sent := <-result:
+			t.Fatalf("send returned before capacity was available: sent=%t", sent)
+		case <-time.After(20 * time.Millisecond):
+		}
+		<-ch
+		if sent := <-result; !sent {
+			t.Fatal("context chunk was dropped after capacity became available")
+		}
+		if chunk := <-ch; chunk.Context == nil || chunk.Context.Type != "usage" {
+			t.Fatalf("chunk = %+v", chunk)
+		}
+	})
+
+	t.Run("turn cancellation unblocks full buffer", func(t *testing.T) {
+		ch := make(chan OutputChunk, 1)
+		ch <- OutputChunk{Type: string(MessageText), Content: "buffered"}
+		done := make(chan struct{})
+		close(done)
+		if sendContextChunk(done, ch, OutputChunk{Type: string(MessageContext), Context: &ContextEvent{Type: "usage"}}) {
+			t.Fatal("context chunk sent after turn cancellation")
+		}
+	})
+}
+
 func TestClaudeTurnControllerRejectsOverlapAndFinishesOnce(t *testing.T) {
 	state := &claudePersistentState{}
 	first := newClaudeTurn()

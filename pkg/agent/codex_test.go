@@ -7,9 +7,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestBuildPromptFromMessagesPreservesSystemContext(t *testing.T) {
+	got := buildPromptFromMessages([]Message{
+		{Role: RoleSystem, Content: "# Session Continuity\nresume task"},
+		{Role: RoleUser, Content: "continue"},
+	})
+	want := "System: # Session Continuity\nresume task\n[user]: continue\n"
+	if got != want {
+		t.Fatalf("prompt = %q, want %q", got, want)
+	}
+}
 
 func TestBuildCodexArgs(t *testing.T) {
 	t.Run("default args", func(t *testing.T) {
@@ -165,11 +178,17 @@ func TestCodexPersistentStartDoesNotPrependSystemPrompt(t *testing.T) {
 	}
 }
 
-func TestCodexClientCompletesOnSnakeCaseFinalAnswer(t *testing.T) {
+func TestCodexClientWaitsForRawTurnCompletionAfterFinalAnswer(t *testing.T) {
 	done := false
+	var chunks []OutputChunk
 	c := &codexClient{
-		logger:      slog.Default(),
-		turnStarted: true,
+		logger:               slog.Default(),
+		threadID:             "thread-1",
+		turnID:               "turn-1",
+		notificationProtocol: "raw",
+		onChunk: func(chunk OutputChunk) {
+			chunks = append(chunks, chunk)
+		},
 		onTurnDone: func(aborted bool) {
 			if aborted {
 				t.Fatal("aborted = true, want false")
@@ -179,6 +198,8 @@ func TestCodexClientCompletesOnSnakeCaseFinalAnswer(t *testing.T) {
 	}
 
 	c.handleRawNotification("item/completed", map[string]any{
+		"threadId": "thread-1",
+		"turnId":   "turn-1",
 		"item": map[string]any{
 			"type":  "agent_message",
 			"text":  "Done.",
@@ -186,8 +207,163 @@ func TestCodexClientCompletesOnSnakeCaseFinalAnswer(t *testing.T) {
 		},
 	})
 
+	if done {
+		t.Fatal("final_answer item completed the raw turn before trailing usage")
+	}
+	c.handleRawNotification("thread/status/changed", map[string]any{
+		"threadId": "thread-1",
+		"status":   map[string]any{"type": "idle"},
+	})
+	if done {
+		t.Fatal("idle status completed the raw turn before trailing usage")
+	}
+	c.notificationProtocol = "mixed"
+	c.handleEvent(map[string]any{"type": "task_complete"})
+	c.handleEvent(map[string]any{"type": "turn_aborted"})
+	if done {
+		t.Fatal("legacy terminal event completed a mixed-protocol turn before trailing usage")
+	}
+	c.handleRawNotification("thread/tokenUsage/updated", map[string]any{
+		"threadId": "thread-1",
+		"turnId":   "turn-1",
+		"tokenUsage": map[string]any{
+			"last":               map[string]any{"totalTokens": float64(42)},
+			"modelContextWindow": float64(100),
+		},
+	})
+	if len(chunks) != 2 || chunks[1].Context == nil || chunks[1].Context.UsedTokens == nil || *chunks[1].Context.UsedTokens != 42 {
+		t.Fatalf("chunks = %+v, want final text then trailing context usage", chunks)
+	}
+	c.handleRawNotification("turn/completed", map[string]any{
+		"threadId": "thread-1",
+		"turn":     map[string]any{"id": "turn-1", "status": "completed"},
+	})
 	if !done {
-		t.Fatal("onTurnDone was not called")
+		t.Fatal("turn/completed did not complete the raw turn")
+	}
+}
+
+func TestCodexClientPureLegacyTerminalFallback(t *testing.T) {
+	done := false
+	c := &codexClient{
+		logger:               slog.Default(),
+		notificationProtocol: "legacy",
+		onTurnDone:           func(bool) { done = true },
+	}
+	c.handleEvent(map[string]any{"type": "task_complete"})
+	if !done {
+		t.Fatal("pure legacy task_complete did not finish the turn")
+	}
+}
+
+func TestCodexClientRawFailedTurnSignalsFailure(t *testing.T) {
+	var failed error
+	done := false
+	c := &codexClient{
+		logger:   slog.Default(),
+		threadID: "thread-1",
+		turnID:   "turn-1",
+		onTurnDone: func(bool) {
+			done = true
+		},
+		onTurnFailed: func(err error) {
+			failed = err
+		},
+	}
+	c.handleRawNotification("turn/completed", map[string]any{
+		"threadId": "thread-1",
+		"turn": map[string]any{
+			"id":     "turn-1",
+			"status": "failed",
+			"error":  map[string]any{"code": "context_length_exceeded"},
+		},
+	})
+	if done || failed == nil || !strings.Contains(failed.Error(), "context_length_exceeded") {
+		t.Fatalf("done=%t failed=%v, want failure callback with provider code", done, failed)
+	}
+}
+
+func TestCodexClientIgnoresFailedCompletionFromPreviousTurn(t *testing.T) {
+	c := &codexClient{logger: slog.Default(), threadID: "thread-1"}
+	c.prepareTurn(nil, func(bool) {}, func(error) {})
+	c.recordTurnID("turn-old")
+	c.signalTurnDoneForID("turn-old", false)
+
+	failed := false
+	c.prepareTurn(nil, func(bool) {}, func(error) { failed = true })
+	c.recordTurnID("turn-new")
+	c.handleRawNotification("turn/completed", map[string]any{
+		"threadId": "thread-1",
+		"turn": map[string]any{
+			"id":     "turn-old",
+			"status": "failed",
+			"error":  map[string]any{"message": "late failure"},
+		},
+	})
+	c.turnDoneMu.Lock()
+	turnDone := c.turnDone
+	c.turnDoneMu.Unlock()
+	c.turnErrorMu.Lock()
+	turnError := c.turnError
+	c.turnErrorMu.Unlock()
+	if failed || turnDone || turnError != "" {
+		t.Fatalf("previous turn failure contaminated the active turn: failed=%t done=%t error=%q", failed, turnDone, turnError)
+	}
+}
+
+func TestCodexClientFailedTurnUsesPriorErrorNotification(t *testing.T) {
+	var failed error
+	c := &codexClient{
+		logger:       slog.Default(),
+		threadID:     "thread-1",
+		turnID:       "turn-1",
+		onTurnFailed: func(err error) { failed = err },
+	}
+	c.handleRawNotification("error", map[string]any{
+		"threadId":  "thread-1",
+		"willRetry": false,
+		"error":     map[string]any{"message": "context_length_exceeded"},
+	})
+	c.handleRawNotification("turn/completed", map[string]any{
+		"threadId": "thread-1",
+		"turn": map[string]any{
+			"id":     "turn-1",
+			"status": "failed",
+			"error":  nil,
+		},
+	})
+	if failed == nil || !strings.Contains(failed.Error(), "context_length_exceeded") {
+		t.Fatalf("failed = %v, want prior context error", failed)
+	}
+}
+
+func TestCodexClientPrepareTurnClearsPreviousError(t *testing.T) {
+	c := &codexClient{logger: slog.Default(), turnError: "previous turn failed"}
+	c.prepareTurn(nil, nil, nil)
+	c.turnErrorMu.Lock()
+	defer c.turnErrorMu.Unlock()
+	if c.turnError != "" {
+		t.Fatalf("turnError = %q, want empty", c.turnError)
+	}
+}
+
+func TestCodexClientCallbackReplacementIsSynchronized(t *testing.T) {
+	c := &codexClient{logger: slog.Default()}
+	var calls atomic.Int64
+	c.prepareTurn(func(OutputChunk) { calls.Add(1) }, func(bool) {}, func(error) {})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.emitChunk(OutputChunk{Type: string(MessageStatus)})
+		}()
+		c.prepareTurn(func(OutputChunk) { calls.Add(1) }, func(bool) {}, func(error) {})
+	}
+	wg.Wait()
+	if calls.Load() != 100 {
+		t.Fatalf("callback calls = %d, want 100", calls.Load())
 	}
 }
 
@@ -370,6 +546,89 @@ func TestCodexPersistentTurnResultUsesExactThreadUsage(t *testing.T) {
 	if usage.InputTokens != 21 || usage.OutputTokens != 6 || usage.CacheReadTokens != 7 {
 		t.Fatalf("usage=%+v, want exact persistent turn usage", usage)
 	}
+}
+
+func TestCodexContextCompactionPairing(t *testing.T) {
+	newClient := func(chunks *[]OutputChunk) *codexClient {
+		return &codexClient{
+			logger:   slog.Default(),
+			threadID: "thread-1",
+			turnID:   "turn-1",
+			onChunk:  func(chunk OutputChunk) { *chunks = append(*chunks, chunk) },
+		}
+	}
+	usage := func(threadID, turnID string, last, total int64, window any) map[string]any {
+		return map[string]any{
+			"threadId": threadID,
+			"turnId":   turnID,
+			"tokenUsage": map[string]any{
+				"last":               map[string]any{"totalTokens": last},
+				"total":              map[string]any{"totalTokens": total},
+				"modelContextWindow": window,
+			},
+		}
+	}
+	item := func(threadID, turnID, itemID string) map[string]any {
+		return map[string]any{
+			"threadId": threadID,
+			"turnId":   turnID,
+			"item":     map[string]any{"type": "contextCompaction", "id": itemID},
+		}
+	}
+
+	t.Run("uses last snapshot and pairs the first post snapshot", func(t *testing.T) {
+		var chunks []OutputChunk
+		client := newClient(&chunks)
+		client.handleRawNotification("thread/tokenUsage/updated", usage("thread-1", "turn-1", 95, 9000, int64(100)))
+		client.handleRawNotification("thread/tokenUsage/updated", usage("wrong-thread", "turn-1", 99, 9999, int64(100)))
+		client.handleRawNotification("item/started", item("thread-1", "turn-1", "compact-1"))
+		client.handleRawNotification("item/completed", item("thread-1", "turn-1", "compact-1"))
+		client.handleRawNotification("thread/tokenUsage/updated", usage("thread-1", "turn-1", 40, 10000, int64(100)))
+
+		if len(chunks) != 4 {
+			t.Fatalf("chunks = %+v, want usage/start/end/usage", chunks)
+		}
+		if got := chunks[0].Context; got == nil || got.UsedTokens == nil || *got.UsedTokens != 95 {
+			t.Fatalf("first usage = %+v, want tokenUsage.last.totalTokens", got)
+		}
+		started, completed := chunks[1].Context, chunks[2].Context
+		if started == nil || started.Type != "compaction_start" || started.BeforeTokens == nil || *started.BeforeTokens != 95 {
+			t.Fatalf("started = %+v", started)
+		}
+		if completed == nil || completed.Type != "compaction_end" || completed.BeforeTokens == nil || *completed.BeforeTokens != 95 || completed.AfterTokens == nil || *completed.AfterTokens != 40 {
+			t.Fatalf("completed = %+v", completed)
+		}
+	})
+
+	t.Run("completed compaction without post snapshot has unknown after", func(t *testing.T) {
+		var chunks []OutputChunk
+		client := newClient(&chunks)
+		client.handleRawNotification("thread/tokenUsage/updated", usage("thread-1", "turn-1", 95, 9000, int64(100)))
+		client.handleRawNotification("item/started", item("thread-1", "turn-1", "compact-1"))
+		client.handleRawNotification("item/completed", item("thread-1", "turn-1", "compact-1"))
+		client.signalTurnDoneForID("turn-1", false)
+
+		completed := chunks[len(chunks)-1].Context
+		if completed == nil || completed.Type != "compaction_end" || completed.BeforeTokens == nil || *completed.BeforeTokens != 95 || completed.AfterTokens != nil {
+			t.Fatalf("completed = %+v, want unknown after", completed)
+		}
+	})
+
+	t.Run("wrong turn completion cannot pair", func(t *testing.T) {
+		var chunks []OutputChunk
+		client := newClient(&chunks)
+		client.handleRawNotification("thread/tokenUsage/updated", usage("thread-1", "turn-1", 95, 9000, int64(100)))
+		client.handleRawNotification("item/started", item("thread-1", "turn-1", "compact-1"))
+		client.handleRawNotification("item/completed", item("thread-1", "wrong-turn", "compact-1"))
+		client.handleRawNotification("thread/tokenUsage/updated", usage("thread-1", "turn-1", 40, 10000, int64(100)))
+		client.signalTurnDoneForID("turn-1", false)
+
+		for _, chunk := range chunks {
+			if chunk.Context != nil && chunk.Context.Type == "compaction_end" {
+				t.Fatalf("unexpected paired compaction = %+v", chunk.Context)
+			}
+		}
+	})
 }
 
 func assertPrefix(t *testing.T, value, prefix string) {

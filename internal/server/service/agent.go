@@ -61,7 +61,11 @@ const (
 	agentFailureTimeout               = "timeout"
 	agentFailureProviderTransient     = "provider_transient"
 	agentFailureConfiguration         = "configuration"
+	agentFailureContextExhausted      = "context_exhausted"
 	agentResultReminderPrompt         = "Your previous turn ended without a user-visible message. Re-check the original goal and the latest conversation state. If the goal already has a visible result, you may stop. Otherwise, send the result the user still needs with `solo message send` to the original target. Do not repeat unrelated content."
+	contextRolloverCapability         = "context_rollover_v1"
+	continuityMessagePrefix           = "# Session Continuity"
+	continuityPacketLimit             = 2000
 )
 
 // maxAgentChainDepth limits the depth of agent-to-agent trigger chains
@@ -251,9 +255,6 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 		return
 	}
 
-	// Query for open tasks in the channel to provide task context to agents
-	taskContext := s.getChannelOpenTasksSummary(ctx, channelID)
-
 	resultContract := agentResultContractNone
 	if policy.requiresVisibleResult(decision.Reason) {
 		resultContract = agentResultContractVisibleMessage
@@ -300,7 +301,6 @@ func (s *AgentService) TriggerAgentResponse(ctx context.Context, channelID, mess
 				Provider: ag.ModelProvider,
 				Model:    ag.ModelName,
 			},
-			TaskContext:    taskContext,
 			AgentChain:     newChain,
 			MentionedNames: mentionedNames,
 			ResultContract: resultContract,
@@ -662,25 +662,7 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 	newRun := existingRun == nil
 	startingRun := newRun || taskReq.PrestartedRun
 	run := existingRun
-	if startingRun && taskReq.NodeID == "" && taskReq.ResumeSessionID == "" && !taskReq.ForceFreshSession {
-		err := s.pool.QueryRow(ctx, `
-			SELECT sess.external_session_id
-			  FROM agent_runs r
-			  JOIN agent_sessions sess ON sess.id = r.session_id
-			 WHERE r.agent_id = $1
-			   AND r.channel_id = $2
-			   AND r.thinking_node_id IS NULL
-			   AND sess.provider = $3
-			   AND sess.status = 'active'
-			   AND COALESCE(sess.external_session_id, '') <> ''
-			 ORDER BY sess.last_active_at DESC, r.updated_at DESC
-			 LIMIT 1`,
-			ag.ID, taskReq.ChannelID, taskReq.ModelConfig.Provider,
-		).Scan(&taskReq.ResumeSessionID)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("failed to load channel session for resume", "agent_id", ag.ID, "channel_id", taskReq.ChannelID, "error", err)
-		}
-	}
+	supportsContextRollover := hasCapability(daemon.Capabilities, contextRolloverCapability)
 	if newRun {
 		var err error
 		activityText := "等待执行"
@@ -710,6 +692,67 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 			s.broadcastAgentError(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, errorCode)
 			return
 		}
+	}
+	finishDispatchFailure := func(dispatchErr error) {
+		s.broadcastAgentError(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, dispatchErr.Error())
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if run.BackendStartedAt == nil {
+			if err := s.requeueUndeliveredMessageWake(cleanupCtx, run); err != nil {
+				slog.Warn("failed to requeue Agent messages after Session dispatch failure", "run_id", run.ID, "error", err)
+				return
+			}
+		}
+		finished, err := runSvc.FinishRun(cleanupCtx, FinishRunInput{
+			RunID: run.ID, Status: AgentRunStatusFailed, ActivityText: agentActivityFailed,
+			Usage: map[string]int{
+				"input_tokens":       taskReq.AccumulatedInputTokens,
+				"output_tokens":      taskReq.AccumulatedOutputTokens,
+				"cache_read_tokens":  taskReq.AccumulatedCacheReadTokens,
+				"cache_write_tokens": taskReq.AccumulatedCacheWriteTokens,
+			},
+		})
+		if errors.Is(err, ErrAgentRunAlreadyFinished) {
+			return
+		}
+		if err != nil {
+			slog.Warn("failed to finish Agent Run after Session dispatch failure", "run_id", run.ID, "error", err)
+			return
+		}
+		s.appendAndBroadcastRunEvent(cleanupCtx, runSvc, finished, ag.ID, agentName, AgentRunEventError, dispatchErr.Error(), "", map[string]any{
+			"status": AgentRunStatusFailed,
+		})
+		s.broadcastAgentRun(taskReq.ChannelID, "agent.run.finished", runPayload(finished, ag.ID, agentName, taskReq.OriginTaskID))
+		if finished.TriggerType == AgentRunTriggerMessage && finished.TriggerMessageID != "" && finished.ThinkingNodeID == "" {
+			go func() {
+				if err := s.advancePendingMessageWake(context.Background(), finished.AgentID, finished.ChannelID); err != nil {
+					slog.Warn("failed to advance pending Agent messages after Session dispatch failure", "run_id", finished.ID, "error", err)
+				}
+			}()
+		}
+	}
+	if startingRun || taskReq.ResultReminderAttempt {
+		dispatch, err := runSvc.ResolveSessionDispatch(ctx, ResolveSessionDispatchInput{
+			RunID:                   run.ID,
+			AgentID:                 ag.ID,
+			ChannelID:               taskReq.ChannelID,
+			Provider:                taskReq.ModelConfig.Provider,
+			ThinkingNodeID:          taskReq.NodeID,
+			ResumeSessionID:         taskReq.ResumeSessionID,
+			ForceFreshSession:       taskReq.ForceFreshSession,
+			SupportsContextRollover: supportsContextRollover,
+		})
+		if err != nil {
+			slog.Warn("failed to resolve Agent Session dispatch", "run_id", run.ID, "error", err)
+			finishDispatchFailure(err)
+			return
+		}
+		if err := s.applySessionDispatch(ctx, s.pool, &taskReq, dispatch); err != nil {
+			slog.Warn("failed to build Agent Session continuity", "run_id", run.ID, "error", err)
+			finishDispatchFailure(err)
+			return
+		}
+		run.RolloverFromSessionID = dispatch.RolloverFromSessionID
 	}
 	if taskReq.ResultReminderAttempt {
 		if taskReq.TaskID == "" || taskReq.TaskID == run.ID {
@@ -789,6 +832,47 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 	cacheWriteTokens := taskReq.AccumulatedCacheWriteTokens
 	failureCode := ""
 	retryable := false
+	var contextSnapshot *agent.ContextEvent
+	var contextCompactions []agent.ContextEvent
+	var rolloverRecommendation *agent.ContextRolloverRecommendation
+	contextRecorded := false
+	recordContext := func() {
+		if contextRecorded || run == nil {
+			return
+		}
+		contextRecorded = true
+		for _, observation := range contextCompactions {
+			if observation.Type != "compaction_end" {
+				continue
+			}
+			s.appendAndBroadcastRunEvent(ctx, runSvc, run, ag.ID, agentName, AgentRunEventContextCompaction, "context compaction", "", contextEventPayload(observation))
+		}
+		if contextSnapshot != nil {
+			s.appendAndBroadcastRunEvent(ctx, runSvc, run, ag.ID, agentName, AgentRunEventContextSnapshot, "context snapshot", "", contextEventPayload(*contextSnapshot))
+		}
+		if rolloverRecommendation == nil || !rolloverRecommendation.Requested || taskReq.NodeID != "" || !supportsContextRollover {
+			return
+		}
+		continuity, err := s.getAgentContinuityPacket(ctx, s.pool, ag.ID, taskReq.ChannelID, taskReq.OriginTaskID)
+		if err != nil {
+			slog.Warn("failed to snapshot Session continuity", "run_id", run.ID, "error", err)
+			return
+		}
+		payload := map[string]any{}
+		if rolloverRecommendation.Context != nil {
+			payload = contextEventPayload(*rolloverRecommendation.Context)
+		}
+		requested, err := runSvc.RequestSessionRollover(ctx, RequestSessionRolloverInput{
+			RunID: run.ID, Reason: rolloverRecommendation.Reason, Continuity: continuity, Payload: payload,
+		})
+		if err != nil {
+			slog.Warn("failed to request Session rollover", "run_id", run.ID, "error", err)
+			return
+		}
+		if requested.Event != nil {
+			s.broadcastStoredRunEvent(run, ag.ID, agentName, requested.Event)
+		}
+	}
 	finishRun := func(status AgentRunStatus) {
 		if run == nil {
 			return
@@ -847,6 +931,7 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 				}
 			}
 			if visibleErr == nil && heldErr == nil && !visible && !held && !taskReq.ResultReminderAttempt {
+				recordContext()
 				updated, updateErr := runSvc.UpdateStatus(ctx, UpdateRunStatusInput{
 					RunID: run.ID, Status: AgentRunStatusQueued, ActivityText: agentActivityResultReminder,
 				})
@@ -889,6 +974,7 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 				return
 			}
 		}
+		recordContext()
 		activityText := finalStateActivityText(status)
 		if failureCode == agentFailureDaemonLost {
 			activityText = agentActivityDaemonLost
@@ -1014,36 +1100,21 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 		if !markBackendStarted() {
 			return
 		}
-		session, err := runSvc.UpsertSession(ctx, UpsertSessionInput{
+		bound, err := runSvc.BindProviderSession(ctx, BindProviderSessionInput{
+			RunID:             run.ID,
 			AgentID:           ag.ID,
 			Provider:          taskReq.ModelConfig.Provider,
 			ExternalSessionID: externalSessionID,
 			TranscriptPath:    transcriptPath,
+			ThinkingNodeID:    taskReq.NodeID,
 		})
 		if err != nil {
-			slog.Warn("failed to upsert agent session", "run_id", run.ID, "agent_id", ag.ID, "error", err)
+			slog.Warn("failed to bind provider session", "run_id", run.ID, "agent_id", ag.ID, "error", err)
 			return
 		}
-		updatedRun, err := runSvc.BindRunSession(ctx, BindRunSessionInput{
-			RunID:          run.ID,
-			SessionID:      session.ID,
-			ThinkingNodeID: taskReq.NodeID,
-		})
-		if err != nil {
-			slog.Warn("failed to bind agent run session", "run_id", run.ID, "session_id", session.ID, "error", err)
-			return
-		}
-		run = updatedRun
-		if transcriptPath != "" {
-			updatedRun, err = runSvc.UpdateRunTranscript(ctx, UpdateRunTranscriptInput{
-				RunID:          run.ID,
-				TranscriptPath: transcriptPath,
-			})
-			if err != nil {
-				slog.Warn("failed to update agent run transcript", "run_id", run.ID, "error", err)
-				return
-			}
-			run = updatedRun
+		run = bound.Run
+		if bound.RolloverEvent != nil {
+			s.broadcastStoredRunEvent(run, ag.ID, agentName, bound.RolloverEvent)
 		}
 		s.broadcastAgentRun(taskReq.ChannelID, "agent.run.updated", runPayload(run, ag.ID, agentName, taskReq.OriginTaskID))
 	}
@@ -1057,6 +1128,34 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 		case "backend_started":
 			if markBackendStarted() {
 				s.broadcastAgentRun(taskReq.ChannelID, "agent.run.updated", runPayload(run, ag.ID, agentName, taskReq.OriginTaskID))
+			}
+
+		case "context":
+			var data struct {
+				Context *agent.ContextEvent `json:"context"`
+			}
+			if err := json.Unmarshal([]byte(event.Data), &data); err != nil || data.Context == nil {
+				continue
+			}
+			observation := *data.Context
+			switch observation.Type {
+			case "compaction_start":
+				contextSnapshot = nil
+			case "compaction_end":
+				contextCompactions = append(contextCompactions, observation)
+				contextSnapshot = nil
+				used := observation.UsedTokens
+				if used == nil {
+					used = observation.AfterTokens
+				}
+				if observation.WindowTokens != nil && *observation.WindowTokens > 0 && used != nil && *used > 0 {
+					contextSnapshot = &observation
+				}
+			case "usage":
+				contextSnapshot = nil
+				if observation.WindowTokens != nil && *observation.WindowTokens > 0 && observation.UsedTokens != nil && *observation.UsedTokens > 0 {
+					contextSnapshot = &observation
+				}
 			}
 
 		case "thinking":
@@ -1147,9 +1246,12 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 
 		case "complete":
 			var data struct {
-				ExternalSessionID string `json:"external_session_id"`
-				TranscriptPath    string `json:"transcript_path"`
-				Usage             struct {
+				ExternalSessionID  string                               `json:"external_session_id"`
+				TranscriptPath     string                               `json:"transcript_path"`
+				ContextSnapshot    *agent.ContextEvent                  `json:"context_snapshot"`
+				ContextCompactions []agent.ContextEvent                 `json:"context_compactions"`
+				SessionRollover    *agent.ContextRolloverRecommendation `json:"session_rollover"`
+				Usage              struct {
 					InputTokens      int `json:"input_tokens"`
 					OutputTokens     int `json:"output_tokens"`
 					CacheReadTokens  int `json:"cache_read_tokens"`
@@ -1158,6 +1260,15 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 			}
 			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
 				bindRunSession(data.ExternalSessionID, data.TranscriptPath)
+				if data.ContextSnapshot != nil {
+					contextSnapshot = data.ContextSnapshot
+				}
+				if data.ContextCompactions != nil {
+					contextCompactions = data.ContextCompactions
+				}
+				if data.SessionRollover != nil {
+					rolloverRecommendation = data.SessionRollover
+				}
 				inputTokens += data.Usage.InputTokens
 				outputTokens += data.Usage.OutputTokens
 				cacheReadTokens += data.Usage.CacheReadTokens
@@ -1168,12 +1279,15 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 
 		case "error":
 			var data struct {
-				AgentID     string `json:"agent_id"`
-				Error       string `json:"error"`
-				Status      string `json:"status"`
-				Retryable   bool   `json:"retryable"`
-				FailureCode string `json:"failure_code"`
-				Usage       struct {
+				AgentID            string                               `json:"agent_id"`
+				Error              string                               `json:"error"`
+				Status             string                               `json:"status"`
+				Retryable          bool                                 `json:"retryable"`
+				FailureCode        string                               `json:"failure_code"`
+				ContextSnapshot    *agent.ContextEvent                  `json:"context_snapshot"`
+				ContextCompactions []agent.ContextEvent                 `json:"context_compactions"`
+				SessionRollover    *agent.ContextRolloverRecommendation `json:"session_rollover"`
+				Usage              struct {
 					InputTokens      int `json:"input_tokens"`
 					OutputTokens     int `json:"output_tokens"`
 					CacheReadTokens  int `json:"cache_read_tokens"`
@@ -1181,6 +1295,15 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 				} `json:"usage"`
 			}
 			if err := json.Unmarshal([]byte(event.Data), &data); err == nil {
+				if data.ContextSnapshot != nil {
+					contextSnapshot = data.ContextSnapshot
+				}
+				if data.ContextCompactions != nil {
+					contextCompactions = data.ContextCompactions
+				}
+				if data.SessionRollover != nil {
+					rolloverRecommendation = data.SessionRollover
+				}
 				inputTokens += data.Usage.InputTokens
 				outputTokens += data.Usage.OutputTokens
 				cacheReadTokens += data.Usage.CacheReadTokens
@@ -1305,22 +1428,23 @@ func stringOrEmpty(session *AgentSession) string {
 
 func runPayload(run *AgentRun, agentID, agentName, taskID string) map[string]any {
 	payload := map[string]any{
-		"run_id":             run.ID,
-		"session_id":         run.SessionID,
-		"agent_id":           agentID,
-		"agent_name":         agentName,
-		"task_id":            taskID,
-		"channel_id":         run.ChannelID,
-		"thread_id":          run.ThreadID,
-		"thinking_node_id":   run.ThinkingNodeID,
-		"status":             run.Status,
-		"activity_text":      run.ActivityText,
-		"tool_name":          run.ToolName,
-		"tool_input_summary": run.ToolInputSummary,
-		"transcript_path":    run.TranscriptPath,
-		"source":             run.Source,
-		"backend_started_at": run.BackendStartedAt,
-		"timestamp":          time.Now().UTC().Format(time.RFC3339),
+		"run_id":                   run.ID,
+		"session_id":               run.SessionID,
+		"rollover_from_session_id": run.RolloverFromSessionID,
+		"agent_id":                 agentID,
+		"agent_name":               agentName,
+		"task_id":                  taskID,
+		"channel_id":               run.ChannelID,
+		"thread_id":                run.ThreadID,
+		"thinking_node_id":         run.ThinkingNodeID,
+		"status":                   run.Status,
+		"activity_text":            run.ActivityText,
+		"tool_name":                run.ToolName,
+		"tool_input_summary":       run.ToolInputSummary,
+		"transcript_path":          run.TranscriptPath,
+		"source":                   run.Source,
+		"backend_started_at":       run.BackendStartedAt,
+		"timestamp":                time.Now().UTC().Format(time.RFC3339),
 	}
 	if run.BudgetState != "" {
 		payload["budget_state"] = run.BudgetState
@@ -1354,6 +1478,13 @@ func (s *AgentService) appendAndBroadcastRunEvent(ctx context.Context, runSvc *A
 		slog.Warn("failed to append agent run event", "run_id", run.ID, "event_type", eventType, "error", err)
 		return
 	}
+	s.broadcastStoredRunEvent(run, agentID, agentName, event)
+}
+
+func (s *AgentService) broadcastStoredRunEvent(run *AgentRun, agentID, agentName string, event *AgentRunEvent) {
+	if run == nil || event == nil {
+		return
+	}
 	s.hub.BroadcastToChannel(run.ChannelID, realtime.Envelope("agent.run.event", map[string]any{
 		"id":               event.ID,
 		"run_id":           run.ID,
@@ -1370,6 +1501,41 @@ func (s *AgentService) appendAndBroadcastRunEvent(ctx context.Context, runSvc *A
 		"payload":          json.RawMessage(event.Payload),
 		"timestamp":        event.CreatedAt.UTC().Format(time.RFC3339),
 	}))
+}
+
+func contextEventPayload(observation agent.ContextEvent) map[string]any {
+	payload := map[string]any{"type": observation.Type}
+	if observation.UsedTokens != nil {
+		payload["used_tokens"] = *observation.UsedTokens
+	}
+	if observation.WindowTokens != nil {
+		payload["window_tokens"] = *observation.WindowTokens
+	}
+	if observation.BeforeTokens != nil {
+		payload["before_tokens"] = *observation.BeforeTokens
+	}
+	if observation.AfterTokens != nil {
+		payload["after_tokens"] = *observation.AfterTokens
+	}
+	if observation.Accuracy != "" {
+		payload["accuracy"] = observation.Accuracy
+	}
+	if observation.Reason != "" {
+		payload["reason"] = observation.Reason
+	}
+	if observation.BeforeTokens != nil && observation.AfterTokens != nil && *observation.BeforeTokens > 0 {
+		payload["saved_ratio"] = 1 - float64(*observation.AfterTokens)/float64(*observation.BeforeTokens)
+	}
+	if observation.WindowTokens != nil && *observation.WindowTokens > 0 {
+		used := observation.UsedTokens
+		if used == nil {
+			used = observation.AfterTokens
+		}
+		if used != nil {
+			payload["pressure_ratio"] = float64(*used) / float64(*observation.WindowTokens)
+		}
+	}
+	return payload
 }
 
 func (s *AgentService) StartAgentRunWatchdogLoop(ctx context.Context) {
@@ -2224,9 +2390,6 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 		contextMsgs = append([]agent.Message{systemMessage}, contextMsgs...)
 		turnMessages = append([]agent.Message{systemMessage}, turnMessages...)
 	}
-	// Query for open tasks in the channel to provide task context to agents
-	taskContext := s.getChannelOpenTasksSummary(ctx, channelID)
-
 	// Resolve @mentioned agent names for context awareness.
 	threadMentionedNames := s.resolveMentionedNames(ctx, mentionedAgentIDs)
 	resultContract := agentResultContractNone
@@ -2268,7 +2431,6 @@ func (s *AgentService) TriggerAgentResponseInThread(ctx context.Context, channel
 				Provider: ag.ModelProvider,
 				Model:    ag.ModelName,
 			},
-			TaskContext:    taskContext,
 			AgentChain:     newChain,
 			MentionedNames: threadMentionedNames,
 			ResultContract: resultContract,
@@ -2847,8 +3009,20 @@ func nullableStr(s string) *string {
 	return &s
 }
 
-func (s *AgentService) getChannelOpenTasksSummary(ctx context.Context, channelID string) string {
-	rows, err := s.pool.Query(ctx,
+type continuityQuerier interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+type continuityTask struct {
+	Number      int
+	Title       string
+	Description string
+	Status      string
+	Category    int
+}
+
+func (s *AgentService) getChannelOpenTasksSummary(ctx context.Context, db continuityQuerier, channelID string) string {
+	rows, err := db.Query(ctx,
 		`SELECT task_number, title, priority
 		 FROM tasks
 		 WHERE channel_id = $1 AND status = $2
@@ -2863,16 +3037,14 @@ func (s *AgentService) getChannelOpenTasksSummary(ctx context.Context, channelID
 	defer rows.Close()
 
 	var b strings.Builder
-	hasTasks := false
 	for rows.Next() {
 		var number int
 		var title, priority string
 		if err := rows.Scan(&number, &title, &priority); err != nil {
 			continue
 		}
-		if !hasTasks {
+		if b.Len() == 0 {
 			b.WriteString("Available tasks in this channel:\n")
-			hasTasks = true
 		}
 		prio := ""
 		if priority != "" && priority != "none" {
@@ -2887,6 +3059,142 @@ func (s *AgentService) getChannelOpenTasksSummary(ctx context.Context, channelID
 	return b.String()
 }
 
+func (s *AgentService) getAgentContinuityPacket(ctx context.Context, db continuityQuerier, agentID, channelID, currentTaskID string) (string, error) {
+	rows, err := db.Query(ctx,
+		`SELECT task_number, title, COALESCE(description, ''), status,
+		        CASE
+		          WHEN id = NULLIF($3, '')::uuid THEN 0
+		          WHEN claimer_id = $2 AND status = $4 THEN 1
+		          WHEN claimer_id = $2 AND status = $5 THEN 2
+		          WHEN creator_id = $2 AND status = $5 THEN 3
+		          ELSE 4
+		        END AS category
+		   FROM tasks
+		  WHERE channel_id = $1
+		    AND status = ANY($6)
+		    AND (
+		      id = NULLIF($3, '')::uuid
+		      OR (claimer_id = $2 AND status = ANY($7))
+		      OR (creator_id = $2 AND status = $5)
+		      OR (claimer_id IS NULL AND status = $8)
+		    )
+		  ORDER BY category, updated_at DESC, task_number
+		  LIMIT 100`,
+		channelID, agentID, currentTaskID, TaskStatusInProgress, TaskStatusInReview,
+		[]string{TaskStatusTodo, TaskStatusInProgress, TaskStatusInReview},
+		[]string{TaskStatusInProgress, TaskStatusInReview}, TaskStatusTodo,
+	)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	tasks := make([]continuityTask, 0)
+	for rows.Next() {
+		var task continuityTask
+		if err := rows.Scan(&task.Number, &task.Title, &task.Description, &task.Status, &task.Category); err != nil {
+			return "", err
+		}
+		tasks = append(tasks, task)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if len(tasks) == 0 {
+		return "", nil
+	}
+
+	var b strings.Builder
+	b.WriteString(continuityMessagePrefix)
+	b.WriteString("\nThis is a fresh provider Session. Continue from the current project files and re-read a Task/Thread before editing.\n")
+	headings := map[int]string{
+		0: "Current task",
+		1: "Work you still own",
+		2: "Work awaiting review",
+		3: "Reviews you owe",
+		4: "Available work",
+	}
+	lastCategory := -1
+	for _, task := range tasks {
+		if task.Category != lastCategory {
+			if !appendWithinRuneLimit(&b, "\n## "+headings[task.Category]+"\n", continuityPacketLimit) {
+				break
+			}
+			lastCategory = task.Category
+		}
+		line := fmt.Sprintf("- #%d [%s] %s", task.Number, task.Status, compactContinuityText(task.Title, 160))
+		if task.Description != "" && task.Category <= 2 {
+			line += " — " + compactContinuityText(task.Description, 240)
+		}
+		line += fmt.Sprintf(". Re-read with `solo task list -c %s --output json` (Task #%d).\n", channelID, task.Number)
+		if !appendWithinRuneLimit(&b, line, continuityPacketLimit) {
+			break
+		}
+	}
+	return b.String(), nil
+}
+
+func compactContinuityText(value string, limit int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit]) + "…"
+}
+
+func appendWithinRuneLimit(b *strings.Builder, value string, limit int) bool {
+	remaining := limit - len([]rune(b.String()))
+	if remaining <= 0 {
+		return false
+	}
+	runes := []rune(value)
+	if len(runes) <= remaining {
+		b.WriteString(value)
+		return true
+	}
+	if remaining > 1 {
+		b.WriteString(string(runes[:remaining-1]))
+		b.WriteRune('…')
+	}
+	return false
+}
+
+func (s *AgentService) applySessionDispatch(ctx context.Context, db continuityQuerier, taskReq *daemonTaskRequest, dispatch SessionDispatch) error {
+	taskReq.ResumeSessionID = dispatch.ResumeSessionID
+	taskReq.ForceFreshSession = dispatch.ForceFreshSession
+	taskReq.RetireSessionID = dispatch.RetireSessionID
+	filtered := taskReq.ColdStartMessages[:0]
+	for _, message := range taskReq.ColdStartMessages {
+		if message.Role == agent.RoleSystem && strings.HasPrefix(message.Content, continuityMessagePrefix) {
+			continue
+		}
+		filtered = append(filtered, message)
+	}
+	taskReq.ColdStartMessages = filtered
+	if taskReq.NodeID != "" {
+		return nil
+	}
+	taskReq.TaskContext = s.getChannelOpenTasksSummary(ctx, db, taskReq.ChannelID)
+	if !dispatch.ColdStart {
+		return nil
+	}
+	packet, err := s.getAgentContinuityPacket(ctx, db, taskReq.AgentID, taskReq.ChannelID, taskReq.OriginTaskID)
+	if err != nil {
+		return err
+	}
+	if packet == "" {
+		return nil
+	}
+	if len(taskReq.ColdStartMessages) == 0 {
+		taskReq.ColdStartMessages = append([]agent.Message(nil), taskReq.Messages...)
+	}
+	taskReq.ColdStartMessages = append([]agent.Message{{
+		Role: agent.RoleSystem, Content: packet, SenderID: "system",
+	}}, taskReq.ColdStartMessages...)
+	return nil
+}
+
 // daemonTaskRequest is the format for tasks sent from server to daemon.
 type daemonTaskRequest struct {
 	TaskID                      string            `json:"task_id"`
@@ -2897,6 +3205,7 @@ type daemonTaskRequest struct {
 	NodeID                      string            `json:"thinking_node_id,omitempty"`
 	ResumeSessionID             string            `json:"resume_session_id,omitempty"`
 	ForceFreshSession           bool              `json:"force_fresh_session,omitempty"`
+	RetireSessionID             string            `json:"retire_session_id,omitempty"`
 	TriggerMessageID            string            `json:"trigger_message_id,omitempty"`
 	Messages                    []agent.Message   `json:"messages"`
 	ColdStartMessages           []agent.Message   `json:"cold_start_messages,omitempty"`

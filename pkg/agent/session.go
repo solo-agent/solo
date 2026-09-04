@@ -42,16 +42,39 @@ type AgentSessionManager struct {
 
 // agentSessionEntry wraps a session with lifetime metadata.
 type agentSessionEntry struct {
-	mu          sync.RWMutex
-	SessionKey  string
-	AgentID     string
-	Session     *PersistentSession // nil when asleep
-	AgentConfig AgentConfig
-	ChannelCtx  ChannelContext
-	CreatedAt   time.Time
-	LastActive  time.Time
-	sessionID   string // preserved across sleep/wake for --resume
-	asleep      bool
+	mu            sync.RWMutex
+	SessionKey    string
+	AgentID       string
+	Session       *PersistentSession // nil when asleep
+	AgentConfig   AgentConfig
+	ChannelCtx    ChannelContext
+	CreatedAt     time.Time
+	LastActive    time.Time
+	sessionID     string // preserved across sleep/wake for --resume
+	asleep        bool
+	contextHealth contextHealthState
+}
+
+// ContextTurnObservation is the context-window evidence collected during one
+// completed runtime turn. IncompleteCompaction is deliberately not serialized;
+// it only prevents two incomplete observations from becoming one fake streak.
+type ContextTurnObservation struct {
+	Compactions          []ContextEvent `json:"context_compactions,omitempty"`
+	FinalSnapshot        *ContextEvent  `json:"context_snapshot,omitempty"`
+	IncompleteCompaction bool           `json:"-"`
+}
+
+// ContextRolloverRecommendation asks the Server to retire the current provider
+// session after the turn. The Daemon never retires a session on its own.
+type ContextRolloverRecommendation struct {
+	Requested bool          `json:"requested"`
+	Reason    string        `json:"reason,omitempty"`
+	Context   *ContextEvent `json:"context,omitempty"`
+}
+
+type contextHealthState struct {
+	ineffectiveCompactions int
+	highPressureTurns      int
 }
 
 func (e *agentSessionEntry) snapshot() (*PersistentSession, bool, string) {
@@ -252,6 +275,101 @@ func (m *AgentSessionManager) CloseSession(agentID string) error {
 // CloseScopedSession terminates one channel- or node-scoped provider session.
 func (m *AgentSessionManager) CloseScopedSession(sessionKey string) error {
 	return m.closeScopedSession(sessionKey, false)
+}
+
+// RetireAndStartFreshScopedSession starts a fresh turn while holding the same
+// scoped gate used by Send and Start. When retireSessionID is non-empty, only
+// that exact provider session may be removed. If another session has already
+// replaced it, the current session receives the turn instead.
+func (m *AgentSessionManager) RetireAndStartFreshScopedSession(
+	ctx context.Context,
+	sessionKey, retireSessionID, agentID string,
+	agentCfg AgentConfig,
+	channelCtx ChannelContext,
+	messages, coldStartMessages []Message,
+	mentionedNames []string,
+) (*PersistentSession, error) {
+	release, err := m.acquireTurn(ctx, sessionKey, agentID)
+	if err != nil {
+		return nil, err
+	}
+
+	m.mu.RLock()
+	entry := m.sessions[sessionKey]
+	m.mu.RUnlock()
+	if entry != nil && retireSessionID != "" && entryProviderSessionID(entry) != retireSessionID {
+		// A newer local session won the race. Reuse it; never close by scope
+		// after the Server supplied an exact provider ID.
+		if !sessionConfigMatches(entry, agentCfg) {
+			release()
+			return nil, fmt.Errorf("newer scoped session has different runtime context")
+		}
+		return m.createSessionWithTurn(ctx, release, sessionKey, agentID, agentCfg, channelCtx, messages, coldStartMessages, entryProviderSessionID(entry), mentionedNames)
+	}
+
+	if entry != nil {
+		ps, asleep, _ := entry.snapshot()
+		if !asleep && ps != nil {
+			if closeErr := m.backend.Close(ps); closeErr != nil {
+				if forceErr := m.backend.ForceClose(ps); forceErr != nil {
+					release()
+					return nil, fmt.Errorf("retire scoped session: close: %v; force close: %w", closeErr, forceErr)
+				}
+			}
+		}
+		m.mu.Lock()
+		if m.sessions[sessionKey] == entry {
+			delete(m.sessions, sessionKey)
+		}
+		m.mu.Unlock()
+	}
+
+	started, err := m.createSessionWithTurn(ctx, release, sessionKey, agentID, agentCfg, channelCtx, messages, coldStartMessages, "", mentionedNames)
+	if err != nil || retireSessionID == "" || persistentSessionID(started) != retireSessionID {
+		return started, err
+	}
+
+	// A fresh start that resolves to the retired provider ID did not actually
+	// roll over. Keep it addressable until it is successfully terminated.
+	if closeErr := m.backend.Close(started); closeErr != nil {
+		if forceErr := m.backend.ForceClose(started); forceErr != nil {
+			return nil, fmt.Errorf("fresh session returned retired provider session id %q; close: %v; force close: %w", retireSessionID, closeErr, forceErr)
+		}
+	}
+	m.mu.Lock()
+	if current := m.sessions[sessionKey]; current != nil {
+		currentSession, _, _ := current.snapshot()
+		if currentSession == started {
+			delete(m.sessions, sessionKey)
+		}
+	}
+	m.mu.Unlock()
+	return nil, fmt.Errorf("fresh session returned retired provider session id %q", retireSessionID)
+}
+
+// FinalizeContextTurn updates the short-lived health counters for the exact
+// cached provider turn. Late finalizers cannot contaminate a replacement
+// session that already owns the same scope.
+func (m *AgentSessionManager) FinalizeContextTurn(sessionKey string, turn *PersistentSession, observation ContextTurnObservation) ContextRolloverRecommendation {
+	if turn == nil || strings.HasPrefix(sessionKey, "thinking:") {
+		return ContextRolloverRecommendation{}
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry := m.sessions[sessionKey]
+	if entry == nil {
+		return ContextRolloverRecommendation{}
+	}
+
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	turnSessionID := persistentSessionID(turn)
+	if entry.Session != turn && (turnSessionID == "" || persistentSessionID(entry.Session) != turnSessionID) {
+		return ContextRolloverRecommendation{}
+	}
+	next, recommendation := evaluateContextTurn(entry.contextHealth, observation)
+	entry.contextHealth = next
+	return recommendation
 }
 
 // CloseThinkingSession terminates one node-scoped provider Session while
@@ -472,6 +590,10 @@ func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, age
 	if err != nil {
 		return nil, err
 	}
+	return m.createSessionWithTurn(ctx, release, sessionKey, agentID, agentCfg, channelCtx, messages, coldStartMessages, prevSessionID, mentionedNames)
+}
+
+func (m *AgentSessionManager) createSessionWithTurn(ctx context.Context, release func(), sessionKey, agentID string, agentCfg AgentConfig, channelCtx ChannelContext, messages, coldStartMessages []Message, prevSessionID string, mentionedNames []string) (*PersistentSession, error) {
 	releaseOnReturn := true
 	defer func() {
 		if releaseOnReturn {
@@ -482,12 +604,22 @@ func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, age
 	m.mu.RLock()
 	entry, exists := m.sessions[sessionKey]
 	m.mu.RUnlock()
+	var resumedContextHealth contextHealthState
+	if exists {
+		entry.mu.RLock()
+		resumedContextHealth = entry.contextHealth
+		entry.mu.RUnlock()
+	}
 	if exists && m.isSessionAlive(entry) {
 		previous, _, _ := entry.snapshot()
-		if entry.AgentConfig.Model == agentCfg.Model {
+		if sessionConfigMatches(entry, agentCfg) {
 			ps, err := m.backend.Send(ctx, previous, messages)
 			if err != nil {
-				return nil, err
+				// Preserve the exact provider Session that rejected the turn so
+				// callers can bind the failure before requesting a fresh Session.
+				failed := *previous
+				failed.SessionID = entryProviderSessionID(entry)
+				return &failed, err
 			}
 			if ps == nil {
 				return nil, fmt.Errorf("session backend returned a nil session for %s", sessionKey)
@@ -518,7 +650,7 @@ func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, age
 	if len(startMessages) == 0 {
 		startMessages = messages
 	}
-	if exists && entry.AgentConfig.Model != agentCfg.Model {
+	if exists && !sessionConfigMatches(entry, agentCfg) {
 		// Never resume a provider session created with another model. Codex
 		// thread/resume, for example, does not accept a new model override.
 		prevSessionID = ""
@@ -593,6 +725,9 @@ func (m *AgentSessionManager) createSession(ctx context.Context, sessionKey, age
 		LastActive:  time.Now(),
 		sessionID:   firstNonEmpty(ps.SessionID, prevSessionID),
 	}
+	if exists && prevSessionID != "" && persistentSessionID(ps) == prevSessionID {
+		entry.contextHealth = resumedContextHealth
+	}
 
 	m.mu.Lock()
 	if old, ok := m.sessions[sessionKey]; ok {
@@ -639,6 +774,103 @@ func holdTurnUntilResult(ps *PersistentSession, release func()) {
 			dst <- result
 		}
 	}()
+}
+
+func entryProviderSessionID(entry *agentSessionEntry) string {
+	ps, _, stored := entry.snapshot()
+	if ps == nil {
+		return stored
+	}
+	if state, ok := ps.state.(SessionStater); ok {
+		return firstNonEmpty(state.SessionID(), ps.SessionID, stored)
+	}
+	return firstNonEmpty(ps.SessionID, stored)
+}
+
+func sessionConfigMatches(entry *agentSessionEntry, config AgentConfig) bool {
+	return entry.AgentConfig.Model == config.Model
+}
+
+func persistentSessionID(session *PersistentSession) string {
+	if session == nil {
+		return ""
+	}
+	if state, ok := session.state.(SessionStater); ok {
+		return firstNonEmpty(state.SessionID(), session.SessionID)
+	}
+	return session.SessionID
+}
+
+func evaluateContextTurn(state contextHealthState, observation ContextTurnObservation) (contextHealthState, ContextRolloverRecommendation) {
+	if observation.IncompleteCompaction {
+		state.ineffectiveCompactions = 0
+	}
+	for i := range observation.Compactions {
+		event := &observation.Compactions[i]
+		before, after, ok := positivePair(event.BeforeTokens, event.AfterTokens)
+		if !ok || (event.Accuracy != "reported" && event.Accuracy != "snapshot") || (event.Accuracy == "snapshot" && after > before) {
+			state.ineffectiveCompactions = 0
+		} else {
+			savedRatio := float64(before-after) / float64(before)
+			if savedRatio < 0.10 {
+				state.ineffectiveCompactions++
+			} else {
+				state.ineffectiveCompactions = 0
+			}
+		}
+
+		if after, window, valid := positivePair(event.AfterTokens, event.WindowTokens); valid && recognizedContextAccuracy(event.Accuracy) && float64(after)/float64(window) >= 0.90 {
+			return state, ContextRolloverRecommendation{Requested: true, Reason: "post_compaction_pressure", Context: event}
+		}
+		if state.ineffectiveCompactions >= 2 {
+			return state, ContextRolloverRecommendation{Requested: true, Reason: "ineffective_compaction", Context: event}
+		}
+	}
+
+	snapshot := observation.FinalSnapshot
+	used, window, valid := contextPressure(snapshot)
+	if !valid {
+		state.highPressureTurns = 0
+		return state, ContextRolloverRecommendation{}
+	}
+	if float64(used)/float64(window) < 0.90 {
+		state.highPressureTurns = 0
+		return state, ContextRolloverRecommendation{}
+	}
+	state.highPressureTurns++
+	required := 2
+	if snapshot.Accuracy == "estimated" {
+		required = 3
+	} else if snapshot.Accuracy != "reported" && snapshot.Accuracy != "snapshot" {
+		state.highPressureTurns = 0
+		return state, ContextRolloverRecommendation{}
+	}
+	if state.highPressureTurns >= required {
+		return state, ContextRolloverRecommendation{Requested: true, Reason: "persistent_context_pressure", Context: snapshot}
+	}
+	return state, ContextRolloverRecommendation{}
+}
+
+func recognizedContextAccuracy(accuracy string) bool {
+	return accuracy == "reported" || accuracy == "snapshot" || accuracy == "estimated"
+}
+
+func positivePair(first, second *int64) (int64, int64, bool) {
+	if first == nil || second == nil || *first <= 0 || *second <= 0 {
+		return 0, 0, false
+	}
+	return *first, *second, true
+}
+
+func contextPressure(event *ContextEvent) (int64, int64, bool) {
+	if event == nil {
+		return 0, 0, false
+	}
+	used := event.UsedTokens
+	if used == nil {
+		used = event.AfterTokens
+	}
+	return positivePair(used, event.WindowTokens)
 }
 
 func firstNonEmpty(values ...string) string {

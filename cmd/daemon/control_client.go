@@ -247,6 +247,7 @@ func (client *daemonControlClient) connect(ctx context.Context) error {
 	hello := map[string]any{
 		"daemon_id":         client.daemonID,
 		"daemon_version":    version.Version,
+		"capabilities":      daemonCapabilities(),
 		"runtime_inventory": agent.GlobalRegistry().Detect(),
 		"system_info":       collectSystemInfo(),
 		"agent_ids":         client.handler.cachedSessionAgentIDs(),

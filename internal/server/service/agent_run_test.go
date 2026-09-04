@@ -307,6 +307,19 @@ func TestAgentRunServiceLifecycle(t *testing.T) {
 	if _, err := svc.MarkBackendStarted(ctx, run.ID); err == nil {
 		t.Fatal("MarkBackendStarted revived a terminal run")
 	}
+	lateExternalID := "late-session-" + uuid.NewString()
+	if _, err := svc.BindProviderSession(ctx, BindProviderSessionInput{
+		RunID: run.ID, AgentID: agentID, Provider: "codex", ExternalSessionID: lateExternalID,
+	}); !errors.Is(err, ErrAgentRunAlreadyFinished) {
+		t.Fatalf("late BindProviderSession error = %v, want ErrAgentRunAlreadyFinished", err)
+	}
+	var lateSessionCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_sessions WHERE agent_id=$1 AND external_session_id=$2`, agentID, lateExternalID).Scan(&lateSessionCount); err != nil {
+		t.Fatal(err)
+	}
+	if lateSessionCount != 0 {
+		t.Fatalf("late BindProviderSession created %d active Sessions", lateSessionCount)
+	}
 	recentRuns, err := svc.ListRecentRuns(ctx)
 	if err != nil {
 		t.Fatalf("ListRecentRuns: %v", err)
@@ -372,6 +385,394 @@ func TestAgentRunServiceLifecycle(t *testing.T) {
 		if active.ID == failedRun.ID {
 			t.Fatalf("failed run %s should not be listed as active", failedRun.ID)
 		}
+	}
+}
+
+func TestForceFreshRecoveryRetiresPreviousSession(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, ownerID)
+	channelID := agentRunChannel(t, pool, ownerID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_sessions WHERE agent_id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE created_by = $1`, ownerID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	svc := NewAgentRunService(pool)
+	oldSession, err := svc.UpsertSession(ctx, UpsertSessionInput{
+		AgentID: agentID, Provider: "codex", ExternalSessionID: "recovery-old-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("create previous Session: %v", err)
+	}
+	if _, err := svc.StartRun(ctx, StartRunInput{
+		AgentID: agentID, SessionID: oldSession.ID, TriggerType: AgentRunTriggerMessage,
+		ChannelID: channelID, Status: AgentRunStatusFailed, Source: "codex",
+	}); err != nil {
+		t.Fatalf("start failed Run: %v", err)
+	}
+	recoveryRun, err := svc.StartRun(ctx, StartRunInput{
+		AgentID: agentID, TriggerType: AgentRunTriggerMessage, ChannelID: channelID,
+		Status: AgentRunStatusQueued, Source: "codex",
+	})
+	if err != nil {
+		t.Fatalf("start recovery Run: %v", err)
+	}
+	dispatch, err := svc.ResolveSessionDispatch(ctx, ResolveSessionDispatchInput{
+		RunID: recoveryRun.ID, AgentID: agentID, ChannelID: channelID, Provider: "codex",
+		ResumeSessionID: oldSession.ExternalSessionID, ForceFreshSession: true, SupportsContextRollover: true,
+	})
+	if err != nil {
+		t.Fatalf("resolve fresh recovery: %v", err)
+	}
+	if !dispatch.ForceFreshSession || dispatch.RetireSessionID != oldSession.ExternalSessionID || dispatch.RolloverFromSessionID != oldSession.ID {
+		t.Fatalf("fresh recovery dispatch = %+v", dispatch)
+	}
+	var oldStatus, persistedIntent string
+	if err := pool.QueryRow(ctx, `
+		SELECT s.status, COALESCE(r.rollover_from_session_id::text, '')
+		  FROM agent_sessions s JOIN agent_runs r ON r.id = $2
+		 WHERE s.id = $1`, oldSession.ID, recoveryRun.ID,
+	).Scan(&oldStatus, &persistedIntent); err != nil {
+		t.Fatalf("load pending recovery state: %v", err)
+	}
+	if oldStatus != AgentSessionStatusRolloverPending || persistedIntent != oldSession.ID {
+		t.Fatalf("pending recovery state = status %q intent %q", oldStatus, persistedIntent)
+	}
+
+	newExternalID := "recovery-new-" + uuid.NewString()
+	bound, err := svc.BindProviderSession(ctx, BindProviderSessionInput{
+		RunID: recoveryRun.ID, AgentID: agentID, Provider: "codex", ExternalSessionID: newExternalID,
+	})
+	if err != nil {
+		t.Fatalf("bind fresh recovery Session: %v", err)
+	}
+	if bound.RolloverEvent == nil || bound.Session.Status != AgentSessionStatusActive {
+		t.Fatalf("bound fresh recovery = %+v", bound)
+	}
+	var activeCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_sessions WHERE agent_id = $1 AND status = $2`, agentID, AgentSessionStatusActive).Scan(&activeCount); err != nil {
+		t.Fatalf("count active Sessions: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT status FROM agent_sessions WHERE id = $1`, oldSession.ID).Scan(&oldStatus); err != nil {
+		t.Fatalf("load retired Session: %v", err)
+	}
+	if activeCount != 1 || oldStatus != AgentSessionStatusClosed {
+		t.Fatalf("completed recovery = active %d old status %q", activeCount, oldStatus)
+	}
+
+	replayedRun, err := svc.StartRun(ctx, StartRunInput{
+		AgentID: agentID, TriggerType: AgentRunTriggerMessage, ChannelID: channelID,
+		Status: AgentRunStatusQueued, Source: "codex",
+	})
+	if err != nil {
+		t.Fatalf("start replayed recovery Run: %v", err)
+	}
+	replayed, err := svc.ResolveSessionDispatch(ctx, ResolveSessionDispatchInput{
+		RunID: replayedRun.ID, AgentID: agentID, ChannelID: channelID, Provider: "codex",
+		ResumeSessionID: oldSession.ExternalSessionID, ForceFreshSession: true, SupportsContextRollover: true,
+	})
+	if err != nil {
+		t.Fatalf("resolve replayed recovery: %v", err)
+	}
+	if replayed.ResumeSessionID != newExternalID || replayed.ForceFreshSession || replayed.RolloverFromSessionID != "" {
+		t.Fatalf("replayed recovery dispatch = %+v", replayed)
+	}
+}
+
+func TestAgentRunSessionRolloverConvergesConcurrentDispatches(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	ownerID := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, ownerID)
+	channelID := agentRunChannel(t, pool, ownerID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_sessions WHERE agent_id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agents WHERE id = $1`, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channels WHERE created_by = $1`, ownerID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, ownerID)
+	})
+
+	svc := NewAgentRunService(pool)
+	oldSession, err := svc.UpsertSession(ctx, UpsertSessionInput{
+		AgentID: agentID, Provider: "codex", ExternalSessionID: "rollover-old-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("create old Session: %v", err)
+	}
+	sourceRun, err := svc.StartRun(ctx, StartRunInput{
+		AgentID: agentID, SessionID: oldSession.ID, TriggerType: AgentRunTriggerMessage,
+		ChannelID: channelID, Status: AgentRunStatusRunning, Source: "codex",
+	})
+	if err != nil {
+		t.Fatalf("start source Run: %v", err)
+	}
+	currentDispatch, err := svc.ResolveSessionDispatch(ctx, ResolveSessionDispatchInput{
+		RunID: sourceRun.ID, AgentID: agentID, ChannelID: channelID, Provider: "codex",
+	})
+	if err != nil {
+		t.Fatalf("resolve current Run Session: %v", err)
+	}
+	if currentDispatch.ResumeSessionID != oldSession.ExternalSessionID || currentDispatch.ColdStart || currentDispatch.ForceFreshSession {
+		t.Fatalf("current Run dispatch = %+v, want its active Session", currentDispatch)
+	}
+
+	peerSourceRun, err := svc.StartRun(ctx, StartRunInput{
+		AgentID: agentID, SessionID: oldSession.ID, TriggerType: AgentRunTriggerMessage,
+		ChannelID: channelID, Status: AgentRunStatusRunning, Source: "codex",
+	})
+	if err != nil {
+		t.Fatalf("start peer source Run: %v", err)
+	}
+	type rolloverCall struct {
+		result *RequestSessionRolloverResult
+		err    error
+	}
+	calls := make(chan rolloverCall, 2)
+	for _, runID := range []string{sourceRun.ID, peerSourceRun.ID} {
+		go func() {
+			result, err := svc.RequestSessionRollover(ctx, RequestSessionRolloverInput{
+				RunID: runID, Reason: "ineffective_compaction", Continuity: "continue task",
+			})
+			calls <- rolloverCall{result: result, err: err}
+		}()
+	}
+	createdRequests := 0
+	requestOwnerID := ""
+	for range 2 {
+		call := <-calls
+		if call.err != nil {
+			t.Fatalf("concurrent rollover request: %v", call.err)
+		}
+		if call.result.SessionID != oldSession.ID {
+			t.Fatalf("concurrent rollover Session = %q, want %q", call.result.SessionID, oldSession.ID)
+		}
+		if call.result.Created {
+			createdRequests++
+			if call.result.Event == nil {
+				t.Fatal("created rollover request has no event")
+			}
+			requestOwnerID = call.result.Event.RunID
+		}
+	}
+	if createdRequests != 1 {
+		t.Fatalf("created rollover requests = %d, want 1", createdRequests)
+	}
+	winnerRun, replayRun := sourceRun, peerSourceRun
+	if requestOwnerID == peerSourceRun.ID {
+		winnerRun, replayRun = peerSourceRun, sourceRun
+	}
+	pending, err := svc.UpsertSession(ctx, UpsertSessionInput{
+		AgentID: agentID, Provider: "codex", ExternalSessionID: oldSession.ExternalSessionID,
+	})
+	if err != nil || pending.ID != oldSession.ID || pending.Status != AgentSessionStatusRolloverPending {
+		t.Fatalf("pending Session upsert = %+v, %v", pending, err)
+	}
+	replayedRequest, err := svc.RequestSessionRollover(ctx, RequestSessionRolloverInput{RunID: sourceRun.ID})
+	if err != nil || replayedRequest.Created || replayedRequest.Event != nil {
+		t.Fatalf("pending rollover replay = %+v, %v", replayedRequest, err)
+	}
+
+	startReplacementRun := func() *AgentRun {
+		t.Helper()
+		run, err := svc.StartRun(ctx, StartRunInput{
+			AgentID: agentID, TriggerType: AgentRunTriggerMessage, ChannelID: channelID,
+			Status: AgentRunStatusQueued, Source: "codex",
+		})
+		if err != nil {
+			t.Fatalf("start replacement Run: %v", err)
+		}
+		return run
+	}
+	firstRun := startReplacementRun()
+	secondRun := startReplacementRun()
+	resolve := func(runID string) SessionDispatch {
+		t.Helper()
+		dispatch, err := svc.ResolveSessionDispatch(ctx, ResolveSessionDispatchInput{
+			RunID: runID, AgentID: agentID, ChannelID: channelID, Provider: "codex",
+			SupportsContextRollover: true,
+		})
+		if err != nil {
+			t.Fatalf("resolve Run %s: %v", runID, err)
+		}
+		return dispatch
+	}
+	for _, run := range []*AgentRun{firstRun, secondRun} {
+		dispatch := resolve(run.ID)
+		if !dispatch.ForceFreshSession || dispatch.RetireSessionID != oldSession.ExternalSessionID || dispatch.RolloverFromSessionID != oldSession.ID {
+			t.Fatalf("initial dispatch for %s = %+v", run.ID, dispatch)
+		}
+	}
+	pendingCurrent := resolve(winnerRun.ID)
+	if !pendingCurrent.ForceFreshSession || pendingCurrent.RetireSessionID != oldSession.ExternalSessionID || pendingCurrent.RolloverFromSessionID != oldSession.ID {
+		t.Fatalf("current pending dispatch = %+v", pendingCurrent)
+	}
+	var peerSessionID, peerIntent string
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(session_id::text, ''), COALESCE(rollover_from_session_id::text, '') FROM agent_runs WHERE id = $1`, winnerRun.ID).Scan(&peerSessionID, &peerIntent); err != nil {
+		t.Fatalf("load pending current Run: %v", err)
+	}
+	if peerSessionID != oldSession.ID || peerIntent != oldSession.ID {
+		t.Fatalf("pending current Run session=%q rollover=%q, want old Session", peerSessionID, peerIntent)
+	}
+
+	if _, err := svc.BindProviderSession(ctx, BindProviderSessionInput{
+		RunID: winnerRun.ID, AgentID: agentID, Provider: "codex", ExternalSessionID: oldSession.ExternalSessionID,
+	}); !errors.Is(err, ErrSessionRolloverMismatch) {
+		t.Fatalf("fresh bind reused predecessor: %v", err)
+	}
+	newExternalID := "rollover-new-" + uuid.NewString()
+	bound, err := svc.BindProviderSession(ctx, BindProviderSessionInput{
+		RunID: winnerRun.ID, AgentID: agentID, Provider: "codex", ExternalSessionID: newExternalID,
+	})
+	if err != nil {
+		t.Fatalf("bind current pending replacement: %v", err)
+	}
+	if bound.RolloverEvent == nil || bound.Run.SessionID != bound.Session.ID || bound.Session.Status != AgentSessionStatusActive {
+		t.Fatalf("current pending replacement bind = %+v", bound)
+	}
+	replacementID := bound.Session.ID
+	directLoserBind, err := svc.BindProviderSession(ctx, BindProviderSessionInput{
+		RunID: firstRun.ID, AgentID: agentID, Provider: "codex", ExternalSessionID: newExternalID,
+	})
+	if err != nil {
+		t.Fatalf("bind directly accepted loser to winner: %v", err)
+	}
+	if directLoserBind.RolloverEvent != nil || directLoserBind.Run.SessionID != replacementID || directLoserBind.Run.RolloverFromSessionID != "" {
+		t.Fatalf("direct loser convergence = %+v", directLoserBind)
+	}
+	if _, err := svc.BindProviderSession(ctx, BindProviderSessionInput{
+		RunID: secondRun.ID, AgentID: agentID, Provider: "codex", ExternalSessionID: "other-winner-" + uuid.NewString(),
+	}); !errors.Is(err, ErrSessionRolloverMismatch) {
+		t.Fatalf("direct loser accepted a different provider Session: %v", err)
+	}
+
+	replayedRequest, err = svc.RequestSessionRollover(ctx, RequestSessionRolloverInput{RunID: replayRun.ID})
+	if err != nil || replayedRequest.Created || replayedRequest.Event != nil {
+		t.Fatalf("closed rollover replay = %+v, %v", replayedRequest, err)
+	}
+	for _, run := range []*AgentRun{firstRun, secondRun} {
+		converged := resolve(run.ID)
+		if converged.ResumeSessionID != newExternalID || converged.ForceFreshSession || converged.RolloverFromSessionID != "" {
+			t.Fatalf("converged dispatch for %s = %+v, want active replacement", run.ID, converged)
+		}
+		var persistedIntent string
+		if err := pool.QueryRow(ctx, `SELECT COALESCE(rollover_from_session_id::text, '') FROM agent_runs WHERE id = $1`, run.ID).Scan(&persistedIntent); err != nil {
+			t.Fatalf("load converged Run: %v", err)
+		}
+		if persistedIntent != "" {
+			t.Fatalf("converged Run %s rollover_from_session_id = %q, want cleared", run.ID, persistedIntent)
+		}
+	}
+
+	secondBound, err := svc.BindProviderSession(ctx, BindProviderSessionInput{
+		RunID: secondRun.ID, AgentID: agentID, Provider: "codex", ExternalSessionID: newExternalID,
+	})
+	if err != nil {
+		t.Fatalf("bind converged Run: %v", err)
+	}
+	if secondBound.Run.SessionID != replacementID || secondBound.RolloverEvent != nil {
+		t.Fatalf("converged bind = %+v", secondBound)
+	}
+	if _, err := svc.BindProviderSession(ctx, BindProviderSessionInput{
+		RunID: secondRun.ID, AgentID: agentID, Provider: "codex", ExternalSessionID: "conflict-" + uuid.NewString(),
+	}); !errors.Is(err, ErrSessionRolloverMismatch) {
+		t.Fatalf("conflicting replay bind: %v", err)
+	}
+
+	var sessionCount, requestedCount, completedCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_sessions WHERE agent_id = $1`, agentID).Scan(&sessionCount); err != nil {
+		t.Fatalf("count Sessions: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_run_events WHERE type = $1 AND run_id = ANY($2::uuid[])`, AgentRunEventSessionRolloverRequested, []string{sourceRun.ID, peerSourceRun.ID}).Scan(&requestedCount); err != nil {
+		t.Fatalf("count requested events: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_run_events WHERE type = $1 AND run_id = ANY($2::uuid[])`, AgentRunEventSessionRolloverCompleted, []string{sourceRun.ID, peerSourceRun.ID, firstRun.ID, secondRun.ID}).Scan(&completedCount); err != nil {
+		t.Fatalf("count completed events: %v", err)
+	}
+	if sessionCount != 2 || requestedCount != 1 || completedCount != 1 {
+		t.Fatalf("persisted rollover state: sessions=%d requested=%d completed=%d", sessionCount, requestedCount, completedCount)
+	}
+
+	closedWithWinnerRun, err := svc.StartRun(ctx, StartRunInput{
+		AgentID: agentID, SessionID: oldSession.ID, TriggerType: AgentRunTriggerMessage,
+		ChannelID: channelID, Status: AgentRunStatusQueued, Source: "codex",
+	})
+	if err != nil {
+		t.Fatalf("start closed current Run with winner: %v", err)
+	}
+	closedWithWinner := resolve(closedWithWinnerRun.ID)
+	if closedWithWinner.ResumeSessionID != newExternalID || closedWithWinner.ColdStart || closedWithWinner.ForceFreshSession {
+		t.Fatalf("closed current dispatch with winner = %+v", closedWithWinner)
+	}
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(session_id::text, '') FROM agent_runs WHERE id = $1`, closedWithWinnerRun.ID).Scan(&peerSessionID); err != nil {
+		t.Fatalf("load closed current Run with winner: %v", err)
+	}
+	if peerSessionID != "" {
+		t.Fatalf("closed current Run retained Session %q", peerSessionID)
+	}
+	if _, err := svc.BindProviderSession(ctx, BindProviderSessionInput{
+		RunID: closedWithWinnerRun.ID, AgentID: agentID, Provider: "codex", ExternalSessionID: newExternalID,
+	}); err != nil {
+		t.Fatalf("bind closed current Run to winner: %v", err)
+	}
+
+	orphanClosed, err := svc.UpsertSession(ctx, UpsertSessionInput{
+		AgentID: agentID, Provider: "codex", ExternalSessionID: "orphan-closed-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("create orphan closed Session: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agent_sessions SET status = $2 WHERE id = $1`, orphanClosed.ID, AgentSessionStatusClosed); err != nil {
+		t.Fatalf("close orphan Session: %v", err)
+	}
+	orphanClosed, err = svc.UpsertSession(ctx, UpsertSessionInput{
+		AgentID: agentID, Provider: "codex", ExternalSessionID: orphanClosed.ExternalSessionID,
+	})
+	if err != nil || orphanClosed.Status != AgentSessionStatusClosed {
+		t.Fatalf("orphan closed Session upsert = %+v, %v", orphanClosed, err)
+	}
+	closedWithoutWinnerRun, err := svc.StartRun(ctx, StartRunInput{
+		AgentID: agentID, SessionID: orphanClosed.ID, TriggerType: AgentRunTriggerMessage,
+		ChannelID: channelID, Status: AgentRunStatusQueued, Source: "codex",
+	})
+	if err != nil {
+		t.Fatalf("start closed current Run without winner: %v", err)
+	}
+	closedWithoutWinner := resolve(closedWithoutWinnerRun.ID)
+	if !closedWithoutWinner.ColdStart || closedWithoutWinner.ResumeSessionID != "" || closedWithoutWinner.ForceFreshSession || closedWithoutWinner.RolloverFromSessionID != "" {
+		t.Fatalf("closed current dispatch without winner = %+v", closedWithoutWinner)
+	}
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(session_id::text, '') FROM agent_runs WHERE id = $1`, closedWithoutWinnerRun.ID).Scan(&peerSessionID); err != nil {
+		t.Fatalf("load closed current Run without winner: %v", err)
+	}
+	if peerSessionID != "" {
+		t.Fatalf("closed current Run without winner retained Session %q", peerSessionID)
+	}
+	if _, err := svc.BindProviderSession(ctx, BindProviderSessionInput{
+		RunID: closedWithoutWinnerRun.ID, AgentID: agentID, Provider: "codex", ExternalSessionID: "orphan-new-" + uuid.NewString(),
+	}); err != nil {
+		t.Fatalf("bind cold-started Run after closed Session: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE agent_sessions SET status = $2 WHERE id = $1`, replacementID, AgentSessionStatusClosed); err != nil {
+		t.Fatalf("close replacement: %v", err)
+	}
+	closed, err := svc.UpsertSession(ctx, UpsertSessionInput{
+		AgentID: agentID, Provider: "codex", ExternalSessionID: newExternalID,
+	})
+	if err != nil || closed.Status != AgentSessionStatusClosed {
+		t.Fatalf("closed Session upsert = %+v, %v", closed, err)
+	}
+	replayed, err := svc.BindProviderSession(ctx, BindProviderSessionInput{
+		RunID: winnerRun.ID, AgentID: agentID, Provider: "codex", ExternalSessionID: newExternalID,
+	})
+	if err != nil || replayed.RolloverEvent != nil || replayed.Session.Status != AgentSessionStatusClosed {
+		t.Fatalf("late completed bind replay = %+v, %v", replayed, err)
 	}
 }
 

@@ -1,4 +1,4 @@
-.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-release-install test-e2e-first-run test-e2e-agent-delivery test-e2e-agent-target-resolution test-e2e-agent-message-coalescing test-e2e-agent-template-credential test-e2e-automation test-e2e-budget-gate test-e2e-budget-gate-run test-e2e-agent-session-resume test-e2e-agent-idle-resume test-e2e-agent-scope-router test-e2e-send-freshness test-e2e-websocket-recovery test-e2e-m8 test-e2e-m9 test-e2e-remote-product-completeness test-e2e-token-accounting test-e2e-remote-server test-e2e-public-remote test-e2e-workspaces test-e2e-auto-daemon
+.PHONY: help dev init start restart rebuild stop clean-pids build migrate db-reset test-release-install test-e2e-first-run test-e2e-agent-delivery test-e2e-agent-target-resolution test-e2e-agent-message-coalescing test-e2e-agent-template-credential test-e2e-automation test-e2e-budget-gate test-e2e-budget-gate-run test-e2e-agent-session-resume test-e2e-agent-idle-resume test-e2e-agent-scope-router test-e2e-send-freshness test-e2e-websocket-recovery test-e2e-m8 test-e2e-m9 test-e2e-remote-product-completeness test-e2e-token-accounting test-e2e-context-compaction test-e2e-remote-server test-e2e-public-remote test-e2e-workspaces test-e2e-auto-daemon
 .DEFAULT_GOAL := help
 
 ENV_FILE ?= .env
@@ -97,6 +97,9 @@ test-e2e-remote-product-completeness: ## Verify remote uploads and Workspace gov
 
 test-e2e-token-accounting: ## Verify Daemon-owned current-turn Token usage for real Claude and Codex runtimes
 	@bash scripts/run-local-e2e.sh token-accounting env CI=1 SOLO_E2E_REAL_TOKEN_ACCOUNTING=1 npx playwright test e2e/token-accounting.spec.ts --workers=1
+
+test-e2e-context-compaction: ## Verify native context compaction telemetry for real Claude and Codex runtimes
+	@bash scripts/run-local-e2e.sh context-compaction env CI=1 SOLO_E2E_REAL_CONTEXT_COMPACTION=1 npx playwright test e2e/context-compaction.spec.ts --workers=1
 
 test-e2e-remote-server: rebuild ## Verify pairing, reverse runtime RPC, durable offline delivery, restart recovery, UI, and DB truth
 	@cd frontend && CI=1 SOLO_E2E_REMOTE_SERVER=1 npx playwright test e2e/remote-server.spec.ts --workers=1

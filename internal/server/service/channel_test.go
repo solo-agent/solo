@@ -166,13 +166,119 @@ func TestChannelAgentOwnershipAndRemovalBoundaries(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE workspace_members SET role='admin' WHERE workspace_id=$1 AND user_id=$2`, workspaceID, adminID); err != nil {
 		t.Fatalf("promote Workspace admin: %v", err)
 	}
+	sharedActiveID, sharedPendingID, homeActiveID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO agent_sessions (id,agent_id,provider,external_session_id,status)
+		VALUES ($1,$4,'codex','shared-active','active'),
+		       ($2,$4,'codex','shared-pending','rollover_pending'),
+		       ($3,$4,'codex','home-active','active')
+	`, sharedActiveID, sharedPendingID, homeActiveID, agentID); err != nil {
+		t.Fatalf("create scoped Sessions: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO agent_runs (id,agent_id,session_id,trigger_type,channel_id,status)
+		VALUES ($1,$7,$4,'message',$8,'completed'),
+		       ($2,$7,$5,'message',$8,'completed'),
+		       ($3,$7,$6,'message',$9,'completed')
+	`, uuid.NewString(), uuid.NewString(), uuid.NewString(), sharedActiveID, sharedPendingID, homeActiveID, agentID, sharedID, homeID); err != nil {
+		t.Fatalf("create scoped Runs: %v", err)
+	}
+	runSvc := NewAgentRunService(pool)
+	sharedRun, err := runSvc.StartRun(ctx, StartRunInput{
+		AgentID: agentID, TriggerType: AgentRunTriggerMessage, ChannelID: sharedID, Status: AgentRunStatusQueued,
+	})
+	if err != nil {
+		t.Fatalf("create active shared Run: %v", err)
+	}
+	homeRun, err := runSvc.StartRun(ctx, StartRunInput{
+		AgentID: agentID, TriggerType: AgentRunTriggerMessage, ChannelID: homeID, Status: AgentRunStatusQueued,
+	})
+	if err != nil {
+		t.Fatalf("create active home Run: %v", err)
+	}
+	sharedScopedTaskID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO tasks (id,channel_id,creator_id,claimer_id,title,status,priority,task_number)
+		VALUES ($1,$2,$3,$4,'scoped claimed task',$5,'normal',
+		  (SELECT COALESCE(MAX(task_number),0)+1 FROM tasks WHERE channel_id=$2))`,
+		sharedScopedTaskID, sharedID, ownerID, agentID, TaskStatusInReview,
+	); err != nil {
+		t.Fatalf("create scoped claimed Task: %v", err)
+	}
 	if _, err := svc.RemoveMember(ctx, sharedID, adminID, agentID); err != nil {
 		t.Fatalf("Workspace admin remove connected Agent: %v", err)
+	}
+	statuses := map[string]string{}
+	rows, err := pool.Query(ctx, `SELECT id::text,status FROM agent_sessions WHERE id::text=ANY($1)`, []string{sharedActiveID, sharedPendingID, homeActiveID})
+	if err != nil {
+		t.Fatalf("load scoped Session statuses: %v", err)
+	}
+	for rows.Next() {
+		var id, status string
+		if err := rows.Scan(&id, &status); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		statuses[id] = status
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatal(err)
+	}
+	rows.Close()
+	if statuses[sharedActiveID] != AgentSessionStatusClosed || statuses[sharedPendingID] != AgentSessionStatusClosed || statuses[homeActiveID] != AgentSessionStatusActive {
+		t.Fatalf("scoped Session statuses = %#v", statuses)
+	}
+	var sharedRunStatus, sharedBudgetState, homeRunStatus, homeBudgetState string
+	if err := pool.QueryRow(ctx, `
+		SELECT r.status,u.state FROM agent_runs r JOIN agent_run_token_usage u ON u.run_id=r.id WHERE r.id=$1`, sharedRun.ID,
+	).Scan(&sharedRunStatus, &sharedBudgetState); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT r.status,u.state FROM agent_runs r JOIN agent_run_token_usage u ON u.run_id=r.id WHERE r.id=$1`, homeRun.ID,
+	).Scan(&homeRunStatus, &homeBudgetState); err != nil {
+		t.Fatal(err)
+	}
+	if sharedRunStatus != string(AgentRunStatusCancelled) || sharedBudgetState != "released" ||
+		homeRunStatus != string(AgentRunStatusQueued) || homeBudgetState != "pending" {
+		t.Fatalf("scoped Runs = shared(%s,%s) home(%s,%s)", sharedRunStatus, sharedBudgetState, homeRunStatus, homeBudgetState)
+	}
+	var scopedTaskStatus, scopedTaskClaimer string
+	if err := pool.QueryRow(ctx, `SELECT status,COALESCE(claimer_id::text,'') FROM tasks WHERE id=$1`, sharedScopedTaskID).Scan(&scopedTaskStatus, &scopedTaskClaimer); err != nil {
+		t.Fatal(err)
+	}
+	if scopedTaskStatus != TaskStatusTodo || scopedTaskClaimer != "" {
+		t.Fatalf("scoped Task = (%s,%s), want todo/unclaimed", scopedTaskStatus, scopedTaskClaimer)
 	}
 	if err := svc.AddMember(ctx, sharedID, ownerID, "agent", agentID); err != nil {
 		t.Fatalf("owner reconnect Agent: %v", err)
 	}
 	if _, err := svc.RemoveMember(ctx, homeID, adminID, agentID); !errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("Workspace admin delete foreign Agent error = %v, want %v", err, ErrPermissionDenied)
+	}
+	sharedTaskID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO tasks (id,channel_id,creator_id,claimer_id,title,status,priority,task_number)
+		VALUES ($1,$2,$3,$4,'shared claimed task',$5,'normal',
+		  (SELECT COALESCE(MAX(task_number),0)+1 FROM tasks WHERE channel_id=$2))`,
+		sharedTaskID, sharedID, ownerID, agentID, TaskStatusInProgress,
+	); err != nil {
+		t.Fatalf("create claimed shared Task: %v", err)
+	}
+	if _, err := svc.RemoveMember(ctx, homeID, ownerID, agentID); err != nil {
+		t.Fatalf("owner remove Agent from home Channel: %v", err)
+	}
+	var taskStatus, taskClaimer, finalHomeRunStatus, finalHomeBudgetState string
+	if err := pool.QueryRow(ctx, `SELECT status,COALESCE(claimer_id::text,'') FROM tasks WHERE id=$1`, sharedTaskID).Scan(&taskStatus, &taskClaimer); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT r.status,u.state FROM agent_runs r JOIN agent_run_token_usage u ON u.run_id=r.id WHERE r.id=$1`, homeRun.ID,
+	).Scan(&finalHomeRunStatus, &finalHomeBudgetState); err != nil {
+		t.Fatal(err)
+	}
+	if taskStatus != TaskStatusTodo || taskClaimer != "" || finalHomeRunStatus != string(AgentRunStatusCancelled) || finalHomeBudgetState != "released" {
+		t.Fatalf("home removal = Task(%s,%s) Run(%s,%s)", taskStatus, taskClaimer, finalHomeRunStatus, finalHomeBudgetState)
 	}
 }

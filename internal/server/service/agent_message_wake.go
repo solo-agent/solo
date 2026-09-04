@@ -449,18 +449,24 @@ func (s *AgentService) persistRemoteMessageRunTx(ctx context.Context, tx pgx.Tx,
 		_ = json.Unmarshal(customEnv, &taskReq.CustomEnv)
 		_ = json.Unmarshal(customArgs, &taskReq.CustomArgs)
 	}
-	if taskReq.NodeID == "" && taskReq.ResumeSessionID == "" && !taskReq.ForceFreshSession {
-		_ = tx.QueryRow(ctx, `
-			SELECT sess.external_session_id
-			  FROM agent_runs r
-			  JOIN agent_sessions sess ON sess.id = r.session_id
-			 WHERE r.agent_id = $1 AND r.channel_id = $2 AND r.id <> $3
-			   AND r.thinking_node_id IS NULL AND sess.provider = $4
-			   AND sess.status = 'active' AND COALESCE(sess.external_session_id, '') <> ''
-			 ORDER BY sess.last_active_at DESC, r.updated_at DESC LIMIT 1`,
-			ag.ID, taskReq.ChannelID, run.ID, taskReq.ModelConfig.Provider,
-		).Scan(&taskReq.ResumeSessionID)
+	runSvc := NewAgentRunService(s.pool)
+	dispatch, err := runSvc.resolveSessionDispatchTx(ctx, tx, ResolveSessionDispatchInput{
+		RunID:                   run.ID,
+		AgentID:                 ag.ID,
+		ChannelID:               taskReq.ChannelID,
+		Provider:                taskReq.ModelConfig.Provider,
+		ThinkingNodeID:          taskReq.NodeID,
+		ResumeSessionID:         taskReq.ResumeSessionID,
+		ForceFreshSession:       taskReq.ForceFreshSession,
+		SupportsContextRollover: hasCapability(dmn.Capabilities, contextRolloverCapability),
+	})
+	if err != nil {
+		return err
 	}
+	if err := s.applySessionDispatch(ctx, tx, &taskReq, dispatch); err != nil {
+		return err
+	}
+	run.RolloverFromSessionID = dispatch.RolloverFromSessionID
 	payload, err := json.Marshal(taskReq)
 	if err != nil {
 		return err
@@ -544,7 +550,6 @@ func (s *AgentService) buildPendingMessageWakeTask(ctx context.Context, wake pen
 		ColdStartMessages:    coldStartMessages,
 		SystemPrompt:         ag.SystemPrompt,
 		ModelConfig:          agent.ModelConfig{Provider: ag.ModelProvider, Model: ag.ModelName},
-		TaskContext:          s.getChannelOpenTasksSummary(ctx, wake.ChannelID),
 		AgentChain:           []string{ag.ID},
 		MentionedNames:       s.resolveMentionedNames(ctx, mentionedIDs),
 		ResultContract:       resultContract,

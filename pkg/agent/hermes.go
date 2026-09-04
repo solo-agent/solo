@@ -124,6 +124,10 @@ func (b *HermesBackend) Execute(ctx context.Context, req *ExecuteRequest, opts *
 				output.WriteString(chunk.Content)
 				outputMu.Unlock()
 			}
+			if chunk.Context != nil {
+				sendContextChunk(runCtx.Done(), msgCh, chunk)
+				return
+			}
 			trySend(msgCh, chunk)
 		},
 		onPromptDone: func(result acpPromptResult) {

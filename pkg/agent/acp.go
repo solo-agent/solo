@@ -78,8 +78,10 @@ func acpPromptErrorStatus(ctx context.Context) string {
 // never channels captured by Start.
 type acpRuntimeTurn struct {
 	mu        sync.Mutex
+	msgMu     sync.RWMutex
 	msgCh     chan OutputChunk
 	resCh     chan *Result
+	done      chan struct{}
 	output    strings.Builder
 	usage     TokenUsage
 	model     string
@@ -91,19 +93,28 @@ func newACPRuntimeTurn(model string) *acpRuntimeTurn {
 	return &acpRuntimeTurn{
 		msgCh:     make(chan OutputChunk, 256),
 		resCh:     make(chan *Result, 1),
+		done:      make(chan struct{}),
 		model:     model,
 		startedAt: time.Now(),
 	}
 }
 
 func (t *acpRuntimeTurn) emit(chunk OutputChunk) {
+	t.msgMu.RLock()
+	defer t.msgMu.RUnlock()
+
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	if t.finished {
+		t.mu.Unlock()
 		return
 	}
 	if chunk.Type == string(MessageText) && chunk.Content != "" {
 		t.output.WriteString(chunk.Content)
+	}
+	t.mu.Unlock()
+	if chunk.Context != nil {
+		sendContextChunk(t.done, t.msgCh, chunk)
+		return
 	}
 	trySend(t.msgCh, chunk)
 }
@@ -130,11 +141,12 @@ func (t *acpRuntimeTurn) recordPromptDone(pr acpPromptResult) {
 
 func (t *acpRuntimeTurn) finish(status, errMsg string) bool {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	if t.finished {
+		t.mu.Unlock()
 		return false
 	}
 	t.finished = true
+	close(t.done)
 	result := &Result{
 		Status:     status,
 		Error:      errMsg,
@@ -142,8 +154,14 @@ func (t *acpRuntimeTurn) finish(status, errMsg string) bool {
 		DurationMs: time.Since(t.startedAt).Milliseconds(),
 		Usage:      buildACPUsageMap(t.usage, t.model),
 	}
-	t.resCh <- result
+	t.mu.Unlock()
+
+	// A context event may be waiting for buffer space. Closing done releases
+	// it; msgMu then guarantees no sender overlaps channel closure.
+	t.msgMu.Lock()
 	close(t.msgCh)
+	t.msgMu.Unlock()
+	t.resCh <- result
 	close(t.resCh)
 	return true
 }
@@ -170,9 +188,10 @@ func (c *acpTurnController) begin(model string) (*acpRuntimeTurn, error) {
 
 func (c *acpTurnController) emit(chunk OutputChunk) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.current != nil {
-		c.current.emit(chunk)
+	turn := c.current
+	c.mu.Unlock()
+	if turn != nil {
+		turn.emit(chunk)
 	}
 }
 
@@ -851,6 +870,29 @@ func (c *acpClient) handleUsageUpdate(data json.RawMessage) {
 		c.usage.CacheReadTokens = msg.Usage.CachedReadTokens
 	}
 	c.usageMu.Unlock()
+
+	if contextEvent := parseACPContextUsage(data); contextEvent != nil {
+		c.invokeOnChunk(OutputChunk{Type: string(MessageContext), Context: contextEvent})
+	}
+}
+
+func parseACPContextUsage(data json.RawMessage) *ContextEvent {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil
+	}
+	used := decodeContextToken(fields["used"])
+	size := decodeContextToken(fields["size"])
+	if used == nil && size == nil {
+		return nil
+	}
+
+	return &ContextEvent{
+		Type:         "usage",
+		UsedTokens:   used,
+		WindowTokens: size,
+		Accuracy:     "estimated",
+	}
 }
 
 // ── Helpers ──

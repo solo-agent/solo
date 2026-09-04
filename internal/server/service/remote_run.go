@@ -123,17 +123,18 @@ func (dm *DaemonManager) AcceptRemoteRun(ctx context.Context, computerID, runID,
 	}
 	defer tx.Rollback(ctx)
 	var delivery RemoteRunDelivery
-	var agentID, agentName string
+	var agentID, agentName, runChannelID, runProvider string
 	var expiresAt time.Time
 	err = tx.QueryRow(ctx, `
 		SELECT r.id::text, COALESCE(r.dispatch_payload, '{}'::jsonb),
 		       COALESCE(r.execution_attempt_id::text, ''), r.delivery_expires_at,
-		       r.agent_id::text, COALESCE(a.name, r.agent_id::text)
+		       r.agent_id::text, COALESCE(a.name, r.agent_id::text),
+		       COALESCE(r.channel_id::text, ''), COALESCE(r.source, '')
 		  FROM agent_runs r
 		  JOIN agents a ON a.id = r.agent_id
 		 WHERE r.id = $1 AND r.computer_id = $2 AND r.finished_at IS NULL
 		 FOR UPDATE`, runID, computerID,
-	).Scan(&delivery.RunID, &delivery.Payload, &delivery.AttemptID, &expiresAt, &agentID, &agentName)
+	).Scan(&delivery.RunID, &delivery.Payload, &delivery.AttemptID, &expiresAt, &agentID, &agentName, &runChannelID, &runProvider)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrRemoteRunNotFound
 	}
@@ -143,13 +144,53 @@ func (dm *DaemonManager) AcceptRemoteRun(ctx context.Context, computerID, runID,
 	if time.Now().After(expiresAt) {
 		return nil, ErrRemoteRunExpired
 	}
-	var identity struct {
-		TaskID string `json:"task_id"`
-	}
-	if err := json.Unmarshal(delivery.Payload, &identity); err != nil || identity.TaskID == "" {
+	var taskReq daemonTaskRequest
+	if err := json.Unmarshal(delivery.Payload, &taskReq); err != nil || taskReq.TaskID == "" {
 		return nil, errors.New("stored Run payload is invalid")
 	}
-	delivery.TaskID = identity.TaskID
+	delivery.TaskID = taskReq.TaskID
+	if taskReq.AgentID == "" {
+		taskReq.AgentID = agentID
+	}
+	if taskReq.ChannelID == "" {
+		taskReq.ChannelID = runChannelID
+	}
+	if taskReq.ModelConfig.Provider == "" {
+		taskReq.ModelConfig.Provider = runProvider
+	}
+	if taskReq.ChannelID != "" && taskReq.ModelConfig.Provider != "" {
+		supportsRollover := false
+		if daemon, ok := dm.GetDaemon(computerID); ok {
+			supportsRollover = hasCapability(daemon.Capabilities, contextRolloverCapability)
+		}
+		dispatch, err := NewAgentRunService(dm.pool).resolveSessionDispatchTx(ctx, tx, ResolveSessionDispatchInput{
+			RunID:                   runID,
+			AgentID:                 agentID,
+			ChannelID:               taskReq.ChannelID,
+			Provider:                taskReq.ModelConfig.Provider,
+			ThinkingNodeID:          taskReq.NodeID,
+			ResumeSessionID:         taskReq.ResumeSessionID,
+			ForceFreshSession:       taskReq.ForceFreshSession,
+			SupportsContextRollover: supportsRollover,
+		})
+		if err != nil {
+			return nil, err
+		}
+		agentService := dm.agentService
+		if agentService == nil {
+			agentService = &AgentService{pool: dm.pool}
+		}
+		if err := agentService.applySessionDispatch(ctx, tx, &taskReq, dispatch); err != nil {
+			return nil, err
+		}
+	}
+	delivery.Payload, err = json.Marshal(taskReq)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE agent_runs SET dispatch_payload = $2, updated_at = now() WHERE id = $1`, runID, delivery.Payload); err != nil {
+		return nil, err
+	}
 	if delivery.AttemptID == "" {
 		delivery.AttemptID = uuid.NewString()
 		if _, err := tx.Exec(ctx, `
@@ -332,7 +373,9 @@ func (dm *DaemonManager) reconcileRemoteConnection(ctx context.Context, computer
 		}
 	}
 	if dm.agentService != nil {
-		dm.agentService.ReconcileRemoteRuns(ctx, &DaemonInfo{ID: computerID, ComputerID: computerID, Status: DaemonStatusOnline, Capabilities: []string{"llm"}, MaxConcurrent: 10})
+		if daemon, ok := dm.GetDaemon(computerID); ok {
+			dm.agentService.ReconcileRemoteRuns(ctx, daemon)
+		}
 	}
 	for _, runID := range activeIDs {
 		dm.NotifyRun(computerID, runID)

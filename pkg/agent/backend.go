@@ -59,10 +59,23 @@ type Session struct {
 
 // OutputChunk is a single event emitted by an agent during execution.
 type OutputChunk struct {
-	Type      string    `json:"type"`                 // text, thinking, tool_use, tool_result, status, error
-	Content   string    `json:"content"`              // text content for text/thinking/error types
-	Tool      *ToolInfo `json:"tool,omitempty"`       // tool call information
-	SessionID string    `json:"session_id,omitempty"` // provider session id when discovered mid-stream
+	Type      string        `json:"type"`                 // text, thinking, tool_use, tool_result, status, error, context
+	Content   string        `json:"content"`              // text content for text/thinking/error types
+	Tool      *ToolInfo     `json:"tool,omitempty"`       // tool call information
+	Context   *ContextEvent `json:"context,omitempty"`    // context-window usage or compaction evidence
+	SessionID string        `json:"session_id,omitempty"` // provider session id when discovered mid-stream
+}
+
+// ContextEvent is a provider-reported context-window observation. Pointer
+// fields preserve the difference between an explicit zero and a missing value.
+type ContextEvent struct {
+	Type         string `json:"type"` // usage, compaction_start, compaction_end
+	UsedTokens   *int64 `json:"used_tokens,omitempty"`
+	WindowTokens *int64 `json:"window_tokens,omitempty"`
+	BeforeTokens *int64 `json:"before_tokens,omitempty"`
+	AfterTokens  *int64 `json:"after_tokens,omitempty"`
+	Accuracy     string `json:"accuracy,omitempty"` // reported, snapshot, estimated
+	Reason       string `json:"reason,omitempty"`
 }
 
 // ToolInfo represents a tool call or tool result emitted by an agent.
@@ -85,6 +98,7 @@ const (
 	MessageToolResult MessageType = "tool_result"
 	MessageStatus     MessageType = "status"
 	MessageError      MessageType = "error"
+	MessageContext    MessageType = "context"
 )
 
 // TriggerType identifies what triggered an agent execution.

@@ -30,6 +30,7 @@ import (
 )
 
 const backendFinalResultWaitAfter = 5 * time.Second
+const backendContextDrainTimeout = 2 * time.Second
 const maxControlRPCResponse = 900 * 1024
 
 const (
@@ -153,6 +154,14 @@ func (h *daemonHandler) handleControlRPC(ctx context.Context, method string, raw
 			return nil, errors.New("agent_id is required")
 		}
 		h.cleanupAgent(agentID)
+		return json.Marshal(map[string]bool{"cleaned": true})
+	case "agent.channel.cleanup":
+		agentID, _ := params["agent_id"].(string)
+		channelID, _ := params["channel_id"].(string)
+		if agentID == "" || channelID == "" {
+			return nil, errors.New("agent_id and channel_id are required")
+		}
+		h.cleanupAgentChannel(agentID, channelID)
 		return json.Marshal(map[string]bool{"cleaned": true})
 	case "thinking.cleanup":
 		nodeValues, _ := params["node_ids"].([]any)
@@ -543,6 +552,7 @@ type runTaskRequest struct {
 	NodeID                string             `json:"thinking_node_id,omitempty"`
 	ResumeSessionID       string             `json:"resume_session_id,omitempty"`
 	ForceFreshSession     bool               `json:"force_fresh_session,omitempty"`
+	RetireSessionID       string             `json:"retire_session_id,omitempty"`
 	ReturnHandoff         bool               `json:"return_handoff,omitempty"`
 	Messages              []llmMessage       `json:"messages"`
 	ColdStartMessages     []llmMessage       `json:"cold_start_messages,omitempty"`
@@ -601,6 +611,9 @@ func (h *daemonHandler) startTask(req runTaskRequest, attemptID string) error {
 	}
 	if req.AgentID == "" || req.ChannelID == "" {
 		return errors.New("agent_id and channel_id are required")
+	}
+	if req.RetireSessionID != "" && !req.ForceFreshSession {
+		return errors.New("retire_session_id requires force_fresh_session")
 	}
 	// Register the task
 	if !h.taskManager.AddTask(req.TaskID, &taskState{
@@ -677,15 +690,6 @@ func (h *daemonHandler) finishCancelledTask(req runTaskRequest) {
 func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTaskRequest) {
 	slog.Info("task processing started (streaming)", "task_id", req.TaskID, "agent_id", req.AgentID)
 
-	// Build LLM request
-	llmMsgs := make([]llm.Message, len(req.Messages))
-	for i, m := range req.Messages {
-		llmMsgs[i] = llm.Message{
-			Role:    m.Role,
-			Content: m.Content,
-		}
-	}
-
 	// SOLO-221-B: Append task context to the system prompt so agents
 	// can see pending tasks in the channel.
 	systemPrompt := req.SystemPrompt
@@ -697,6 +701,24 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 			systemPrompt += "\n\n"
 		}
 		systemPrompt += req.TaskContext
+	}
+
+	// API providers are stateless, so a cold-start packet belongs in this
+	// request. Anthropic requires system messages in the top-level prompt.
+	messages := req.Messages
+	if len(req.ColdStartMessages) > 0 {
+		messages = req.ColdStartMessages
+	}
+	llmMsgs := make([]llm.Message, 0, len(messages))
+	for _, message := range messages {
+		if message.Role == string(agent.RoleSystem) {
+			if systemPrompt != "" {
+				systemPrompt += "\n\n"
+			}
+			systemPrompt += message.Content
+			continue
+		}
+		llmMsgs = append(llmMsgs, llm.Message{Role: message.Role, Content: message.Content})
 	}
 
 	llmReq := &llm.CompletionRequest{
@@ -826,6 +848,150 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 	h.taskManager.CloseAllSubscribers(req.TaskID)
 }
 
+type backendContextTurn struct {
+	compactions        []agent.ContextEvent
+	finalSnapshot      *agent.ContextEvent
+	pendingCompactions int
+}
+
+func (turn *backendContextTurn) observe(event *agent.ContextEvent) {
+	if event == nil {
+		return
+	}
+	copy := *event
+	switch copy.Type {
+	case "compaction_start":
+		turn.pendingCompactions++
+		turn.finalSnapshot = nil
+	case "compaction_end":
+		turn.compactions = append(turn.compactions, copy)
+		if turn.pendingCompactions > 0 {
+			turn.pendingCompactions--
+		}
+		turn.finalSnapshot = nil
+		if validContextSnapshot(&copy) {
+			turn.finalSnapshot = &copy
+		}
+	case "usage":
+		turn.finalSnapshot = nil
+		if validContextSnapshot(&copy) {
+			turn.finalSnapshot = &copy
+		}
+	}
+}
+
+func validContextSnapshot(event *agent.ContextEvent) bool {
+	if event == nil || event.WindowTokens == nil || *event.WindowTokens <= 0 {
+		return false
+	}
+	used := event.UsedTokens
+	if used == nil {
+		used = event.AfterTokens
+	}
+	return used != nil && *used > 0
+}
+
+func (turn *backendContextTurn) observation() agent.ContextTurnObservation {
+	return agent.ContextTurnObservation{
+		Compactions:          turn.compactions,
+		FinalSnapshot:        turn.finalSnapshot,
+		IncompleteCompaction: turn.pendingCompactions > 0,
+	}
+}
+
+type backendTurnFinalizer struct {
+	h              *daemonHandler
+	req            runTaskRequest
+	sessionKey     string
+	sessionManager *agent.AgentSessionManager
+	managedSession *agent.PersistentSession
+	context        backendContextTurn
+	managedTurn    bool
+	contextFinal   bool
+	suppressed     bool
+	taskStatus     string
+	event          string
+	data           map[string]interface{}
+}
+
+func (finalizer *backendTurnFinalizer) observeContext(event *agent.ContextEvent) {
+	if event == nil {
+		return
+	}
+	finalizer.context.observe(event)
+	finalizer.h.pushEventJSON(finalizer.req.TaskID, "context", map[string]interface{}{
+		"agent_id": finalizer.req.AgentID,
+		"context":  event,
+	})
+}
+
+func (finalizer *backendTurnFinalizer) finish(taskStatus, event string, data map[string]interface{}) {
+	finalizer.taskStatus = taskStatus
+	finalizer.event = event
+	finalizer.data = data
+}
+
+func (finalizer *backendTurnFinalizer) finalize() {
+	if finalizer.suppressed || finalizer.event == "" {
+		return
+	}
+	if finalizer.data == nil {
+		finalizer.data = make(map[string]interface{})
+	}
+	observation := finalizer.context.observation()
+	if observation.FinalSnapshot != nil {
+		finalizer.data["context_snapshot"] = observation.FinalSnapshot
+	}
+	if len(observation.Compactions) > 0 {
+		finalizer.data["context_compactions"] = observation.Compactions
+	}
+	if finalizer.managedTurn && finalizer.contextFinal && finalizer.sessionManager != nil {
+		recommendation := finalizer.sessionManager.FinalizeContextTurn(finalizer.sessionKey, finalizer.managedSession, observation)
+		if recommendation.Requested {
+			finalizer.data["session_rollover"] = recommendation
+		}
+	}
+	finalizer.h.taskManager.UpdateStatus(finalizer.req.TaskID, finalizer.taskStatus)
+	finalizer.h.pushEventJSON(finalizer.req.TaskID, finalizer.event, finalizer.data)
+	finalizer.h.pushEventJSON(finalizer.req.TaskID, "done", map[string]interface{}{})
+	finalizer.h.taskManager.CloseAllSubscribers(finalizer.req.TaskID)
+}
+
+func (finalizer *backendTurnFinalizer) stopAndDrainContext(session *agent.Session, timeout time.Duration) bool {
+	if session == nil || session.Messages == nil {
+		return false
+	}
+	stopDone := make(chan error, 1)
+	if session.Stop != nil {
+		go func() { stopDone <- session.Stop() }()
+	} else {
+		close(stopDone)
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	messages := session.Messages
+	for messages != nil {
+		select {
+		case chunk, ok := <-messages:
+			if !ok {
+				return true
+			}
+			if chunk.Context != nil {
+				finalizer.observeContext(chunk.Context)
+			}
+		case stopErr, ok := <-stopDone:
+			if ok && stopErr != nil {
+				slog.Warn("task: backend stop failed while draining context", "task_id", finalizer.req.TaskID, "agent_id", finalizer.req.AgentID, "error", stopErr)
+			}
+			stopDone = nil
+		case <-timer.C:
+			return false
+		}
+	}
+	return true
+}
+
 // processTaskWithBackend runs a task using the new agent.Backend interface.
 // It prepares the workspace, loads memory, builds the system prompt, and
 // executes the agent, streaming output chunks as SSE events.
@@ -839,6 +1005,15 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 			}
 		}()
 	}
+	sessionKey := agent.ChannelSessionKey(req.AgentID, req.ChannelID)
+	if req.NodeID != "" {
+		sessionKey = agent.ThinkingSessionKey(req.NodeID)
+	}
+	sessionManager := h.getSessionManager(req.ModelConfig.Provider)
+	finalizer := &backendTurnFinalizer{
+		h: h, req: req, sessionKey: sessionKey, sessionManager: sessionManager,
+	}
+	defer finalizer.finalize()
 	slog.Info("task processing started (backend)",
 		"task_id", req.TaskID,
 		"agent_id", req.AgentID,
@@ -864,12 +1039,10 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	})
 	if err != nil {
 		slog.Error("task: workspace preparation failed", "task_id", req.TaskID, "error", err)
-		h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
-		h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
+		finalizer.finish(taskStatusFailed, "error", map[string]interface{}{
 			"agent_id": req.AgentID, "error": "workspace preparation failed",
 			"failure_code": "configuration", "retryable": false,
 		})
-		h.taskManager.CloseAllSubscribers(req.TaskID)
 		return
 	}
 	// Load memory content
@@ -1015,42 +1188,68 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		CustomArgs:   agentInfo.CustomArgs,
 		// ExtraArgs: daemonConfig.ExtraArgs[backend.Name()], // P1 reserved
 	}
+	sessionMessages := msgs
+	sessionColdStartMessages := coldStartMsgs
+	if req.TaskContext != "" {
+		contextMessage := agent.Message{Role: agent.RoleSystem, Content: req.TaskContext, SenderID: "system"}
+		sessionMessages = append([]agent.Message{contextMessage}, sessionMessages...)
+		sessionColdStartMessages = append([]agent.Message{contextMessage}, sessionColdStartMessages...)
+	}
 
 	// v1.3: Session-aware dispatch. Thinking nodes use a node-scoped pool key
 	// while retaining the real Agent identity, workspace, and configuration.
 	var session *agent.Session
 	var providerSessionID string
 	var transcriptPath string
-	if sm := h.getSessionManager(req.ModelConfig.Provider); sm != nil {
-		sessionKey := agent.ChannelSessionKey(req.AgentID, req.ChannelID)
-		if req.NodeID != "" {
-			sessionKey = agent.ThinkingSessionKey(req.NodeID)
-		}
-		if req.ForceFreshSession {
-			if closeErr := sm.CloseScopedSession(sessionKey); closeErr != nil {
-				slog.Warn("task: failed to close session before fresh recovery", "agent_id", req.AgentID, "session_key", sessionKey, "error", closeErr)
-			}
-			req.ResumeSessionID = ""
-		}
+	if sessionManager != nil {
 		slog.Info("task: getting persistent session", "agent_id", req.AgentID, "session_key", sessionKey, "resume", req.ResumeSessionID)
-		ps, psErr := sm.GetOrCreateScopedSession(ctx, sessionKey, req.AgentID, agentCfg, channelCtx, msgs, coldStartMsgs, req.ResumeSessionID, req.MentionedNames)
+		var ps *agent.PersistentSession
+		var psErr error
+		if req.ForceFreshSession {
+			ps, psErr = sessionManager.RetireAndStartFreshScopedSession(ctx, sessionKey, req.RetireSessionID, req.AgentID, agentCfg, channelCtx, sessionMessages, sessionColdStartMessages, req.MentionedNames)
+		} else {
+			ps, psErr = sessionManager.GetOrCreateScopedSession(ctx, sessionKey, req.AgentID, agentCfg, channelCtx, sessionMessages, sessionColdStartMessages, req.ResumeSessionID, req.MentionedNames)
+		}
 		if psErr == nil {
+			finalizer.managedTurn = true
+			finalizer.managedSession = ps
 			providerSessionID = ps.SessionID
 			transcriptPath = transcriptPathForProvider(req.ModelConfig.Provider, ws.WorkDir, providerSessionID)
 			session = &agent.Session{Messages: ps.Messages, Result: ps.Result, Stop: ps.Stop, SessionID: providerSessionID}
+		} else if req.ForceFreshSession {
+			slog.Error("task: fresh persistent session failed", "agent_id", req.AgentID, "session_key", sessionKey, "error", psErr)
+			failure := taskFailureDetails(psErr.Error())
+			finalizer.finish(taskStatusFailed, "error", map[string]interface{}{
+				"agent_id": req.AgentID, "error": psErr.Error(),
+				"failure_code": failure.Code, "retryable": failure.Retryable,
+			})
+			return
 		} else {
+			failure := taskFailureDetails(psErr.Error())
+			if providerSessionID = resumableContextFailureSessionID(req.ResumeSessionID, ps, failure); providerSessionID != "" {
+				transcriptPath = transcriptPathForProvider(req.ModelConfig.Provider, ws.WorkDir, providerSessionID)
+				h.pushEventJSON(req.TaskID, "session", map[string]interface{}{
+					"agent_id":            req.AgentID,
+					"external_session_id": providerSessionID,
+					"transcript_path":     transcriptPath,
+				})
+				finalizer.finish(taskStatusFailed, "error", map[string]interface{}{
+					"agent_id": req.AgentID, "error": psErr.Error(),
+					"failure_code": failure.Code, "retryable": failure.Retryable,
+				})
+				return
+			}
 			slog.Warn("task: persistent session failed, falling back to Execute", "agent_id", req.AgentID, "session_key", sessionKey, "error", psErr)
 		}
 	}
 
 	if ctx.Err() != nil {
-		if session != nil && session.Stop != nil {
-			if stopErr := session.Stop(); stopErr != nil {
-				slog.Warn("task: backend stop failed after cancelled start", "task_id", req.TaskID, "agent_id", req.AgentID, "error", stopErr)
-			}
-		}
+		finalizer.contextFinal = finalizer.stopAndDrainContext(session, backendContextDrainTimeout)
 		slog.Info("task cancelled while waiting for backend turn", "task_id", req.TaskID, "agent_id", req.AgentID)
-		h.finishCancelledTask(req)
+		finalizer.finish(taskStatusCancelled, "error", map[string]interface{}{
+			"agent_id": req.AgentID, "error": "execution cancelled", "status": "cancelled",
+			"failure_code": "cancelled", "retryable": false,
+		})
 		return
 	}
 	if session == nil {
@@ -1059,17 +1258,18 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		if execErr != nil {
 			if ctx.Err() != nil {
 				slog.Info("task cancelled during backend start", "task_id", req.TaskID, "agent_id", req.AgentID)
-				h.finishCancelledTask(req)
+				finalizer.finish(taskStatusCancelled, "error", map[string]interface{}{
+					"agent_id": req.AgentID, "error": "execution cancelled", "status": "cancelled",
+					"failure_code": "cancelled", "retryable": false,
+				})
 				return
 			}
 			slog.Error("task: Backend.Execute failed", "task_id", req.TaskID, "error", execErr)
-			h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
 			failure := taskFailureDetails(execErr.Error())
-			h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
+			finalizer.finish(taskStatusFailed, "error", map[string]interface{}{
 				"agent_id": req.AgentID, "error": execErr.Error(),
 				"failure_code": failure.Code, "retryable": failure.Retryable,
 			})
-			h.taskManager.CloseAllSubscribers(req.TaskID)
 			return
 		}
 	}
@@ -1102,13 +1302,12 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		var chunk agent.OutputChunk
 		select {
 		case <-ctx.Done():
-			if session.Stop != nil {
-				if stopErr := session.Stop(); stopErr != nil {
-					slog.Warn("task: backend stop failed", "task_id", req.TaskID, "agent_id", req.AgentID, "error", stopErr)
-				}
-			}
+			finalizer.contextFinal = finalizer.stopAndDrainContext(session, backendContextDrainTimeout)
 			slog.Info("task cancelled via context", "task_id", req.TaskID, "agent_id", req.AgentID)
-			h.finishCancelledTask(req)
+			finalizer.finish(taskStatusCancelled, "error", map[string]interface{}{
+				"agent_id": req.AgentID, "error": "execution cancelled", "status": "cancelled",
+				"failure_code": "cancelled", "retryable": false,
+			})
 			return
 		case next, ok := <-session.Messages:
 			if !ok {
@@ -1136,6 +1335,9 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 				})
 			}
 		}
+		if chunk.Context != nil {
+			finalizer.observeContext(chunk.Context)
+		}
 
 		// Emit a run update for every chunk the UI cares about.
 		h.pushAgentActivity(req, agentInfo.Name, req.ModelConfig.Provider, chunk)
@@ -1160,16 +1362,16 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 
 		case string(agent.MessageError):
 			if h.shuttingDown.Load() {
+				finalizer.suppressed = true
 				return
 			}
 			slog.Error("task: backend stream error", "task_id", req.TaskID, "error", chunk.Content)
-			h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
+			finalizer.contextFinal = finalizer.stopAndDrainContext(session, backendContextDrainTimeout)
 			failure := taskFailureDetails(chunk.Content)
-			h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
+			finalizer.finish(taskStatusFailed, "error", map[string]interface{}{
 				"agent_id": req.AgentID, "error": chunk.Content,
 				"failure_code": failure.Code, "retryable": failure.Retryable,
 			})
-			h.taskManager.CloseAllSubscribers(req.TaskID)
 			return
 
 		case string(agent.MessageToolUse):
@@ -1198,8 +1400,10 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 			}
 		}
 	}
+	finalizer.contextFinal = true
 
 	if h.shuttingDown.Load() {
+		finalizer.suppressed = true
 		return
 	}
 
@@ -1210,7 +1414,10 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	// Check context cancellation
 	if ctx.Err() != nil {
 		slog.Info("task cancelled via context", "task_id", req.TaskID, "agent_id", req.AgentID)
-		h.finishCancelledTask(req)
+		finalizer.finish(taskStatusCancelled, "error", map[string]interface{}{
+			"agent_id": req.AgentID, "error": "execution cancelled", "status": "cancelled",
+			"failure_code": "cancelled", "retryable": false,
+		})
 		return
 	}
 
@@ -1258,8 +1465,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		} else if finalStatus == "cancelled" {
 			failure = taskFailure{Code: "cancelled", Retryable: false}
 		}
-		h.taskManager.UpdateStatus(req.TaskID, backendTaskStatus(finalStatus))
-		h.pushEventJSON(req.TaskID, "error", map[string]interface{}{
+		finalizer.finish(backendTaskStatus(finalStatus), "error", map[string]interface{}{
 			"agent_id":     req.AgentID,
 			"error":        errMsg,
 			"status":       finalStatus,
@@ -1272,16 +1478,14 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 				"cache_write_tokens": cacheWriteTokens,
 			},
 		})
-		h.taskManager.CloseAllSubscribers(req.TaskID)
 		return
 	}
 
-	h.taskManager.UpdateStatus(req.TaskID, backendTaskStatus(finalStatus))
 	transcriptPath = refreshTranscriptPathForProvider(req.ModelConfig.Provider, ws.WorkDir, providerSessionID, transcriptPath)
 
 	// Push complete event — notification only (no content, no persist).
 	// Real messages arrive via solo message send → daemon proxy → server API → message.new.
-	h.pushEventJSON(req.TaskID, "complete", map[string]interface{}{
+	finalizer.finish(backendTaskStatus(finalStatus), "complete", map[string]interface{}{
 		"agent_id":            req.AgentID,
 		"external_session_id": providerSessionID,
 		"transcript_path":     transcriptPath,
@@ -1292,11 +1496,13 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 			"cache_write_tokens": cacheWriteTokens,
 		},
 	})
+}
 
-	// Push done sentinel and close. The done event is consumed by SSE
-	// subscribers in order, eliminating the need for a delay.
-	h.pushEventJSON(req.TaskID, "done", map[string]interface{}{})
-	h.taskManager.CloseAllSubscribers(req.TaskID)
+func resumableContextFailureSessionID(resumeSessionID string, session *agent.PersistentSession, failure taskFailure) string {
+	if resumeSessionID == "" || session == nil || session.SessionID == "" || failure.Code != "context_exhausted" {
+		return ""
+	}
+	return session.SessionID
 }
 
 func mergeAgentCustomEnv(base, custom map[string]string) {
@@ -1552,6 +1758,19 @@ type taskFailure struct {
 
 func taskFailureDetails(message string) taskFailure {
 	normalized := strings.ToLower(strings.TrimSpace(message))
+	contextExhaustedMarkers := []string{
+		"context_length_exceeded",
+		"context window exceeded",
+		"exceeds the context window",
+		"exceeded the context window",
+		"maximum context length",
+		"prompt is too long",
+	}
+	for _, marker := range contextExhaustedMarkers {
+		if strings.Contains(normalized, marker) {
+			return taskFailure{Code: "context_exhausted", Retryable: true}
+		}
+	}
 	configurationMarkers := []string{
 		"executable not found",
 		"unknown backend",
@@ -2151,6 +2370,12 @@ func (h *daemonHandler) CleanupAgent(w http.ResponseWriter, r *http.Request) {
 
 func (h *daemonHandler) cleanupAgent(agentID string) {
 	slog.Info("daemon: cleanup agent requested", "agent_id", agentID)
+	for _, taskID := range h.taskManager.ListActiveTasks() {
+		task, ok := h.taskManager.GetTask(taskID)
+		if ok && task.AgentID == agentID {
+			h.taskManager.CancelTask(taskID)
+		}
+	}
 	for provider, sm := range h.sessionManagers {
 		if err := sm.ForceCloseSession(agentID); err != nil {
 			slog.Warn("daemon: force-close session failed",
@@ -2172,6 +2397,34 @@ func (h *daemonHandler) cleanupAgent(agentID string) {
 		}
 	}
 
+}
+
+// CleanupAgentChannel handles scoped cleanup when an Agent leaves one Channel.
+func (h *daemonHandler) CleanupAgentChannel(w http.ResponseWriter, r *http.Request) {
+	agentID := chi.URLParam(r, "agentID")
+	channelID := chi.URLParam(r, "channelID")
+	if agentID == "" || channelID == "" {
+		http.Error(w, "agent_id and channel_id are required", http.StatusBadRequest)
+		return
+	}
+	h.cleanupAgentChannel(agentID, channelID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *daemonHandler) cleanupAgentChannel(agentID, channelID string) {
+	for _, taskID := range h.taskManager.ListActiveTasks() {
+		task, ok := h.taskManager.GetTask(taskID)
+		if ok && task.AgentID == agentID && task.ChannelID == channelID {
+			h.taskManager.CancelTask(taskID)
+		}
+	}
+	sessionKey := agent.ChannelSessionKey(agentID, channelID)
+	for provider, sm := range h.sessionManagers {
+		if err := sm.CloseScopedSession(sessionKey); err != nil {
+			slog.Warn("daemon: close channel session failed",
+				"agent_id", agentID, "channel_id", channelID, "provider", provider, "error", err)
+		}
+	}
 }
 
 type cleanupThinkingSessionsRequest struct {
