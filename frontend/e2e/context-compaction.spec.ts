@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { acquireLocalComputer, type LocalComputerLease } from './support/local-computer';
 import { registerVerified } from './support/auth';
 
@@ -16,6 +17,7 @@ interface RunState {
   session_status: string;
   rollover_from_session_id: string;
   rollover_completed_events: number;
+  task_lookup_events: number;
   message_id: string;
   message_content: string;
 }
@@ -76,6 +78,13 @@ function runState(triggerMessageID: string): RunState {
         'session_status', COALESCE(s.status, ''),
         'rollover_from_session_id', COALESCE(r.rollover_from_session_id::text, ''),
         'rollover_completed_events', (SELECT count(*) FROM agent_run_events e WHERE e.run_id = r.id AND e.type = 'session_rollover_completed'),
+        'task_lookup_events', (
+          SELECT count(*)
+            FROM agent_run_events e
+           WHERE e.run_id = r.id
+             AND e.type = 'tool_started'
+             AND COALESCE(e.payload->>'input', '') ~* 'solo[[:space:]]+task'
+        ),
         'message_id', COALESCE(reply.id::text, ''),
         'message_content', COALESCE(reply.content, '')
       )::text
@@ -88,7 +97,7 @@ function runState(triggerMessageID: string): RunState {
         ) reply ON true
        WHERE r.trigger_message_id = '${triggerMessageID}'
        ORDER BY r.started_at DESC LIMIT 1
-    ), '{"run_id":"","status":"","session_id":"","session_status":"","rollover_from_session_id":"","rollover_completed_events":0,"message_id":"","message_content":""}')
+    ), '{"run_id":"","status":"","session_id":"","session_status":"","rollover_from_session_id":"","rollover_completed_events":0,"task_lookup_events":0,"message_id":"","message_content":""}')
   `);
 }
 
@@ -209,7 +218,7 @@ test.describe('native context compaction telemetry', () => {
             `Always use solo message send --target '#${channel.name}' for visible replies.`,
             `When introducing yourself, send exactly ${provider.toUpperCase()}_CONTEXT_READY_${suffix}.`,
             provider === 'codex'
-              ? 'For every message containing CONTEXT_PRESSURE, ignore its padding. Determine the answer only from your private context; do not call tools to look up tasks. If that context has a section headed "# Session Continuity", find its open task title beginning ROLLOVER_HANDOFF_ and send exactly that full title; if that section or task is absent, send exactly HANDOFF_MISSING.'
+              ? 'For every message containing CONTEXT_PRESSURE, ignore its padding. Determine the answer only from your private context; do not call tools to look up tasks. If that context has a section headed "# Session Continuity" with an open task, use its first task bullet and send only the title text after the status bracket and before ". Re-read with"; if that section or task is absent, send exactly HANDOFF_MISSING.'
               : `For every message containing CONTEXT_PRESSURE, ignore its padding and send exactly ${acknowledgement}.`,
             'Send no other visible message.',
           ].join(' '),
@@ -237,7 +246,7 @@ test.describe('native context compaction telemetry', () => {
           await expectCompactionUI(page, channel.id, agent.name);
           // Task creation normally wakes every Channel Agent and would consume
           // the pending rollover before the explicit handoff turn under test.
-          rolloverTask = seedContinuityTask(channel.id, email, agent.id, `ROLLOVER_HANDOFF_${suffix}`);
+          rolloverTask = seedContinuityTask(channel.id, email, agent.id, `Continuity secret ${randomUUID()}`);
           expectedReply = rolloverTask.title;
         }
 
@@ -255,12 +264,13 @@ test.describe('native context compaction telemetry', () => {
             message_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
           });
           visibleRun = runState(trigger.id);
-          expect(visibleRun.message_content).toBe(expectedReply);
           if (provider === 'codex') {
             expect(visibleRun.rollover_from_session_id).toBe(retiredSessionID);
             expect(visibleRun.session_id).not.toBe(retiredSessionID);
             expect(visibleRun.rollover_completed_events).toBeGreaterThan(0);
+            expect(visibleRun.task_lookup_events).toBe(0);
           }
+          expect(visibleRun.message_content).toBe(expectedReply);
           if (contextState(agent.id).compaction_events > 0) break;
         }
 
