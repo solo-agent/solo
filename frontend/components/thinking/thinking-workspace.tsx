@@ -1,10 +1,14 @@
 'use client';
 
+import { Select } from '@/components/ui/select';
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   BackgroundVariant,
   Controls,
+  getNodesBounds,
+  getViewportForBounds,
   ReactFlow,
   type Edge,
   type ReactFlowInstance,
@@ -125,6 +129,8 @@ function layoutSpace(
     return {
       id: node.id,
       type: 'thinkingNode',
+      width: NODE_WIDTH,
+      height: NODE_HEIGHT,
       data: {
         node,
         activityPlacement: outwardActivityPlacement(angle, !node.parent_id),
@@ -170,6 +176,8 @@ export function ThinkingWorkspace({
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [flow, setFlow] = useState<ReactFlowInstance | null>(null);
   const { liveByThinkingNode } = useTeamAgentActivity();
   const previousNodeIdsRef = useRef<Set<string>>(new Set());
@@ -204,8 +212,18 @@ export function ThinkingWorkspace({
   const topologyKey = graph.nodes.map((node) => `${node.id}:${node.data.node.parent_id ?? ''}`).join('|');
 
   useEffect(() => {
-    if (!flow || graph.nodes.length === 0) return;
-    const focusKey = `${topologyKey}:${selectedNodeId ?? ''}`;
+    const element = containerRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setCanvasSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [flow]);
+
+  useEffect(() => {
+    if (!flow || graph.nodes.length === 0 || !canvasSize.width || !canvasSize.height) return;
+    const focusKey = `${topologyKey}:${selectedNodeId ?? ''}:${canvasSize.width}:${canvasSize.height}`;
     if (focusKey === lastFocusKeyRef.current) return;
 
     const previousIds = previousNodeIdsRef.current;
@@ -234,19 +252,24 @@ export function ThinkingWorkspace({
     }
     if (focusIds.size === 0) focusIds.add(graph.nodes[0].id);
 
-    previousNodeIdsRef.current = new Set(graph.nodes.map((node) => node.id));
-    lastFocusKeyRef.current = focusKey;
+    const viewportFor = (nodes: ThinkingFlowNode[]) => getViewportForBounds(
+      getNodesBounds(nodes), canvasSize.width, canvasSize.height, 0.25, 1, 0.2,
+    );
+    let targets = graph.nodes.filter((node) => focusIds.has(node.id));
+    let viewport = viewportFor(targets);
+    if (viewport.zoom < 0.7) {
+      const selected = added.at(-1) ?? graph.nodes.find((node) => node.id === selectedNodeId) ?? targets[0];
+      targets = graph.nodes.filter((node) => node.id === selected.id || node.id === selected.data.node.parent_id);
+      viewport = viewportFor(targets);
+      if (viewport.zoom < 0.7) viewport = viewportFor([selected]);
+    }
     const frame = requestAnimationFrame(() => {
-      void flow.fitView({
-        nodes: graph.nodes.filter((node) => focusIds.has(node.id)),
-        padding: showOverview ? 0.2 : 0.65,
-        minZoom: 0.7,
-        maxZoom: 1,
-        duration: motionDuration(420),
-      });
+      void flow.setViewport(viewport, { duration: motionDuration(420) });
+      previousNodeIdsRef.current = new Set(graph.nodes.map((node) => node.id));
+      lastFocusKeyRef.current = focusKey;
     });
     return () => cancelAnimationFrame(frame);
-  }, [flow, graph.nodes, selectedNodeId, topologyKey]);
+  }, [canvasSize, flow, graph.nodes, selectedNodeId, topologyKey]);
 
   useEffect(() => {
     setShowSplit(false);
@@ -310,9 +333,15 @@ export function ThinkingWorkspace({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="border-b-2 border-black bg-brutal-cream px-3 py-2">
         <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="font-mono text-[9px] font-bold uppercase tracking-widest text-muted-foreground">{t('thinkingCurrentBranch')}</p>
-            <p className="truncate font-heading text-sm font-black">{selectedNode?.title ?? t('thinkingMode')}</p>
+            <Select
+              aria-label={t('thinkingCurrentBranch')}
+              value={selectedNodeId ?? ''}
+              onChange={onSelect}
+              className="mt-1 w-full min-w-0"
+              options={space.nodes.map((node) => ({ value: node.id, label: `${'· '.repeat(node.depth)}${node.title}` }))}
+            />
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {selectedNode?.fork_handoff_pending && (
@@ -356,7 +385,7 @@ export function ThinkingWorkspace({
         </div>
         {(error || actionError) && <p className="mt-2 font-body text-[10px] text-brutal-danger">{actionError || error}</p>}
       </div>
-      <div className={cn('min-h-0 flex-1 bg-brutal-cream', busy && 'cursor-progress')}>
+      <div ref={containerRef} className={cn('min-h-0 flex-1 bg-brutal-cream', busy && 'cursor-progress')}>
         <ThinkingActivityContext.Provider value={liveByThinkingNode}>
           <ReactFlow
             className="thinking-flow"

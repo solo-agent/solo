@@ -2,12 +2,14 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
+test.use({ actionTimeout: 30_000 });
 const wsBase = apiBase.replace(/^http/, 'ws');
 const credentials = { email: 'websocket-message-e2e@solo.local', password: 'SoloE2E-2026!' };
 
 interface AuthResponse {
   access_token: string;
   refresh_token: string;
+  user: { id: string };
 }
 
 interface MessageResponse {
@@ -108,11 +110,12 @@ test('WebSocket message.send and thread.reply persist and render', async ({ page
   const channel = await createdChannel.json() as { id: string };
 
   try {
-    await page.addInitScript(({ accessToken, refreshToken }) => {
+    await page.addInitScript(({ accessToken, refreshToken, userID }) => {
       localStorage.setItem('access_token', accessToken);
       localStorage.setItem('refresh_token', refreshToken);
       localStorage.setItem('solo.locale', 'en');
-    }, { accessToken: auth.access_token, refreshToken: auth.refresh_token });
+      localStorage.setItem(`solo:first-run-guide-skipped:${userID}`, '1');
+    }, { accessToken: auth.access_token, refreshToken: auth.refresh_token, userID: auth.user.id });
     await page.goto(`/dashboard?channel=${channel.id}`);
     await expect(page.locator('#channel-conversation-panel')).toBeVisible();
 

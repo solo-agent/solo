@@ -46,7 +46,7 @@ func (h *AgentRelationshipHandler) List(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	rels, err := h.svc.List(r.Context(), userID, r.URL.Query().Get("agent_id"))
+	rels, err := h.svc.List(r.Context(), userID, r.URL.Query().Get("agent_id"), r.URL.Query().Get("channel_id"))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

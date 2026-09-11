@@ -1,0 +1,34 @@
+{
+  "status": "passed",
+  "checks": [
+    {
+      "command": "./node_modules/.bin/tsc --noEmit --incremental false",
+      "cwd": "frontend",
+      "exit_code": 0
+    },
+    {
+      "command": "./node_modules/.bin/eslint",
+      "cwd": "frontend",
+      "exit_code": 0,
+      "files": [
+        "components/tasks/task-delivery-dialog.tsx",
+        "components/tasks/task-metrics-panel.tsx",
+        "components/agents/agent-profile-tab.tsx",
+        "e2e/compounding-ui.spec.ts",
+        "e2e/automation.spec.ts",
+        "e2e/agent-selection.spec.ts",
+        "e2e/revision-skills.spec.ts",
+        "e2e/task-delivery-contract.spec.ts"
+      ]
+    },
+    {
+      "command": "./node_modules/.bin/eslint components/dashboard/channel-view.tsx e2e/compounding-ui.spec.ts",
+      "cwd": "frontend",
+      "exit_code": 0,
+      "errors": 0,
+      "preexisting_warnings": 8,
+      "log": "header-eslint.log"
+    }
+  ],
+  "note": "成本刷新与英文标题栏修正后的 TypeScript / ESLint 检查；频道组件保留 8 条既有 Hook 警告。"
+}

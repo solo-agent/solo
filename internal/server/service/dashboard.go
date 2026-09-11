@@ -53,6 +53,7 @@ type DashboardLiveAgent struct {
 }
 
 type DashboardInsight struct {
+	Delivery    []DeliveryCohort       `json:"delivery"`
 	Since       time.Time              `json:"since"`
 	GeneratedAt time.Time              `json:"generated_at"`
 	Messages    int                    `json:"messages"`
@@ -145,7 +146,7 @@ func (s *AgentRunService) GetDashboardLive(ctx context.Context, ownerID string) 
 		   JOIN channels home ON home.id = a.home_channel_id
 		   LEFT JOIN latest_runs lr ON lr.agent_id = a.id
 		   LEFT JOIN counts c ON c.agent_id = a.id
-		  WHERE a.owner_id = $1 AND a.is_active = true AND ($2 = '' OR home.workspace_id::text = $2)
+		  WHERE a.owner_id = $1 AND a.is_active = true AND NOT EXISTS(SELECT 1 FROM agent_selection_trials internal_trial JOIN agent_selections internal_selection ON internal_selection.id=internal_trial.selection_id WHERE internal_trial.agent_id=a.id AND COALESCE(internal_selection.plan->>'reviewer_agent_id','')<>'') AND ($2 = '' OR home.workspace_id::text = $2)
 		  ORDER BY lr.updated_at DESC NULLS LAST, a.name ASC
 		  LIMIT 200`, ownerID, serverworkspace.FilterID(ctx))
 	if err != nil {
@@ -280,6 +281,10 @@ func (s *AgentRunService) GetDashboardInsight(ctx context.Context, ownerID strin
 		return nil, err
 	}
 	result.Series, err = s.dashboardSeries(ctx, ownerID, since)
+	if err != nil {
+		return nil, err
+	}
+	result.Delivery, err = s.dashboardDelivery(ctx, ownerID, since)
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,28 @@
+{
+  "members": [
+    {
+      "name": "Authormtwsqh2d",
+      "agent_id": "35184f0c-ebd4-4ed8-99ca-732bd9c95566",
+      "owner_id": "4748d261-e669-4e67-a5ff-b954b7e985e7",
+      "config_hash": "03ba3cb53c63bec4553d7482d89dc81db81a9d7dd0888539e7c243c3a3a39127",
+      "revision_id": "1ec7e32c-6039-47f0-8374-34f6599d23e9"
+    },
+    {
+      "name": "Reviewermtwsqh2d",
+      "agent_id": "5a601ffb-2138-4d99-9e0b-5caca66aa16d",
+      "owner_id": "4748d261-e669-4e67-a5ff-b954b7e985e7",
+      "config_hash": "b2676f0ae4768ceb6bbc607340745564fedaa0e8c5df6efc97483417f2146842",
+      "revision_id": "7cc03ce8-1267-4506-a69e-eef57db4ac6f"
+    },
+    {
+      "name": "DeliveryReceivermtwsqh2d",
+      "agent_id": "c951ad5b-72bf-43ba-83dc-55748a2c9f7d",
+      "owner_id": "4748d261-e669-4e67-a5ff-b954b7e985e7",
+      "config_hash": "d3b8b2a5f40f93b3c0ee08408363d038333712ff67c0f502b8834d2f3141ed93",
+      "revision_id": "0cfa622e-f267-4055-81dc-a2a97aff0ce5"
+    }
+  ],
+  "channel_id": "19f25545-304e-4d97-8bdf-a2028af1a47c",
+  "relationships": [],
+  "schema_version": 1
+}

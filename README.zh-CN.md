@@ -56,7 +56,7 @@ Solo 是工作区，不是公司模拟器：你可以提及、分配、审核、
 
 ## 快速开始
 
-需要 Go 1.22+、Node.js 20+、npm、Docker，以及至少一个已安装并在 `PATH` 中可用的智能体 CLI。
+需要 Go 1.25+、Node.js 20+、npm、Docker，以及至少一个已安装并在 `PATH` 中可用的智能体 CLI。
 
 ```bash
 git clone git@github.com:solo-agent/solo.git

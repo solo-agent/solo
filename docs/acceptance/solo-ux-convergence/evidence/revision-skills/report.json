@@ -1,0 +1,23 @@
+{
+  "stats": {
+    "startTime": "2026-09-11T09:54:53.807Z",
+    "duration": 181390.444,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "results": [
+    {
+      "title": "Skill files are evaluated, published, pinned and restored by real Agent Runs",
+      "status": "passed",
+      "duration_ms": 180946,
+      "retry": 0,
+      "attachments": [],
+      "errors": []
+    }
+  ],
+  "additional_evidence": [
+    "persisted-deliveries.json"
+  ]
+}

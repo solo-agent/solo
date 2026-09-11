@@ -90,7 +90,7 @@ const listPendingInboxActionsQuery = `
 	)
 	SELECT t.id::text,
 	       CASE
-	         WHEN t.creator_id = $1 AND t.status = 'in_review' THEN 'review'
+	         WHEN (t.creator_id = $1 OR t.contract->'gate'->>'reviewer_id'=$1::text) AND t.status = 'in_review' THEN 'review'
 	         WHEN t.creator_id = $1 AND latest_run.status = 'waiting_input' THEN 'waiting_input'
 	         WHEN t.creator_id = $1 AND latest_run.status = 'waiting_approval' THEN 'waiting_approval'
 	         WHEN t.creator_id = $1 AND latest_run.status IN ('failed', 'timeout') THEN 'failed'
@@ -103,7 +103,7 @@ const listPendingInboxActionsQuery = `
 	       artifact.id::text, artifact.title,
 	       COALESCE(claimer_user.display_name, claimer_agent.name),
 	       CASE
-	         WHEN t.creator_id = $1 AND t.status = 'in_review' THEN t.updated_at
+	         WHEN (t.creator_id = $1 OR t.contract->'gate'->>'reviewer_id'=$1::text) AND t.status = 'in_review' THEN t.updated_at
 	         WHEN t.creator_id = $1 AND latest_run.status IN ('waiting_input', 'waiting_approval', 'failed', 'timeout') THEN latest_run.updated_at
 	         ELSE t.updated_at
 	       END AS waiting_since
@@ -116,16 +116,16 @@ const listPendingInboxActionsQuery = `
 	LEFT JOIN latest_artifacts artifact ON artifact.task_id = t.id
 	LEFT JOIN users claimer_user ON claimer_user.id = t.claimer_id
 	LEFT JOIN agents claimer_agent ON claimer_agent.id = t.claimer_id
-	WHERE channel.workspace_id = $2
+	WHERE NOT EXISTS(SELECT 1 FROM agent_selection_trials internal_trial JOIN agent_selections internal_selection ON internal_selection.id=internal_trial.selection_id WHERE internal_trial.channel_id=channel.id AND COALESCE(internal_selection.plan->>'reviewer_agent_id','')<>'') AND channel.workspace_id = $2
 	  AND t.status NOT IN ('done', 'closed')
 	  AND (
-	    (t.creator_id = $1 AND t.status = 'in_review')
+	    ((t.creator_id = $1 OR t.contract->'gate'->>'reviewer_id'=$1::text) AND t.status = 'in_review')
 	    OR (t.creator_id = $1 AND latest_run.status IN ('waiting_input', 'waiting_approval', 'failed', 'timeout'))
 	    OR (t.claimer_id = $1 AND t.status IN ('todo', 'in_progress'))
 	  )
 	ORDER BY
 	  CASE
-	    WHEN t.creator_id = $1 AND t.status = 'in_review' THEN 1
+	    WHEN (t.creator_id = $1 OR t.contract->'gate'->>'reviewer_id'=$1::text) AND t.status = 'in_review' THEN 1
 	    WHEN t.creator_id = $1 AND latest_run.status IN ('waiting_input', 'waiting_approval') THEN 2
 	    WHEN t.creator_id = $1 AND latest_run.status IN ('failed', 'timeout') THEN 3
 	    ELSE 4
@@ -152,7 +152,7 @@ const listHandledInboxActionsQuery = `
 	LEFT JOIN users reviewer ON reviewer.id = review.reviewer_id
 	LEFT JOIN users next_user ON next_user.id = review.next_owner_id
 	LEFT JOIN agents next_agent ON next_agent.id = review.next_owner_id
-	WHERE review.reviewer_id = $1 AND channel.workspace_id = $2
+	WHERE review.reviewer_id = $1 AND NOT EXISTS(SELECT 1 FROM agent_selection_trials internal_trial JOIN agent_selections internal_selection ON internal_selection.id=internal_trial.selection_id WHERE internal_trial.channel_id=channel.id AND COALESCE(internal_selection.plan->>'reviewer_agent_id','')<>'') AND channel.workspace_id = $2
 	ORDER BY review.created_at DESC
 	LIMIT 100
 `
@@ -262,7 +262,7 @@ const listInboxQuery = `
 		  AND (COALESCE($5::text[], '{}'::text[]) = '{}'::text[] OR 'thread_reply' = ANY($5::text[]))
 		  AND ($6 = '' OR COALESCE(u.display_name, a.name) ILIKE '%' || $6 || '%')
 		  AND COALESCE(m.is_deleted, false) = false
-		  AND c.workspace_id = $7
+		  AND NOT EXISTS(SELECT 1 FROM agent_selection_trials internal_trial JOIN agent_selections internal_selection ON internal_selection.id=internal_trial.selection_id WHERE internal_trial.channel_id=c.id AND COALESCE(internal_selection.plan->>'reviewer_agent_id','')<>'') AND c.workspace_id = $7
 
 		UNION ALL
 
@@ -299,7 +299,7 @@ const listInboxQuery = `
 		  AND ($5::text[] = '{}' OR 'dm' = ANY($5::text[]))
 		  AND ($6 = '' OR COALESCE(u.display_name, a.name) ILIKE '%' || $6 || '%')
 		  AND COALESCE(m.is_deleted, false) = false
-		  AND c.workspace_id = $7
+		  AND NOT EXISTS(SELECT 1 FROM agent_selection_trials internal_trial JOIN agent_selections internal_selection ON internal_selection.id=internal_trial.selection_id WHERE internal_trial.channel_id=c.id AND COALESCE(internal_selection.plan->>'reviewer_agent_id','')<>'') AND c.workspace_id = $7
 
 		UNION ALL
 
@@ -336,7 +336,7 @@ const listInboxQuery = `
 		  AND ($5::text[] = '{}' OR 'mention' = ANY($5::text[]))
 		  AND ($6 = '' OR COALESCE(u.display_name, a.name) ILIKE '%' || $6 || '%')
 		  AND COALESCE(m.is_deleted, false) = false
-		  AND c.workspace_id = $7
+		  AND NOT EXISTS(SELECT 1 FROM agent_selection_trials internal_trial JOIN agent_selections internal_selection ON internal_selection.id=internal_trial.selection_id WHERE internal_trial.channel_id=c.id AND COALESCE(internal_selection.plan->>'reviewer_agent_id','')<>'') AND c.workspace_id = $7
 	) sub
 	ORDER BY created_at DESC
 	LIMIT $4
@@ -414,7 +414,7 @@ func (s *InboxService) UnreadCount(ctx context.Context, userID string) (*UnreadC
 		       )
 		   )
 		   AND COALESCE(m.is_deleted, false) = false
-		   AND c.workspace_id = $2
+		   AND NOT EXISTS(SELECT 1 FROM agent_selection_trials internal_trial JOIN agent_selections internal_selection ON internal_selection.id=internal_trial.selection_id WHERE internal_trial.channel_id=c.id AND COALESCE(internal_selection.plan->>'reviewer_agent_id','')<>'') AND c.workspace_id = $2
 		   `+readFilter,
 		userID, workspaceID,
 	).Scan(&result.ThreadReplies)
@@ -434,7 +434,7 @@ func (s *InboxService) UnreadCount(ctx context.Context, userID string) (*UnreadC
 		   AND (u.id IS NOT NULL OR a.id IS NOT NULL)
 		   AND m.thread_id IS NULL
 		   AND COALESCE(m.is_deleted, false) = false
-		   AND c.workspace_id = $2
+		   AND NOT EXISTS(SELECT 1 FROM agent_selection_trials internal_trial JOIN agent_selections internal_selection ON internal_selection.id=internal_trial.selection_id WHERE internal_trial.channel_id=c.id AND COALESCE(internal_selection.plan->>'reviewer_agent_id','')<>'') AND c.workspace_id = $2
 		   `+readFilter,
 		userID, workspaceID,
 	).Scan(&result.DM)
@@ -454,7 +454,7 @@ func (s *InboxService) UnreadCount(ctx context.Context, userID string) (*UnreadC
 		   AND (u.id IS NOT NULL OR a.id IS NOT NULL)
 		   AND m.thread_id IS NULL
 		   AND COALESCE(m.is_deleted, false) = false
-		   AND c.workspace_id = $2
+		   AND NOT EXISTS(SELECT 1 FROM agent_selection_trials internal_trial JOIN agent_selections internal_selection ON internal_selection.id=internal_trial.selection_id WHERE internal_trial.channel_id=c.id AND COALESCE(internal_selection.plan->>'reviewer_agent_id','')<>'') AND c.workspace_id = $2
 		   `+readFilter,
 		userID, workspaceID,
 	).Scan(&result.Mentions)
@@ -515,7 +515,7 @@ func (s *InboxService) MarkAllRead(ctx context.Context, userID string) error {
 			      )
 			  )
 			  AND COALESCE(m.is_deleted, false) = false
-			  AND c.workspace_id=$2
+			  AND NOT EXISTS(SELECT 1 FROM agent_selection_trials internal_trial JOIN agent_selections internal_selection ON internal_selection.id=internal_trial.selection_id WHERE internal_trial.channel_id=c.id AND COALESCE(internal_selection.plan->>'reviewer_agent_id','')<>'') AND c.workspace_id=$2
 			  AND r.message_id IS NULL
 			UNION
 			SELECT m.id FROM messages m
@@ -527,7 +527,7 @@ func (s *InboxService) MarkAllRead(ctx context.Context, userID string) error {
 			WHERE m.sender_id != $1
 			  AND m.sender_type IN ('user', 'agent') AND (u.id IS NOT NULL OR a.id IS NOT NULL)
 			  AND m.thread_id IS NULL AND COALESCE(m.is_deleted, false) = false
-			  AND c.workspace_id=$2
+			  AND NOT EXISTS(SELECT 1 FROM agent_selection_trials internal_trial JOIN agent_selections internal_selection ON internal_selection.id=internal_trial.selection_id WHERE internal_trial.channel_id=c.id AND COALESCE(internal_selection.plan->>'reviewer_agent_id','')<>'') AND c.workspace_id=$2
 			  AND r.message_id IS NULL
 			UNION
 			SELECT m.id FROM messages m
@@ -539,7 +539,7 @@ func (s *InboxService) MarkAllRead(ctx context.Context, userID string) error {
 			WHERE m.sender_id != $1
 			  AND m.sender_type IN ('user', 'agent') AND (u.id IS NOT NULL OR a.id IS NOT NULL)
 			  AND m.thread_id IS NULL AND COALESCE(m.is_deleted, false) = false AND r.message_id IS NULL
-			  AND c.workspace_id=$2
+			  AND NOT EXISTS(SELECT 1 FROM agent_selection_trials internal_trial JOIN agent_selections internal_selection ON internal_selection.id=internal_trial.selection_id WHERE internal_trial.channel_id=c.id AND COALESCE(internal_selection.plan->>'reviewer_agent_id','')<>'') AND c.workspace_id=$2
 		 ) sub ON CONFLICT DO NOTHING`,
 		userID, serverworkspace.ContextID(ctx),
 	)

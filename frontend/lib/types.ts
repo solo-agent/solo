@@ -116,7 +116,10 @@ export interface CreateChannelInput {
 
 // ---- Agent types ----
 
+export type SkillBundle = { name: string; sha256?: string; files: { path: string; content: string; executable?: boolean }[] };
+
 export interface Agent {
+  skills?: SkillBundle[];
   id: string;
   name: string;
   description: string;
@@ -225,7 +228,24 @@ export interface Thread {
 export type TaskStatus = 'todo' | 'in_progress' | 'in_review' | 'done' | 'closed';
 export type TaskPriority = 'urgent' | 'high' | 'normal' | 'low';
 
+export interface TaskContract {
+  requirements: { id: string; text: string }[];
+  gate: { kind: 'human' | 'agent' | 'code'; human_review_mode?: 'decision'; reviewer_id: string; max_revisions: number; code?: { repository_path: string; base_commit: string; timeout_seconds: number; checks: { requirement_id: string; command: string[] }[] } };
+}
+export interface TaskEvidence { id: string; description: string; content?: string; uri?: string; sha256?: string }
+export interface TaskSubmission {
+  id: string; task_id: string; task_version: number; artifact_version: string;
+  contract: TaskContract;
+  handoff: { summary: string; changes: string; risks: string; next_steps: string };
+  evidence: TaskEvidence[];
+  reviews: { reviewer_id: string; decision: string; reason: string; evidence: TaskEvidence[]; checks: { requirement_id: string; passed: boolean; reason: string }[] }[];
+}
 export interface Task {
+  waiting?: boolean;
+  can_review?: boolean;
+  version?: number;
+  contract?: TaskContract;
+  current_submission_id?: string;
   id: string;
   channel_id: string;
   channel_name?: string;
@@ -283,6 +303,8 @@ export interface TaskArtifact {
 }
 
 export interface CreateTaskInput {
+  contract?: TaskContract;
+  assignee?: string;
   channel_id: string;
   title: string;
   description?: string;
@@ -293,6 +315,8 @@ export interface CreateTaskInput {
 }
 
 export interface UpdateTaskInput {
+  contract?: TaskContract;
+  expected_task_version?: number;
   title?: string;
   description?: string;
   status?: TaskStatus;
@@ -330,6 +354,7 @@ export interface AutomationRun {
 }
 
 export interface Automation {
+  contract?: TaskContract;
   id: string;
   channel_id: string;
   creator_id: string;
@@ -354,6 +379,7 @@ export interface Automation {
 }
 
 export interface AutomationInput {
+  contract?: TaskContract;
   name: string;
   task_title: string;
   task_description: string;

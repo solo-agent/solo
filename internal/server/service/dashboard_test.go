@@ -7,6 +7,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
 )
 
 func TestGetDashboardLiveUsesLatestStartedRunStatusWhenIdle(t *testing.T) {
@@ -194,6 +196,15 @@ func TestGetDashboardInsightFiltersAgentsAndReadsTranscriptUsage(t *testing.T) {
 	svc := NewAgentRunService(pool)
 	base := time.Now().UTC().Add(-30 * time.Minute).Truncate(time.Second)
 	channelID = agentRunChannel(t, pool, ownerID)
+	// Match the real request scope; accumulated E2E messages must not evict this fixture's terms.
+	var workspaceID string
+	if err := pool.QueryRow(ctx, `INSERT INTO workspaces(name,visibility,created_by) VALUES('Dashboard fixture','private',$1) RETURNING id::text`, ownerID).Scan(&workspaceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE channels SET workspace_id=$2 WHERE created_by=$1`, ownerID, workspaceID); err != nil {
+		t.Fatal(err)
+	}
+	ctx = serverworkspace.WithScope(ctx, serverworkspace.Scope{ID: workspaceID, Role: "owner"})
 	messageID := agentRunMessage(t, pool, channelID, ownerID)
 	taskID := agentRunTask(t, pool, channelID, ownerID)
 	if _, err := pool.Exec(ctx, `UPDATE messages SET content = 'alpha alpha beta target', created_at = $2, updated_at = $2 WHERE id = $1`, messageID, base); err != nil {

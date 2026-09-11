@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -326,6 +327,50 @@ func (h *daemonHandler) runSessionReaper(ctx context.Context) {
 	}
 }
 
+func messageReadPath(channelID, threadID, nodeID, content string) (string, error) {
+	var options struct {
+		Limit  int    `json:"limit"`
+		Before string `json:"before"`
+		After  string `json:"after"`
+		IsDM   bool   `json:"is_dm"`
+	}
+	if content != "" {
+		if err := json.Unmarshal([]byte(content), &options); err != nil {
+			return "", fmt.Errorf("invalid message read options: %w", err)
+		}
+	}
+	if _, err := uuid.Parse(channelID); err != nil {
+		return "", fmt.Errorf("message read requires a Channel UUID")
+	}
+	base := "/api/v1/channels/"
+	if options.IsDM {
+		base = "/api/v1/dm/"
+	}
+	path := base + url.PathEscape(channelID) + "/messages"
+	query := url.Values{}
+	if threadID != "" {
+		if strings.ContainsAny(threadID, "/\\?#") || threadID == "." || threadID == ".." {
+			return "", fmt.Errorf("invalid message thread ID")
+		}
+		path += "/" + url.PathEscape(threadID) + "/thread"
+	} else if nodeID != "" && !options.IsDM {
+		query.Set("thinking_node_id", nodeID)
+	}
+	if options.Limit != 0 {
+		query.Set("limit", fmt.Sprint(options.Limit))
+	}
+	if options.Before != "" {
+		query.Set("before", options.Before)
+	}
+	if options.After != "" {
+		query.Set("after", options.After)
+	}
+	if len(query) != 0 {
+		path += "?" + query.Encode()
+	}
+	return path, nil
+}
+
 // ProxyRequest handles POST /internal/daemon/proxy
 // Agents call this local endpoint instead of hitting the server API directly.
 // The daemon adds auth and forwards the request to the server. This keeps
@@ -339,17 +384,19 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		AgentID     string `json:"agent_id"`
-		Action      string `json:"action"`
-		ChannelID   string `json:"channel_id"`
-		Content     string `json:"content,omitempty"`
-		ThreadID    string `json:"thread_id,omitempty"`
-		NodeID      string `json:"thinking_node_id,omitempty"`
-		RunID       string `json:"run_id,omitempty"`
-		TaskNumber  int    `json:"task_number,omitempty"`
-		TaskID      string `json:"task_id,omitempty"`
-		Status      string `json:"status,omitempty"`
-		ClientMsgID string `json:"client_msg_id,omitempty"`
+		AgentID         string `json:"agent_id"`
+		Action          string `json:"action"`
+		ChannelID       string `json:"channel_id"`
+		Content         string `json:"content,omitempty"`
+		ThreadID        string `json:"thread_id,omitempty"`
+		NodeID          string `json:"thinking_node_id,omitempty"`
+		RunID           string `json:"run_id,omitempty"`
+		TaskNumber      int    `json:"task_number,omitempty"`
+		TaskID          string `json:"task_id,omitempty"`
+		Status          string `json:"status,omitempty"`
+		ClientMsgID     string `json:"client_msg_id,omitempty"`
+		KeepAfterSeq    int64  `json:"keep_after_seq,omitempty"`
+		FreshnessReason string `json:"freshness_reason,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -375,11 +422,22 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_, token := h.taskManager.ExecutingCredential(req.AgentID, req.ChannelID, req.NodeID)
+	credentialChannel := req.ChannelID
+	if req.Action == "message_read" {
+		// Reads may target another joined channel. Authenticate with the one
+		// executing Run; the server still checks target membership and scope.
+		credentialChannel = ""
+	}
+	_, token := h.taskManager.ExecutingCredential(req.AgentID, credentialChannel, req.NodeID)
 	if token == "" {
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": "this command must run during one active Agent turn; no unique current Run was found",
 		})
+		return
+	}
+
+	if req.Action == "task_worktree" {
+		h.taskWorktree(w, r, req.AgentID, req.ChannelID, req.TaskNumber, token)
 		return
 	}
 
@@ -389,7 +447,11 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	switch req.Action {
 	case "message_send":
 		serverPath = fmt.Sprintf("/api/v1/channels/%s/messages", req.ChannelID)
-		bodyMap := map[string]string{"content": req.Content}
+		bodyMap := map[string]any{"content": req.Content}
+		if req.KeepAfterSeq != 0 || req.FreshnessReason != "" {
+			bodyMap["keep_after_seq"] = req.KeepAfterSeq
+			bodyMap["freshness_reason"] = req.FreshnessReason
+		}
 		if req.ThreadID != "" {
 			bodyMap["thread_id"] = req.ThreadID
 		}
@@ -403,7 +465,55 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 			bodyMap["client_msg_id"] = req.ClientMsgID
 		}
 		serverBody, _ = json.Marshal(bodyMap)
+	case "agent_work":
+		switch req.Status {
+		case "list", "mark", "attention", "discard", "revisions", "propose-revision", "selections", "start-selection":
+		default:
+			writeJSON(w, 400, map[string]string{"error": "invalid work action"})
+			return
+		}
+		if _, err := uuid.Parse(req.AgentID); err != nil {
+			writeJSON(w, 400, map[string]string{"error": "invalid agent ID"})
+			return
+		}
+		serverPath = fmt.Sprintf("/api/v1/agents/%s/work", req.AgentID)
+		if req.Status == "attention" {
+			serverPath = fmt.Sprintf("/api/v1/agents/%s/attention", req.AgentID)
+		}
+		if req.Status == "discard" {
+			serverPath = fmt.Sprintf("/api/v1/agents/%s/drafts/discard", req.AgentID)
+		}
+		if req.Status == "revisions" || req.Status == "propose-revision" {
+			serverPath = fmt.Sprintf("/api/v1/agents/%s/revisions", req.AgentID)
+		}
+		if req.Status == "selections" || req.Status == "start-selection" {
+			serverPath = fmt.Sprintf("/api/v1/agents/%s/selections", req.AgentID)
+		}
+		if req.Status != "list" && req.Status != "revisions" && req.Status != "selections" {
+			serverBody = []byte(req.Content)
+		}
+	case "task_lifecycle":
+		switch req.Status {
+		case "submit", "review", "accept", "reject", "close", "reopen", "get", "submissions", "wait", "waits", "resolve-wait":
+		default:
+			writeJSON(w, 400, map[string]string{"error": "invalid task action"})
+			return
+		}
+		if _, err := uuid.Parse(req.ChannelID); err != nil || req.TaskNumber < 1 {
+			writeJSON(w, 400, map[string]string{"error": "invalid task target"})
+			return
+		}
+		serverPath = fmt.Sprintf("/api/v1/channels/%s/tasks/%d", req.ChannelID, req.TaskNumber)
+		if req.Status != "get" {
+			serverPath += "/" + req.Status
+		}
+		if req.Status != "get" && req.Status != "submissions" && req.Status != "waits" {
+			serverBody = []byte(req.Content)
+		}
 	case "task_claim":
+		if req.Content != "" && req.Content != req.TaskID && req.Content != fmt.Sprint(req.TaskNumber) {
+			serverBody = []byte(req.Content)
+		}
 		if req.TaskID != "" {
 			serverPath = fmt.Sprintf("/api/v1/channels/%s/tasks/%s/claim", req.ChannelID, req.TaskID)
 		} else {
@@ -421,9 +531,11 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	case "template_list":
 		serverPath = "/api/v1/templates"
 	case "message_read":
-		serverPath = fmt.Sprintf("/api/v1/channels/%s/messages", req.ChannelID)
-		if req.NodeID != "" {
-			serverPath += "?thinking_node_id=" + url.QueryEscape(req.NodeID)
+		var err error
+		serverPath, err = messageReadPath(req.ChannelID, req.ThreadID, req.NodeID, req.Content)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
 		}
 	case "message_check":
 		serverPath = fmt.Sprintf("/api/v1/messages/check?channel_id=%s", req.ChannelID)
@@ -436,6 +548,14 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 	case "thread_unfollow":
 		serverPath = "/api/v1/threads/unfollow"
 		serverBody, _ = json.Marshal(map[string]string{"target": req.Content})
+	case "team_agreements", "team_propose_agreement":
+		serverPath = fmt.Sprintf("/api/v1/channels/%s/team-agreements", req.ChannelID)
+		if req.Action == "team_propose_agreement" {
+			serverBody = []byte(req.Content)
+		}
+	case "team_candidates":
+		serverPath = "/api/v1/team-formations/candidates"
+		serverBody = []byte(req.Content)
 	case "team_form":
 		serverPath = "/api/v1/team-formations"
 		serverBody = []byte(req.Content)
@@ -450,8 +570,14 @@ func (h *daemonHandler) ProxyRequest(w http.ResponseWriter, r *http.Request) {
 		method := "GET"
 		var fwdBody io.Reader
 		switch req.Action {
+		case "task_lifecycle":
+			if req.Status != "get" && req.Status != "submissions" && req.Status != "waits" {
+				method = "POST"
+				fwdBody = bytes.NewReader(serverBody)
+			}
 		case "task_claim":
 			method = "POST"
+			fwdBody = bytes.NewReader(serverBody)
 		case "task_update":
 			method = "PATCH"
 			fwdBody = bytes.NewReader(serverBody)
@@ -544,28 +670,34 @@ func (h *daemonHandler) getProvider(providerType string) llm.Provider {
 
 // runTaskRequest is the payload sent by the server to the daemon.
 type runTaskRequest struct {
-	TaskID                string             `json:"task_id"`
-	RunID                 string             `json:"run_id,omitempty"`
-	AgentID               string             `json:"agent_id"`
-	ChannelID             string             `json:"channel_id"`
-	ThreadID              string             `json:"thread_id,omitempty"`
-	NodeID                string             `json:"thinking_node_id,omitempty"`
-	ResumeSessionID       string             `json:"resume_session_id,omitempty"`
-	ForceFreshSession     bool               `json:"force_fresh_session,omitempty"`
-	RetireSessionID       string             `json:"retire_session_id,omitempty"`
-	ReturnHandoff         bool               `json:"return_handoff,omitempty"`
-	Messages              []llmMessage       `json:"messages"`
-	ColdStartMessages     []llmMessage       `json:"cold_start_messages,omitempty"`
-	SystemPrompt          string             `json:"system_prompt"`
-	ThinkingRuntimePrompt string             `json:"thinking_runtime_prompt,omitempty"`
-	ModelConfig           modelConfigPayload `json:"model_config"`
-	TaskContext           string             `json:"task_context,omitempty"`    // SOLO-221-B: summary of pending tasks in channel
-	MentionedNames        []string           `json:"mentioned_names,omitempty"` // v1.3: names of @mentioned agents
-	AgentToken            string             `json:"agent_token,omitempty"`
-	AgentName             string             `json:"agent_name,omitempty"`
-	ChannelName           string             `json:"channel_name,omitempty"`
-	CustomEnv             map[string]string  `json:"custom_env,omitempty"`
-	CustomArgs            []string           `json:"custom_args,omitempty"`
+	Skills                []skillloader.Bundle      `json:"skills,omitempty"`
+	OriginTaskID          string                    `json:"origin_task_id,omitempty"`
+	CodeReview            *agent.CodeReviewDispatch `json:"code_review,omitempty"`
+	AgentRevisionID       string                    `json:"agent_revision_id,omitempty"`
+	TeamVersionID         string                    `json:"team_version_id,omitempty"`
+	RelationshipsMarkdown string                    `json:"relationships_markdown,omitempty"`
+	TaskID                string                    `json:"task_id"`
+	RunID                 string                    `json:"run_id,omitempty"`
+	AgentID               string                    `json:"agent_id"`
+	ChannelID             string                    `json:"channel_id"`
+	ThreadID              string                    `json:"thread_id,omitempty"`
+	NodeID                string                    `json:"thinking_node_id,omitempty"`
+	ResumeSessionID       string                    `json:"resume_session_id,omitempty"`
+	ForceFreshSession     bool                      `json:"force_fresh_session,omitempty"`
+	RetireSessionID       string                    `json:"retire_session_id,omitempty"`
+	ReturnHandoff         bool                      `json:"return_handoff,omitempty"`
+	Messages              []llmMessage              `json:"messages"`
+	ColdStartMessages     []llmMessage              `json:"cold_start_messages,omitempty"`
+	SystemPrompt          string                    `json:"system_prompt"`
+	ThinkingRuntimePrompt string                    `json:"thinking_runtime_prompt,omitempty"`
+	ModelConfig           modelConfigPayload        `json:"model_config"`
+	TaskContext           string                    `json:"task_context,omitempty"`    // SOLO-221-B: summary of pending tasks in channel
+	MentionedNames        []string                  `json:"mentioned_names,omitempty"` // v1.3: names of @mentioned agents
+	AgentToken            string                    `json:"agent_token,omitempty"`
+	AgentName             string                    `json:"agent_name,omitempty"`
+	ChannelName           string                    `json:"channel_name,omitempty"`
+	CustomEnv             map[string]string         `json:"custom_env,omitempty"`
+	CustomArgs            []string                  `json:"custom_args,omitempty"`
 }
 
 type llmMessage struct {
@@ -660,6 +792,10 @@ func (h *daemonHandler) processTaskStreaming(ctx context.Context, req runTaskReq
 	}
 	defer release()
 
+	if req.CodeReview != nil {
+		h.processCodeReview(ctx, req)
+		return
+	}
 	if backend, err := agent.NewBackend(req.ModelConfig.Provider, os.Getenv("LLM_API_KEY")); err == nil {
 		h.processTaskWithBackend(ctx, req, backend)
 		return
@@ -667,6 +803,10 @@ func (h *daemonHandler) processTaskStreaming(ctx context.Context, req runTaskReq
 
 	// Fallback: use old LLM provider path.
 	h.processTaskWithProvider(ctx, req)
+}
+
+func (h *daemonHandler) pushBackendStarted(req runTaskRequest) {
+	h.pushEventJSON(req.TaskID, "backend_started", map[string]string{"agent_id": req.AgentID, "run_id": req.RunID, "agent_revision_id": req.AgentRevisionID, "team_version_id": req.TeamVersionID, "skills_sha256": skillloader.BundlesDigest(req.Skills), "relationships_sha256": fmt.Sprintf("%x", sha256.Sum256([]byte(req.RelationshipsMarkdown)))})
 }
 
 func (h *daemonHandler) finishCancelledTask(req runTaskRequest) {
@@ -693,6 +833,9 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 	// SOLO-221-B: Append task context to the system prompt so agents
 	// can see pending tasks in the channel.
 	systemPrompt := req.SystemPrompt
+	if req.RelationshipsMarkdown != "" {
+		systemPrompt += "\n\n" + req.RelationshipsMarkdown
+	}
 	if req.ThinkingRuntimePrompt != "" {
 		systemPrompt += "\n\n## Thinking Runtime\n\n" + req.ThinkingRuntimePrompt
 	}
@@ -721,6 +864,12 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 		llmMsgs = append(llmMsgs, llm.Message{Role: message.Role, Content: message.Content})
 	}
 
+	if len(req.Skills) > 0 {
+		h.taskManager.UpdateStatus(req.TaskID, taskStatusFailed)
+		h.pushEventJSON(req.TaskID, "error", map[string]interface{}{"agent_id": req.AgentID, "error": "versioned Skill files require a local Agent backend", "failure_code": "configuration", "retryable": false})
+		h.taskManager.CloseAllSubscribers(req.TaskID)
+		return
+	}
 	llmReq := &llm.CompletionRequest{
 		Model:        req.ModelConfig.Model,
 		Messages:     llmMsgs,
@@ -745,10 +894,7 @@ func (h *daemonHandler) processTaskWithProvider(ctx context.Context, req runTask
 		h.taskManager.CloseAllSubscribers(req.TaskID)
 		return
 	}
-	h.pushEventJSON(req.TaskID, "backend_started", map[string]string{
-		"agent_id": req.AgentID,
-		"run_id":   req.RunID,
-	})
+	h.pushBackendStarted(req)
 	h.taskManager.UpdateStatus(req.TaskID, taskStatusThinking)
 	h.pushEventJSON(req.TaskID, "thinking", map[string]string{
 		"agent_id": req.AgentID,
@@ -1104,9 +1250,18 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 	}
 	agentEnv["PATH"] = ws.WorkDir + string(os.PathListSeparator) + runtimePath
 
+	if req.RelationshipsMarkdown != "" {
+		if err := os.WriteFile(filepath.Join(ws.WorkDir, "RELATIONSHIPS.md"), []byte(req.RelationshipsMarkdown), 0o644); err != nil {
+			finalizer.finish(taskStatusFailed, "error", map[string]interface{}{"error": err.Error()})
+			return
+		}
+	}
 	// Build system prompt using PromptBuilder
 	hostname, _ := os.Hostname()
 	agentCfg := agent.AgentConfig{
+		AgentRevisionID: req.AgentRevisionID, TeamVersionID: req.TeamVersionID,
+		SkillsDigest:          skillloader.BundlesDigest(req.Skills),
+		RelationshipsMarkdown: req.RelationshipsMarkdown,
 		AgentID:               req.AgentID,
 		Name:                  agentInfo.Name,
 		SystemPrompt:          req.SystemPrompt,
@@ -1136,6 +1291,10 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		slog.Warn("task: sync solo skills failed (non-fatal)", "task_id", req.TaskID, "error", err)
 	}
 
+	if _, err := agent.PrepareRevisionSkills(ws.WorkDir, req.ModelConfig.Provider, req.Skills); err != nil {
+		finalizer.finish(taskStatusFailed, "error", map[string]interface{}{"agent_id": req.AgentID, "error": err.Error(), "failure_code": "configuration", "retryable": false})
+		return
+	}
 	materializedMessages := h.materializeMessageAttachments(ctx, req.AgentToken, req.Messages, ws.WorkDir)
 	materializedColdStartMessages := h.materializeMessageAttachments(ctx, req.AgentToken, req.ColdStartMessages, ws.WorkDir)
 
@@ -1277,10 +1436,7 @@ func (h *daemonHandler) processTaskWithBackend(ctx context.Context, req runTaskR
 		providerSessionID = session.SessionID
 		transcriptPath = transcriptPathForProvider(req.ModelConfig.Provider, ws.WorkDir, providerSessionID)
 	}
-	h.pushEventJSON(req.TaskID, "backend_started", map[string]string{
-		"agent_id": req.AgentID,
-		"run_id":   req.RunID,
-	})
+	h.pushBackendStarted(req)
 	h.taskManager.UpdateStatus(req.TaskID, taskStatusThinking)
 	h.pushEventJSON(req.TaskID, "thinking", map[string]string{
 		"agent_id": req.AgentID,

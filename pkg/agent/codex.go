@@ -249,7 +249,9 @@ func (b *CodexBackend) Close(ps *PersistentSession) error {
 	if !ok || state == nil {
 		return fmt.Errorf("codex: invalid session state")
 	}
-	return state.runner.close()
+	err := state.runner.close()
+	b.logger.Info("codex: persistent session closed", "session_id", state.threadID, "reaped", state.runner.exited.Load())
+	return err
 }
 
 // ForceClose immediately kills the Codex subprocess without graceful exit.
@@ -258,7 +260,9 @@ func (b *CodexBackend) ForceClose(ps *PersistentSession) error {
 	if !ok || state == nil {
 		return fmt.Errorf("codex: invalid session state")
 	}
-	return state.runner.forceClose()
+	err := state.runner.forceClose()
+	b.logger.Info("codex: persistent session ended", "session_id", state.threadID, "reaped", state.runner.exited.Load())
+	return err
 }
 
 // ── Blocked args ──
@@ -677,6 +681,10 @@ func buildPromptFromMessages(messages []Message) string {
 
 func buildCodexArgs(opts *ExecuteOptions) []string {
 	args := []string{"app-server", "--listen", "stdio://"}
+	if opts.Env["SOLO_AGENT_ID"] != "" {
+		// Login profiles can replace the daemon's PATH with an older global solo.
+		args = append(args, "-c", "allow_login_shell=false")
+	}
 	// Daemon-level ExtraArgs first, then agent-level CustomArgs can override.
 	args = append(args, filterCustomArgs(opts.ExtraArgs, codexBlockedArgs)...)
 	args = append(args, filterCustomArgs(opts.CustomArgs, codexBlockedArgs)...)

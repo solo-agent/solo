@@ -1,0 +1,24 @@
+{
+  "verified_after_test_cleanup": true,
+  "source": "PostgreSQL; exact Skill test channel b1d1bf58-8222-4b4d-a7cf-1d3cb2c0815d",
+  "tasks": [
+    {
+      "task_id": "cb29acfd-3fae-4dc7-b468-14bdaf969151",
+      "title": "Pinned Skill remains v2",
+      "status": "done",
+      "summary": "SKILL_RESULT_42",
+      "run_id": "4385a01d-908c-4c4c-9545-19446fc65d80",
+      "revision_id": "cfdb72a1-1451-4585-9f6d-aebc9e1d579d",
+      "team_version_id": "4beb3642-8ed6-4fc4-9f50-caf3e9fecad2"
+    },
+    {
+      "task_id": "b983eb4a-8843-44d3-94c6-18a372cd3153",
+      "title": "Restored Skill uses original files",
+      "status": "done",
+      "summary": "SKILL_RESULT_40",
+      "run_id": "01e6e823-4049-40b8-af70-d1ad048ab22f",
+      "revision_id": "d86671a8-1499-4312-b12c-8b14465058d1",
+      "team_version_id": null
+    }
+  ]
+}

@@ -16,7 +16,7 @@ function databaseJSON<T>(query: string): T {
 }
 
 function rebuild(extra: Record<string, string> = {}) {
-  execFileSync('make', ['rebuild', ...Object.entries(extra).map(([key, value]) => `${key}=${value}`)], {
+  execFileSync('make', ['rebuild', 'SOLO_DAEMON_PROFILE=', ...Object.entries(extra).map(([key, value]) => `${key}=${value}`)], {
     cwd: repoRoot,
     env: { ...process.env, ...extra },
     stdio: 'ignore',

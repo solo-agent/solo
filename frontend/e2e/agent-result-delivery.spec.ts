@@ -1,16 +1,20 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { acquireLocalComputer, type LocalComputerLease } from './support/local-computer';
 import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
 const credentials = {
-  email: `agent-result-delivery-${Date.now()}-${process.pid}@solo.local`,
+  email: `agent-result-delivery-${process.env.SOLO_E2E_DAEMON_ID ?? 'local'}@solo.local`,
   password: 'SoloE2E-2026!',
 };
 const daemonLogPath = join(process.cwd(), '..', 'daemon.log');
+
+let activeWorkspaceID = '';
+let activeUserID = '';
 
 interface AuthResponse {
   access_token: string;
@@ -68,6 +72,8 @@ interface AgentHeartbeatState {
 
 interface TaskRetryState {
   run_id: string;
+  backend_started: boolean;
+  external_session_id: string;
   status: string;
   claimer_id: string;
   attempts: number;
@@ -316,6 +322,8 @@ function taskRetryState(taskID: string): TaskRetryState {
     )
     SELECT json_build_object(
 	  'run_id', COALESCE((SELECT id::text FROM latest), ''),
+      'backend_started', COALESCE((SELECT backend_started_at IS NOT NULL FROM latest), false),
+      'external_session_id', COALESCE((SELECT s.external_session_id FROM agent_sessions s JOIN latest r ON r.session_id=s.id), ''),
       'status', t.status,
       'claimer_id', COALESCE(t.claimer_id::text, ''),
       'attempts', (SELECT COUNT(*) FROM linked),
@@ -379,12 +387,28 @@ function taskRetryState(taskID: string): TaskRetryState {
 
 async function authenticate(request: APIRequestContext): Promise<AuthResponse> {
   const login = await request.post(`${apiBase}/api/v1/auth/login`, { data: credentials });
-  if (login.ok()) return login.json();
+  if (login.ok()) return prepareWorkspace(request, await login.json());
   const register = await registerVerified(request, apiBase, {
     data: { ...credentials, display_name: 'Human E2E Tester' },
   });
   if (!register.ok()) throw new Error(`E2E authentication failed: ${register.status()} ${await register.text()}`);
-  return register.json();
+  return prepareWorkspace(request, await register.json());
+}
+
+async function prepareWorkspace(request: APIRequestContext, auth: AuthResponse): Promise<AuthResponse> {
+  const headers = { authorization: `Bearer ${auth.access_token}` };
+  const response = await request.get(`${apiBase}/api/v1/workspaces`, { headers });
+  if (!response.ok()) throw new Error(`Workspace fixture: ${response.status()} ${await response.text()}`);
+  const workspaces = await response.json() as { id: string; is_personal: boolean; created_by: string }[];
+  let personal = workspaces.find((item) => item.is_personal);
+  if (!personal) {
+    const created = await request.post(`${apiBase}/api/v1/workspaces`, { headers, data: { name: 'Private E2E workspace' } });
+    if (!created.ok()) throw new Error(`Create private Workspace: ${created.status()} ${await created.text()}`);
+    personal = await created.json() as typeof workspaces[number];
+  }
+  activeWorkspaceID = personal.id;
+  activeUserID = personal.created_by;
+  return auth;
 }
 
 async function api<T>(
@@ -395,7 +419,7 @@ async function api<T>(
   data?: unknown,
 ): Promise<T> {
   const response = await request[method](`${apiBase}${path}`, {
-    headers: { authorization: `Bearer ${token}` },
+    headers: { authorization: `Bearer ${token}`, 'X-Workspace-ID': activeWorkspaceID },
     data,
   });
   if (!response.ok()) throw new Error(`${method.toUpperCase()} ${path}: ${response.status()} ${await response.text()}`);
@@ -404,11 +428,13 @@ async function api<T>(
 }
 
 async function authenticatePage(page: Page, auth: AuthResponse) {
-  await page.addInitScript(({ accessToken, refreshToken }) => {
+  await page.addInitScript(({ accessToken, refreshToken, workspaceID, userID }) => {
     localStorage.setItem('access_token', accessToken);
     localStorage.setItem('refresh_token', refreshToken);
+    localStorage.setItem('solo_active_workspace_id', workspaceID);
+    localStorage.setItem(`solo_active_workspace_id:${userID}`, workspaceID);
     localStorage.setItem('solo.locale', 'en');
-  }, { accessToken: auth.access_token, refreshToken: auth.refresh_token });
+  }, { accessToken: auth.access_token, refreshToken: auth.refresh_token, workspaceID: activeWorkspaceID, userID: activeUserID });
 }
 
 function rebuildIsolatedE2EStack() {
@@ -418,10 +444,11 @@ function rebuildIsolatedE2EStack() {
     throw new Error('isolated E2E Daemon environment is required before restarting the stack');
   }
   execFileSync('make', [
-    'rebuild',
+    'rebuild', 'SOLO_DAEMON_PROFILE=',
     `DAEMON_SERVER_URL=${apiBase}`,
     `DAEMON_ID=${daemonID}`,
     `SOLO_DAEMON_CREDENTIAL_FILE=${credentialFile}`,
+    `SOLO_DAEMON_STATE_DIR=${process.env.SOLO_DAEMON_STATE_DIR}`,
     'SOLO_COMPUTER_ID=',
     'SOLO_COMPUTER_CREDENTIAL=',
     'SOLO_ENROLLMENT_TOKEN=',
@@ -458,7 +485,7 @@ test.describe('real Agent result delivery contract', () => {
         name: `Delivery E2E ${suffix}`,
         computer_id: localComputer.id,
         model_provider: 'claude',
-        model_name: 'sonnet',
+        model_name: process.env.SOLO_E2E_MODEL ?? 'sonnet',
         system_prompt: 'Always use solo message send for visible replies. When asked to introduce yourself, post the introduction. When the user says SECOND, send exactly SECOND_OK. Do not merely print replies.',
       });
 
@@ -499,11 +526,12 @@ test.describe('real Agent result delivery contract', () => {
     }
   });
 
-  test('sends by Channel name and UUID through a current Run when the provider Session token is stale', async ({ page, request }) => {
+  test('reads and sends by Channel name and UUID through a current Run when the provider Session token is stale', async ({ page, request }) => {
     const auth = await authenticate(request);
     const suffix = Date.now().toString(36);
     let channel: Entity | null = null;
     let agent: Entity | null = null;
+    const readChannels: Entity[] = [];
 
     try {
       channel = await api<Entity>(request, auth.access_token, 'post', '/api/v1/channels', {
@@ -514,13 +542,15 @@ test.describe('real Agent result delivery contract', () => {
         name: `Target Resolution E2E ${suffix}`,
         computer_id: localComputer.id,
         model_provider: 'claude',
-        model_name: 'sonnet',
+        model_name: process.env.SOLO_E2E_MODEL ?? 'sonnet',
         system_prompt: [
           'When introducing yourself, use solo message send to send exactly TARGET_RESOLUTION_READY.',
-          `When a user message contains NAME_TARGET, run exactly: SOLO_AUTH_TOKEN=expired-provider-session-token solo message send -c NAME_TARGET_OK --target '#${channel.name}'`,
+          `When a user message contains NAME_TARGET, first run SOLO_AUTH_TOKEN=expired-provider-session-token solo message read --target '#${channel.name}' --limit 1 > name-read.json and verify the returned messages array has exactly one item containing NAME_TARGET. Only after this actual read succeeds run: SOLO_AUTH_TOKEN=expired-provider-session-token solo message send -c NAME_TARGET_OK --target '#${channel.name}'`,
           'For NAME_TARGET, do not inspect server info, use a Channel UUID, or retry with another target.',
-          `When a user message contains UUID_TARGET, run exactly: SOLO_AUTH_TOKEN=expired-provider-session-token solo message send -c UUID_TARGET_OK --target '${channel.id}'`,
-          'Do not merely print either reply. Send no other visible text.',
+          `When a user message contains UUID_TARGET, first run SOLO_AUTH_TOKEN=expired-provider-session-token solo message read --target '${channel.id}' --limit 100 > uuid-read.json and verify both NAME_TARGET_OK and UUID_TARGET are in the returned messages. Only after this actual read succeeds run: SOLO_AUTH_TOKEN=expired-provider-session-token solo message send -c UUID_TARGET_OK --target '${channel.id}'`,
+          'For CROSS_READ, execute the exact read checks in that user request; an explicitly expected denial is a successful check.',
+          'If an unexpected command fails, stop the Run; do not inspect credentials, environment variables or other directories, and do not start any service.',
+          'Do not merely print replies. Send no other visible text.',
         ].join(' '),
       });
 
@@ -544,6 +574,9 @@ test.describe('real Agent result delivery contract', () => {
         `completed/${introduction.external_session_id}/NAME_TARGET_OK`,
       );
       const byName = channelSessionState(nameTrigger.id);
+      const readWorkspace = join(homedir(), '.solo', 'agents', agent.id, 'workspace');
+      const nameRead = JSON.parse(readFileSync(join(readWorkspace, 'name-read.json'), 'utf8')) as { messages: { id: string }[] };
+      expect(nameRead.messages.map((message) => message.id)).toEqual([nameTrigger.id]);
 
       const uuidTrigger = await api<{ id: string }>(
         request,
@@ -559,6 +592,40 @@ test.describe('real Agent result delivery contract', () => {
         `completed/${byName.external_session_id}/UUID_TARGET_OK`,
       );
       const byUUID = channelSessionState(uuidTrigger.id);
+      const uuidRead = JSON.parse(readFileSync(join(readWorkspace, 'uuid-read.json'), 'utf8')) as { messages: { id: string }[] };
+      expect(uuidRead.messages.map((message) => message.id)).toEqual(expect.arrayContaining([byName.message_id, uuidTrigger.id]));
+
+      for (const label of ['joined', 'private']) {
+        readChannels.push(await api<Entity>(request, auth.access_token, 'post', '/api/v1/channels', { name: `read-${label}-${suffix}` }));
+      }
+      const sentinel = await api<{ id: string }>(request, auth.access_token, 'post', `/api/v1/channels/${readChannels[0].id}/messages`, { content: `CROSS_CHANNEL_SENTINEL_${suffix}` });
+      await api(request, auth.access_token, 'post', `/api/v1/channels/${readChannels[0].id}/members`, { member_type: 'agent', member_id: agent.id });
+      await expect.poll(() => databaseJSON<boolean>(`SELECT to_json(count(*)>0 AND bool_and(finished_at IS NOT NULL)) FROM agent_runs WHERE agent_id='${agent!.id}' AND channel_id='${readChannels[0].id}'`), { timeout: 180000 }).toBe(true);
+      const readScript = join(readWorkspace, 'cross-read.py');
+      writeFileSync(readScript, `import json,os,pathlib,subprocess
+root=pathlib.Path(__file__).resolve().parent
+env=dict(os.environ,SOLO_AUTH_TOKEN='expired-provider-session-token')
+def read(channel):
+ return subprocess.run(['solo','message','read','--target',channel,'--limit','100'],capture_output=True,text=True,env=env,timeout=30)
+joined=read('${readChannels[0].id}')
+assert joined.returncode==0,joined.stderr
+assert '${sentinel.id}' in [m['id'] for m in json.loads(joined.stdout)['messages']]
+(root/'joined-read.json').write_text(joined.stdout)
+denied=read('${readChannels[1].id}')
+(root/'denied-read.txt').write_text(denied.stdout+denied.stderr)
+(root/'denied-read-status.txt').write_text(str(denied.returncode))
+assert denied.returncode!=0 and ('not found' in (denied.stdout+denied.stderr).lower() or '404' in (denied.stdout+denied.stderr))
+subprocess.run(['solo','message','send','--target','${channel.id}','-c','CROSS_READ_OK'],env=env,check=True,timeout=30)
+`);
+      const crossTrigger = await api<{ id: string }>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/messages`, { content: `CROSS_READ: Run exactly once in the foreground: python3 ${readScript}. This authorized script checks a joined channel and an expected denial for a private channel, saves actual outputs and sends its own confirmation. After exit finish the Run; do not retry, repair, read other files or send another message.` });
+      await expect.poll(() => {
+        const state = channelSessionState(crossTrigger.id);
+        return `${state.status}/${state.external_session_id}/${state.message_content}`;
+      }, { timeout: 180000 }).toBe(`completed/${byUUID.external_session_id}/CROSS_READ_OK`);
+      const joinedRead = JSON.parse(readFileSync(join(readWorkspace, 'joined-read.json'), 'utf8')) as { messages: { id: string }[] };
+      expect(joinedRead.messages.map((message) => message.id)).toContain(sentinel.id);
+      expect(readFileSync(join(readWorkspace, 'denied-read-status.txt'), 'utf8').trim()).toMatch(/^[1-9]\d*$/);
+      expect(readFileSync(join(readWorkspace, 'denied-read.txt'), 'utf8')).toMatch(/not found|404/i);
 
       const persisted = databaseJSON<{ name_messages: number; uuid_messages: number; wrong_channels: number }>(`
         SELECT json_build_object(
@@ -575,8 +642,10 @@ test.describe('real Agent result delivery contract', () => {
       await page.goto(`/dashboard?channel=${channel.id}`);
       await expect(page.locator(`[data-message-id="${byName.message_id}"]`)).toContainText('NAME_TARGET_OK');
       await expect(page.locator(`[data-message-id="${byUUID.message_id}"]`)).toContainText('UUID_TARGET_OK');
+      await expect(page.locator(`[data-message-id="${channelSessionState(crossTrigger.id).message_id}"]`)).toContainText('CROSS_READ_OK');
     } finally {
       if (agent) await api(request, auth.access_token, 'delete', `/api/v1/agents/${agent.id}`).catch(() => undefined);
+      for (const readChannel of readChannels) await api(request, auth.access_token, 'delete', `/api/v1/channels/${readChannel.id}`).catch(() => undefined);
       if (channel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
     }
   });
@@ -596,7 +665,7 @@ test.describe('real Agent result delivery contract', () => {
         name: `Template Proxy E2E ${suffix}`,
         computer_id: localComputer.id,
         model_provider: 'claude',
-        model_name: 'sonnet',
+        model_name: process.env.SOLO_E2E_MODEL ?? 'sonnet',
         system_prompt: [
           'Always deliver replies with solo message send.',
           'When introducing yourself, run solo template list --json first. If it succeeds, send exactly TEMPLATE_LIST_FIRST_OK.',
@@ -716,14 +785,14 @@ test.describe('real Agent result delivery contract', () => {
         name: `RouterLead${suffix}`,
         computer_id: localComputer.id,
         model_provider: 'claude',
-        model_name: 'sonnet',
+        model_name: process.env.SOLO_E2E_MODEL ?? 'sonnet',
         system_prompt: `When introducing yourself, use solo message send to send exactly LEAD_READY. For a human message beginning ROUTER_E2E_, use solo message send to send exactly ${leadAck}. Send no other visible text.`,
       });
       worker = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `RouterWorker${suffix}`,
         computer_id: localComputer.id,
         model_provider: 'claude',
-        model_name: 'sonnet',
+        model_name: process.env.SOLO_E2E_MODEL ?? 'sonnet',
         system_prompt: `When introducing yourself, use solo message send to send exactly WORKER_READY. For a human message beginning ROUTER_E2E_, use solo message send to send exactly ${workerAck}. Send no other visible text.`,
       });
       await api(request, auth.access_token, 'post', '/api/v1/agent-relationships', {
@@ -769,15 +838,15 @@ test.describe('real Agent result delivery contract', () => {
       const readRouterState = () => databaseJSON<RouterState>(`
         SELECT json_build_object(
           'runs', COUNT(*) FILTER (WHERE trigger_message_id = '${triggerIDs.routed}'),
-          'lead_runs', COUNT(*) FILTER (WHERE trigger_message_id = '${triggerIDs.routed}' AND agent_id = '${lead.id}'),
-          'worker_runs', COUNT(*) FILTER (WHERE trigger_message_id = '${triggerIDs.routed}' AND agent_id = '${worker.id}'),
+          'lead_runs', COUNT(*) FILTER (WHERE trigger_message_id = '${triggerIDs.routed}' AND agent_id = '${lead!.id}'),
+          'worker_runs', COUNT(*) FILTER (WHERE trigger_message_id = '${triggerIDs.routed}' AND agent_id = '${worker!.id}'),
           'completed', COUNT(*) FILTER (WHERE trigger_message_id = '${triggerIDs.routed}' AND status = 'completed'),
-          'lead_message_id', COALESCE((SELECT id::text FROM messages WHERE channel_id = '${channel.id}' AND sender_id = '${lead.id}' AND content = '${leadAck}' ORDER BY created_at DESC LIMIT 1), ''),
-          'worker_replies', (SELECT COUNT(*) FROM messages WHERE channel_id = '${channel.id}' AND sender_id = '${worker.id}' AND content = '${workerAck}'),
+          'lead_message_id', COALESCE((SELECT id::text FROM messages WHERE channel_id = '${channel!.id}' AND sender_id = '${lead!.id}' AND content = '${leadAck}' ORDER BY created_at DESC LIMIT 1), ''),
+          'worker_replies', (SELECT COUNT(*) FROM messages WHERE channel_id = '${channel!.id}' AND sender_id = '${worker!.id}' AND content = '${workerAck}'),
           'unresolved_runs', COUNT(*) FILTER (WHERE trigger_message_id = '${triggerIDs.unresolved}')
         )::text
           FROM agent_runs
-         WHERE agent_id IN ('${lead.id}', '${worker.id}')
+         WHERE agent_id IN ('${lead!.id}', '${worker!.id}')
       `);
       await expect.poll(readRouterState, { timeout: 180000, intervals: [500, 1000, 2000] }).toMatchObject({
         runs: 1,
@@ -814,7 +883,7 @@ test.describe('real Agent result delivery contract', () => {
         name: `Missing Delivery E2E ${suffix}`,
         computer_id: localComputer.id,
         model_provider: 'claude',
-        model_name: 'sonnet',
+        model_name: process.env.SOLO_E2E_MODEL ?? 'sonnet',
         custom_args: ['--tools', ''],
         system_prompt: 'Do not use tools. Respond with exactly INTERNAL_ONLY as plain text and stop.',
       });
@@ -850,7 +919,7 @@ test.describe('real Agent result delivery contract', () => {
         name: `Daemon Recovery E2E ${suffix}`,
         computer_id: localComputer.id,
         model_provider: 'claude',
-        model_name: 'sonnet',
+        model_name: process.env.SOLO_E2E_MODEL ?? 'sonnet',
         system_prompt: 'Before introducing yourself, you must run the Bash command `sleep 60` and wait for it to finish. Only then use solo message send. Do not skip the wait.',
       });
 
@@ -895,7 +964,7 @@ test.describe('real Agent result delivery contract', () => {
         name: `Channel Session Resume E2E ${suffix}`,
         computer_id: localComputer.id,
         model_provider: 'claude',
-        model_name: 'sonnet',
+        model_name: process.env.SOLO_E2E_MODEL ?? 'sonnet',
         system_prompt: [
           'Always deliver replies with solo message send.',
           'When introducing yourself, send exactly READY.',
@@ -914,7 +983,7 @@ test.describe('real Agent result delivery contract', () => {
         auth.access_token,
         'post',
         `/api/v1/channels/${channel.id}/messages`,
-        { content: `REMEMBER ${secret}` },
+        { content: `REMEMBER ${secret}\nReply with exactly STORED.` },
       );
       await expect.poll(() => {
         const state = channelSessionState(rememberMessage.id);
@@ -929,7 +998,7 @@ test.describe('real Agent result delivery contract', () => {
         auth.access_token,
         'post',
         `/api/v1/channels/${channel.id}/messages`,
-        { content: 'RECALL' },
+        { content: 'RECALL\nReply with exactly RECALLED followed by a space and the memorized value.' },
       );
       await expect.poll(() => {
         const state = channelSessionState(recallMessage.id);
@@ -955,8 +1024,8 @@ test.describe('real Agent result delivery contract', () => {
     const auth = await authenticate(request);
     const suffix = `idle-${Date.now().toString(36)}`;
     const secret = `IDLE_MEMORY_${suffix.toUpperCase()}`;
-    const rememberContent = `REMEMBER ${secret}`;
-    const recallContent = `RECALL ${suffix}`;
+    const rememberContent = `REMEMBER ${secret}\nReply with exactly STORED.`;
+    const recallContent = `RECALL ${suffix}\nReply with exactly RECALLED followed by a space and the memorized value.`;
     let channel: Entity | null = null;
     let agent: Entity | null = null;
 
@@ -969,7 +1038,7 @@ test.describe('real Agent result delivery contract', () => {
         name: `Channel Idle Resume E2E ${suffix}`,
         computer_id: localComputer.id,
         model_provider: 'claude',
-        model_name: 'sonnet',
+        model_name: process.env.SOLO_E2E_MODEL ?? 'sonnet',
         system_prompt: [
           'Always deliver replies with solo message send.',
           'When introducing yourself, send exactly READY.',
@@ -1057,14 +1126,14 @@ test.describe('real Agent result delivery contract', () => {
         name: `FailingWorker${suffix}`,
         computer_id: localComputer.id,
         model_provider: 'claude',
-        model_name: 'sonnet',
+        model_name: process.env.SOLO_E2E_MODEL ?? 'sonnet',
         system_prompt: 'For every Task, first run the Bash command `sleep 60` and wait for it to finish. Only then use solo message send once with the requested target. Do not skip the wait.',
       });
       succeedingAgent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `SuccessfulWorker${suffix}`,
         computer_id: localComputer.id,
         model_provider: 'claude',
-        model_name: 'sonnet',
+        model_name: process.env.SOLO_E2E_MODEL ?? 'sonnet',
         system_prompt: 'For a Task, do not submit or close it. Use solo message send exactly once with the target from the request to deliver a concise completed result.',
       });
       task = await api<TaskEntity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/tasks`, {
@@ -1074,8 +1143,8 @@ test.describe('real Agent result delivery contract', () => {
 
       await expect.poll(() => {
         const state = taskRetryState(task!.id);
-        const active = ['queued', 'running', 'thinking', 'streaming', 'waiting_input', 'waiting_approval'].includes(state.latest_status);
-        return `${state.attempts}/${state.latest_agent_id}/${active}`;
+        const active = ['running', 'thinking', 'streaming', 'waiting_input', 'waiting_approval'].includes(state.latest_status);
+        return `${state.attempts}/${state.latest_agent_id}/${active && state.backend_started && Boolean(state.external_session_id)}`;
       }, { timeout: 120000, intervals: [500, 1000, 2000] }).toBe(`1/${failingAgent.id}/true`);
       const interruptedRunID = taskRetryState(task.id).run_id;
 
@@ -1120,7 +1189,7 @@ test.describe('real Agent result delivery contract', () => {
         name: `Misconfigured Worker ${suffix}`,
         computer_id: localComputer.id,
         model_provider: 'claude',
-        model_name: 'sonnet',
+        model_name: process.env.SOLO_E2E_MODEL ?? 'sonnet',
         custom_args: ['--solo-e2e-intentionally-invalid-flag'],
         system_prompt: 'This Task is intentionally used to verify configuration failure handling.',
       });
@@ -1139,6 +1208,8 @@ test.describe('real Agent result delivery contract', () => {
       await expect(page.getByText(/配置问题未自动恢复/).first()).toBeVisible();
       await page.locator('.relationship-flow .react-flow__node').filter({ hasText: agent.name }).click();
       await page.getByRole('tab', { name: 'Run history' }).click();
+      await page.getByRole('button', { name: 'Tasks', exact: true }).click();
+      await page.getByRole('button').filter({ has: page.getByText(`#${task.task_number} ${task.title}`, { exact: true }) }).click();
       await expect(page.getByText('Configuration is missing or invalid')).toBeVisible();
       await expect(page.getByText('Waiting for human handling').first()).toBeVisible();
       await expect(page.getByText('Task creator')).toBeVisible();

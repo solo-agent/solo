@@ -1,0 +1,22 @@
+{
+  "stats": {
+    "startTime": "2026-09-11T09:41:17.788Z",
+    "duration": 114591.781,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "results": [
+    {
+      "title": "real Agent edits a managed worktree; Runtime verifies the exact commit without a reviewer model",
+      "status": "passed",
+      "duration_ms": 114145,
+      "retry": 0,
+      "attachments": [
+        "evidence/code-gate/code-gate-verified.png"
+      ],
+      "errors": []
+    }
+  ]
+}

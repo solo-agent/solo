@@ -99,6 +99,8 @@ func runCLI(args []string) int {
 	}
 
 	switch args[0] {
+	case "work":
+		handleAgentWork(args[1:], baseURL, token)
 	case "task":
 		handleTask(args[1:], baseURL, token)
 	case "message":
@@ -182,18 +184,97 @@ func handleTemplate(args []string, baseURL, token string) {
 
 func handleTeam(args []string, baseURL, token string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "solo: error: team subcommand required: form")
+		fmt.Fprintln(os.Stderr, "solo: error: team subcommand required: form, candidates, agreements or propose-agreement")
 		printUsage()
 		doExit(exitUsage)
 	}
 	switch args[0] {
 	case "form":
 		handleTeamForm(args[1:], baseURL, token)
+	case "candidates":
+		handleTeamCandidates(args[1:], baseURL, token)
+	case "agreements", "propose-agreement":
+		handleTeamAgreement(args[0], args[1:], baseURL, token)
 	default:
 		fmt.Fprintf(os.Stderr, "solo: error: unknown team subcommand %q\n", args[0])
 		printUsage()
 		doExit(exitUsage)
 	}
+}
+
+func handleTeamAgreement(action string, args []string, baseURL, token string) {
+	fs := flag.NewFlagSet("team "+action, flag.ExitOnError)
+	channel := fs.String("c", "", "Channel ID or name")
+	file := fs.String("file", "", "Exact relationship JSON proposal (- reads stdin)")
+	fs.Parse(args)
+	if *channel == "" || (action == "propose-agreement" && *file == "") {
+		fmt.Fprintln(os.Stderr, "solo: team agreements requires -c; propose-agreement also requires --file")
+		doExit(exitUsage)
+		return
+	}
+	channelID, err := resolveChannelParam(baseURL, token, *channel)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		doExit(exitBusiness)
+		return
+	}
+	method, proxyAction := http.MethodGet, "team_agreements"
+	var body []byte
+	if action == "propose-agreement" {
+		method, proxyAction = http.MethodPost, "team_propose_agreement"
+		body = readTaskJSON(*file)
+	}
+	status, response, err := proxyRequest(proxyAction, channelID, string(body), "", token, 0, "", "")
+	if err != nil && allowDirectFallback() {
+		status, response, err = doHTTP(method, baseURL+"/api/v1/channels/"+channelID+"/team-agreements", token, body)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		doExit(exitUsage)
+		return
+	}
+	if status >= 400 {
+		handleNonProxyHTTPError(status, response)
+		return
+	}
+	fmt.Println(string(response))
+}
+
+func handleTeamCandidates(args []string, baseURL, token string) {
+	fs := flag.NewFlagSet("team candidates", flag.ExitOnError)
+	var channel, message, template string
+	fs.StringVar(&channel, "c", "", "Lucy source Channel")
+	fs.StringVar(&channel, "source-channel", "", "Lucy source Channel")
+	fs.StringVar(&message, "m", "", "Owner source message")
+	fs.StringVar(&message, "source-message", "", "Owner source message")
+	fs.StringVar(&template, "template", "", "Official template ID")
+	fs.Parse(args)
+	if channel == "" || message == "" || template == "" {
+		fmt.Fprintln(os.Stderr, "solo: team candidates requires -c, -m and --template")
+		doExit(exitUsage)
+		return
+	}
+	channelID, err := resolveChannelParam(baseURL, token, channel)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		doExit(exitBusiness)
+		return
+	}
+	body, _ := json.Marshal(map[string]any{"source_channel_id": channelID, "source_message_id": message, "plan": map[string]string{"template_id": template}})
+	status, response, err := proxyRequest("team_candidates", channelID, string(body), "", token, 0, "", "")
+	if (err != nil || status == http.StatusBadGateway || status == http.StatusGatewayTimeout) && allowDirectFallback() {
+		status, response, err = doHTTP(http.MethodPost, baseURL+"/api/v1/team-formations/candidates", token, body)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		doExit(exitUsage)
+		return
+	}
+	if status >= 400 {
+		handleNonProxyHTTPError(status, response)
+		return
+	}
+	fmt.Println(string(response))
 }
 
 func handleTeamForm(args []string, baseURL, token string) {
@@ -399,29 +480,20 @@ func handleArtifactPublish(args []string, baseURL, token string) {
 
 // proxyRequest calls the daemon proxy instead of the server API directly.
 // This keeps local thinking separate from channel communication.
-func proxyRequest(action, channelID, content, threadID, token string, taskNumber int, status, clientMsgID string) (int, []byte, error) {
-	daemonURL := os.Getenv("SOLO_DAEMON_URL")
-	if daemonURL == "" {
-		daemonURL = "http://127.0.0.1:8081"
-	}
-	agentID := os.Getenv("SOLO_AGENT_ID")
-	if agentID == "" {
-		return 0, nil, fmt.Errorf("SOLO_AGENT_ID not set")
-	}
+type messageFreshnessConfirmation struct {
+	KeepAfterSeq int64
+	Reason       string
+}
+
+func proxyRequest(action, channelID, content, threadID, token string, taskNumber int, status, clientMsgID string, confirmations ...messageFreshnessConfirmation) (int, []byte, error) {
 	body := map[string]interface{}{
-		"agent_id": agentID, "action": action, "channel_id": channelID,
+		"action": action, "channel_id": channelID,
 	}
 	if content != "" {
 		body["content"] = content
 	}
 	if threadID != "" {
 		body["thread_id"] = threadID
-	}
-	if nodeID := os.Getenv("SOLO_NODE_ID"); nodeID != "" {
-		body["thinking_node_id"] = nodeID
-	}
-	if runID := os.Getenv("SOLO_RUN_ID"); runID != "" {
-		body["run_id"] = runID
 	}
 	if taskNumber > 0 {
 		body["task_number"] = taskNumber
@@ -432,12 +504,36 @@ func proxyRequest(action, channelID, content, threadID, token string, taskNumber
 	if clientMsgID != "" {
 		body["client_msg_id"] = clientMsgID
 	}
+	if len(confirmations) > 0 && confirmations[0].KeepAfterSeq > 0 {
+		body["keep_after_seq"] = confirmations[0].KeepAfterSeq
+		body["freshness_reason"] = confirmations[0].Reason
+	}
 	// For task_claim with -m, the message_id is passed in the content field.
 	// Forward it as task_id so the proxy can construct the correct URL path.
 	// Only when -n is NOT also specified (taskNumber <= 0) — -n takes priority.
 	if (action == "task_claim" || action == "task_update" || action == "task_unclaim") && len(content) > 0 && taskNumber <= 0 {
 		body["task_id"] = content
 	}
+	return proxyRequestBody(body)
+}
+
+func proxyRequestBody(body map[string]interface{}) (int, []byte, error) {
+	daemonURL := os.Getenv("SOLO_DAEMON_URL")
+	if daemonURL == "" {
+		daemonURL = "http://127.0.0.1:8081"
+	}
+	agentID := os.Getenv("SOLO_AGENT_ID")
+	if agentID == "" {
+		return 0, nil, fmt.Errorf("SOLO_AGENT_ID not set")
+	}
+	body["agent_id"] = agentID
+	if nodeID := os.Getenv("SOLO_NODE_ID"); nodeID != "" {
+		body["thinking_node_id"] = nodeID
+	}
+	if runID := os.Getenv("SOLO_RUN_ID"); runID != "" {
+		body["run_id"] = runID
+	}
+	action, _ := body["action"].(string)
 	reqBody, _ := json.Marshal(body)
 	url := daemonURL + "/internal/daemon/proxy"
 	req, err := http.NewRequest("POST", url, bytes.NewReader(reqBody))
@@ -477,7 +573,7 @@ func handleTask(args []string, baseURL, token string) {
 		handleTaskCreate(args[1:], baseURL, token)
 	case "unclaim":
 		handleTaskUnclaim(args[1:], baseURL, token)
-	case "submit", "accept", "reject", "close", "reopen":
+	case "submit", "accept", "reject", "close", "reopen", "review", "submissions", "get", "worktree", "wait", "waits", "resolve-wait":
 		handleTaskLifecycle(args[1:], baseURL, token, args[0])
 	default:
 		fmt.Fprintf(os.Stderr, "solo: error: unknown task subcommand %q\n", args[0])
@@ -549,7 +645,7 @@ func handleTaskList(args []string, baseURL, token string) {
 // --- task claim ---
 
 func handleTaskClaim(args []string, baseURL, token string) {
-	var channel, messageID string
+	var channel, messageID, contractFile string
 	var number int
 	fs := flag.NewFlagSet("task claim", flag.ExitOnError)
 	fs.StringVar(&channel, "c", "", "Channel ID or #name")
@@ -558,6 +654,7 @@ func handleTaskClaim(args []string, baseURL, token string) {
 	fs.IntVar(&number, "number", 0, "Task number")
 	fs.StringVar(&messageID, "m", "", "Message ID (from msg= header)")
 	fs.StringVar(&messageID, "message-id", "", "Message ID (from msg= header)")
+	fs.StringVar(&contractFile, "contract-file", "", "Initial requirements and human result confirmation for a source message")
 	fs.Parse(args)
 
 	if channel == "" {
@@ -584,13 +681,18 @@ func handleTaskClaim(args []string, baseURL, token string) {
 		taskID = strconv.Itoa(number)
 	}
 
+	var claimBody []byte
+	if contractFile != "" {
+		claimBody, _ = json.Marshal(map[string]json.RawMessage{"contract": json.RawMessage(readTaskJSON(contractFile))})
+	}
+
 	// Try daemon proxy first (uses fresh JWT).
 	// Pass messageID via taskID parameter so the proxy uses it in the URL path.
-	statusCode, body, err := proxyRequest("task_claim", channelID, taskID, "", token, number, "", "")
+	statusCode, body, err := proxyRequestBody(map[string]interface{}{"action": "task_claim", "channel_id": channelID, "task_id": taskID, "task_number": number, "content": string(claimBody)})
 	if err != nil && allowDirectFallback() {
 		// Fallback to direct API
 		apiURL := fmt.Sprintf("%s/api/v1/channels/%s/tasks/%s/claim", baseURL, channelID, taskID)
-		statusCode, body, err = doHTTP(http.MethodPost, apiURL, token, nil)
+		statusCode, body, err = doHTTP(http.MethodPost, apiURL, token, claimBody)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
@@ -656,7 +758,7 @@ func handleTaskUpdate(args []string, baseURL, token string) {
 // --- task create ---
 
 func handleTaskCreate(args []string, baseURL, token string) {
-	var channel, title, description, priority, assignee string
+	var channel, title, description, priority, assignee, contractFile string
 	var parent int
 	fs := flag.NewFlagSet("task create", flag.ExitOnError)
 	fs.StringVar(&channel, "c", "", "Channel ID or #name (required)")
@@ -666,6 +768,7 @@ func handleTaskCreate(args []string, baseURL, token string) {
 	fs.StringVar(&priority, "priority", "", "Task priority: p0|p1|p2|p3")
 	fs.StringVar(&assignee, "assignee", "", "Assign directly to an Agent ID or name")
 	fs.IntVar(&parent, "parent", 0, "Parent task number")
+	fs.StringVar(&contractFile, "contract-file", "", "JSON requirements and gate file")
 	fs.Parse(args)
 
 	if channel == "" {
@@ -691,7 +794,7 @@ func handleTaskCreate(args []string, baseURL, token string) {
 		doExit(exitBusiness)
 	}
 
-	bodyMap := map[string]string{
+	bodyMap := map[string]any{
 		"title":       title,
 		"description": description,
 		"priority":    priority,
@@ -710,6 +813,9 @@ func handleTaskCreate(args []string, baseURL, token string) {
 		bodyMap["parent_task_id"] = parentID
 	}
 
+	if contractFile != "" {
+		bodyMap["contract"] = json.RawMessage(readTaskJSON(contractFile))
+	}
 	reqBody, _ := json.Marshal(bodyMap)
 	url := fmt.Sprintf("%s/api/v1/channels/%s/tasks", baseURL, channelID)
 	statusCode, body, err := doHTTP(http.MethodPost, url, token, reqBody)
@@ -774,7 +880,7 @@ func handleTaskUnclaim(args []string, baseURL, token string) {
 }
 
 func handleTaskLifecycle(args []string, baseURL, token, action string) {
-	var channel, reason string
+	var channel, reason, file string
 	var number int
 	fs := flag.NewFlagSet("task "+action, flag.ExitOnError)
 	fs.StringVar(&channel, "c", "", "Channel ID or #name (required)")
@@ -783,6 +889,7 @@ func handleTaskLifecycle(args []string, baseURL, token, action string) {
 	fs.IntVar(&number, "number", 0, "Task number (required)")
 	fs.StringVar(&reason, "r", "", "Reason for reject")
 	fs.StringVar(&reason, "reason", "", "Reason for reject")
+	fs.StringVar(&file, "file", "", "JSON request file for versioned submit or review (- reads stdin)")
 	fs.Parse(args)
 
 	if channel == "" {
@@ -809,7 +916,24 @@ func handleTaskLifecycle(args []string, baseURL, token, action string) {
 	if action == "reject" {
 		reqBody, _ = json.Marshal(map[string]string{"reason": strings.TrimSpace(reason)})
 	}
-	statusCode, body, err := doHTTP(http.MethodPost, url, token, reqBody)
+	if file != "" {
+		reqBody = readTaskJSON(file)
+	}
+	method := http.MethodPost
+	if action == "submissions" || action == "get" || action == "waits" {
+		method = http.MethodGet
+	}
+	if action == "get" {
+		url = strings.TrimSuffix(url, "/get")
+	}
+	proxyAction := "task_lifecycle"
+	if action == "worktree" {
+		proxyAction = "task_worktree"
+	}
+	statusCode, body, err := proxyRequest(proxyAction, channelID, string(reqBody), "", token, number, action, "")
+	if err != nil && action != "worktree" && allowDirectFallback() {
+		statusCode, body, err = doHTTP(method, url, token, reqBody)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
 		doExit(exitUsage)
@@ -850,11 +974,18 @@ func handleMessage(args []string, baseURL, token string) {
 func handleMessageSend(args []string, baseURL, token string) {
 	var content, target string
 	fs := flag.NewFlagSet("message send", flag.ExitOnError)
+	keepAfterSeq := fs.Int64("keep-after-seq", 0, "Keep the held draft after reviewing this exact seen sequence")
+	freshnessReason := fs.String("freshness-reason", "", "Why the held draft remains appropriate")
 	fs.StringVar(&content, "c", "", "Message content (-c or stdin)")
 	fs.StringVar(&content, "content", "", "Message content (-c or stdin)")
 	fs.StringVar(&target, "target", "", "Target: '#channel', 'dm:@peer', '#channel:shortid', or 'dm:@peer:shortid'")
 	fs.Parse(args)
 
+	if *keepAfterSeq < 0 || (*keepAfterSeq > 0) != (strings.TrimSpace(*freshnessReason) != "") {
+		fmt.Fprintln(os.Stderr, "solo: --keep-after-seq and --freshness-reason must be provided together")
+		doExit(exitUsage)
+		return
+	}
 	// If no -c flag, read from stdin( heredoc support)
 	if content == "" {
 		stdinBytes, _ := io.ReadAll(os.Stdin)
@@ -877,7 +1008,11 @@ func handleMessageSend(args []string, baseURL, token string) {
 	}
 
 	clientMsgID := uuid.NewString()
-	reqBody := map[string]string{"content": content, "client_msg_id": clientMsgID}
+	reqBody := map[string]any{"content": content, "client_msg_id": clientMsgID}
+	if *keepAfterSeq > 0 {
+		reqBody["keep_after_seq"] = *keepAfterSeq
+		reqBody["freshness_reason"] = *freshnessReason
+	}
 	if threadID != "" {
 		reqBody["thread_id"] = threadID
 	}
@@ -890,7 +1025,7 @@ func handleMessageSend(args []string, baseURL, token string) {
 
 	body, _ := json.Marshal(reqBody)
 	// Try daemon proxy first
-	statusCode, respBody, err := proxyRequest("message_send", channelID, content, threadID, token, 0, "", clientMsgID)
+	statusCode, respBody, err := proxyRequest("message_send", channelID, content, threadID, token, 0, "", clientMsgID, messageFreshnessConfirmation{KeepAfterSeq: *keepAfterSeq, Reason: *freshnessReason})
 	if (err != nil || statusCode == http.StatusBadGateway || statusCode == http.StatusGatewayTimeout) && allowDirectFallback() {
 		// Fallback to direct API
 		url := fmt.Sprintf("%s/api/v1/channels/%s/messages", baseURL, channelID)
@@ -1114,6 +1249,20 @@ func handleMessageRead(args []string, baseURL, token string) {
 		doExit(exitUsage)
 	}
 
+	options, _ := json.Marshal(map[string]any{"limit": limit, "before": before, "after": after, "is_dm": isDM})
+	statusCode, body, proxyErr := proxyRequest("message_read", channelID, string(options), threadMsgID, token, 0, "", "")
+	if proxyErr == nil {
+		if statusCode >= 400 {
+			handleNonProxyHTTPError(statusCode, body)
+		}
+		fmt.Println(string(body))
+		doExit(exitOK)
+	}
+	if !allowDirectFallback() {
+		fmt.Fprintf(os.Stderr, "solo: error: daemon request failed: %v\n", proxyErr)
+		doExit(exitUsage)
+	}
+
 	// Thread target: read specific thread messages
 	if threadMsgID != "" {
 		channelBase := "/api/v1/channels"
@@ -1154,7 +1303,7 @@ func handleMessageRead(args []string, baseURL, token string) {
 		requestURL += "&thinking_node_id=" + url.QueryEscape(nodeID)
 	}
 
-	statusCode, body, err := doHTTP(http.MethodGet, requestURL, token, nil)
+	statusCode, body, err = doHTTP(http.MethodGet, requestURL, token, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "solo: error: request failed: %v\n", err)
 		doExit(exitUsage)
@@ -1462,6 +1611,7 @@ func printMessageSendResult(body []byte, channelID, threadID string) {
 		Reason              string `json:"reason"`
 		NewMessageCount     int    `json:"new_message_count"`
 		OmittedMessageCount int    `json:"omitted_message_count"`
+		SeenUpToSeq         int64  `json:"seen_up_to_seq"`
 		HeldMessages        []struct {
 			Seq        int64  `json:"seq"`
 			SenderType string `json:"sender_type"`
@@ -1473,12 +1623,13 @@ func printMessageSendResult(body []byte, channelID, threadID string) {
 	if json.Unmarshal(body, &held) == nil && held.State == "held" {
 		fmt.Println("HELD: Your original message was not sent because newer messages arrived while you were working.")
 		fmt.Println("Review the original request, the message you intended to send, and the new messages below. Re-evaluate the situation and take the action you judge most appropriate. Do not stop by default, and do not repeat the original message without reconsidering it. If you still need to send something, call `solo message send` again.")
+		fmt.Printf("Seen up to sequence: %d. To explicitly retain this draft, use --keep-after-seq %d --freshness-reason '<why still appropriate>'. Newer messages will still hold the send. To discard it, read its SHA256 with solo work list, then solo work discard --file <json containing run_id, sha256, reason>.\n", held.SeenUpToSeq, held.SeenUpToSeq)
 		fmt.Println("\nNew messages:")
 		for _, message := range held.HeldMessages {
 			fmt.Printf("[seq=%d time=%s type=%s] @%s: %s\n", message.Seq, message.CreatedAt, message.SenderType, message.SenderName, message.Content)
 		}
 		if held.OmittedMessageCount > 0 {
-			fmt.Printf("%d earlier unseen message(s) omitted; %d newer message(s) were detected in total.\n", held.OmittedMessageCount, held.NewMessageCount)
+			fmt.Printf("%d later unseen message(s) remain; %d newer message(s) were detected in total. Your next send will check the next page before sending.\n", held.OmittedMessageCount, held.NewMessageCount)
 		}
 		return
 	}
@@ -1571,7 +1722,18 @@ func printUsage() {
   solo task update   -n <number> -c <channel_id> -s <status>
   solo task create   -c <channel_id> --title <title> [--description <desc>] [--priority <p0-p3>] [--parent <n>] [--assignee <agent>]
   solo task unclaim  -n <number> -c <channel_id>
-  solo task submit   -n <number> -c <channel_id>
+  solo task submit   -n <number> -c <channel_id> [--file <json|->]
+  solo task wait     -n <number> -c <channel_id> --file <json|->
+  solo task waits    -n <number> -c <channel_id>
+  solo task resolve-wait -n <number> -c <channel_id> --file <json|->
+  solo task get|submissions|worktree -n <number> -c <channel_id>
+  solo task review   -n <number> -c <channel_id> --file <json|->
+  solo team agreements -c <channel_id>
+  solo team propose-agreement -c <channel_id> --file <json|->
+  solo work list
+  solo work mark|attention|discard|propose-revision --file <json|->
+  solo work revisions|selections
+  solo work start-selection --file <json|->
   solo task accept   -n <number> -c <channel_id>
   solo task reject   -n <number> -c <channel_id> --reason <reason>
   solo task close    -n <number> -c <channel_id>
@@ -1580,6 +1742,7 @@ func printUsage() {
   solo channel members -c <channel_id> [--output json]
   solo channel join  --target <#channel-name>
   solo template list --json
+  solo team candidates -c <lucy_channel> -m <owner_message> --template <id>
   solo team form     -c <channel_id> -m <message_id> [--plan <file>] [--output json]
   solo thread unfollow --target <#channel:shortid>
   solo daemon connect --server <url> --computer-id <id> --token <token> [--profile <name>]
@@ -1591,4 +1754,56 @@ func printUsage() {
 Environment:
   SOLO_AUTH_TOKEN  JWT authentication token (required, falls back to SOLO_TOKEN)
   SOLO_API_URL     API base URL (default: http://localhost:8080)`)
+}
+
+func readTaskJSON(file string) []byte {
+	var data []byte
+	var err error
+	if file == "-" {
+		data, err = io.ReadAll(io.LimitReader(os.Stdin, (6<<20)+1))
+	} else {
+		data, err = os.ReadFile(file)
+	}
+	if err != nil || !json.Valid(data) || len(data) > 6<<20 {
+		fmt.Fprintln(os.Stderr, "solo: invalid JSON file (maximum 6 MiB)")
+		doExit(exitUsage)
+	}
+	return data
+}
+
+// Work obligations persist across Runs and Sessions until explicitly resolved.
+func handleAgentWork(args []string, baseURL, token string) {
+	if len(args) == 0 || (args[0] != "list" && args[0] != "mark" && args[0] != "attention" && args[0] != "discard" && args[0] != "revisions" && args[0] != "propose-revision" && args[0] != "selections" && args[0] != "start-selection") {
+		fmt.Fprintln(os.Stderr, "solo work list | mark --file <json> | attention --file <json> | discard --file <json> | revisions | propose-revision --file <json> | selections | start-selection --file <json>")
+		doExit(exitUsage)
+		return
+	}
+	fs := flag.NewFlagSet("work "+args[0], flag.ExitOnError)
+	file := fs.String("file", "", "JSON request file")
+	channel := fs.String("c", "", "Current channel ID")
+	fs.Parse(args[1:])
+	var content string
+	if args[0] != "list" && args[0] != "revisions" && args[0] != "selections" {
+		if *file == "" {
+			fmt.Fprintln(os.Stderr, "solo: --file is required")
+			doExit(exitUsage)
+			return
+		}
+		content = string(readTaskJSON(*file))
+	}
+	channelID := *channel
+	if channelID == "" {
+		channelID = os.Getenv("SOLO_CHANNEL_ID")
+	}
+	status, body, err := proxyRequest("agent_work", channelID, content, "", token, 0, args[0], "")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		doExit(exitBusiness)
+		return
+	}
+	if status >= 400 {
+		handleNonProxyHTTPError(status, body)
+	}
+	fmt.Println(string(body))
+	doExit(exitOK)
 }

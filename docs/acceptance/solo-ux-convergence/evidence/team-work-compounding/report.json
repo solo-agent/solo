@@ -1,0 +1,20 @@
+{
+  "stats": {
+    "startTime": "2026-09-11T09:32:50.637Z",
+    "duration": 213214.345,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "results": [
+    {
+      "title": "joint owners authorize existing Agents; real work consumes seven corrections and retains its obligation",
+      "status": "passed",
+      "duration_ms": 212712,
+      "retry": 0,
+      "attachments": [],
+      "errors": []
+    }
+  ]
+}

@@ -261,9 +261,35 @@ func (s *BudgetService) ReserveRunTx(ctx context.Context, tx pgx.Tx, runID, agen
 			reserved = candidate
 		}
 	}
+	// Selection uses the same ledger and locks, but its allowance never resets monthly.
+	var selectionLimit int64
+	err = tx.QueryRow(ctx, `SELECT token_budget FROM agent_selection_trials WHERE agent_id=$1`, agentID).Scan(&selectionLimit)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if selectionLimit > 0 {
+		var used int64
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(COALESCE(actual_tokens,reserved_tokens)),0) FROM agent_run_token_usage WHERE agent_id=$1`, agentID).Scan(&used); err != nil {
+			return err
+		}
+		if used >= selectionLimit {
+			return &BudgetStartError{Scope: "selection", Period: "lifetime", Reason: "Selection Token budget is exhausted"}
+		}
+		selectionReserve := min(systemRunReserveTokens, selectionLimit-used)
+		if selectionReserve > reserved {
+			reserved = selectionReserve
+		}
+	}
+	budgetContext := map[string]int64{}
+	for _, policy := range plan.Policies {
+		budgetContext[policy.ScopeType+"_month"] = policy.MonthlyLimitTokens
+	}
+	if selectionLimit > 0 {
+		budgetContext["selection_lifetime"] = selectionLimit
+	}
 	_, err = tx.Exec(ctx, `
-		INSERT INTO agent_run_token_usage (run_id, owner_id, agent_id, state, reserved_tokens)
-		VALUES ($1, $2, $3, 'pending', $4)`, runID, plan.OwnerID, agentID, reserved)
+		INSERT INTO agent_run_token_usage (run_id, owner_id, agent_id, state, reserved_tokens, budget_context)
+		VALUES ($1, $2, $3, 'pending', $4, $5)`, runID, plan.OwnerID, agentID, reserved, budgetContext)
 	if err != nil {
 		return err
 	}

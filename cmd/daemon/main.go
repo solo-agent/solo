@@ -51,7 +51,7 @@ var (
 const contextRolloverCapability = "context_rollover_v1"
 
 func daemonCapabilities() []string {
-	return []string{"llm", contextRolloverCapability}
+	return []string{"llm", contextRolloverCapability, agent.CodeGateCapability, agent.RunSnapshotCapability, skillloader.BundleCapability}
 }
 
 func main() {

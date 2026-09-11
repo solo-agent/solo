@@ -59,3 +59,34 @@ func (h *TeamFormationHandler) Form(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, status, result)
 }
+
+func (h *TeamFormationHandler) Candidates(w http.ResponseWriter, r *http.Request) {
+	callerID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, 401, "not authenticated")
+		return
+	}
+	var req service.TeamFormationRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTeamFormationBodyBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		writeError(w, 400, "invalid candidate request")
+		return
+	}
+	result, err := h.svc.Candidates(r.Context(), callerID, req)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrTeamFormationForbidden):
+			writeError(w, 403, err.Error())
+		case errors.Is(err, service.ErrTeamFormationSourceNotFound):
+			writeError(w, 404, err.Error())
+		case errors.Is(err, service.ErrInvalidTeamFormationPlan):
+			writeError(w, 400, err.Error())
+		default:
+			slog.Error("team candidates failed", "error", err)
+			writeError(w, 500, "failed to inspect candidates")
+		}
+		return
+	}
+	writeJSON(w, 200, result)
+}

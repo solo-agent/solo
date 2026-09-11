@@ -65,67 +65,77 @@ var allowedTransitions = map[string]map[string]bool{
 }
 
 var (
-	ErrTaskNotFound          = errors.New("task not found")
-	ErrTaskInvalidStatus     = errors.New("invalid task status")
-	ErrTaskInvalidTransition = errors.New("invalid task status transition")
-	ErrTaskNotChannelMember  = errors.New("user is not a channel member")
-	ErrTaskAlreadyClaimed    = errors.New("task is already claimed by another agent")
-	ErrTaskInTerminalState   = errors.New("task is in a terminal state and cannot be claimed")
-	ErrTaskNotClaimable      = errors.New("task status does not allow claiming")
-	ErrTaskNotClaimer        = errors.New("you are not the claimer of this task")
-	ErrTaskAssigneeNotFound  = errors.New("task assignee not found in channel")
-	ErrTaskAssigneeAmbiguous = errors.New("task assignee is ambiguous")
-	ErrTaskNotCreator        = errors.New("you are not the creator of this task")
-	ErrTaskHumanOnly         = errors.New("this task action is human-only")
-	ErrTaskNotSubmittable    = errors.New("task is not ready to submit")
-	ErrTaskNotReviewable     = errors.New("task is not in review")
-	ErrTaskHasOpenSubtasks   = errors.New("task has unfinished subtasks")
-	ErrTaskReasonRequired    = errors.New("reject reason is required")
-	ErrTaskLifecyclePatch    = errors.New("task lifecycle status changes must use lifecycle endpoints")
+	ErrTaskNotFound           = errors.New("task not found")
+	ErrTaskReferenceAmbiguous = errors.New("message prefix matches more than one message; use a longer ID")
+	ErrTaskSourceExists       = errors.New("this message already has a task")
+	ErrTaskInvalidStatus      = errors.New("invalid task status")
+	ErrTaskInvalidTransition  = errors.New("invalid task status transition")
+	ErrTaskNotChannelMember   = errors.New("user is not a channel member")
+	ErrTaskAlreadyClaimed     = errors.New("task is already claimed by another agent")
+	ErrTaskInTerminalState    = errors.New("task is in a terminal state and cannot be claimed")
+	ErrTaskNotClaimable       = errors.New("task status does not allow claiming")
+	ErrTaskNotClaimer         = errors.New("you are not the claimer of this task")
+	ErrTaskAssigneeNotFound   = errors.New("task assignee not found in channel")
+	ErrTaskAssigneeAmbiguous  = errors.New("task assignee is ambiguous")
+	ErrTaskNotCreator         = errors.New("you are not the creator of this task")
+	ErrTaskHumanOnly          = errors.New("this task action is human-only")
+	ErrTaskNotSubmittable     = errors.New("task is not ready to submit")
+	ErrTaskNotReviewable      = errors.New("task is not in review")
+	ErrTaskHasOpenSubtasks    = errors.New("task has unfinished subtasks")
+	ErrTaskReasonRequired     = errors.New("reject reason is required")
+	ErrTaskLifecyclePatch     = errors.New("task lifecycle status changes must use lifecycle endpoints")
 )
 
 // Task represents a task in a channel.
 type Task struct {
-	ID               string     `json:"id"`
-	TaskNumber       int        `json:"task_number"`
-	ChannelID        string     `json:"channel_id"`
-	CreatorID        string     `json:"creator_id"`
-	CreatorName      string     `json:"creator_name,omitempty"`
-	Title            string     `json:"title"`
-	Description      string     `json:"description,omitempty"`
-	Status           string     `json:"status"`
-	ClaimerID        string     `json:"claimer_id,omitempty"`
-	ClaimerName      string     `json:"claimer_name,omitempty"`
-	ClaimerDeleted   bool       `json:"claimer_deleted"`
-	Priority         string     `json:"priority"`
-	DueDate          *time.Time `json:"due_date,omitempty"`
-	MessageID        string     `json:"message_id,omitempty"`
-	ParentTaskID     *string    `json:"parent_task_id,omitempty"`
-	SubtaskCount     int        `json:"subtask_count,omitempty"`
-	DoneSubtaskCount int        `json:"done_subtask_count,omitempty"`
-	ArtifactStatus   string     `json:"artifact_status,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	Waiting             bool          `json:"waiting"`
+	CanReview           bool          `json:"can_review"`
+	Version             int64         `json:"version"`
+	Contract            *TaskContract `json:"contract,omitempty"`
+	CurrentSubmissionID string        `json:"current_submission_id,omitempty"`
+	ID                  string        `json:"id"`
+	TaskNumber          int           `json:"task_number"`
+	ChannelID           string        `json:"channel_id"`
+	CreatorID           string        `json:"creator_id"`
+	CreatorName         string        `json:"creator_name,omitempty"`
+	Title               string        `json:"title"`
+	Description         string        `json:"description,omitempty"`
+	Status              string        `json:"status"`
+	ClaimerID           string        `json:"claimer_id,omitempty"`
+	ClaimerName         string        `json:"claimer_name,omitempty"`
+	ClaimerDeleted      bool          `json:"claimer_deleted"`
+	Priority            string        `json:"priority"`
+	DueDate             *time.Time    `json:"due_date,omitempty"`
+	MessageID           string        `json:"message_id,omitempty"`
+	ParentTaskID        *string       `json:"parent_task_id,omitempty"`
+	SubtaskCount        int           `json:"subtask_count,omitempty"`
+	DoneSubtaskCount    int           `json:"done_subtask_count,omitempty"`
+	ArtifactStatus      string        `json:"artifact_status,omitempty"`
+	CreatedAt           time.Time     `json:"created_at"`
+	UpdatedAt           time.Time     `json:"updated_at"`
 }
 
 // TaskCreateRequest contains the fields needed to create a task.
 type TaskCreateRequest struct {
-	Title        string     `json:"title"`
-	Description  string     `json:"description,omitempty"`
-	Priority     string     `json:"priority,omitempty"`
-	DueDate      *time.Time `json:"due_date,omitempty"`
-	MessageID    string     `json:"message_id,omitempty"`
-	ParentTaskID string     `json:"parent_task_id,omitempty"`
-	Assignee     string     `json:"assignee,omitempty"`
+	Contract     *TaskContract `json:"contract,omitempty"`
+	Title        string        `json:"title"`
+	Description  string        `json:"description,omitempty"`
+	Priority     string        `json:"priority,omitempty"`
+	DueDate      *time.Time    `json:"due_date,omitempty"`
+	MessageID    string        `json:"message_id,omitempty"`
+	ParentTaskID string        `json:"parent_task_id,omitempty"`
+	Assignee     string        `json:"assignee,omitempty"`
 }
 
 // TaskUpdateRequest contains the fields that can be updated on a task.
 type TaskUpdateRequest struct {
-	Title       *string    `json:"title,omitempty"`
-	Description *string    `json:"description,omitempty"`
-	Status      *string    `json:"status,omitempty"`
-	Priority    *string    `json:"priority,omitempty"`
-	DueDate     *time.Time `json:"due_date,omitempty"`
+	Contract            *TaskContract `json:"contract,omitempty"`
+	ExpectedTaskVersion int64         `json:"expected_task_version,omitempty"`
+	Title               *string       `json:"title,omitempty"`
+	Description         *string       `json:"description,omitempty"`
+	Status              *string       `json:"status,omitempty"`
+	Priority            *string       `json:"priority,omitempty"`
+	DueDate             *time.Time    `json:"due_date,omitempty"`
 }
 
 // TaskFilter contains optional filters for listing tasks.
@@ -166,6 +176,9 @@ func (s *TaskService) CreateTask(ctx context.Context, channelID, creatorID strin
 		}
 	}
 
+	if err := s.ValidateContract(ctx, channelID, creatorID, req.Contract); err != nil {
+		return nil, err
+	}
 	// Validate title
 	if req.Title == "" {
 		return nil, errors.New("task title is required")
@@ -202,54 +215,52 @@ func (s *TaskService) CreateTask(ctx context.Context, channelID, creatorID strin
 	id := uuid.New().String()
 	now := time.Now()
 
-	// Compute per-channel task number without the SERIAL default.
-	nextNumber, err := s.nextTaskNumber(ctx, channelID)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("compute next task number: %w", err)
+		return nil, err
 	}
-
-	// NULL-safe channel_id, message_id
-	chanID := interface{}(nil)
-	if channelID != "" {
-		chanID = channelID
+	defer tx.Rollback(ctx)
+	nextNumber, err := nextTaskNumberTx(ctx, tx, channelID)
+	if err != nil {
+		return nil, err
 	}
-	msgID := interface{}(nil)
 	if req.MessageID != "" {
-		msgID = req.MessageID
-	}
-
-	if req.ParentTaskID != "" {
-		if err := s.createChildTask(ctx, channelID, req.ParentTaskID, id, nextNumber, chanID, creatorID, req, msgID, parentTaskID, taskStatus, claimerID, now); err != nil {
+		req.MessageID, err = resolveTaskMessageID(ctx, tx, channelID, req.MessageID)
+		if err != nil {
 			return nil, err
 		}
-	} else {
-		_, err = s.pool.Exec(ctx,
-			`INSERT INTO tasks (id, task_number, channel_id, creator_id, title, description, status, claimer_id, priority, due_date, message_id, parent_task_id, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-			id, nextNumber, chanID, creatorID, req.Title, nullableStr(req.Description),
-			taskStatus, claimerID, req.Priority, req.DueDate, msgID, parentTaskID, now, now,
-		)
-		if err != nil {
-			// If unique constraint on (channel_id, task_number) is violated, retry once.
-			if isPgUniqueViolation(err) {
-				nextNumber2, err2 := s.nextTaskNumber(ctx, channelID)
-				if err2 != nil {
-					return nil, fmt.Errorf("retry next task number: %w", err2)
-				}
-				_, err = s.pool.Exec(ctx,
-					`INSERT INTO tasks (id, task_number, channel_id, creator_id, title, description, status, claimer_id, priority, due_date, message_id, parent_task_id, created_at, updated_at)
-					 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-					id, nextNumber2, chanID, creatorID, req.Title, nullableStr(req.Description),
-					taskStatus, claimerID, req.Priority, req.DueDate, msgID, parentTaskID, now, now,
-				)
-				if err != nil {
-					return nil, err
-				}
-				nextNumber = nextNumber2
-			} else {
-				return nil, err
-			}
+		var sourceID string
+		if err = tx.QueryRow(ctx, `SELECT id::text FROM messages WHERE id=$1 FOR UPDATE`, req.MessageID).Scan(&sourceID); err != nil {
+			return nil, err
 		}
+	}
+	if req.ParentTaskID != "" {
+		var parentChannel, parentStatus string
+		err = tx.QueryRow(ctx, `SELECT channel_id::text,status FROM tasks WHERE id=$1 FOR UPDATE`, req.ParentTaskID).Scan(&parentChannel, &parentStatus)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrTaskNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		if parentChannel != channelID {
+			return nil, errors.New("parent task is not in the same channel")
+		}
+		if parentStatus == TaskStatusInReview || TerminalStatuses[parentStatus] {
+			return nil, ErrTaskInvalidTransition
+		}
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO tasks(id,task_number,channel_id,creator_id,title,description,status,claimer_id,priority,due_date,message_id,parent_task_id,created_at,updated_at,contract)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13,$14)`, id, nextNumber, nullableStr(channelID), creatorID, req.Title, nullableStr(req.Description), taskStatus, claimerID, req.Priority, req.DueDate, nullableStr(req.MessageID), parentTaskID, now, req.Contract)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.ConstraintName == "unique_task_source_message" {
+			return nil, ErrTaskSourceExists
+		}
+		return nil, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return nil, err
 	}
 
 	var pti *string
@@ -257,6 +268,7 @@ func (s *TaskService) CreateTask(ctx context.Context, channelID, creatorID strin
 		pti = &req.ParentTaskID
 	}
 	task := &Task{
+		Version: 1, Contract: req.Contract,
 		ID:           id,
 		TaskNumber:   nextNumber,
 		ChannelID:    channelID,
@@ -333,62 +345,11 @@ func (s *TaskService) resolveTaskAssignee(ctx context.Context, channelID, assign
 	return matches[0].id, matches[0].name, nil
 }
 
-func (s *TaskService) createChildTask(ctx context.Context, channelID, parentID, id string, taskNumber int, chanID interface{}, creatorID string, req TaskCreateRequest, msgID, parentTaskID interface{}, taskStatus string, claimerID interface{}, now time.Time) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
-	var parentChannelID, parentStatus string
-	err = tx.QueryRow(ctx,
-		`SELECT channel_id::text, status FROM tasks WHERE id = $1 FOR UPDATE`, parentID,
-	).Scan(&parentChannelID, &parentStatus)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("parent task not found")
-		}
-		return fmt.Errorf("lookup parent task: %w", err)
-	}
-	if parentChannelID != channelID {
-		return fmt.Errorf("parent task is not in the same channel")
-	}
-	if parentStatus == TaskStatusInReview || TerminalStatuses[parentStatus] {
-		return ErrTaskInvalidTransition
-	}
-
-	tag, err := tx.Exec(ctx,
-		`INSERT INTO tasks (id, task_number, channel_id, creator_id, title, description, status, claimer_id, priority, due_date, message_id, parent_task_id, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-		 ON CONFLICT ON CONSTRAINT unique_channel_task_number DO NOTHING`,
-		id, taskNumber, chanID, creatorID, req.Title, nullableStr(req.Description),
-		taskStatus, claimerID, req.Priority, req.DueDate, msgID, parentTaskID, now, now,
-	)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		taskNumber, err = nextTaskNumberTx(ctx, tx, channelID)
-		if err != nil {
-			return fmt.Errorf("retry next task number: %w", err)
-		}
-		tag, err = tx.Exec(ctx,
-			`INSERT INTO tasks (id, task_number, channel_id, creator_id, title, description, status, claimer_id, priority, due_date, message_id, parent_task_id, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-			id, taskNumber, chanID, creatorID, req.Title, nullableStr(req.Description),
-			taskStatus, claimerID, req.Priority, req.DueDate, msgID, parentTaskID, now, now,
-		)
-	}
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("create child task affected no rows")
-	}
-	return tx.Commit(ctx)
-}
-
 func nextTaskNumberTx(ctx context.Context, tx pgx.Tx, channelID string) (int, error) {
+	// Share Automation's per-channel creation lock; numbering is part of the insert transaction.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, channelID); err != nil {
+		return 0, err
+	}
 	var num int
 	if channelID != "" {
 		err := tx.QueryRow(ctx,
@@ -398,22 +359,6 @@ func nextTaskNumberTx(ctx context.Context, tx pgx.Tx, channelID string) (int, er
 		return num, err
 	}
 	err := tx.QueryRow(ctx,
-		`SELECT COALESCE(MAX(task_number), 0) + 1 FROM tasks WHERE channel_id IS NULL`,
-	).Scan(&num)
-	return num, err
-}
-
-// nextTaskNumber computes the next per-channel task number.
-func (s *TaskService) nextTaskNumber(ctx context.Context, channelID string) (int, error) {
-	var num int
-	if channelID != "" {
-		err := s.pool.QueryRow(ctx,
-			`SELECT COALESCE(MAX(task_number), 0) + 1 FROM tasks WHERE channel_id = $1`,
-			channelID,
-		).Scan(&num)
-		return num, err
-	}
-	err := s.pool.QueryRow(ctx,
 		`SELECT COALESCE(MAX(task_number), 0) + 1 FROM tasks WHERE channel_id IS NULL`,
 	).Scan(&num)
 	return num, err
@@ -437,51 +382,8 @@ func (s *TaskService) ClaimTask(ctx context.Context, channelID, taskID, userID s
 	}
 	defer tx.Rollback(ctx)
 
-	// Lock the task row for update to prevent concurrent claims.
-	var currentStatus, currentClaimerID string
-	err = tx.QueryRow(ctx,
-		`SELECT status, COALESCE(claimer_id::text, '')
-		 FROM tasks
-		 WHERE id = $1 AND channel_id = $2
-		 FOR UPDATE`,
-		taskID, channelID,
-	).Scan(&currentStatus, &currentClaimerID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrTaskNotFound
-		}
-		return nil, fmt.Errorf("lock task: %w", err)
-	}
-
-	// State validation: only todo and in_progress are claimable.
-	if TerminalStatuses[currentStatus] {
-		return nil, ErrTaskInTerminalState
-	}
-	if currentStatus == TaskStatusInReview {
-		return nil, ErrTaskNotClaimable
-	}
-	// (TaskStatusTodo and TaskStatusInProgress fall through)
-
-	// Claimer validation: prevent stealing from another claimer.
-	if currentClaimerID != "" && currentClaimerID != userID {
-		return nil, ErrTaskAlreadyClaimed
-	}
-
-	// Determine new status.
-	newStatus := currentStatus
-	if currentStatus == TaskStatusTodo {
-		newStatus = TaskStatusInProgress
-	}
-
-	// Update the task — idempotent when the same claimer re-claims.
-	now := time.Now()
-	_, err = tx.Exec(ctx,
-		`UPDATE tasks SET claimer_id = $1, status = $2, updated_at = $3
-		 WHERE id = $4 AND channel_id = $5`,
-		userID, newStatus, now, taskID, channelID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("update claim: %w", err)
+	if err := claimTaskTx(ctx, tx, channelID, taskID, userID); err != nil {
+		return nil, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -499,10 +401,66 @@ func (s *TaskService) ClaimTask(ctx context.Context, channelID, taskID, userID s
 		"task_number", refetched.TaskNumber,
 		"channel_id", channelID,
 		"claimer_id", userID,
-		"new_status", newStatus,
+		"new_status", refetched.Status,
 	)
 
 	return refetched, nil
+}
+
+func claimTaskTx(ctx context.Context, tx pgx.Tx, channelID, taskID, userID string) error {
+	// Lock the task row for update to prevent concurrent claims.
+	var currentStatus, currentClaimerID string
+	err := tx.QueryRow(ctx,
+		`SELECT status, COALESCE(claimer_id::text, '')
+		 FROM tasks
+		 WHERE id = $1 AND channel_id = $2
+		 FOR UPDATE`,
+		taskID, channelID,
+	).Scan(&currentStatus, &currentClaimerID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrTaskNotFound
+		}
+		return fmt.Errorf("lock task: %w", err)
+	}
+
+	// State validation: only todo and in_progress are claimable.
+	if TerminalStatuses[currentStatus] {
+		return ErrTaskInTerminalState
+	}
+	if currentStatus == TaskStatusInReview {
+		return ErrTaskNotClaimable
+	}
+	// (TaskStatusTodo and TaskStatusInProgress fall through)
+
+	// Claimer validation: prevent stealing from another claimer.
+	if currentClaimerID != "" && currentClaimerID != userID {
+		return ErrTaskAlreadyClaimed
+	}
+
+	// Determine new status.
+	newStatus := currentStatus
+	if currentStatus == TaskStatusTodo {
+		newStatus = TaskStatusInProgress
+	}
+
+	// Update the task — idempotent when the same claimer re-claims.
+	now := time.Now()
+	_, err = tx.Exec(ctx,
+		`UPDATE tasks SET claimer_id = $1, status = $2, updated_at = $3
+		 WHERE id = $4 AND channel_id = $5`,
+		userID, newStatus, now, taskID, channelID,
+	)
+	if err != nil {
+		return fmt.Errorf("update claim: %w", err)
+	}
+	if currentClaimerID == "" {
+		if _, err = tx.Exec(ctx, `INSERT INTO task_responsibility_events(task_id,task_version,actor_id,assignee_id,kind) SELECT id,version,$2,$2,'claimed' FROM tasks WHERE id=$1`, taskID, userID); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // UnclaimTask releases a claim on a task. Only the current claimer can unclaim.
@@ -567,10 +525,14 @@ func (s *TaskService) SubmitTask(ctx context.Context, channelID, taskID, userID 
 	defer tx.Rollback(ctx)
 
 	var status, claimerID string
+	var contract *TaskContract
 	err = tx.QueryRow(ctx,
-		`SELECT status, COALESCE(claimer_id::text, '') FROM tasks WHERE id = $1 AND channel_id = $2 FOR UPDATE`,
+		`SELECT status, COALESCE(claimer_id::text, ''), contract FROM tasks WHERE id = $1 AND channel_id = $2 FOR UPDATE`,
 		task.ID, channelID,
-	).Scan(&status, &claimerID)
+	).Scan(&status, &claimerID, &contract)
+	if err == nil && contract != nil {
+		return nil, ErrTaskContractRequired
+	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrTaskNotFound
@@ -650,15 +612,19 @@ func (s *TaskService) reviewTask(ctx context.Context, channelID, taskID, userID,
 	defer tx.Rollback(ctx)
 
 	var creatorID, currentStatus, claimerID string
+	var contract *TaskContract
 	if err := tx.QueryRow(ctx,
-		`SELECT creator_id::text, status, COALESCE(claimer_id::text, '')
+		`SELECT creator_id::text, status, COALESCE(claimer_id::text, ''), contract
 		 FROM tasks WHERE id = $1 AND channel_id = $2 FOR UPDATE`,
 		taskID, channelID,
-	).Scan(&creatorID, &currentStatus, &claimerID); err != nil {
+	).Scan(&creatorID, &currentStatus, &claimerID, &contract); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrTaskNotFound
 		}
 		return nil, err
+	}
+	if contract != nil {
+		return nil, ErrTaskContractRequired
 	}
 	if creatorID != userID {
 		return nil, ErrTaskNotCreator
@@ -775,39 +741,127 @@ func (s *TaskService) setTaskStatus(ctx context.Context, channelID, taskID, user
 // ConvertMessageToTask creates a task from an existing message (asTask).
 // The message content becomes the task title, and the task is linked via message_id.
 func (s *TaskService) ConvertMessageToTask(ctx context.Context, channelID, messageID, userID string) (*Task, error) {
-	if err := s.requireChannelMember(ctx, channelID, userID); err != nil {
-		return nil, err
-	}
+	task, _, err := s.messageTask(ctx, channelID, messageID, userID, false, nil, nil)
+	return task, err
+}
 
-	if existing, err := s.GetTask(ctx, channelID, messageID, userID); err == nil {
-		return existing, nil
-	} else if err != ErrTaskNotFound {
-		return nil, err
-	}
+// ClaimMessageTask converts an ordinary message and claims it in one transaction.
+// beforeClaim preserves the existing mention-priority window even if conversion raced.
+func (s *TaskService) ClaimMessageTask(ctx context.Context, channelID, messageID, userID string, beforeClaim func(string) error, contract *TaskContract) (*Task, bool, error) {
+	return s.messageTask(ctx, channelID, messageID, userID, true, beforeClaim, contract)
+}
 
-	// Get message content for the task title
-	var content string
-	err := s.pool.QueryRow(ctx,
-		`SELECT content FROM messages WHERE id = $1 AND channel_id = $2 AND COALESCE(is_deleted, false) = false`,
-		messageID, channelID,
-	).Scan(&content)
+func resolveTaskMessageID(ctx context.Context, db agentRunRowQuerier, channelID, prefix string) (string, error) {
+	if !messageIDPattern.MatchString(prefix) {
+		return "", ErrTaskNotFound
+	}
+	var ids []string
+	err := db.QueryRow(ctx, `SELECT COALESCE(array_agg(id::text),'{}') FROM (SELECT id FROM messages WHERE channel_id=$1 AND id::text LIKE lower($2)||'%' AND NOT COALESCE(is_deleted,false) AND thinking_node_id IS NULL ORDER BY id LIMIT 2) candidates`, channelID, prefix).Scan(&ids)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, errors.New("message not found")
+		return "", err
+	}
+	if len(ids) == 0 {
+		return "", ErrTaskNotFound
+	}
+	if len(ids) > 1 {
+		return "", ErrTaskReferenceAmbiguous
+	}
+	return ids[0], nil
+}
+
+// A legacy message may still link to multiple Tasks. Never choose one implicitly.
+func resolveMessageTaskID(ctx context.Context, db agentRunRowQuerier, channelID, messageID string) (string, error) {
+	var ids []string
+	err := db.QueryRow(ctx, `SELECT COALESCE(array_agg(id::text),'{}') FROM (SELECT id FROM tasks WHERE channel_id=$1 AND message_id=$2 ORDER BY id LIMIT 2) candidates`, channelID, messageID).Scan(&ids)
+	if err != nil {
+		return "", err
+	}
+	if len(ids) == 0 {
+		return "", pgx.ErrNoRows
+	}
+	if len(ids) > 1 {
+		return "", fmt.Errorf("source message has multiple historical tasks; use a task number or UUID: %w", ErrTaskReferenceAmbiguous)
+	}
+	return ids[0], nil
+}
+
+func (s *TaskService) messageTask(ctx context.Context, channelID, messageID, userID string, claim bool, beforeClaim func(string) error, contract *TaskContract) (*Task, bool, error) {
+	if err := s.requireChannelMember(ctx, channelID, userID); err != nil {
+		return nil, false, err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	defer tx.Rollback(ctx)
+	number, err := nextTaskNumberTx(ctx, tx, channelID)
+	if err != nil {
+		return nil, false, err
+	}
+	messageID, err = resolveTaskMessageID(ctx, tx, channelID, messageID)
+	if err != nil {
+		return nil, false, err
+	}
+	var content, senderType, senderID string
+	if err = tx.QueryRow(ctx, `SELECT content,sender_type,sender_id::text FROM messages WHERE id=$1 AND NOT COALESCE(is_deleted,false) FOR UPDATE`, messageID).Scan(&content, &senderType, &senderID); err != nil {
+		return nil, false, err
+	}
+	if strings.TrimSpace(content) == "" {
+		return nil, false, invalidDelivery("an empty source message needs an explicit task title")
+	}
+	var taskID string
+	taskID, err = resolveMessageTaskID(ctx, tx, channelID, messageID)
+	created := errors.Is(err, pgx.ErrNoRows)
+	if created {
+		taskID = uuid.NewString()
+		creator := userID
+		if claim && (senderType == "user" || senderType == "agent") {
+			creator = senderID
 		}
-		return nil, err
+		if contract != nil {
+			if err = validateTaskContract(ctx, tx, channelID, creator, contract); err != nil {
+				return nil, false, err
+			}
+			// Claiming a user's request never delegates their acceptance authority.
+			if userID != creator && (senderType != "user" || contract.Gate.Kind != "human" || contract.Gate.ReviewerID != creator || contract.Gate.HumanReviewMode != "decision") {
+				return nil, false, invalidDelivery("initial claim requirements must keep result confirmation with the source user")
+			}
+			if contract.Gate.ReviewerID == userID {
+				return nil, false, invalidDelivery("the executing Agent cannot review its own delivery")
+			}
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO tasks(id,task_number,channel_id,creator_id,title,description,status,priority,message_id,contract) VALUES($1,$2,$3,$4,$5,$6,'todo','none',$7,$8)`, taskID, number, channelID, creator, truncateForTitle(content, 500), content, messageID, contract)
+	} else if err == nil && contract != nil {
+		var existing *TaskContract
+		var creator string
+		if err = tx.QueryRow(ctx, `SELECT contract,creator_id::text FROM tasks WHERE id=$1 FOR UPDATE`, taskID).Scan(&existing, &creator); err != nil {
+			return nil, false, err
+		}
+		if err = validateTaskContract(ctx, tx, channelID, creator, contract); err != nil {
+			return nil, false, err
+		}
+		if existing == nil || deliveryRequestHash(existing) != deliveryRequestHash(contract) {
+			return nil, false, ErrTaskVersionConflict
+		}
 	}
-
-	// Use truncated message content as default title
-	title := truncateForTitle(content, 500)
-
-	req := TaskCreateRequest{
-		Title:       title,
-		Description: content, // Full message content as description
-		MessageID:   messageID,
+	if err != nil {
+		return nil, false, err
 	}
-
-	return s.CreateTask(ctx, channelID, userID, req)
+	if claim {
+		if beforeClaim != nil {
+			if err = beforeClaim(taskID); err != nil {
+				return nil, false, err
+			}
+		}
+		if err = claimTaskTx(ctx, tx, channelID, taskID, userID); err != nil {
+			return nil, false, err
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return nil, false, err
+	}
+	task, err := s.GetTask(ctx, channelID, taskID, userID)
+	return task, created, err
 }
 
 // GetTask retrieves a single task by ID.
@@ -821,8 +875,24 @@ func (s *TaskService) GetTask(ctx context.Context, channelID, taskID, userID str
 		return nil, err
 	}
 
-	// Try UUID first
-	err := s.pool.QueryRow(ctx,
+	var resolvedID string
+	err := s.pool.QueryRow(ctx, `SELECT id::text FROM tasks WHERE channel_id=$1 AND (id::text=lower($2) OR task_number::text=$2) ORDER BY (id::text=lower($2)) DESC LIMIT 1`, channelID, taskID).Scan(&resolvedID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		messageID, resolveErr := resolveTaskMessageID(ctx, s.pool, channelID, taskID)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		resolvedID, err = resolveMessageTaskID(ctx, s.pool, channelID, messageID)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrTaskNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	taskID = resolvedID
+	// The same projection applies to UUIDs, task numbers and message prefixes.
+	err = s.pool.QueryRow(ctx,
 		`SELECT t.id, t.task_number, t.channel_id, t.creator_id, COALESCE(u_creator.display_name, a_creator.name, '') as creator_name, t.title, COALESCE(t.description, ''), t.status,
 		 COALESCE(t.claimer_id::text, ''),
 		 COALESCE(u_claimer.display_name, a_claimer.name, ''), t.priority, t.due_date, COALESCE(t.message_id::text, ''),
@@ -831,49 +901,31 @@ func (s *TaskService) GetTask(ctx context.Context, channelID, taskID, userID str
 		 (SELECT COUNT(*) FROM tasks WHERE parent_task_id = t.id AND status = 'done') AS done_subtask_count,
 		 t.created_at, t.updated_at,
 		 `+taskArtifactStatusSQL("t")+` AS artifact_status,
-		 (NOT COALESCE(a_claimer.is_active, true)) AS claimer_deleted
+		 (NOT COALESCE(a_claimer.is_active, true)) AS claimer_deleted, t.version, t.contract, COALESCE(t.current_submission_id::text,''), EXISTS(SELECT 1 FROM task_waits w WHERE w.task_id=t.id AND w.status='waiting')
 		 FROM tasks t LEFT JOIN users u_creator ON t.creator_id = u_creator.id LEFT JOIN agents a_creator ON t.creator_id = a_creator.id LEFT JOIN users u_claimer ON t.claimer_id = u_claimer.id LEFT JOIN agents a_claimer ON t.claimer_id = a_claimer.id WHERE t.id = $1 AND t.channel_id = $2`,
 		taskID, channelID,
 	).Scan(&task.ID, &task.TaskNumber, &task.ChannelID, &task.CreatorID, &task.CreatorName, &task.Title, &description,
 		&task.Status, &task.ClaimerID, &task.ClaimerName, &task.Priority, &dueDate, &task.MessageID,
-		&task.ParentTaskID, &task.SubtaskCount, &task.DoneSubtaskCount, &task.CreatedAt, &task.UpdatedAt, &task.ArtifactStatus, &task.ClaimerDeleted)
+		&task.ParentTaskID, &task.SubtaskCount, &task.DoneSubtaskCount, &task.CreatedAt, &task.UpdatedAt, &task.ArtifactStatus, &task.ClaimerDeleted, &task.Version, &task.Contract, &task.CurrentSubmissionID, &task.Waiting)
 
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrTaskNotFound
+	}
 	if err != nil {
-		// Try by task_number
-		err2 := s.pool.QueryRow(ctx,
-			`SELECT t.id, t.task_number, t.channel_id, t.creator_id, COALESCE(u_creator.display_name, a_creator.name, '') as creator_name, t.title, COALESCE(t.description, ''), t.status,
-			 COALESCE(t.claimer_id::text, ''),
-		 COALESCE(u_claimer.display_name, a_claimer.name, ''), t.priority, t.due_date, COALESCE(t.message_id::text, ''), t.created_at, t.updated_at,
-		 `+taskArtifactStatusSQL("t")+` AS artifact_status,
-		 (NOT COALESCE(a_claimer.is_active, true)) AS claimer_deleted
-			 FROM tasks t LEFT JOIN users u_creator ON t.creator_id = u_creator.id LEFT JOIN agents a_creator ON t.creator_id = a_creator.id LEFT JOIN users u_claimer ON t.claimer_id = u_claimer.id LEFT JOIN agents a_claimer ON t.claimer_id = a_claimer.id WHERE t.task_number::text = $1 AND t.channel_id = $2`,
-			taskID, channelID,
-		).Scan(&task.ID, &task.TaskNumber, &task.ChannelID, &task.CreatorID, &task.CreatorName, &task.Title, &description,
-			&task.Status, &task.ClaimerID, &task.ClaimerName, &task.Priority, &dueDate, &task.MessageID, &task.CreatedAt, &task.UpdatedAt, &task.ArtifactStatus, &task.ClaimerDeleted)
-		if err2 != nil {
-			// Try by message_id( agent uses msg= header short ID)
-			err3 := s.pool.QueryRow(ctx,
-				`SELECT t.id, t.task_number, t.channel_id, t.creator_id, COALESCE(u_creator.display_name, a_creator.name, '') as creator_name, t.title, COALESCE(t.description, ''), t.status,
-				 COALESCE(t.claimer_id::text, ''),
-				COALESCE(u_claimer.display_name, a_claimer.name, ''), t.priority, t.due_date, COALESCE(t.message_id::text, ''), t.created_at, t.updated_at,
-				`+taskArtifactStatusSQL("t")+` AS artifact_status,
-				(NOT COALESCE(a_claimer.is_active, true)) AS claimer_deleted
-				 FROM tasks t LEFT JOIN users u_creator ON t.creator_id = u_creator.id LEFT JOIN agents a_creator ON t.creator_id = a_creator.id LEFT JOIN users u_claimer ON t.claimer_id = u_claimer.id LEFT JOIN agents a_claimer ON t.claimer_id = a_claimer.id WHERE t.message_id::text = $1 AND t.channel_id = $2`,
-				taskID, channelID,
-			).Scan(&task.ID, &task.TaskNumber, &task.ChannelID, &task.CreatorID, &task.CreatorName, &task.Title, &description,
-				&task.Status, &task.ClaimerID, &task.ClaimerName, &task.Priority, &dueDate, &task.MessageID, &task.CreatedAt, &task.UpdatedAt, &task.ArtifactStatus, &task.ClaimerDeleted)
-			if err3 != nil {
-				if errors.Is(err3, pgx.ErrNoRows) {
-					return nil, ErrTaskNotFound
-				}
-				return nil, err3
-			}
-		}
+		return nil, err
 	}
 
 	task.Description = description
 	if dueDate != nil {
 		task.DueDate = dueDate
+	}
+	if task.Contract != nil && task.Status == TaskStatusInReview && task.ClaimerID != userID {
+		task.CanReview = task.Contract.Gate.ReviewerID == userID
+		if !task.CanReview && task.CreatorID == userID {
+			if err := s.pool.QueryRow(ctx, `SELECT (EXISTS(SELECT 1 FROM task_reviews WHERE submission_id=NULLIF($1,'')::uuid AND decision='needs_human') OR EXISTS(SELECT 1 FROM task_review_deliveries d LEFT JOIN agent_runs r ON r.id=d.run_id WHERE d.submission_id=NULLIF($1,'')::uuid AND d.attempts>=3 AND (r.id IS NULL OR r.finished_at IS NOT NULL))) AND EXISTS(SELECT 1 FROM users WHERE id=$2)`, task.CurrentSubmissionID, userID).Scan(&task.CanReview); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return &task, nil
 }
@@ -889,7 +941,7 @@ func (s *TaskService) ListTasks(ctx context.Context, channelID, userID string, f
 			                  t.created_at, t.updated_at,
 			                  COALESCE(u_claimer.display_name, a_claimer.name, '') AS claimer_name,
 			                  ` + taskArtifactStatusSQL("t") + ` AS artifact_status,
-			                  (NOT COALESCE(a_claimer.is_active, true)) AS claimer_deleted
+			                  (NOT COALESCE(a_claimer.is_active, true)) AS claimer_deleted, t.version, t.contract, COALESCE(t.current_submission_id::text,''), EXISTS(SELECT 1 FROM task_waits w WHERE w.task_id=t.id AND w.status='waiting')
 		           FROM tasks t
 		           LEFT JOIN users u_creator ON t.creator_id = u_creator.id
 		           LEFT JOIN agents a_creator ON t.creator_id = a_creator.id
@@ -935,7 +987,7 @@ func (s *TaskService) ListTasks(ctx context.Context, channelID, userID string, f
 		var parentTaskID *string
 		err := rows.Scan(&t.ID, &t.TaskNumber, &t.ChannelID, &t.CreatorID, &t.CreatorName, &t.Title, &t.Description,
 			&t.Status, &t.ClaimerID, &t.Priority,
-			&dueDate, &t.MessageID, &parentTaskID, &t.CreatedAt, &t.UpdatedAt, &t.ClaimerName, &t.ArtifactStatus, &t.ClaimerDeleted)
+			&dueDate, &t.MessageID, &parentTaskID, &t.CreatedAt, &t.UpdatedAt, &t.ClaimerName, &t.ArtifactStatus, &t.ClaimerDeleted, &t.Version, &t.Contract, &t.CurrentSubmissionID, &t.Waiting)
 		if err != nil {
 			return nil, err
 		}
@@ -969,6 +1021,24 @@ func (s *TaskService) UpdateTask(ctx context.Context, channelID, taskID, userID 
 		return nil, err
 	}
 
+	if currentTask.Contract != nil || req.Contract != nil {
+		if TerminalStatuses[currentTask.Status] {
+			return nil, invalidDelivery("reopen a finished task before changing its requirements or scope")
+		}
+		if currentTask.CreatorID != userID {
+			return nil, ErrTaskNotCreator
+		}
+		if req.ExpectedTaskVersion != currentTask.Version {
+			return nil, ErrTaskVersionConflict
+		}
+	}
+	contract := currentTask.Contract
+	if req.Contract != nil {
+		if err := s.ValidateContract(ctx, channelID, userID, req.Contract); err != nil {
+			return nil, err
+		}
+		contract = req.Contract
+	}
 	// Validate status transition if status is being changed
 	if req.Status != nil && *req.Status != "" {
 		return nil, ErrTaskLifecyclePatch
@@ -1007,32 +1077,16 @@ func (s *TaskService) UpdateTask(ctx context.Context, channelID, taskID, userID 
 	result, err := s.pool.Exec(ctx,
 		`UPDATE tasks SET
 			title = $1, description = $2, status = $3,
-			priority = $4, due_date = $5, updated_at = $6
-		 WHERE id = $7 AND channel_id = $8`,
+			priority = $4, due_date = $5, updated_at = $6, contract = $9
+		 WHERE id = $7 AND channel_id = $8 AND version = $10`,
 		newTitle, nullableStr(newDescription), newStatus,
-		newPriority, newDueDate, now, currentTask.ID, channelID,
+		newPriority, newDueDate, now, currentTask.ID, channelID, contract, currentTask.Version,
 	)
 	if err != nil {
 		return nil, err
 	}
 	if result.RowsAffected() == 0 {
-		return nil, ErrTaskNotFound
-	}
-
-	updatedTask := &Task{
-		ID:          taskID,
-		TaskNumber:  currentTask.TaskNumber,
-		ChannelID:   channelID,
-		CreatorID:   currentTask.CreatorID,
-		Title:       newTitle,
-		Description: newDescription,
-		Status:      newStatus,
-		ClaimerID:   currentTask.ClaimerID,
-		Priority:    newPriority,
-		DueDate:     newDueDate,
-		MessageID:   currentTask.MessageID,
-		CreatedAt:   currentTask.CreatedAt,
-		UpdatedAt:   now,
+		return nil, ErrTaskVersionConflict
 	}
 
 	slog.Info("task updated",
@@ -1042,7 +1096,7 @@ func (s *TaskService) UpdateTask(ctx context.Context, channelID, taskID, userID 
 		"new_status", newStatus,
 	)
 
-	return updatedTask, nil
+	return s.GetTask(ctx, channelID, currentTask.ID, userID)
 }
 
 func (s *TaskService) validateStatusActor(ctx context.Context, task *Task, userID, newStatus string) error {
@@ -1101,9 +1155,9 @@ func (s *TaskService) DeleteTask(ctx context.Context, channelID, taskID, userID 
 // in the in_progress state.
 func (s *TaskService) GetTasksForAgent(ctx context.Context, agentID string) ([]Task, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT t.id, t.task_number, t.channel_id, t.creator_id, t.title, COALESCE(t.description, ''), t.status,
+		`SELECT t.id, t.task_number, t.channel_id, t.creator_id, COALESCE((SELECT display_name FROM users WHERE id=t.creator_id),(SELECT name FROM agents WHERE id=t.creator_id),''), t.title, COALESCE(t.description, ''), t.status,
 		        COALESCE(t.claimer_id::text, ''), t.priority,
-		        t.due_date, COALESCE(t.message_id::text, ''), t.created_at, t.updated_at
+		        t.due_date, COALESCE(t.message_id::text, ''), t.parent_task_id, t.created_at, t.updated_at, t.version, t.contract, COALESCE(t.current_submission_id::text,''), EXISTS(SELECT 1 FROM task_waits w WHERE w.task_id=t.id AND w.status='waiting')
 		 FROM tasks t
 		 LEFT JOIN channels c ON t.channel_id = c.id
 		 WHERE t.claimer_id = $1 AND t.status = $2 AND (t.channel_id IS NULL OR c.is_archived = false)
@@ -1122,7 +1176,7 @@ func (s *TaskService) GetTasksForAgent(ctx context.Context, agentID string) ([]T
 		var parentTaskID *string
 		err := rows.Scan(&t.ID, &t.TaskNumber, &t.ChannelID, &t.CreatorID, &t.CreatorName, &t.Title, &t.Description,
 			&t.Status, &t.ClaimerID, &t.Priority,
-			&dueDate, &t.MessageID, &parentTaskID, &t.CreatedAt, &t.UpdatedAt)
+			&dueDate, &t.MessageID, &parentTaskID, &t.CreatedAt, &t.UpdatedAt, &t.Version, &t.Contract, &t.CurrentSubmissionID, &t.Waiting)
 		if err != nil {
 			return nil, err
 		}
@@ -1148,7 +1202,7 @@ func (s *TaskService) GetTasksForAgent(ctx context.Context, agentID string) ([]T
 // because an agent may be assigned a task that hasn't been explicitly claimed.
 func (s *TaskService) CompleteTaskForAgent(ctx context.Context, taskID string) error {
 	_, err := s.pool.Exec(ctx,
-		`UPDATE tasks SET status = $1, updated_at = now() WHERE id = $2 AND status IN ($3, $4)`,
+		`UPDATE tasks SET status = $1, updated_at = now() WHERE id = $2 AND status IN ($3, $4) AND contract IS NULL`,
 		TaskStatusInReview, taskID, TaskStatusInProgress, TaskStatusTodo,
 	)
 	return err
@@ -1250,7 +1304,7 @@ func (s *TaskService) ListAllUserTasks(ctx context.Context, userID string, chann
 		var parentTaskID string
 		err := rows.Scan(&t.ID, &t.TaskNumber, &t.ChannelID, &t.CreatorID, &t.CreatorName, &t.Title, &t.Description,
 			&t.Status, &t.ClaimerID, &t.Priority, &dueDate, &t.MessageID, &parentTaskID,
-			&t.SubtaskCount, &t.DoneSubtaskCount, &t.CreatedAt, &t.UpdatedAt, &t.ClaimerName, &t.ArtifactStatus, &t.ClaimerDeleted)
+			&t.SubtaskCount, &t.DoneSubtaskCount, &t.CreatedAt, &t.UpdatedAt, &t.ClaimerName, &t.ArtifactStatus, &t.ClaimerDeleted, &t.Version, &t.Contract, &t.CurrentSubmissionID, &t.Waiting)
 		if err != nil {
 			return nil, err
 		}
@@ -1277,7 +1331,7 @@ func buildListAllUserTasksQuery(userID string, channelID string, status string, 
 		t.created_at, t.updated_at,
 		COALESCE(u_claimer.display_name, a_claimer.name, '') AS claimer_name,
 		` + taskArtifactStatusSQL("t") + ` AS artifact_status,
-		(NOT COALESCE(a_claimer.is_active, true)) AS claimer_deleted
+		(NOT COALESCE(a_claimer.is_active, true)) AS claimer_deleted, t.version, t.contract, COALESCE(t.current_submission_id::text,''), EXISTS(SELECT 1 FROM task_waits w WHERE w.task_id=t.id AND w.status='waiting')
 		FROM tasks t
 		LEFT JOIN users u_creator ON t.creator_id = u_creator.id
 		LEFT JOIN agents a_creator ON t.creator_id = a_creator.id
@@ -1313,6 +1367,9 @@ func buildListAllUserTasksQuery(userID string, channelID string, status string, 
 		query += fmt.Sprintf(" AND t.creator_id = $%d", argIdx)
 		args = append(args, creatorID)
 		argIdx++
+	}
+	if channelID == "" {
+		query += " AND NOT EXISTS(SELECT 1 FROM agent_selection_trials internal_trial JOIN agent_selections internal_selection ON internal_selection.id=internal_trial.selection_id WHERE internal_trial.channel_id=c.id AND COALESCE(internal_selection.plan->>'reviewer_agent_id','')<>'')"
 	}
 	query += " ORDER BY t.created_at DESC LIMIT 100"
 

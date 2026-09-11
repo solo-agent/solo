@@ -1,0 +1,20 @@
+{
+  "stats": {
+    "startTime": "2026-09-11T11:10:42.749Z",
+    "duration": 6177.798,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "results": [
+    {
+      "title": "converged entries keep keyboard access, narrow layout and readonly persisted history",
+      "status": "passed",
+      "duration_ms": 5767,
+      "retry": 0,
+      "attachments": [],
+      "errors": []
+    }
+  ]
+}

@@ -171,11 +171,16 @@ func seedLucyInPrivateWorkspace(t *testing.T, pool *pgxpool.Pool, ownerID string
 		t.Fatalf("add channel member: %v", err)
 	}
 
+	computerID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO computers(id,name,owner_id,daemon_id,status,runtime_inventory) VALUES($1,'formation fixture',$2,$3,'online','[{"type":"codex","available":true}]')`, computerID, ownerID, "daemon-e2e-formation-"+computerID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM computers WHERE id=$1`, computerID) })
 	agentID := uuid.NewString()
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO agents (id, name, owner_id, model_provider, model_name, runtime_id, home_channel_id, kind)
-		VALUES ($1, $2, $3, 'codex', 'gpt-test', '11111111-1111-4111-8111-111111111111', $4, 'lucy')
-	`, agentID, "wf-inherit-test-lucy", ownerID, channelID); err != nil {
+		VALUES ($1, $2, $3, 'codex', 'gpt-test', $5, $4, 'lucy')
+	`, agentID, "wf-inherit-test-lucy", ownerID, channelID, computerID); err != nil {
 		t.Fatalf("create lucy agent: %v", err)
 	}
 	t.Cleanup(func() {

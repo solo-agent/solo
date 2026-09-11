@@ -1,0 +1,20 @@
+{
+  "stats": {
+    "startTime": "2026-09-11T09:31:57.973Z",
+    "duration": 41445.472,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "results": [
+    {
+      "title": "real Runtime explicitly retains and discards held drafts without losing obligations",
+      "status": "passed",
+      "duration_ms": 40977,
+      "retry": 0,
+      "attachments": [],
+      "errors": []
+    }
+  ]
+}

@@ -60,6 +60,8 @@ func (s *AgentService) retryFailedTaskRuns(ctx context.Context) error {
 		   AND t.status = ANY($4)
 		   AND (t.claimer_id IS NULL OR t.claimer_id = r.agent_id)
 		   AND t.updated_at <= r.finished_at
+		   AND NOT EXISTS(SELECT 1 FROM task_waits w WHERE w.task_id=t.id AND w.status='waiting')
+		   AND NOT EXISTS(SELECT 1 FROM agent_selection_tasks st WHERE st.task_id=t.id)
 		   AND (
 		     SELECT payload->>'result_contract'
 		       FROM agent_run_events

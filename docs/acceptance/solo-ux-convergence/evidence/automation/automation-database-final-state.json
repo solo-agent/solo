@@ -1,0 +1,34 @@
+{
+  "automation": {
+    "id": "923c7d35-d4a3-4d0d-b96e-3400c1502bf5",
+    "next_run_at": "2026-09-11 15:59:00+00",
+    "target_agent_id": "8d501097-484a-4594-a0b6-1c6adc1b1997",
+    "completion_policy": "review_required",
+    "run_count": 4,
+    "task_count": 3
+  },
+  "manual": {
+    "id": "bc4619c5-e584-4c5e-bc90-6497978aebe8",
+    "source": "manual",
+    "status": "completed",
+    "task_id": "4f426a0a-3f63-4dae-ba2c-9683a62f73a4",
+    "task_number": 3,
+    "task_status": "in_review",
+    "agent_runs": 1,
+    "agent_run_id": "3b591183-cc53-4837-9025-6db99602d35f",
+    "agent_status": "completed",
+    "replies": 1
+  },
+  "scheduled": {
+    "id": "619a8283-ce1e-415b-ae2c-debeed37be62",
+    "source": "scheduled",
+    "status": "completed",
+    "task_id": "d5290b7f-7d6c-48ae-bac5-8756d9982d02",
+    "task_number": 2,
+    "task_status": "done",
+    "agent_runs": 1,
+    "agent_run_id": "d55a6a57-c86e-4952-83dc-5e0feed67ae5",
+    "agent_status": "completed",
+    "replies": 1
+  }
+}

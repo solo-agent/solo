@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"text/template"
 	"time"
 
@@ -13,12 +11,11 @@ import (
 )
 
 type RelationshipsMDGenerator struct {
-	pool          *pgxpool.Pool
-	workspaceRoot string
+	pool *pgxpool.Pool
 }
 
-func NewRelationshipsMDGenerator(pool *pgxpool.Pool, workspaceRoot string) *RelationshipsMDGenerator {
-	return &RelationshipsMDGenerator{pool: pool, workspaceRoot: workspaceRoot}
+func NewRelationshipsMDGenerator(pool *pgxpool.Pool, _ string) *RelationshipsMDGenerator {
+	return &RelationshipsMDGenerator{pool: pool}
 }
 
 type relationshipDoc struct {
@@ -62,23 +59,20 @@ Read this before deciding whether to coordinate, delegate, claim, or collaborate
 {{end}}
 `
 
+// GenerateForAgent validates that the relationship document can be produced.
+// Only the daemon writes RELATIONSHIPS.md, under its Agent execution lock, using
+// the exact channel/Team snapshot carried by the Run. Server-side relationship
+// edits must never overwrite an active Run's workspace.
 func (g *RelationshipsMDGenerator) GenerateForAgent(ctx context.Context, agentID string) error {
-	doc, err := g.collect(ctx, agentID)
-	if err != nil {
-		return err
-	}
-	var buf bytes.Buffer
-	if err := template.Must(template.New("relationships").Parse(relationshipsMDTemplate)).Execute(&buf, doc); err != nil {
-		return err
-	}
-	dir := filepath.Join(g.workspaceRoot, agentID, "workspace")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, "RELATIONSHIPS.md"), buf.Bytes(), 0o644)
+	_, err := g.RenderForAgent(ctx, agentID)
+	return err
 }
 
-func (g *RelationshipsMDGenerator) collect(ctx context.Context, agentID string) (*relationshipDoc, error) {
+func (g *RelationshipsMDGenerator) collect(ctx context.Context, agentID string, channelIDs ...string) (*relationshipDoc, error) {
+	channelID := ""
+	if len(channelIDs) > 0 {
+		channelID = channelIDs[0]
+	}
 	doc := &relationshipDoc{UpdatedAt: time.Now().Format("2006-01-02 15:04:05")}
 	if err := g.pool.QueryRow(ctx, `SELECT name FROM agents WHERE id = $1`, agentID).Scan(&doc.AgentName); err != nil {
 		return nil, err
@@ -86,11 +80,11 @@ func (g *RelationshipsMDGenerator) collect(ctx context.Context, agentID string) 
 
 	assignsTo, err := g.queryRows(ctx, `
 		SELECT a.name, COALESCE(a.description, ''), r.weight, COALESCE(r.instruction, '')
-		  FROM agent_relationships r
+		  FROM agent_relationship_scopes r
 		  JOIN agents a ON a.id = r.to_agent_id
-		 WHERE r.from_agent_id = $1 AND r.rel_type = 'assigns_to'
+		 WHERE r.from_agent_id = $1 AND r.rel_type = 'assigns_to' AND ($2='' OR r.channel_id::text=$2)
 		 ORDER BY a.name
-	`, agentID)
+	`, agentID, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("assigns_to: %w", err)
 	}
@@ -98,11 +92,11 @@ func (g *RelationshipsMDGenerator) collect(ctx context.Context, agentID string) 
 
 	assignedFrom, err := g.queryRows(ctx, `
 		SELECT a.name, COALESCE(a.description, ''), r.weight, COALESCE(r.instruction, '')
-		  FROM agent_relationships r
+		  FROM agent_relationship_scopes r
 		  JOIN agents a ON a.id = r.from_agent_id
-		 WHERE r.to_agent_id = $1 AND r.rel_type = 'assigns_to'
+		 WHERE r.to_agent_id = $1 AND r.rel_type = 'assigns_to' AND ($2='' OR r.channel_id::text=$2)
 		 ORDER BY a.name
-	`, agentID)
+	`, agentID, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("assigned_from: %w", err)
 	}
@@ -110,11 +104,11 @@ func (g *RelationshipsMDGenerator) collect(ctx context.Context, agentID string) 
 
 	collaborators, err := g.queryRows(ctx, `
 		SELECT a.name, COALESCE(a.description, ''), r.weight, COALESCE(r.instruction, '')
-		  FROM agent_relationships r
+		  FROM agent_relationship_scopes r
 		  JOIN agents a ON a.id = CASE WHEN r.from_agent_id = $1 THEN r.to_agent_id ELSE r.from_agent_id END
-		 WHERE $1 IN (r.from_agent_id, r.to_agent_id) AND r.rel_type = 'collaborates_with'
+		 WHERE $1 IN (r.from_agent_id, r.to_agent_id) AND r.rel_type = 'collaborates_with' AND ($2='' OR r.channel_id::text=$2)
 		 ORDER BY a.name
-	`, agentID)
+	`, agentID, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("collaborators: %w", err)
 	}
@@ -123,8 +117,8 @@ func (g *RelationshipsMDGenerator) collect(ctx context.Context, agentID string) 
 	return doc, nil
 }
 
-func (g *RelationshipsMDGenerator) queryRows(ctx context.Context, query, agentID string) ([]relationshipDocRow, error) {
-	rows, err := g.pool.Query(ctx, query, agentID)
+func (g *RelationshipsMDGenerator) queryRows(ctx context.Context, query string, args ...any) ([]relationshipDocRow, error) {
+	rows, err := g.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -139,4 +133,18 @@ func (g *RelationshipsMDGenerator) queryRows(ctx context.Context, query, agentID
 		out = append(out, row)
 	}
 	return out, rows.Err()
+}
+
+// RenderForAgent is transported with each Run so remote Computers receive the same relationship snapshot.
+func (g *RelationshipsMDGenerator) RenderForAgent(ctx context.Context, agentID string, channelIDs ...string) (string, error) {
+	doc, err := g.collect(ctx, agentID, channelIDs...)
+	if err != nil {
+		return "", err
+	}
+	doc.UpdatedAt = "current dispatch"
+	var buf bytes.Buffer
+	if err := template.Must(template.New("relationships").Parse(relationshipsMDTemplate)).Execute(&buf, doc); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }

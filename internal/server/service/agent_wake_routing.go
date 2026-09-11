@@ -68,7 +68,24 @@ type relationshipEdge struct {
 }
 
 func (s *AgentService) routeWakeTargets(ctx context.Context, agents []agentChannelInfo, req wakeRouteRequest) ([]agentChannelInfo, wakeRouteDecision) {
-	activeIDs := agentIDs(agents)
+	// A correction belongs to one existing obligation, even when its owner changed attention policy.
+	if req.TriggerMessageID != "" {
+		var correctionAgent string
+		err := s.pool.QueryRow(ctx, `SELECT COALESCE((SELECT r.agent_id::text FROM messages m JOIN agent_runs r ON r.id::text=m.metadata->>'correction_of_run_id' WHERE m.id=$1 AND m.channel_id=$2 AND m.sender_type='user'),'')`, req.TriggerMessageID, req.ChannelID).Scan(&correctionAgent)
+		if err != nil {
+			slog.Error("correction routing failed", "error", err)
+			return nil, wakeRouteDecision{Reason: wakeReasonNoActiveAgent}
+		}
+		if correctionAgent != "" {
+			ids := intersectInOrder(agentIDs(agents), []string{correctionAgent})
+			return filterAgentsByID(agents, ids), wakeRouteDecision{AgentIDs: ids, Reason: wakeReasonExplicitMention}
+		}
+	}
+	activeIDs, err := s.filterAttention(ctx, agentIDs(agents), req)
+	if err != nil {
+		slog.Error("attention policy lookup failed", "error", err)
+		return nil, wakeRouteDecision{Reason: wakeReasonNoActiveAgent}
+	}
 	if req.ExcludeAgentID != "" {
 		activeIDs = excludeID(activeIDs, req.ExcludeAgentID)
 	}
@@ -82,7 +99,7 @@ func (s *AgentService) routeWakeTargets(ctx context.Context, agents []agentChann
 	// Explicit and unresolved mentions do not need relationship or history reads.
 	decision := selectWakeDecision(facts)
 	if decision.Reason != wakeReasonExplicitMention && decision.Reason != wakeReasonUnresolvedMention && decision.Reason != wakeReasonNoActiveAgent {
-		allEdges, err := s.getWakeRelationshipEdges(ctx)
+		allEdges, err := s.getWakeRelationshipEdges(ctx, req.ChannelID)
 		if err != nil {
 			slog.Error("failed to load agent relationship graph for wake routing", "channel_id", req.ChannelID, "error", err)
 		} else {
@@ -267,13 +284,15 @@ func relationshipGraphForActive(activeIDs []string, allEdges []relationshipEdge)
 	return nodes, edges
 }
 
-func (s *AgentService) getWakeRelationshipEdges(ctx context.Context) ([]relationshipEdge, error) {
+func (s *AgentService) getWakeRelationshipEdges(ctx context.Context, channelIDs ...string) ([]relationshipEdge, error) {
+	channelID := ""
+	if len(channelIDs) > 0 {
+		channelID = channelIDs[0]
+	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT from_agent_id::text, to_agent_id::text
-		  FROM agent_relationships
-		 WHERE rel_type = 'assigns_to'
-		 ORDER BY created_at ASC, id ASC
-	`)
+		SELECT from_agent_id::text, to_agent_id::text FROM agent_relationship_scopes r WHERE rel_type='assigns_to' AND ($1='' OR channel_id::text=$1) AND NOT EXISTS(SELECT 1 FROM channels c WHERE c.id::text=$1 AND c.team_version_id IS NOT NULL)
+ UNION ALL SELECT edge->>'from_agent_id',edge->>'to_agent_id' FROM channels c JOIN channel_team_versions v ON v.id=c.team_version_id CROSS JOIN LATERAL jsonb_array_elements(v.lockfile->'relationships') edge WHERE c.id::text=$1 AND edge->>'rel_type'='assigns_to'
+	`, channelID)
 	if err != nil {
 		return nil, err
 	}

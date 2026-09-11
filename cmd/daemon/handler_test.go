@@ -128,6 +128,32 @@ func TestProxyWithoutExecutingRunExplainsRuntimeStateNotPermission(t *testing.T)
 	}
 }
 
+func TestMessageReadPathPreservesScopeAndPagination(t *testing.T) {
+	const channel = "11111111-1111-4111-8111-111111111111"
+	for _, tc := range []struct{ thread, node, options, want string }{
+		{"", "", "", "/api/v1/channels/" + channel + "/messages"},
+		{"", "node-a", `{"limit":100,"before":"a&after=wrong","after":"b"}`, "/api/v1/channels/" + channel + "/messages?after=b&before=a%26after%3Dwrong&limit=100&thinking_node_id=node-a"},
+		{"abc12345", "node-a", `{"limit":20}`, "/api/v1/channels/" + channel + "/messages/abc12345/thread?limit=20"},
+		{"", "node-a", `{"is_dm":true}`, "/api/v1/dm/" + channel + "/messages"},
+		{"abc12345", "", `{"is_dm":true,"after":"cursor"}`, "/api/v1/dm/" + channel + "/messages/abc12345/thread?after=cursor"},
+	} {
+		got, err := messageReadPath(channel, tc.thread, tc.node, tc.options)
+		if err != nil || got != tc.want {
+			t.Errorf("messageReadPath(%q, %q, %q) = %q, %v; want %q", tc.thread, tc.node, tc.options, got, err, tc.want)
+		}
+	}
+	for _, tc := range []struct{ channel, thread, options string }{
+		{channel, "", `{"limit":"bad"}`},
+		{"../other", "", ""},
+		{channel, "../other", ""},
+		{channel, "..", ""},
+	} {
+		if _, err := messageReadPath(tc.channel, tc.thread, "", tc.options); err == nil {
+			t.Errorf("accepted invalid read options: %+v", tc)
+		}
+	}
+}
+
 func TestBackendFinalStatusMapping(t *testing.T) {
 	tests := []struct {
 		name       string

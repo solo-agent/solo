@@ -1,5 +1,7 @@
 'use client';
 
+import { TaskDeliveryDialog } from './task-delivery-dialog';
+import { TaskWaitDialog } from './task-wait-dialog';
 import { Check, RotateCcw, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
@@ -26,12 +28,22 @@ interface TaskActionButtonsProps {
 }
 
 export function TaskActionButtons({ task, onActionComplete }: TaskActionButtonsProps) {
+	const [waitingOpen, setWaitingOpen] = useState(false);
+	return <div onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+		<TaskLifecycleButtons task={task} onActionComplete={onActionComplete} />
+		{task.waiting && <div className="mt-2"><ActionButton tone="info" onClick={() => setWaitingOpen(true)}>等待条件中</ActionButton></div>}
+		{waitingOpen && <TaskWaitDialog task={task} onClose={() => setWaitingOpen(false)} />}
+	</div>;
+}
+
+function TaskLifecycleButtons({ task, onActionComplete }: TaskActionButtonsProps) {
   const { user } = useAuth();
   const { showToast } = useToast();
   const [busy, setBusy] = useState<TaskAction | null>(null);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
   const [confirmingClose, setConfirmingClose] = useState(false);
+  const [deliveryOpen, setDeliveryOpen] = useState(false);
 
   const isCreator = !!user?.id && task.creator_id === user.id;
   const disabled = busy !== null;
@@ -52,6 +64,17 @@ export function TaskActionButtons({ task, onActionComplete }: TaskActionButtonsP
     }
   };
 
+  if (task.contract) {
+    return <div onClick={(e) => e.stopPropagation()}>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <ActionButton tone="info" onClick={() => setDeliveryOpen(true)}>查看成果</ActionButton>
+        {isCreator && (task.status === 'done' || task.status === 'closed') && <ActionButton tone="info" disabled={disabled} onClick={() => run('reopen')}>{t('taskActionReopen')}</ActionButton>}
+      </div>
+      <CloseHoverButton disabled={disabled} onClick={() => setConfirmingClose(true)} />
+      <TaskDeliveryDialog taskId={task.id} open={deliveryOpen} onOpenChange={setDeliveryOpen} onComplete={onActionComplete} />
+      <CloseTaskDialog open={confirmingClose} disabled={disabled} taskTitle={task.title} onOpenChange={setConfirmingClose} onConfirm={() => run('close')} />
+    </div>;
+  }
   if (task.status === 'in_review') {
     return (
       <>

@@ -15,7 +15,7 @@ const corsOrigins = `http://localhost:${frontendPort},http://127.0.0.1:${fronten
 
 function lifecycleArgs(...extra: string[]) {
   const args = [
-    'rebuild',
+    'rebuild', 'SOLO_DAEMON_PROFILE=',
     `SERVER_PORT=${serverPort}`,
     `DAEMON_PORT=${daemonPort}`,
     `FRONTEND_PORT=${frontendPort}`,

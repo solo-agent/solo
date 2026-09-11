@@ -18,7 +18,7 @@ grep -q 'ordinary_online' <<<"$source_text" || fail "cleanup does not verify the
 grep -q 'ordinary_health' <<<"$source_text" || fail "cleanup does not verify the ordinary Daemon health"
 grep -q 'isolated_remaining' <<<"$source_text" || fail "cleanup does not verify removal of the E2E Daemon"
 grep -Fq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' <<<"$source_text" || fail "Computer ID is not validated as a hexadecimal UUID"
-grep -q "UPDATE tasks SET status = 'todo', claimer_id = NULL" <<<"$source_text" || fail "cleanup does not release E2E Agent task claims"
+grep -q "UPDATE tasks SET status = 'closed'" <<<"$source_text" || fail "cleanup does not close unfinished E2E tasks"
 grep -q "UPDATE agent_runs SET status = 'cancelled'" <<<"$source_text" || fail "cleanup does not cancel active E2E Agent Runs"
 grep -q "UPDATE agent_sessions SET status = 'closed'" <<<"$source_text" || fail "cleanup does not close active E2E Agent Sessions"
 
@@ -27,7 +27,7 @@ trap 'rm -rf -- "$tmp_root"' EXIT
 credential_file="$tmp_root/credentials.json"
 printf '{"computer_id":"1234567g-1234-1234-1234-123456789abc"}\n' >"$credential_file"
 set +e
-validation_output="$(TMPDIR="$tmp_root/missing" SOLO_DAEMON_CREDENTIAL_FILE="$credential_file" bash "$SCRIPT_DIR/run-local-e2e.sh" self-test true 2>&1)"
+validation_output="$(TMPDIR="$tmp_root/missing" SOLO_DAEMON_PROFILE= SOLO_DAEMON_CREDENTIAL_FILE="$credential_file" bash "$SCRIPT_DIR/run-local-e2e.sh" self-test true 2>&1)"
 validation_status=$?
 set -e
 [ "$validation_status" -eq 2 ] || fail "non-hex Computer ID was not rejected before startup"
@@ -35,7 +35,7 @@ grep -q 'valid UUID Computer ID' <<<"$validation_output" || fail "non-hex Comput
 
 printf '{"computer_id":"ABCDEF01-2345-6789-aBcD-ef0123456789"}\n' >"$credential_file"
 set +e
-validation_output="$(TMPDIR="$tmp_root/missing" SOLO_DAEMON_CREDENTIAL_FILE="$credential_file" bash "$SCRIPT_DIR/run-local-e2e.sh" self-test true 2>&1)"
+validation_output="$(TMPDIR="$tmp_root/missing" SOLO_DAEMON_PROFILE= SOLO_DAEMON_CREDENTIAL_FILE="$credential_file" bash "$SCRIPT_DIR/run-local-e2e.sh" self-test true 2>&1)"
 validation_status=$?
 set -e
 [ "$validation_status" -ne 2 ] || fail "valid hexadecimal UUID was rejected"

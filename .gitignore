@@ -76,6 +76,12 @@ docs/design/*
 !docs/design/public-remote-product-architecture.md
 !docs/design/workspace-multi-daemon-architecture.md
 !docs/design/agent-context-compaction-rollover.md
+!docs/design/agent-team-compounding-gap-and-rollout.md
+!docs/design/agent-team-compounding-design-notes.md
+!docs/design/solo-ux-convergence.md
+!docs/acceptance/
+!docs/acceptance/**
+!docs/acceptance/**/*.png
 !docs/plans/
 docs/plans/*
 !docs/plans/remote-product-completeness.md
@@ -95,3 +101,5 @@ frontend/e2e/
 !frontend/e2e/support/*.ts
 !frontend/e2e/workspace-multi-daemon.spec.ts
 videos/
+
+.e2e-state/

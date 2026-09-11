@@ -10,6 +10,8 @@
 
 'use client';
 
+import { detailSectionTitleClass } from '@/components/ui/detail-section';
+
 import {
   Fragment,
   useEffect,
@@ -300,6 +302,7 @@ const MessageItem = memo(function MessageItem({
     const channelName = typeof message.metadata?.channel_name === 'string' ? message.metadata.channel_name : t('lucyNewChannel');
     const templateId = typeof message.metadata?.template_id === 'string' ? message.metadata.template_id : '';
     const memberCount = typeof message.metadata?.member_count === 'number' ? message.metadata.member_count : 0;
+    const selectedMembers = Array.isArray(message.metadata?.members) ? message.metadata.members as { id: string; name: string; selection_reason?: string }[] : [];
     return (
       <div data-message-id={message.id} className="px-5 py-3" role="listitem">
         <div className="border-4 border-black bg-brutal-cream p-4 shadow-brutal">
@@ -311,6 +314,7 @@ const MessageItem = memo(function MessageItem({
               <div className="font-body text-[11px] font-semibold uppercase tracking-wider text-black/55">{t('lucyChannelReady')}</div>
               <h3 className="truncate font-heading text-lg font-black"># {channelName}</h3>
               <p className="mt-1 font-body text-sm text-black/65">{message.content}</p>
+              {selectedMembers.some((member) => member.selection_reason) && <details className="mt-3 break-words text-sm leading-relaxed"><summary className="cursor-pointer select-none"><span className={detailSectionTitleClass()}>成员选择依据</span></summary><ul className="space-y-2 text-muted-foreground">{selectedMembers.map((member) => <li key={member.id} className="my-2"><strong>{member.name}</strong>：{member.selection_reason}</li>)}</ul></details>}
               <div className="mt-3 flex flex-wrap gap-2">
                 {templateId && (
                   <span className="border-2 border-black bg-white px-2 py-1 font-mono text-[10px] font-bold uppercase">

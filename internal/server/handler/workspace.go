@@ -1273,6 +1273,35 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusConflict, "member still owns Agents in this Workspace")
 		return
 	}
+	// Reuse the complete withdrawal path before removing the owner's access.
+	rows, err := h.pool.Query(r.Context(), `SELECT cm.channel_id::text,cm.member_id::text FROM channel_members cm JOIN channels c ON c.id=cm.channel_id JOIN agents a ON a.id=cm.member_id WHERE cm.member_type='agent' AND c.workspace_id=$1 AND a.owner_id=$2 AND c.id<>a.home_channel_id`, workspaceID, targetID)
+	if err != nil {
+		writeError(w, 500, "failed to list shared Agents")
+		return
+	}
+	var memberships [][2]string
+	for rows.Next() {
+		var entry [2]string
+		if err = rows.Scan(&entry[0], &entry[1]); err != nil {
+			break
+		}
+		memberships = append(memberships, entry)
+	}
+	if err == nil {
+		err = rows.Err()
+	}
+	rows.Close()
+	if err != nil {
+		writeError(w, 500, "failed to list shared Agents")
+		return
+	}
+	for _, entry := range memberships {
+		// The workspace administrator's explicit removal revokes the departing owner's grants.
+		if _, err = service.NewChannelService(h.pool).RemoveMember(r.Context(), entry[0], targetID, entry[1]); err != nil {
+			writeError(w, 500, "failed to withdraw shared Agent")
+			return
+		}
+	}
 	tx, err := h.pool.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to remove member")

@@ -1,0 +1,27 @@
+{
+  "stats": {
+    "startTime": "2026-09-11T09:22:47.712Z",
+    "duration": 383812.585,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "results": [
+    {
+      "title": "Agent prepares and reviews an improvement, owner applies it to one team and confirms the real result",
+      "status": "passed",
+      "duration_ms": 383374,
+      "retry": 0,
+      "attachments": [
+        "evidence/ux-convergence/proposal-ready.png",
+        "evidence/ux-convergence/result-accepted.png",
+        "evidence/ux-convergence/team-records.png",
+        "evidence/ux-convergence/team-records-mobile.png",
+        "evidence/ux-convergence/real-runtime-and-database-receipt.json",
+        "evidence/ux-convergence/persisted-state-before-cleanup.json"
+      ],
+      "errors": []
+    }
+  ]
+}

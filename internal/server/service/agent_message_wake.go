@@ -142,6 +142,13 @@ func (s *AgentService) claimMessageWake(ctx context.Context, daemon *DaemonInfo,
 	if err := lockMessageWakeSlot(ctx, tx, ag.ID, taskReq.ChannelID); err != nil {
 		return nil, false, err
 	}
+	allowed, err := messageWakeAllowedTx(ctx, tx, ag.ID, taskReq.ChannelID, taskReq.ThreadID, taskReq.ResultContract == agentResultContractVisibleMessage)
+	if err != nil {
+		return nil, false, err
+	}
+	if !allowed {
+		return nil, true, nil
+	}
 	activeRunID, err := findActiveMessageRunTx(ctx, tx, ag.ID, taskReq.ChannelID)
 	if err != nil {
 		return nil, false, err
@@ -172,9 +179,9 @@ func (s *AgentService) claimMessageWake(ctx context.Context, daemon *DaemonInfo,
 	var pendingExists bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (
-			SELECT 1 FROM agent_pending_message_wakes
-			 WHERE agent_id = $1 AND channel_id = $2
-		)`, ag.ID, taskReq.ChannelID).Scan(&pendingExists); err != nil {
+			SELECT 1 FROM agent_inbox
+			 WHERE agent_id = $1 AND ready_at<=now()
+		)`, ag.ID).Scan(&pendingExists); err != nil {
 		return nil, false, err
 	}
 	if pendingExists {
@@ -240,6 +247,9 @@ func (s *AgentService) claimMessageWake(ctx context.Context, daemon *DaemonInfo,
 }
 
 func lockMessageWakeSlot(ctx context.Context, tx pgx.Tx, agentID, channelID string) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "agent-work:"+agentID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO agent_message_wake_slots (agent_id, channel_id)
 		VALUES ($1, $2)
@@ -260,21 +270,33 @@ func findActiveMessageRunTx(ctx context.Context, tx pgx.Tx, agentID, channelID s
 		SELECT id::text
 		  FROM agent_runs
 		 WHERE agent_id = $1
-		   AND channel_id = $2
-		   AND trigger_type = $3
-		   AND trigger_message_id IS NOT NULL
-		   AND thinking_node_id IS NULL
 		   AND finished_at IS NULL
 		 ORDER BY started_at ASC, id ASC
-		 LIMIT 1`, agentID, channelID, AgentRunTriggerMessage).Scan(&runID)
+		 LIMIT 1`, agentID).Scan(&runID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
 	return runID, err
 }
 
+// The routing decision may predate a concurrent mute. Recheck under the same
+// Agent lock before claiming or restoring any automatic message delivery.
+func messageWakeAllowedTx(ctx context.Context, tx pgx.Tx, agentID, channelID, threadID string, explicit bool) (bool, error) {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "agent-work:"+agentID); err != nil {
+		return false, err
+	}
+	var allowed bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agents a LEFT JOIN agent_channel_attention p ON p.agent_id=a.id AND p.channel_id=$2 LEFT JOIN thread_subscriptions ts ON ts.actor_id=a.id AND ts.thread_id=NULLIF($3,'')::uuid WHERE a.id=$1 AND a.is_active AND COALESCE(p.policy,a.attention_policy)<>'nothing' AND ($4 OR ts.followed=true OR (COALESCE(p.policy,a.attention_policy)='all' AND COALESCE(ts.followed,true))))`, agentID, channelID, threadID, explicit).Scan(&allowed)
+	return allowed, err
+}
+
 func upsertPendingMessageWakeTx(ctx context.Context, tx pgx.Tx, wake pendingMessageWake) error {
-	_, err := tx.Exec(ctx, `
+	allowed, err := messageWakeAllowedTx(ctx, tx, wake.AgentID, wake.ChannelID, wake.ThreadID, wake.RequiresVisibleReply)
+	if err != nil || !allowed {
+		return err
+	}
+
+	_, err = tx.Exec(ctx, `
 		INSERT INTO agent_pending_message_wakes (
 			agent_id, channel_id, scope_key, thread_id, first_message_seq,
 			latest_message_seq, requires_visible_result
@@ -321,6 +343,15 @@ func (s *AgentService) advancePendingMessageWake(ctx context.Context, agentID, c
 		  FROM agents
 		 WHERE id = $1 AND is_active = true`, agentID,
 	).Scan(&ag.ID, &ag.Name, &ag.ModelProvider, &ag.ModelName, &ag.SystemPrompt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			if _, err = tx.Exec(ctx, `DELETE FROM agent_pending_message_wakes WHERE agent_id=$1`, agentID); err != nil {
+				return err
+			}
+			if _, err = tx.Exec(ctx, `DELETE FROM agent_message_wake_slots WHERE agent_id=$1`, agentID); err != nil {
+				return err
+			}
+			return tx.Commit(ctx)
+		}
 		return err
 	}
 
@@ -330,10 +361,10 @@ func (s *AgentService) advancePendingMessageWake(ctx context.Context, agentID, c
 			SELECT agent_id::text, channel_id::text, COALESCE(thread_id::text, ''), scope_key,
 			       first_message_seq, latest_message_seq, requires_visible_result
 			  FROM agent_pending_message_wakes
-			 WHERE agent_id = $1 AND channel_id = $2
-			 ORDER BY created_at ASC, scope_key ASC
+			 WHERE agent_id = $1
+			 ORDER BY requires_visible_result DESC, created_at ASC, scope_key ASC
 			 LIMIT 1
-			 FOR UPDATE`, agentID, channelID,
+			 FOR UPDATE`, agentID,
 		).Scan(&wake.AgentID, &wake.ChannelID, &wake.ThreadID, &wake.ScopeKey,
 			&wake.FirstMessageSeq, &wake.LatestMessageSeq, &wake.RequiresVisibleReply)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -349,16 +380,30 @@ func (s *AgentService) advancePendingMessageWake(ctx context.Context, agentID, c
 			return err
 		}
 
+		channelID = wake.ChannelID
+		allowed, allowErr := messageWakeAllowedTx(ctx, tx, agentID, channelID, wake.ThreadID, wake.RequiresVisibleReply)
+		if allowErr != nil {
+			return allowErr
+		}
+		if !allowed {
+			if _, err := tx.Exec(ctx, `DELETE FROM agent_pending_message_wakes WHERE agent_id=$1 AND channel_id=$2 AND scope_key=$3`, agentID, channelID, wake.ScopeKey); err != nil {
+				return err
+			}
+			continue
+		}
+
 		err = tx.QueryRow(ctx, `
 			SELECT id::text
 			  FROM messages
 			 WHERE channel_id = $1
 			   AND seq BETWEEN $2 AND $3
 			   AND is_deleted = false
+ AND EXISTS(SELECT 1 FROM channel_members cm JOIN channels c ON c.id=cm.channel_id WHERE cm.channel_id=messages.channel_id AND cm.member_type='agent' AND cm.member_id=$5 AND NOT c.is_archived)
 			   AND thinking_node_id IS NULL
 			   AND (($4 = '' AND thread_id IS NULL) OR thread_id = NULLIF($4, '')::uuid)
+ AND NOT EXISTS(SELECT 1 FROM agent_message_consumptions c WHERE c.agent_id=$5 AND c.message_id=messages.id)
 			 ORDER BY seq DESC
-			 LIMIT 1`, channelID, wake.FirstMessageSeq, wake.LatestMessageSeq, wake.ThreadID,
+			 LIMIT 1`, channelID, wake.FirstMessageSeq, wake.LatestMessageSeq, wake.ThreadID, agentID,
 		).Scan(&wake.TriggerMessageID)
 		if !errors.Is(err, pgx.ErrNoRows) {
 			break
@@ -370,6 +415,10 @@ func (s *AgentService) advancePendingMessageWake(ctx context.Context, agentID, c
 		}
 	}
 	if err != nil {
+		return err
+	}
+	head, err := agentInboxTurnTx(ctx, tx, agentID, "message", wake.ChannelID+":"+wake.ScopeKey)
+	if err != nil || !head {
 		return err
 	}
 	dmn, err := s.dm.ResolveDaemonForAgent(ctx, agentID, "llm")
@@ -442,6 +491,13 @@ func (s *AgentService) persistRemoteMessageRunTx(ctx context.Context, tx pgx.Tx,
 	}
 	taskReq.RunID = run.ID
 	taskReq.TaskID = run.ID
+	if taskReq.RelationshipsMarkdown == "" {
+		var err error
+		taskReq.RelationshipsMarkdown, err = NewRelationshipsMDGenerator(s.pool, "").RenderForAgent(ctx, ag.ID, taskReq.ChannelID)
+		if err != nil {
+			return err
+		}
+	}
 	taskReq.AgentName = ag.Name
 	_ = tx.QueryRow(ctx, `SELECT COALESCE(name, id::text) FROM channels WHERE id = $1`, taskReq.ChannelID).Scan(&taskReq.ChannelName)
 	var customEnv, customArgs json.RawMessage
@@ -449,24 +505,32 @@ func (s *AgentService) persistRemoteMessageRunTx(ctx context.Context, tx pgx.Tx,
 		_ = json.Unmarshal(customEnv, &taskReq.CustomEnv)
 		_ = json.Unmarshal(customArgs, &taskReq.CustomArgs)
 	}
-	runSvc := NewAgentRunService(s.pool)
-	dispatch, err := runSvc.resolveSessionDispatchTx(ctx, tx, ResolveSessionDispatchInput{
-		RunID:                   run.ID,
-		AgentID:                 ag.ID,
-		ChannelID:               taskReq.ChannelID,
-		Provider:                taskReq.ModelConfig.Provider,
-		ThinkingNodeID:          taskReq.NodeID,
-		ResumeSessionID:         taskReq.ResumeSessionID,
-		ForceFreshSession:       taskReq.ForceFreshSession,
-		SupportsContextRollover: hasCapability(dmn.Capabilities, contextRolloverCapability),
-	})
-	if err != nil {
+	if err := applyRunRevision(ctx, tx, &taskReq, run.ID); err != nil {
 		return err
 	}
-	if err := s.applySessionDispatch(ctx, tx, &taskReq, dispatch); err != nil {
+	if err := validateRevisionRuntime(taskReq, dmn.Capabilities); err != nil {
 		return err
 	}
-	run.RolloverFromSessionID = dispatch.RolloverFromSessionID
+	if taskReq.CodeReview == nil {
+		runSvc := NewAgentRunService(s.pool)
+		dispatch, err := runSvc.resolveSessionDispatchTx(ctx, tx, ResolveSessionDispatchInput{
+			RunID:                   run.ID,
+			AgentID:                 ag.ID,
+			ChannelID:               taskReq.ChannelID,
+			Provider:                taskReq.ModelConfig.Provider,
+			ThinkingNodeID:          taskReq.NodeID,
+			ResumeSessionID:         taskReq.ResumeSessionID,
+			ForceFreshSession:       taskReq.ForceFreshSession,
+			SupportsContextRollover: hasCapability(dmn.Capabilities, contextRolloverCapability),
+		})
+		if err != nil {
+			return err
+		}
+		if err := s.applySessionDispatch(ctx, tx, &taskReq, dispatch); err != nil {
+			return err
+		}
+		run.RolloverFromSessionID = dispatch.RolloverFromSessionID
+	}
 	payload, err := json.Marshal(taskReq)
 	if err != nil {
 		return err
@@ -530,6 +594,31 @@ func (s *AgentService) buildPendingMessageWakeTask(ctx context.Context, wake pen
 	if err != nil {
 		return daemonTaskRequest{}, err
 	}
+	consumed, err := s.pool.Query(ctx, `SELECT m.seq FROM agent_message_consumptions c JOIN messages m ON m.id=c.message_id WHERE c.agent_id=$1 AND m.channel_id=$2 AND m.seq BETWEEN $3 AND $4`, ag.ID, wake.ChannelID, wake.FirstMessageSeq, wake.LatestMessageSeq)
+	if err != nil {
+		return daemonTaskRequest{}, err
+	}
+	seen := map[int64]bool{}
+	for consumed.Next() {
+		var seq int64
+		if err := consumed.Scan(&seq); err != nil {
+			consumed.Close()
+			return daemonTaskRequest{}, err
+		}
+		seen[seq] = true
+	}
+	err = consumed.Err()
+	consumed.Close()
+	if err != nil {
+		return daemonTaskRequest{}, err
+	}
+	filtered := turnMessages[:0]
+	for _, message := range turnMessages {
+		if !seen[message.Seq] {
+			filtered = append(filtered, message)
+		}
+	}
+	turnMessages = filtered
 	if len(turnMessages) == 0 {
 		return daemonTaskRequest{}, errors.New("coalesced wake has no remaining messages")
 	}

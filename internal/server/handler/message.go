@@ -93,13 +93,16 @@ func NewMessageHandler(pool *pgxpool.Pool, hub *ws.Hub, agentSvc *service.AgentS
 // --- Request/Response types ---
 
 type CreateMessageRequest struct {
-	Content        string   `json:"content"`
-	AsTask         bool     `json:"as_task,omitempty"`
-	AttachmentIDs  []string `json:"attachment_ids,omitempty"`
-	ThreadID       string   `json:"thread_id,omitempty"`
-	ThinkingNodeID string   `json:"thinking_node_id,omitempty"`
-	RunID          string   `json:"run_id,omitempty"`
-	ClientMsgID    string   `json:"client_msg_id,omitempty"`
+	KeepAfterSeq      int64    `json:"keep_after_seq,omitempty"`
+	FreshnessReason   string   `json:"freshness_reason,omitempty"`
+	CorrectionOfRunID string   `json:"correction_of_run_id,omitempty"`
+	Content           string   `json:"content"`
+	AsTask            bool     `json:"as_task,omitempty"`
+	AttachmentIDs     []string `json:"attachment_ids,omitempty"`
+	ThreadID          string   `json:"thread_id,omitempty"`
+	ThinkingNodeID    string   `json:"thinking_node_id,omitempty"`
+	RunID             string   `json:"run_id,omitempty"`
+	ClientMsgID       string   `json:"client_msg_id,omitempty"`
 }
 
 // AttachmentMeta is the attachment metadata included in message responses.
@@ -648,10 +651,12 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	if deliveryRunID != "" && thinkingNodeID == "" {
 		hold, freshnessErr := service.CheckAndHoldAgentSend(r.Context(), tx, service.AgentSendFreshnessInput{
-			RunID: deliveryRunID, AgentID: userID, ChannelID: channelID, ThreadID: deliveryFreshnessThreadID,
+			RunID: deliveryRunID, AgentID: userID, ChannelID: channelID, ThreadID: deliveryFreshnessThreadID, Draft: content, KeepAfterSeq: req.KeepAfterSeq, FreshnessReason: req.FreshnessReason,
 		})
 		if freshnessErr != nil {
-			if errors.Is(freshnessErr, service.ErrFreshnessRunUnavailable) {
+			if errors.Is(freshnessErr, service.ErrFreshnessDraftUnchanged) {
+				writeError(w, http.StatusConflict, freshnessErr.Error())
+			} else if errors.Is(freshnessErr, service.ErrFreshnessRunUnavailable) {
 				writeError(w, http.StatusConflict, "invalid agent run")
 			} else {
 				slog.Error("failed to check message freshness", "error", freshnessErr, "run_id", deliveryRunID)
@@ -702,6 +707,34 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		nullableThreadID = threadID
 	}
 	metadata := map[string]any{}
+	if req.KeepAfterSeq != 0 || req.FreshnessReason != "" {
+		if req.KeepAfterSeq < 1 || strings.TrimSpace(req.FreshnessReason) == "" || len(req.FreshnessReason) > 4000 || deliveryRunID == "" || thinkingNodeID != "" {
+			writeError(w, http.StatusBadRequest, "retaining a held draft requires its active Run, latest seen sequence and reason")
+			return
+		}
+		metadata["freshness_resolution"] = map[string]any{"action": "retain", "seen_up_to_seq": req.KeepAfterSeq, "reason": req.FreshnessReason}
+	}
+	if req.CorrectionOfRunID != "" {
+		if _, err := uuid.Parse(req.CorrectionOfRunID); err != nil || senderType != "user" {
+			writeError(w, 400, "only a human can correct a valid active Run")
+			return
+		}
+		var valid bool
+		if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE id=$1 AND channel_id=$2 AND COALESCE(thread_id::text,'')=$3 AND thinking_node_id IS NULL AND finished_at IS NULL)`, req.CorrectionOfRunID, channelID, threadID).Scan(&valid); err != nil || !valid {
+			writeError(w, 409, "correction target is no longer active in this conversation")
+			return
+		}
+		metadata["correction_of_run_id"] = req.CorrectionOfRunID
+	} else if senderType == "user" && thinkingNodeID == "" {
+		correctionRunID, err := service.TaskCorrectionRun(r.Context(), tx, channelID, threadID)
+		if err != nil {
+			writeError(w, 500, "failed to associate task follow-up")
+			return
+		}
+		if correctionRunID != "" {
+			metadata["correction_of_run_id"] = correctionRunID
+		}
+	}
 	if deliveryRunID != "" {
 		metadata["agent_run_id"] = deliveryRunID
 		metadata["delivery"] = "visible"
@@ -718,6 +751,12 @@ func (h *MessageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if deliveryRunID != "" {
+		if _, err := tx.Exec(r.Context(), `DELETE FROM agent_held_drafts WHERE run_id=$1`, deliveryRunID); err != nil {
+			writeError(w, 500, "could not retire held draft")
+			return
+		}
+	}
 	var threadRootMsgID string
 	var threadReplyCount int
 	if threadID != "" {

@@ -137,13 +137,13 @@ func (h *AutomationHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 
 func (h *AutomationHandler) writeError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, service.ErrTaskNotChannelMember):
+	case errors.Is(err, service.ErrTaskNotCreator), errors.Is(err, service.ErrTaskNotChannelMember):
 		writeError(w, http.StatusForbidden, "not a channel member")
 	case errors.Is(err, service.ErrAutomationNotFound):
 		writeError(w, http.StatusNotFound, "automation not found")
 	case errors.Is(err, service.ErrAutomationTargetMissing):
 		writeErrorCode(w, http.StatusBadRequest, "automation_target_unavailable", err.Error())
-	case errors.Is(err, service.ErrAutomationInvalidInput):
+	case errors.Is(err, service.ErrTaskDeliveryInvalid), errors.Is(err, service.ErrAutomationInvalidInput):
 		writeErrorCode(w, http.StatusBadRequest, "automation_invalid_input", err.Error())
 	default:
 		if errors.Is(err, service.ErrAutomationNotDue) {

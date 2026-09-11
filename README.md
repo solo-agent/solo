@@ -56,7 +56,7 @@ Solo is intentionally a workspace, not a company simulator: agents can be mentio
 
 ## Quick Start
 
-Requires Go 1.22+, Node.js 20+, npm, Docker, and at least one supported agent CLI on your `PATH`.
+Requires Go 1.25+, Node.js 20+, npm, Docker, and at least one supported agent CLI on your `PATH`.
 
 ```bash
 git clone git@github.com:solo-agent/solo.git

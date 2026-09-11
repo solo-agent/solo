@@ -1,0 +1,25 @@
+{
+  "checked_at": "2026-09-11T11:18:15.148215+00:00",
+  "ports": {
+    "3000": {
+      "endpoint": "/",
+      "http_status": 200
+    },
+    "8080": {
+      "endpoint": "/readyz",
+      "http_status": 200,
+      "status": "ok"
+    },
+    "8081": {
+      "endpoint": "/health",
+      "http_status": 200,
+      "status": "ok",
+      "control_connected": true
+    }
+  },
+  "database": {
+    "ordinary_computer_online": true,
+    "isolated_computer_remaining": 0,
+    "original_lead_task_status": "in_review"
+  }
+}

@@ -4,6 +4,7 @@ import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
 const publicWorkspaceID = '00000000-0000-0000-0000-000000000001';
+test.use({ actionTimeout: 30_000 });
 
 interface AuthResponse {
   access_token: string;
@@ -65,12 +66,14 @@ function databaseJSON<T>(query: string): T {
 }
 
 async function authenticatePage(page: Page, auth: AuthResponse, workspaceID: string) {
-  await page.addInitScript(({ accessToken, refreshToken, activeWorkspace }) => {
+  await page.addInitScript(({ accessToken, refreshToken, activeWorkspace, userID }) => {
     localStorage.setItem('access_token', accessToken);
     localStorage.setItem('refresh_token', refreshToken);
     localStorage.setItem('solo_active_workspace_id', activeWorkspace);
+    localStorage.setItem(`solo_active_workspace_id:${userID}`, activeWorkspace);
+    localStorage.setItem(`solo:first-run-guide-skipped:${userID}`, '1');
     localStorage.setItem('solo.locale', 'en');
-  }, { accessToken: auth.access_token, refreshToken: auth.refresh_token, activeWorkspace: workspaceID });
+  }, { accessToken: auth.access_token, refreshToken: auth.refresh_token, activeWorkspace: workspaceID, userID: auth.user.id });
 }
 
 async function sendBlockedWebSocketCommand(
@@ -142,10 +145,12 @@ test.describe('remote product completeness', () => {
       await expect(page.getByText('Pinned messages', { exact: true })).toHaveCount(0);
       const rootMessage = page.locator(`[data-message-id="${root.id}"]`);
       await rootMessage.hover();
-      await expect(rootMessage.getByRole('button', { name: 'Pin message' })).toBeVisible();
-      await rootMessage.getByRole('button', { name: 'Pin message' }).click();
+      await rootMessage.getByRole('button', { name: 'More message actions' }).click();
+      await page.getByRole('menuitem', { name: 'Pin message', exact: true }).click();
       await expect(page.getByText('Message pinned.', { exact: true })).toBeVisible();
-      await expect(rootMessage.getByRole('button', { name: 'Unpin message' })).toBeVisible();
+      await rootMessage.getByRole('button', { name: 'More message actions' }).click();
+      await expect(page.getByRole('menuitem', { name: 'Unpin message', exact: true })).toBeVisible();
+      await page.keyboard.press('Escape');
       await expect(page.getByText('Pinned messages', { exact: true })).toBeVisible();
       await expect(page.getByText(`PIN_ME_${suffix}`, { exact: true })).toBeVisible();
 
@@ -215,13 +220,17 @@ test.describe('remote product completeness', () => {
       const avatarDownload = await request.get(`${apiBase}${avatarURL}`, { headers: headers(owner, workspace.id) });
       expect(avatarDownload.ok()).toBe(true);
       expect(avatarDownload.headers()['content-type']).toContain('image/png');
+      // Consecutive messages by one sender share an avatar in the current UI.
+      await call(request, owner, 'post', `/api/v1/channels/${channel.id}/messages`, workspace.id, {
+        content: `AVATAR_GROUP_BREAK_${suffix}`,
+      });
       const avatarMessage = await call<Message>(request, member, 'post', `/api/v1/channels/${channel.id}/messages`, workspace.id, {
         content: `AVATAR_VISIBLE_${suffix}`,
       });
       await page.reload();
       const sharedAvatar = page.locator(`[data-message-id="${avatarMessage.id}"]`).getByLabel(member.user.display_name).locator('img');
       await expect(sharedAvatar).toBeVisible();
-      await expect.poll(() => sharedAvatar.evaluate((image) => image.complete && image.naturalWidth > 0)).toBe(true);
+      await expect.poll(() => sharedAvatar.evaluate((image) => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0)).toBe(true);
 
       const persisted = databaseJSON<{ pin_count: number; mute_count: number; attachment_count: number; avatar_url: string; policy: string }>(`
         SELECT json_build_object(

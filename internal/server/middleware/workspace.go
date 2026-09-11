@@ -111,7 +111,7 @@ func resourceBelongsToWorkspace(pool *pgxpool.Pool, r *http.Request, workspaceID
 	case "channels", "dm":
 		query = `SELECT EXISTS(SELECT 1 FROM channels WHERE id=$1 AND workspace_id=$2)`
 	case "agents":
-		query = `SELECT EXISTS(SELECT 1 FROM agents a JOIN channels c ON c.id=a.home_channel_id WHERE a.id=$1 AND c.workspace_id=$2)`
+		query = `SELECT EXISTS(SELECT 1 FROM agents a LEFT JOIN channels c ON c.id=a.home_channel_id WHERE a.id=$1 AND (c.workspace_id=$2 OR EXISTS(SELECT 1 FROM channel_members m JOIN channels target ON target.id=m.channel_id WHERE m.member_id=a.id AND m.member_type='agent' AND target.workspace_id=$2)))`
 	case "tasks":
 		query = `SELECT EXISTS(SELECT 1 FROM tasks t JOIN channels c ON c.id=t.channel_id WHERE t.id=$1 AND c.workspace_id=$2)`
 	case "agent-runs":
@@ -123,7 +123,7 @@ func resourceBelongsToWorkspace(pool *pgxpool.Pool, r *http.Request, workspaceID
 	case "threads":
 		query = `SELECT EXISTS(SELECT 1 FROM threads t JOIN channels c ON c.id=t.channel_id WHERE t.id=$1 AND c.workspace_id=$2)`
 	case "agent-relationships":
-		query = `SELECT EXISTS(SELECT 1 FROM agent_relationships ar JOIN agents a ON a.id=ar.from_agent_id JOIN channels c ON c.id=a.home_channel_id WHERE ar.id=$1 AND c.workspace_id=$2)`
+		query = `SELECT EXISTS(SELECT 1 FROM agent_relationships ar JOIN channels c ON c.id=ar.channel_id WHERE ar.id=$1 AND c.workspace_id=$2)`
 	default:
 		return true
 	}

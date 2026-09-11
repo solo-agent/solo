@@ -1,0 +1,20 @@
+{
+  "stats": {
+    "startTime": "2026-09-11T09:30:46.793Z",
+    "duration": 60007.687,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "results": [
+    {
+      "title": "real Runtime waits durably, works independently, and resumes the original Task after a confirmed condition",
+      "status": "passed",
+      "duration_ms": 59582,
+      "retry": 0,
+      "attachments": [],
+      "errors": []
+    }
+  ]
+}
