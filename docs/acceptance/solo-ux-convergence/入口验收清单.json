@@ -1,0 +1,202 @@
+[
+  {
+    "id": "UX-01",
+    "title": "等待登记",
+    "mode": "日常操作消失",
+    "where": "原任务卡片显示等待状态",
+    "owner": "Agent 登记；Server 监听时间、依赖或外部确认",
+    "acceptance": "任务需要等待时，不要求用户填写等待表单；负责人能处理其他事，条件满足后继续同一 Task。",
+    "suite": "task-wait-resume",
+    "status": "通过"
+  },
+  {
+    "id": "UX-02",
+    "title": "关闭待跟进",
+    "mode": "日常操作消失",
+    "where": "原成员侧栏 → 工作记录（只读）",
+    "owner": "Agent 根据真实完成或取消依据更新",
+    "acceptance": "“标记已处理”按钮消失；在原对话补充处理意见后，Agent 更新记录；读过消息、Run 结束不等于承诺完成。",
+    "suite": "team-work-compounding",
+    "status": "通过"
+  },
+  {
+    "id": "UX-03",
+    "title": "失效草稿处理",
+    "mode": "日常操作消失",
+    "where": "原成员侧栏 → 工作记录 → 发送前暂存的草稿",
+    "owner": "Agent 消化补充后改写、保留或放弃",
+    "acceptance": "没有“放弃这份草稿”表单；旧稿不能越过更新检查直接发出；放弃草稿后，独立待办仍然存在。",
+    "suite": "agent-draft-decisions",
+    "status": "通过"
+  },
+  {
+    "id": "UX-04",
+    "title": "能力评测",
+    "mode": "日常操作消失",
+    "where": "原成员侧栏 → 改进建议；需要时展开对照结果",
+    "owner": "Agent 准备候选和固定样例，独立 Reviewer 检查",
+    "acceptance": "普通目录不出现自动评测临时成员和逐案任务；未验证、仍运行、用量未知或超预算时不能采用。",
+    "suite": "ux-convergence",
+    "status": "通过"
+  },
+  {
+    "id": "UX-05",
+    "title": "手动固定团队版本",
+    "mode": "日常操作消失",
+    "where": "原频道更多 → 团队记录 → 版本历史",
+    "owner": "Server 在获得所需授权后自动保存团队组合",
+    "acceptance": "没有“固定当前团队”日常按钮；采用后持久保存精确成员版本；已经创建的 Run 保持原快照，尚未领取的待办使用领取时获准版本。",
+    "suite": "ux-convergence",
+    "status": "通过"
+  },
+  {
+    "id": "UX-06",
+    "title": "工作队列",
+    "mode": "只读展开",
+    "where": "原成员侧栏 → 工作记录",
+    "owner": "Server 排序和串行调度；用户只读",
+    "acceptance": "默认折叠；展开能看到真实等待顺序，不能在这里派发、清空或把工作标记完成；同一成员不并发执行两份普通工作。",
+    "suite": "agent-inbox",
+    "status": "通过"
+  },
+  {
+    "id": "UX-07",
+    "title": "验证证据与成本",
+    "mode": "只读展开",
+    "where": "原任务卡片 → 查看成果 → 验证记录与交付成本",
+    "owner": "Agent/Server 记录；用户按需查看",
+    "acceptance": "默认先看当前成果；展开显示具体提交、审核、等待恢复和成本，没有人为填写投入分钟的表单；未知值不冒充零。",
+    "suite": "compounding-ui",
+    "status": "通过"
+  },
+  {
+    "id": "UX-08",
+    "title": "成员版本历史",
+    "mode": "只读展开",
+    "where": "原成员侧栏 → 改进历史",
+    "owner": "Server 保存历史；用户按需查看",
+    "acceptance": "默认折叠；历史不混入发布或编辑表单；采用和恢复只出现在明确团队范围的建议卡片上。",
+    "suite": "ux-convergence",
+    "status": "通过"
+  },
+  {
+    "id": "UX-09",
+    "title": "团队记录",
+    "mode": "只读展开",
+    "where": "原频道标题右侧“…” → 团队记录弹窗",
+    "owner": "Server 保存；用户按需查看",
+    "acceptance": "唯一新增弹窗；关闭后仍在原频道，左侧导航没有新增一级页；显示版本与合作记录。",
+    "suite": "compounding-ui",
+    "status": "通过"
+  },
+  {
+    "id": "UX-10",
+    "title": "消息接收策略",
+    "mode": "低频编辑",
+    "where": "原成员侧栏 → 消息接收",
+    "owner": "成员主人",
+    "acceptance": "默认折叠；改为不自动接收后普通消息不触发，改回提及接收后按规则恢复；不改变任务已有责任。",
+    "suite": "team-work-compounding",
+    "status": "通过"
+  },
+  {
+    "id": "UX-11",
+    "title": "Prompt、模型、Skill",
+    "mode": "低频编辑",
+    "where": "原成员侧栏的资料、运行配置与 Skill 区",
+    "owner": "成员主人",
+    "acceptance": "保留原配置入口和权限；折叠记录区不能挡住配置；已有能力包仍实际进入 Runtime。",
+    "suite": "revision-skills",
+    "status": "通过"
+  },
+  {
+    "id": "UX-12",
+    "title": "手动改进",
+    "mode": "低频编辑",
+    "where": "原成员侧栏 → 高级 → 手动改进",
+    "owner": "需要精确控制的成员主人",
+    "acceptance": "默认没有改进表单；主动打开后才挂载原手动评测能力；全局发布明确写明“全局”，不能伪装成只影响一支团队。",
+    "suite": "agent-selection",
+    "status": "通过"
+  },
+  {
+    "id": "UX-13",
+    "title": "精确验收规则",
+    "mode": "低频编辑",
+    "where": "原创建任务弹窗 → 自定义验收；原交付弹窗 → 验收安排",
+    "owner": "任务创建人；审核由指定角色承担",
+    "acceptance": "普通创建不展示整套 Gate 表单；严格人工、Agent、代码验收仍可选；旧严格任务仍需要逐项证据，不能被普通确认绕过。",
+    "suite": "code-gate",
+    "status": "通过"
+  },
+  {
+    "id": "UX-14",
+    "title": "导出 Lockfile",
+    "mode": "低频编辑",
+    "where": "团队记录 → 展开某个具体版本 → 导出 Lockfile",
+    "owner": "有权查看该团队记录的用户",
+    "acceptance": "不出现独立导出中心；下载 JSON 对应所选版本，成员 Revision 和关系与持久化记录一致。",
+    "suite": "task-delivery-contract",
+    "status": "通过"
+  },
+  {
+    "id": "UX-15",
+    "title": "自动任务",
+    "mode": "低频编辑",
+    "where": "原频道 → 自动任务视图",
+    "owner": "用户决定时间、范围和启停；Server 调度",
+    "acceptance": "保留原视图；同一自动任务未结束时不重复开工；错过日程按现有规则恢复；暂停后不产生下一轮。",
+    "suite": "automation",
+    "status": "通过"
+  },
+  {
+    "id": "UX-16",
+    "title": "执行中的补充",
+    "mode": "原处决定",
+    "where": "原 Task 讨论串输入框",
+    "owner": "用户补充；Server 绑定上下文；Agent 消化",
+    "acceptance": "不需要选择 Run，不出现第二个纠正表单；同一任务明确线程内的补充进入当前工作，旧稿不能覆盖新要求；不误绑其他任务。",
+    "suite": "team-work-compounding",
+    "status": "通过"
+  },
+  {
+    "id": "UX-17",
+    "title": "接受或退回成果",
+    "mode": "原处决定",
+    "where": "原任务卡片 → 查看成果弹窗",
+    "owner": "指定的人类确认者",
+    "acceptance": "先看到当前成果；普通结果确认没有技术检查复选框；接受写入真实意见，退回继续原任务、原团队；无权用户不能代为确认。",
+    "suite": "ux-convergence",
+    "status": "通过"
+  },
+  {
+    "id": "UX-18",
+    "title": "确认外部输入",
+    "mode": "条件出现",
+    "where": "需要外部确认的任务卡片 → 等待条件中 → 原等待弹窗",
+    "owner": "该等待记录允许的确认人",
+    "acceptance": "只有具体等待任务出现操作；填写真实依据后，负责人空闲再恢复；普通任务和已恢复任务不继续显示等待按钮。",
+    "suite": "task-wait-resume",
+    "status": "通过"
+  },
+  {
+    "id": "UX-19",
+    "title": "采用或恢复改进",
+    "mode": "条件出现",
+    "where": "原成员侧栏 → 具体改进建议卡片",
+    "owner": "成员主人，涉及其他主人时等待各自确认",
+    "acceptance": "按钮明确作用于哪支团队和哪个成员；采用不改全局配置，恢复后下一次真实任务使用此前版本；过期提案不能覆盖新团队。",
+    "suite": "ux-convergence",
+    "status": "通过"
+  },
+  {
+    "id": "UX-20",
+    "title": "合作授权与撤回",
+    "mode": "条件出现",
+    "where": "原频道更多 → 团队记录 → 具体合作约定",
+    "owner": "相关成员的主人各自决定",
+    "acceptance": "Agent 只能起草；一方同意不能冒充双方生效；另一方确认后生效，任一授权方撤回后停止后续使用并保留历史。",
+    "suite": "team-work-compounding",
+    "status": "通过"
+  }
+]

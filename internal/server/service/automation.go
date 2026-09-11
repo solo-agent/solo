@@ -42,6 +42,7 @@ var (
 
 // Automation describes one recurring task definition in a Channel.
 type Automation struct {
+	Contract         *TaskContract  `json:"contract,omitempty"`
 	ID               string         `json:"id"`
 	ChannelID        string         `json:"channel_id"`
 	CreatorID        string         `json:"creator_id"`
@@ -83,17 +84,18 @@ type AutomationRun struct {
 
 // AutomationInput is the user-editable portion of an Automation.
 type AutomationInput struct {
-	Name             string `json:"name"`
-	TaskTitle        string `json:"task_title"`
-	TaskDescription  string `json:"task_description"`
-	TargetAgentID    string `json:"target_agent_id"`
-	ScheduleType     string `json:"schedule_type"`
-	ScheduleHour     int    `json:"schedule_hour"`
-	ScheduleMinute   int    `json:"schedule_minute"`
-	ScheduleWeekday  *int   `json:"schedule_weekday"`
-	Timezone         string `json:"timezone"`
-	CompletionPolicy string `json:"completion_policy"`
-	Enabled          bool   `json:"enabled"`
+	Contract         *TaskContract `json:"contract,omitempty"`
+	Name             string        `json:"name"`
+	TaskTitle        string        `json:"task_title"`
+	TaskDescription  string        `json:"task_description"`
+	TargetAgentID    string        `json:"target_agent_id"`
+	ScheduleType     string        `json:"schedule_type"`
+	ScheduleHour     int           `json:"schedule_hour"`
+	ScheduleMinute   int           `json:"schedule_minute"`
+	ScheduleWeekday  *int          `json:"schedule_weekday"`
+	Timezone         string        `json:"timezone"`
+	CompletionPolicy string        `json:"completion_policy"`
+	Enabled          bool          `json:"enabled"`
 }
 
 // AutomationService owns persistence, scheduling and task materialisation.
@@ -216,6 +218,12 @@ func (s *AutomationService) Create(ctx context.Context, channelID, userID string
 	if err := s.taskSvc.requireChannelMember(ctx, channelID, userID); err != nil {
 		return nil, err
 	}
+	if err := s.taskSvc.ValidateContract(ctx, channelID, userID, input.Contract); err != nil {
+		return nil, err
+	}
+	if input.Contract != nil {
+		input.CompletionPolicy = AutomationCompletionReview
+	}
 	if input.CompletionPolicy == "" {
 		input.CompletionPolicy = AutomationCompletionAuto
 	}
@@ -235,11 +243,11 @@ func (s *AutomationService) Create(ctx context.Context, channelID, userID string
 		INSERT INTO automations (
 			id, channel_id, creator_id, name, task_title, task_description,
 			target_agent_id, schedule_type, schedule_hour, schedule_minute,
-			schedule_weekday, timezone, completion_policy, enabled, next_run_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+			schedule_weekday, timezone, completion_policy, enabled, next_run_at, contract
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 		id, channelID, userID, input.Name, input.TaskTitle, input.TaskDescription,
 		input.TargetAgentID, input.ScheduleType, input.ScheduleHour, input.ScheduleMinute,
-		input.ScheduleWeekday, input.Timezone, input.CompletionPolicy, input.Enabled, nextRun)
+		input.ScheduleWeekday, input.Timezone, input.CompletionPolicy, input.Enabled, nextRun, input.Contract)
 	if err != nil {
 		return nil, err
 	}
@@ -249,6 +257,23 @@ func (s *AutomationService) Create(ctx context.Context, channelID, userID string
 func (s *AutomationService) Update(ctx context.Context, channelID, automationID, userID string, input AutomationInput) (*Automation, error) {
 	if err := s.taskSvc.requireChannelMember(ctx, channelID, userID); err != nil {
 		return nil, err
+	}
+	var existingContract *TaskContract
+	var creatorID string
+	if err := s.pool.QueryRow(ctx, `SELECT creator_id::text,contract FROM automations WHERE id=$1 AND channel_id=$2`, automationID, channelID).Scan(&creatorID, &existingContract); err != nil {
+		return nil, err
+	}
+	if existingContract != nil || input.Contract != nil {
+		if creatorID != userID {
+			return nil, ErrTaskNotCreator
+		}
+		if input.Contract == nil {
+			input.Contract = existingContract
+		}
+		if err := s.taskSvc.ValidateContract(ctx, channelID, creatorID, input.Contract); err != nil {
+			return nil, err
+		}
+		input.CompletionPolicy = AutomationCompletionReview
 	}
 	if input.CompletionPolicy == "" {
 		if err := s.pool.QueryRow(ctx, `SELECT completion_policy FROM automations WHERE id=$1 AND channel_id=$2`, automationID, channelID).Scan(&input.CompletionPolicy); errors.Is(err, pgx.ErrNoRows) {
@@ -272,11 +297,11 @@ func (s *AutomationService) Update(ctx context.Context, channelID, automationID,
 		UPDATE automations SET
 			name=$1, task_title=$2, task_description=$3, target_agent_id=$4,
 			schedule_type=$5, schedule_hour=$6, schedule_minute=$7,
-			schedule_weekday=$8, timezone=$9, completion_policy=$10, enabled=$11, next_run_at=$12, updated_at=now()
+			schedule_weekday=$8, timezone=$9, completion_policy=$10, enabled=$11, next_run_at=$12, updated_at=now(),contract=$15
 		 WHERE id=$13 AND channel_id=$14`,
 		input.Name, input.TaskTitle, input.TaskDescription, input.TargetAgentID,
 		input.ScheduleType, input.ScheduleHour, input.ScheduleMinute,
-		input.ScheduleWeekday, input.Timezone, input.CompletionPolicy, input.Enabled, nextRun, automationID, channelID)
+		input.ScheduleWeekday, input.Timezone, input.CompletionPolicy, input.Enabled, nextRun, automationID, channelID, input.Contract)
 	if err != nil {
 		return nil, err
 	}
@@ -445,10 +470,10 @@ func (s *AutomationService) dispatch(ctx context.Context, automationID, source s
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO tasks (
 			id, task_number, channel_id, creator_id, title, description, status,
-			claimer_id, priority, message_id, created_at, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,'in_progress',$7,'normal',$8,$9,$9)`,
+			claimer_id, priority, message_id, created_at, updated_at,contract
+		) VALUES ($1,$2,$3,$4,$5,$6,'in_progress',$7,'normal',$8,$9,$9,$10)`,
 		taskID, taskNumber, automation.ChannelID, automation.CreatorID, automation.TaskTitle,
-		nullableStr(automation.TaskDescription), automation.TargetAgentID, messageID, now); err != nil {
+		nullableStr(automation.TaskDescription), automation.TargetAgentID, messageID, now, automation.Contract); err != nil {
 		return nil, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE automation_runs SET task_id=$1 WHERE id=$2`, taskID, runID); err != nil {
@@ -514,6 +539,9 @@ func (s *AutomationService) failDispatchedTask(ctx context.Context, runID, taskI
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockAutomationTasks(ctx, tx, ""); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `UPDATE automation_runs SET status='failed', failure_reason='dispatch_failed', completed_at=now() WHERE id=$1 AND status='running'`, runID); err != nil {
 		return err
 	}
@@ -544,11 +572,17 @@ func (s *AutomationService) reconcileRuns(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `UPDATE automation_runs r SET status=CASE t.status WHEN 'done' THEN 'completed' ELSE 'failed' END, failure_reason=CASE t.status WHEN 'closed' THEN 'task_closed' ELSE '' END,completed_at=now() FROM tasks t WHERE t.id=r.task_id AND t.contract IS NOT NULL AND t.status IN ('done','closed') AND r.status='running'`); err != nil {
+		return err
+	}
+
 	completedRows, err := tx.Query(ctx, `
 		UPDATE automation_runs r
 		   SET status='completed', completed_at=now()
 		 WHERE r.status='running'
 		   AND r.task_id IS NOT NULL
+ AND EXISTS(SELECT 1 FROM tasks t WHERE t.id=r.task_id AND t.contract IS NULL)
+ AND NOT EXISTS(SELECT 1 FROM tasks child WHERE child.parent_task_id=r.task_id AND child.status NOT IN ('done','closed'))
 		   AND COALESCE((
 			SELECT ar.status
 			  FROM agent_run_task_links link
@@ -626,10 +660,19 @@ func (s *AutomationService) pauseRepeatedFailures(ctx context.Context) error {
 }
 
 func reconcileAutomationRunTx(ctx context.Context, tx pgx.Tx, automationID string) ([]string, error) {
+	if err := lockAutomationTasks(ctx, tx, automationID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE automation_runs r SET status=CASE t.status WHEN 'done' THEN 'completed' ELSE 'failed' END, failure_reason=CASE t.status WHEN 'closed' THEN 'task_closed' ELSE '' END,completed_at=now() FROM tasks t WHERE t.id=r.task_id AND t.contract IS NOT NULL AND t.status IN ('done','closed') AND r.status='running' AND r.automation_id=$1`, automationID); err != nil {
+		return nil, err
+	}
+
 	rows, err := tx.Query(ctx, `
 		UPDATE automation_runs r SET status='completed', completed_at=now()
 		WHERE r.automation_id=$1 AND r.status='running'
 		  AND r.task_id IS NOT NULL
+ AND EXISTS(SELECT 1 FROM tasks t WHERE t.id=r.task_id AND t.contract IS NULL)
+ AND NOT EXISTS(SELECT 1 FROM tasks child WHERE child.parent_task_id=r.task_id AND child.status NOT IN ('done','closed'))
 		  AND COALESCE((
 			SELECT ar.status
 			  FROM agent_run_task_links link
@@ -680,7 +723,9 @@ func updateCompletedAutomationTask(ctx context.Context, tx pgx.Tx, taskID string
 		 WHERE t.id=$1
 		   AND r.task_id=t.id
 		   AND r.status='completed'
-		   AND t.status IN ($5,$6)`,
+		   AND t.status IN ($5,$6)
+ AND t.contract IS NULL
+ AND NOT EXISTS(SELECT 1 FROM tasks child WHERE child.parent_task_id=t.id AND child.status NOT IN ('done','closed'))`,
 		taskID, AutomationCompletionAuto, TaskStatusDone, TaskStatusInReview,
 		TaskStatusInProgress, TaskStatusTodo)
 	return err
@@ -848,7 +893,7 @@ const automationSelect = `
 	       COALESCE(u.display_name,''), a.name, a.task_title, a.task_description,
 	       COALESCE(a.target_agent_id::text,''), COALESCE(ag.name,''),
 	       a.schedule_type, a.schedule_hour, a.schedule_minute, a.schedule_weekday,
-	       a.timezone, a.completion_policy, a.enabled, a.next_run_at, a.last_run_at, a.created_at, a.updated_at
+	       a.timezone, a.completion_policy, a.enabled, a.next_run_at, a.last_run_at, a.created_at, a.updated_at, a.contract
 	  FROM automations a
 	  LEFT JOIN users u ON u.id=a.creator_id
 	  LEFT JOIN agents ag ON ag.id=a.target_agent_id`
@@ -873,7 +918,7 @@ func scanAutomation(row rowScanner) (*Automation, error) {
 		&item.TargetAgentID, &item.TargetAgentName, &item.ScheduleType,
 		&item.ScheduleHour, &item.ScheduleMinute, &item.ScheduleWeekday,
 		&item.Timezone, &item.CompletionPolicy, &item.Enabled, &item.NextRunAt, &item.LastRunAt,
-		&item.CreatedAt, &item.UpdatedAt,
+		&item.CreatedAt, &item.UpdatedAt, &item.Contract,
 	); err != nil {
 		return nil, err
 	}
@@ -890,4 +935,13 @@ func scanAutomationRun(row rowScanner) (*AutomationRun, error) {
 		return nil, err
 	}
 	return &item, nil
+}
+
+func lockAutomationTasks(ctx context.Context, tx pgx.Tx, automationID string) error {
+	rows, err := tx.Query(ctx, `SELECT t.id::text FROM tasks t JOIN automation_runs r ON r.task_id=t.id WHERE r.status='running' AND ($1='' OR r.automation_id::text=$1) ORDER BY t.id FOR UPDATE OF t`, automationID)
+	if err != nil {
+		return err
+	}
+	_, err = collectTaskIDs(rows)
+	return err
 }

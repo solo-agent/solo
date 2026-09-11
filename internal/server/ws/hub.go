@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -727,13 +728,26 @@ func (h *Hub) handleThreadReply(client *Client, payload ThreadReplyPayload) {
 		return
 	}
 
+	metadata := map[string]any{}
+	if senderType == "user" {
+		correctionRunID, err := service.TaskCorrectionRun(context.Background(), tx, payload.ChannelID, payload.ThreadID)
+		if err != nil {
+			client.sendError("INTERNAL_ERROR", "failed to associate task follow-up")
+			return
+		}
+		if correctionRunID != "" {
+			metadata["correction_of_run_id"] = correctionRunID
+		}
+	}
+	metadataJSON, _ := json.Marshal(metadata)
+
 	now := time.Now()
 	messageID := uuid.New().String()
 
 	_, err = tx.Exec(context.Background(),
-		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, thread_id, mentioned_agent_ids, attachment_ids, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7::uuid[], $8::uuid[], $9, $9)`,
-		messageID, payload.ChannelID, senderType, client.userID, payload.Content, payload.ThreadID, formatUUIDArray(mentionedAgentIDs), formatUUIDArray(attachmentIDs), now,
+		`INSERT INTO messages (id, channel_id, sender_type, sender_id, content, thread_id, mentioned_agent_ids, attachment_ids, created_at, updated_at, metadata)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7::uuid[], $8::uuid[], $9, $9, $10::jsonb)`,
+		messageID, payload.ChannelID, senderType, client.userID, payload.Content, payload.ThreadID, formatUUIDArray(mentionedAgentIDs), formatUUIDArray(attachmentIDs), now, metadataJSON,
 	)
 	if err != nil {
 		slog.Error("ws: failed to persist thread reply", "error", err, "user_id", client.userID)

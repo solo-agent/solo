@@ -359,6 +359,7 @@ func (h *ChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 		 FROM channels c
 		 JOIN channel_members cm ON cm.channel_id = c.id
 		 WHERE cm.member_type = 'user' AND cm.member_id = $1 AND c.workspace_id = $2 AND c.is_archived = false AND c.type = 'channel'
+         AND NOT EXISTS(SELECT 1 FROM agent_selection_trials internal_trial JOIN agent_selections internal_selection ON internal_selection.id=internal_trial.selection_id WHERE internal_trial.channel_id=c.id AND COALESCE(internal_selection.plan->>'reviewer_agent_id','')<>'')
 		 ORDER BY c.created_at DESC`,
 		userID, serverworkspace.ID(r),
 	)

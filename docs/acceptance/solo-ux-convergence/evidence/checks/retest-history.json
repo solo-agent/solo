@@ -1,0 +1,79 @@
+[
+  {
+    "suite": "automation",
+    "stats": {
+      "startTime": "2026-09-11T09:43:22.789Z",
+      "duration": 433274.668,
+      "expected": 0,
+      "skipped": 2,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "reason": "旧测试账号未完成引导，未进入目标页面；已补齐测试前置条件。",
+    "counts_as_pass": false,
+    "rerun": "通过"
+  },
+  {
+    "suite": "agent-selection",
+    "stats": {
+      "startTime": "2026-09-11T09:50:46.542Z",
+      "duration": 236827.676,
+      "expected": 0,
+      "skipped": 0,
+      "unexpected": 1,
+      "flaky": 0
+    },
+    "reason": "交付成本刷新未跟随弹窗重新读取；已补充共享刷新修正和真实 UI 回归断言。",
+    "counts_as_pass": false,
+    "rerun": "通过"
+  },
+  {
+    "suite": "task-delivery-contract",
+    "stats": {
+      "startTime": "2026-09-11T09:58:06.138Z",
+      "duration": 404386.10599999997,
+      "expected": 0,
+      "skipped": 0,
+      "unexpected": 1,
+      "flaky": 0
+    },
+    "reason": "业务交付及版本已验证，最后检查卡片时测试仍在团队画布；改为通过原任务看板按钮进入。",
+    "counts_as_pass": false,
+    "rerun": "通过"
+  },
+  {
+    "suite": "thinking-mode",
+    "stats": {
+      "startTime": "2026-09-11T10:05:02.072Z",
+      "duration": 600.047,
+      "expected": 0,
+      "skipped": 0,
+      "unexpected": 1,
+      "flaky": 0
+    },
+    "reason": "默认测试账号已存在且默认密码无法登录；复跑使用独立测试邮箱，不更改原账号。",
+    "counts_as_pass": false,
+    "rerun": "通过"
+  },
+  {
+    "suite": "thinking-mode",
+    "stats": {
+      "startTime": "2026-09-11T10:18:30.512Z",
+      "duration": 68488.414,
+      "expected": 0,
+      "skipped": 0,
+      "unexpected": 1,
+      "flaky": 0
+    },
+    "reason": "1280 像素英文页签被全屏按钮遮挡；修正频道共用标题栏换行并增加 1280/1024 真实点击检查。",
+    "counts_as_pass": false,
+    "rerun": "通过"
+  },
+  {
+    "suite": "compounding-ui",
+    "status": "failed",
+    "reason": "测试初始化脚本在刷新后覆盖主动切换的语言；改为仅在未设置语言时初始化。",
+    "counts_as_pass": false,
+    "rerun": "通过"
+  }
+]

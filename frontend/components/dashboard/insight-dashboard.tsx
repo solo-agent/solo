@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Activity, BarChart3, Bot, CalendarDays, CheckSquare, MessageSquare } from 'lucide-react';
+import { BarChart3, Bot, CalendarDays, CheckSquare, MessageSquare } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { Spinner } from '@/components/ui/spinner';
 import { DashboardTopTabs } from '@/components/dashboard/live-monitor';
@@ -10,7 +10,17 @@ import { tabButtonClass } from '@/components/ui/tab-bar';
 import { cn } from '@/lib/utils';
 import { t } from '@/lib/i18n';
 
+interface DeliveryCohort {
+  cohort: string; models: string[]; budgets: unknown[]; tasks: number; qualified: number;
+  comparable_tasks: number; comparable_qualified: number; comparable_tokens: number;
+  actual_tokens: number; accounted_tokens: number; unknown_runs: number; shared_runs: number; active_runs: number; failed_runs: number;
+  execution_seconds: number; qualified_elapsed_seconds: number; human_minutes: number; human_recorded_tasks: number;
+  reworks: number; rework_reasons: Record<string, number>; observations: Record<string, number>;
+  recovery_samples: number; recovery_seconds: number; first_actions_recorded: number; first_actions_correct: number;
+}
+
 interface DashboardInsight {
+  delivery?: DeliveryCohort[];
   since: string;
   generated_at: string;
   messages: number;
@@ -142,6 +152,21 @@ export function InsightDashboard() {
             <InsightMetric icon={<CheckSquare className="h-5 w-5" />} label={t('observabilityMetricTasks')} value={data.tasks} />
             <InsightMetric icon={<BarChart3 className="h-5 w-5" />} label={t('observabilityMetricTokens')} value={data.tokens.total} />
           </div>
+
+          <InsightPanel title="合格交付与长期成本">
+            <p className="mb-3 font-body text-sm leading-relaxed text-muted-foreground">按任务创建时间选择样本，累计其全部执行、审核、失败和返工。相同任务组、实际模型与预算快照才放在一起；未填人工时间表示未知。共享 Run 在组内只计一次，各组存在共享时不能直接相加。</p>
+            <div className="overflow-x-auto rounded-lg border border-border" data-testid="delivery-cohorts">
+              <table className="w-full min-w-[56rem] text-left font-body text-xs leading-relaxed tabular-nums"><thead className="bg-brutal-primary-light"><tr>{['任务组与条件', '交付与成本', '人工与返工', '恢复与协作'].map((label) => <th key={label} scope="col" className="border-b border-border p-3 font-heading text-xs">{label}</th>)}</tr></thead>
+                <tbody>{(data.delivery ?? []).map((group, index) => <tr key={index} className="border-b border-border last:border-0 align-top">
+                  <td className="w-1/4 max-w-64 break-words p-3"><p className="font-bold">{group.cohort || '未设置对照组'}</p><p>{group.models.join(', ') || '尚无运行'}</p><details className="mt-2"><summary className="cursor-pointer font-heading font-bold text-muted-foreground">运行时预算</summary><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-brutal-primary-light p-2 font-mono text-xs">{JSON.stringify(group.budgets, null, 2)}</pre><p className="text-xs">null 为历史未知；空对象表示当时未启用额度。</p></details></td>
+                  <td className="w-1/4 p-3"><p>合格 {group.qualified} / {group.tasks} 个任务</p><p>已确认 Token {group.actual_tokens.toLocaleString()} · 含预留 {group.accounted_tokens.toLocaleString()}</p><p>失败 {group.failed_runs} · 未结束 {group.active_runs} · 未知用量 {group.unknown_runs} · 共享 {group.shared_runs}</p><p>可比样本 {group.comparable_tasks} · 排除 {group.tasks - group.comparable_tasks}</p><p>{group.comparable_qualified ? `每次合格交付 ${(group.comparable_tokens / group.comparable_qualified).toFixed(0)} Token（含同组失败成本）` : '尚无可比的合格交付'}</p><p>执行 {(group.execution_seconds / 60).toFixed(1)} 分钟 · {group.qualified ? `平均验收历时 ${(group.qualified_elapsed_seconds / group.qualified / 60).toFixed(1)} 分钟` : '无验收历时'}</p></td>
+                  <td className="w-1/4 p-3"><p>已记录人工 {group.human_minutes} 分钟 · 覆盖 {group.human_recorded_tasks} / {group.tasks} 个任务</p><p>退回 {group.reworks} 次</p>{Object.entries(group.rework_reasons).map(([reason, count]) => <p key={reason}>{reason}：{count} 次{count > 1 ? '（重复出现）' : ''}</p>)}</td>
+                  <td className="w-1/4 p-3"><p>重复工作 {group.observations.duplicate_work ?? 0} · 重复解释 {group.observations.reexplanation ?? 0} · 额外交接 {group.observations.handoff ?? 0}</p><p>恢复到首个工具：{group.recovery_samples ? `${(group.recovery_seconds / group.recovery_samples).toFixed(1)} 秒，${group.recovery_samples} 个样本` : '尚无样本'}</p><p>首个动作正确 {group.first_actions_correct} / {group.first_actions_recorded} 次人工观察</p></td>
+                </tr>)}</tbody>
+              </table>
+              {!data.delivery?.length && <p className="p-4 font-body text-sm text-muted-foreground">该时间范围还没有可见任务。</p>}
+            </div>
+          </InsightPanel>
 
           <InsightPanel title={t('observabilityTrendStats')}>
             <TrendChart points={data.series ?? []} />

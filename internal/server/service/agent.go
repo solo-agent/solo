@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"github.com/solo-ai/solo/internal/auth"
 	"github.com/solo-ai/solo/internal/realtime"
 	"github.com/solo-ai/solo/pkg/agent"
+	"github.com/solo-ai/solo/pkg/skillloader"
 )
 
 // Default agent auto-response settings.
@@ -426,14 +428,7 @@ func (s *AgentService) triggerAgentResponseInNode(ctx context.Context, channelID
 			continue
 		}
 		newChain := append(append([]string(nil), agentChain...), ag.ID)
-		daemon, err := s.dm.ResolveDaemonForAgent(ctx, ag.ID, "llm")
-		if err != nil {
-			s.broadcastAgentError("", channelID, ag.ID, ag.Name, agentErrorNoAvailableDaemon)
-			if handoffRun {
-				return errors.New("no available local Agent daemon")
-			}
-			continue
-		}
+
 		taskReq := daemonTaskRequest{
 			AgentID:               ag.ID,
 			ChannelID:             channelID,
@@ -454,7 +449,9 @@ func (s *AgentService) triggerAgentResponseInNode(ctx context.Context, channelID
 		if handoffRun {
 			taskReq.ResultContract = agentResultContractHandoff
 		}
-		go s.handleStreamingAgentTask(context.Background(), daemon, taskReq, ag)
+		if err := s.enqueueAgentWork(ctx, taskReq); err != nil {
+			return err
+		}
 		dispatched = true
 	}
 	if handoffRun && !dispatched {
@@ -649,6 +646,14 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 		_ = json.Unmarshal(customArgs, &taskReq.CustomArgs)
 	}
 
+	if taskReq.RelationshipsMarkdown == "" {
+		if content, err := NewRelationshipsMDGenerator(s.pool, "").RenderForAgent(ctx, ag.ID, taskReq.ChannelID); err == nil {
+			taskReq.RelationshipsMarkdown = content
+		} else {
+			slog.Warn("relationship snapshot unavailable", "agent_id", ag.ID, "error", err)
+			return
+		}
+	}
 	// Queue and backend execution are timed independently by DaemonManager.
 	// This context is cancelled when either phase exceeds its own deadline.
 	streamCtx, streamCancel := context.WithCancel(ctx)
@@ -731,7 +736,15 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 			}()
 		}
 	}
-	if startingRun || taskReq.ResultReminderAttempt {
+	if err := applyRunRevision(ctx, s.pool, &taskReq, run.ID); err != nil {
+		finishDispatchFailure(err)
+		return
+	}
+	if err := validateRevisionRuntime(taskReq, daemon.Capabilities); err != nil {
+		finishDispatchFailure(err)
+		return
+	}
+	if (startingRun || taskReq.ResultReminderAttempt || taskReq.SessionRecoveryAttempt) && taskReq.CodeReview == nil {
 		dispatch, err := runSvc.ResolveSessionDispatch(ctx, ResolveSessionDispatchInput{
 			RunID:                   run.ID,
 			AgentID:                 ag.ID,
@@ -754,7 +767,7 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 		}
 		run.RolloverFromSessionID = dispatch.RolloverFromSessionID
 	}
-	if taskReq.ResultReminderAttempt {
+	if taskReq.ResultReminderAttempt || taskReq.SessionRecoveryAttempt {
 		if taskReq.TaskID == "" || taskReq.TaskID == run.ID {
 			taskReq.TaskID = uuid.NewString()
 		}
@@ -766,7 +779,10 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 	s.dm.AttachTaskRun(taskReq.TaskID, run.ID)
 	defer s.dm.RemoveTask(taskReq.TaskID)
 	if startingRun && taskReq.OriginTaskID != "" {
-		if err := runSvc.LinkTask(ctx, LinkRunTaskInput{RunID: run.ID, TaskID: taskReq.OriginTaskID, Role: AgentRunTaskRolePrimary, Confidence: 1}); err != nil {
+		if taskReq.TaskLinkRole == "" {
+			taskReq.TaskLinkRole = AgentRunTaskRolePrimary
+		}
+		if err := runSvc.LinkTask(ctx, LinkRunTaskInput{RunID: run.ID, TaskID: taskReq.OriginTaskID, Role: taskReq.TaskLinkRole, Confidence: 1}); err != nil {
 			slog.Warn("failed to link agent run task", "run_id", run.ID, "task_id", taskReq.OriginTaskID, "error", err)
 		} else {
 			s.appendAndBroadcastRunEvent(ctx, runSvc, run, ag.ID, agentName, AgentRunEventTaskLinked, "关联 task", "", map[string]any{
@@ -835,6 +851,7 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 	var contextSnapshot *agent.ContextEvent
 	var contextCompactions []agent.ContextEvent
 	var rolloverRecommendation *agent.ContextRolloverRecommendation
+	missingSessionFailure := false
 	contextRecorded := false
 	recordContext := func() {
 		if contextRecorded || run == nil {
@@ -916,6 +933,29 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 				failureCode = ""
 				retryable = false
 			}
+		}
+		if status == AgentRunStatusFailed && missingSessionFailure {
+			updated, updateErr := runSvc.UpdateStatus(ctx, UpdateRunStatusInput{
+				RunID: run.ID, Status: AgentRunStatusQueued, ActivityText: "正在恢复失效的运行会话",
+			})
+			if updateErr == nil {
+				run = updated
+				s.appendAndBroadcastRunEvent(ctx, runSvc, run, ag.ID, agentName, "session_recovery", "retrying once after provider session disappeared", "", map[string]any{"resume_session_id": taskReq.ResumeSessionID, "attempt": 1})
+				s.broadcastAgentRun(taskReq.ChannelID, "agent.run.updated", runPayload(run, ag.ID, agentName, taskReq.OriginTaskID))
+				recoveryReq := taskReq
+				recoveryReq.TaskID = uuid.NewString()
+				recoveryReq.ForceFreshSession = true
+				recoveryReq.SessionRecoveryAttempt = true
+				recoveryReq.PrestartedRun = false
+				recoveryReq.RemotePrequeued = false
+				recoveryReq.AccumulatedInputTokens = inputTokens
+				recoveryReq.AccumulatedOutputTokens = outputTokens
+				recoveryReq.AccumulatedCacheReadTokens = cacheReadTokens
+				recoveryReq.AccumulatedCacheWriteTokens = cacheWriteTokens
+				s.runStreamingAgentTask(ctx, daemon, recoveryReq, ag, run)
+				return
+			}
+			slog.Warn("failed to queue missing Session recovery", "run_id", run.ID, "error", updateErr)
 		}
 		if status == AgentRunStatusCompleted && resultContract == agentResultContractVisibleMessage {
 			visible, visibleErr := runSvc.HasVisibleMessage(ctx, run.ID)
@@ -1040,7 +1080,7 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 		if err == nil {
 			s.dm.NotifyRun(daemon.ComputerID, run.ID)
 		}
-	} else if startingRun || taskReq.ResultReminderAttempt {
+	} else if startingRun || taskReq.ResultReminderAttempt || taskReq.SessionRecoveryAttempt {
 		eventCh, err = s.dm.StreamTask(streamCtx, daemon, taskReq)
 	} else {
 		eventCh, err = s.dm.SubscribeTask(streamCtx, daemon, taskReq.TaskID)
@@ -1126,6 +1166,14 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 	for event := range eventCh {
 		switch event.Event {
 		case "backend_started":
+			if hasCapability(daemon.Capabilities, agent.RunSnapshotCapability) {
+				var receipt map[string]string
+				if err := json.Unmarshal([]byte(event.Data), &receipt); err != nil || receipt["agent_revision_id"] != taskReq.AgentRevisionID || receipt["team_version_id"] != taskReq.TeamVersionID || receipt["skills_sha256"] != skillloader.BundlesDigest(taskReq.Skills) || receipt["relationships_sha256"] != fmt.Sprintf("%x", sha256.Sum256([]byte(taskReq.RelationshipsMarkdown))) {
+					finishDispatchFailure(errors.New("Runtime configuration receipt differs from dispatched snapshot"))
+					return
+				}
+				s.appendAndBroadcastRunEvent(ctx, runSvc, run, ag.ID, agentName, "execution_configuration", "Runtime configuration verified", "", map[string]any{"agent_revision_id": receipt["agent_revision_id"], "team_version_id": receipt["team_version_id"], "relationships_sha256": receipt["relationships_sha256"], "skills_sha256": receipt["skills_sha256"]})
+			}
 			if markBackendStarted() {
 				s.broadcastAgentRun(taskReq.ChannelID, "agent.run.updated", runPayload(run, ag.ID, agentName, taskReq.OriginTaskID))
 			}
@@ -1315,6 +1363,7 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 				)
 				s.broadcastAgentError(taskReq.ThreadID, taskReq.ChannelID, ag.ID, agentName, data.Error)
 				finalState = finalStateFromErrorEventStatus(data.Status)
+				missingSessionFailure = canRecoverMissingSession(taskReq, run, data.Error)
 				retryable = data.Retryable
 				if data.FailureCode != "" {
 					failureCode = data.FailureCode
@@ -2499,6 +2548,10 @@ func (s *AgentService) TriggerAgentForTask(ctx context.Context, channelID, taskI
 }
 
 func (s *AgentService) triggerAgentForTask(ctx context.Context, channelID, taskID, agentID string, taskNumber int, taskTitle, taskDescription string, agentChain, mentionedAgentIDs []string, recovery *taskRunRecovery) bool {
+	var waiting bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM task_waits WHERE task_id=$1 AND status='waiting')`, taskID).Scan(&waiting); err != nil || waiting {
+		return false
+	}
 	// Get agent info
 	var ag agentChannelInfo
 	err := s.pool.QueryRow(ctx,
@@ -2589,14 +2642,6 @@ func (s *AgentService) triggerAgentForTask(ctx context.Context, channelID, taskI
 		)
 	}
 
-	daemon, err := s.dm.ResolveDaemonForAgent(ctx, ag.ID, "llm")
-	if err != nil {
-		slog.Warn("no available daemon for task agent trigger", "agent_id", ag.ID, "task_id", taskID)
-		s.broadcastAgentError(threadID, channelID, ag.ID, ag.Name, agentErrorNoAvailableDaemon)
-		return false
-
-	}
-
 	// SOLO-228-B: Validate agent trigger chain for task dispatching.
 	if agentChain != nil {
 		if len(agentChain) >= maxAgentChainDepth {
@@ -2653,13 +2698,29 @@ func (s *AgentService) triggerAgentForTask(ctx context.Context, channelID, taskI
 	taskContent := fmt.Sprintf("New message received:\n\n[target=%s msg=%s time=%s type=%s] @%s: %s",
 		target, shortMsgID, msgCreatedAt, senderType, senderName, msgContent)
 	taskContent += fmt.Sprintf(" [task #%d status=%s channel=%s]", taskNumber, taskStatus, channelID)
+	if taskDescription != "" {
+		taskContent += "\nCurrent task instructions and feedback:\n" + taskDescription
+	}
 	taskContent += "\n\nRespond as appropriate. Complete all your work before stopping."
 	taskContent += "\n- To reply to this message, use the `target` and `msg` fields above."
 	taskContent += "\n- To claim or update this task, use the `channel` field above (e.g. `solo task claim -n N -c <channel>`)."
 	if taskClaimerID == agentID {
 		taskContent += fmt.Sprintf("\n- This Task is currently assigned to you (@%s). Execute it now even if the original message names a previous assignee; do not claim it again.", ag.Name)
 	}
+	var resumedContext json.RawMessage
+	err = s.pool.QueryRow(ctx, `SELECT jsonb_build_object('condition',w.condition,'evidence',w.fulfillment,'handoff',w.handoff,'next_action',w.next_action) FROM task_waits w JOIN tasks t ON t.id=w.task_id AND t.version=w.task_version WHERE w.task_id=$1 AND w.agent_id=$2 AND w.status='resumed' ORDER BY w.created_at DESC LIMIT 1`, taskID, agentID).Scan(&resumedContext)
+	if err == nil {
+		taskContent += "\nThis Task already resumed after its recorded condition. Continue the saved next_action; do not repeat the initial waiting setup. Saved state: " + string(resumedContext)
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("read resumed Task context", "task_id", taskID, "error", err)
+		return false
+	}
 
+	var contract *TaskContract
+	if err := s.pool.QueryRow(ctx, `SELECT contract FROM tasks WHERE id=$1`, taskID).Scan(&contract); err == nil && contract != nil {
+		data, _ := json.Marshal(contract)
+		taskContent += fmt.Sprintf("\nDelivery contract: %s\nBefore submitting, run solo task get -n %d -c %s and use its current version. Submit with solo task submit -n %d -c %s --file <json-file>. JSON fields: expected_task_version, idempotency_key, artifact_version, handoff {summary,changes,risks,next_steps}, evidence [{id,description,content}] (or uri + sha256). Include reproducible evidence for every requirement. Task completion requires the designated reviewer; never call legacy accept or change status directly.", data, taskNumber, channelID, taskNumber, channelID)
+	}
 	contextMsgs := []agent.Message{
 		{Role: agent.RoleUser, Content: taskContent, SenderID: "", Seq: messageSeq},
 	}
@@ -2695,7 +2756,10 @@ func (s *AgentService) triggerAgentForTask(ctx context.Context, channelID, taskI
 	// v1.3: Agent decides whether to claim autonomously after reading task context.
 	// The daemon task request includes task context. The agent evaluates the task,
 	// and if it decides to claim, outputs /claim #N which is parsed by
-	go s.handleStreamingAgentTask(context.Background(), daemon, taskReq, ag)
+	if err := s.enqueueAgentWork(ctx, taskReq); err != nil {
+		s.broadcastAgentError(threadID, channelID, ag.ID, ag.Name, err.Error())
+		return false
+	}
 	return true
 }
 
@@ -2716,11 +2780,6 @@ func (s *AgentService) TriggerAgentForArtifact(ctx context.Context, task *Task, 
 		} else {
 			slog.Warn("artifact: failed to resolve task thread", "task_id", task.ID, "error", err)
 		}
-	}
-
-	daemon, err := s.dm.ResolveDaemonForAgent(ctx, ag.ID, "llm")
-	if err != nil {
-		return fmt.Errorf("no available daemon for artifact agent trigger")
 	}
 
 	taskReq := daemonTaskRequest{
@@ -2745,8 +2804,7 @@ func (s *AgentService) TriggerAgentForArtifact(ctx context.Context, task *Task, 
 		"requested_by", requestedBy,
 		"mode", mode,
 	)
-	go s.handleStreamingAgentTask(context.Background(), daemon, taskReq, ag)
-	return nil
+	return s.enqueueAgentWork(ctx, taskReq)
 }
 
 func (s *AgentService) findArtifactLeader(ctx context.Context, task *Task) (agentChannelInfo, bool) {
@@ -3075,7 +3133,7 @@ func (s *AgentService) getAgentContinuityPacket(ctx context.Context, db continui
 		    AND (
 		      id = NULLIF($3, '')::uuid
 		      OR (claimer_id = $2 AND status = ANY($7))
-		      OR (creator_id = $2 AND status = $5)
+		      OR ((creator_id = $2 OR contract->'gate'->>'reviewer_id'=$2::text) AND status = $5)
 		      OR (claimer_id IS NULL AND status = $8)
 		    )
 		  ORDER BY category, updated_at DESC, task_number
@@ -3100,11 +3158,45 @@ func (s *AgentService) getAgentContinuityPacket(ctx context.Context, db continui
 	if err := rows.Err(); err != nil {
 		return "", err
 	}
-	if len(tasks) == 0 {
-		return "", nil
-	}
 
 	var b strings.Builder
+	waits, err := db.Query(ctx, `SELECT t.task_number,w.condition,w.handoff,w.next_action FROM task_waits w JOIN tasks t ON t.id=w.task_id WHERE w.agent_id=$1 AND w.status='waiting' AND t.channel_id=$2 ORDER BY w.created_at LIMIT 20`, agentID, channelID)
+	if err != nil {
+		return "", err
+	}
+	for waits.Next() {
+		var number int
+		var condition, handoff json.RawMessage
+		var next string
+		if err = waits.Scan(&number, &condition, &handoff, &next); err != nil {
+			waits.Close()
+			return "", err
+		}
+		appendWithinRuneLimit(&b, fmt.Sprintf("Task #%d is WAITING. Do not execute it or recreate it while its condition is unmet. Continue other work. Condition: %s; handoff: %s; next action after resume: %s\n", number, condition, handoff, next), continuityPacketLimit/2)
+	}
+	err = waits.Err()
+	waits.Close()
+	if err != nil {
+		return "", err
+	}
+	marks, err := db.Query(ctx, `SELECT description,next_action,channel_id::text FROM agent_work_marks WHERE agent_id=$1 AND status='open' ORDER BY created_at LIMIT 20`, agentID)
+	if err != nil {
+		return "", err
+	}
+	for marks.Next() {
+		var description, next, channel string
+		if err := marks.Scan(&description, &next, &channel); err != nil {
+			marks.Close()
+			return "", err
+		}
+		fmt.Fprintf(&b, "Pending commitment in channel %s: %s; next: %s\n", channel, description, next)
+	}
+	err = marks.Err()
+	marks.Close()
+	if err != nil {
+		return "", err
+	}
+
 	b.WriteString(continuityMessagePrefix)
 	b.WriteString("\nThis is a fresh provider Session. Continue from the current project files and re-read a Task/Thread before editing.\n")
 	headings := map[int]string{
@@ -3197,45 +3289,59 @@ func (s *AgentService) applySessionDispatch(ctx context.Context, db continuityQu
 
 // daemonTaskRequest is the format for tasks sent from server to daemon.
 type daemonTaskRequest struct {
-	TaskID                      string            `json:"task_id"`
-	RunID                       string            `json:"run_id,omitempty"`
-	AgentID                     string            `json:"agent_id"`
-	ChannelID                   string            `json:"channel_id"`
-	ThreadID                    string            `json:"thread_id,omitempty"`
-	NodeID                      string            `json:"thinking_node_id,omitempty"`
-	ResumeSessionID             string            `json:"resume_session_id,omitempty"`
-	ForceFreshSession           bool              `json:"force_fresh_session,omitempty"`
-	RetireSessionID             string            `json:"retire_session_id,omitempty"`
-	TriggerMessageID            string            `json:"trigger_message_id,omitempty"`
-	Messages                    []agent.Message   `json:"messages"`
-	ColdStartMessages           []agent.Message   `json:"cold_start_messages,omitempty"`
-	SystemPrompt                string            `json:"system_prompt"`
-	ThinkingRuntimePrompt       string            `json:"thinking_runtime_prompt,omitempty"`
-	ModelConfig                 agent.ModelConfig `json:"model_config"`
-	OriginTaskID                string            `json:"origin_task_id,omitempty"`   // SOLO-123-B: task ID for status update
-	TaskContext                 string            `json:"task_context,omitempty"`     // SOLO-221-B: summary of pending tasks in channel
-	AgentChain                  []string          `json:"agent_chain,omitempty"`      // SOLO-228-B: agent trigger chain for loop prevention
-	MentionedNames              []string          `json:"mentioned_names,omitempty"`  // v1.3: names of @mentioned agents for context awareness
-	InitialGreeting             string            `json:"initial_greeting,omitempty"` // greeting message to prepend as system context
-	ReturnHandoff               bool              `json:"return_handoff,omitempty"`
-	ResultContract              string            `json:"result_contract,omitempty"`
-	ResultReminderAttempt       bool              `json:"result_reminder_attempt,omitempty"`
-	ModelSeenSeq                int64             `json:"-"`
-	AgentName                   string            `json:"agent_name,omitempty"`
-	ChannelName                 string            `json:"channel_name,omitempty"`
-	CustomEnv                   map[string]string `json:"custom_env,omitempty"`
-	CustomArgs                  []string          `json:"custom_args,omitempty"`
-	AgentToken                  string            `json:"agent_token,omitempty"`
-	Recovery                    *taskRunRecovery  `json:"-"`
-	AccumulatedInputTokens      int               `json:"-"`
-	AccumulatedOutputTokens     int               `json:"-"`
-	AccumulatedCacheReadTokens  int               `json:"-"`
-	AccumulatedCacheWriteTokens int               `json:"-"`
-	PrestartedRun               bool              `json:"-"`
-	WakeFirstMessageSeq         int64             `json:"-"`
-	WakeLatestMessageSeq        int64             `json:"-"`
-	WakeMessageCount            int               `json:"-"`
-	RemotePrequeued             bool              `json:"-"`
+	Skills                      []skillloader.Bundle      `json:"skills,omitempty"`
+	CodeReview                  *agent.CodeReviewDispatch `json:"code_review,omitempty"`
+	AgentRevisionID             string                    `json:"agent_revision_id,omitempty"`
+	TeamVersionID               string                    `json:"team_version_id,omitempty"`
+	RelationshipsMarkdown       string                    `json:"relationships_markdown,omitempty"`
+	TaskLinkRole                string                    `json:"task_link_role,omitempty"`
+	TaskID                      string                    `json:"task_id"`
+	RunID                       string                    `json:"run_id,omitempty"`
+	AgentID                     string                    `json:"agent_id"`
+	ChannelID                   string                    `json:"channel_id"`
+	ThreadID                    string                    `json:"thread_id,omitempty"`
+	NodeID                      string                    `json:"thinking_node_id,omitempty"`
+	ResumeSessionID             string                    `json:"resume_session_id,omitempty"`
+	ForceFreshSession           bool                      `json:"force_fresh_session,omitempty"`
+	RetireSessionID             string                    `json:"retire_session_id,omitempty"`
+	TriggerMessageID            string                    `json:"trigger_message_id,omitempty"`
+	Messages                    []agent.Message           `json:"messages"`
+	ColdStartMessages           []agent.Message           `json:"cold_start_messages,omitempty"`
+	SystemPrompt                string                    `json:"system_prompt"`
+	ThinkingRuntimePrompt       string                    `json:"thinking_runtime_prompt,omitempty"`
+	ModelConfig                 agent.ModelConfig         `json:"model_config"`
+	OriginTaskID                string                    `json:"origin_task_id,omitempty"` // SOLO-123-B: task ID for status update
+	OriginTaskAssigneeID        string                    `json:"origin_task_assignee_id,omitempty"`
+	TaskContext                 string                    `json:"task_context,omitempty"`     // SOLO-221-B: summary of pending tasks in channel
+	AgentChain                  []string                  `json:"agent_chain,omitempty"`      // SOLO-228-B: agent trigger chain for loop prevention
+	MentionedNames              []string                  `json:"mentioned_names,omitempty"`  // v1.3: names of @mentioned agents for context awareness
+	InitialGreeting             string                    `json:"initial_greeting,omitempty"` // greeting message to prepend as system context
+	ReturnHandoff               bool                      `json:"return_handoff,omitempty"`
+	ResultContract              string                    `json:"result_contract,omitempty"`
+	ResultReminderAttempt       bool                      `json:"result_reminder_attempt,omitempty"`
+	SessionRecoveryAttempt      bool                      `json:"session_recovery_attempt,omitempty"`
+	ModelSeenSeq                int64                     `json:"-"`
+	AgentName                   string                    `json:"agent_name,omitempty"`
+	ChannelName                 string                    `json:"channel_name,omitempty"`
+	CustomEnv                   map[string]string         `json:"custom_env,omitempty"`
+	CustomArgs                  []string                  `json:"custom_args,omitempty"`
+	AgentToken                  string                    `json:"agent_token,omitempty"`
+	Recovery                    *taskRunRecovery          `json:"-"`
+	AccumulatedInputTokens      int                       `json:"-"`
+	AccumulatedOutputTokens     int                       `json:"-"`
+	AccumulatedCacheReadTokens  int                       `json:"-"`
+	AccumulatedCacheWriteTokens int                       `json:"-"`
+	PrestartedRun               bool                      `json:"-"`
+	WakeFirstMessageSeq         int64                     `json:"-"`
+	WakeLatestMessageSeq        int64                     `json:"-"`
+	WakeMessageCount            int                       `json:"-"`
+	RemotePrequeued             bool                      `json:"-"`
+}
+
+func canRecoverMissingSession(req daemonTaskRequest, run *AgentRun, message string) bool {
+	return run != nil && run.SessionID == "" && req.NodeID == "" && req.CodeReview == nil &&
+		!req.SessionRecoveryAttempt && !req.ForceFreshSession && req.ModelConfig.Provider == "claude" &&
+		req.ResumeSessionID != "" && strings.Contains(message, "No conversation found with session ID: "+req.ResumeSessionID)
 }
 
 func highestMessageSeq(messages []agent.Message) int64 {

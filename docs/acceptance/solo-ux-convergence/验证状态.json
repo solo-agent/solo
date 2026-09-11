@@ -1,0 +1,108 @@
+{
+  "status": "验收通过",
+  "date": "2026-09-11",
+  "worktree": "/Users/langgengxin/.codex/worktrees/a8d8/solo",
+  "suites": {
+    "compounding-ui": {
+      "status": "通过",
+      "scope": "真实 UI/API/PostgreSQL；本场景不调用 Agent",
+      "duration_seconds": 6.2,
+      "evidence": "evidence/compounding-ui/report.json"
+    },
+    "ux-convergence": {
+      "status": "通过",
+      "scope": "真实 Agent 自动评测、独立审核、团队采用、人工结果确认、恢复后执行",
+      "duration_seconds": 383.8,
+      "evidence": "evidence/ux-convergence/report.json"
+    },
+    "task-wait-resume": {
+      "status": "通过",
+      "scope": "真实 UI / API / PostgreSQL / Daemon / 本地 Agent Runtime",
+      "duration_seconds": 60.0,
+      "evidence": "evidence/task-wait-resume/report.json"
+    },
+    "agent-draft-decisions": {
+      "status": "通过",
+      "scope": "真实 UI / API / PostgreSQL / Daemon / 本地 Agent Runtime",
+      "duration_seconds": 41.4,
+      "evidence": "evidence/agent-draft-decisions/report.json"
+    },
+    "team-work-compounding": {
+      "status": "通过",
+      "scope": "真实 UI / API / PostgreSQL / Daemon / 本地 Agent Runtime",
+      "duration_seconds": 213.2,
+      "evidence": "evidence/team-work-compounding/report.json"
+    },
+    "agent-inbox": {
+      "status": "通过",
+      "scope": "真实 UI / API / PostgreSQL / Daemon / 本地 Agent Runtime",
+      "duration_seconds": 158.6,
+      "evidence": "evidence/agent-inbox/report.json"
+    },
+    "code-gate": {
+      "status": "通过",
+      "scope": "真实 UI / API / PostgreSQL / Daemon / 本地 Agent Runtime",
+      "duration_seconds": 114.6,
+      "evidence": "evidence/code-gate/report.json"
+    },
+    "revision-skills": {
+      "status": "通过",
+      "scope": "真实 UI / API / PostgreSQL / Daemon / 本地 Agent Runtime",
+      "duration_seconds": 181.4,
+      "evidence": "evidence/revision-skills/report.json"
+    },
+    "postgres-regressions": {
+      "status": "通过",
+      "scope": "14 项真实 PostgreSQL 检查：权限、初始约定、严格审核、版本应用、返工原团队、旧库迁移",
+      "evidence": "evidence/checks/postgres-regressions.json"
+    },
+    "static-validation": {
+      "status": "通过",
+      "scope": "全量 TypeScript 与最终改动的针对性 ESLint；不计为产品 E2E",
+      "evidence": "evidence/checks/static-validation.json"
+    },
+    "agent-selection": {
+      "status": "通过",
+      "scope": "真实 UI / API / PostgreSQL / Daemon / 本地 Agent Runtime",
+      "duration_seconds": 80.5,
+      "evidence": "evidence/agent-selection/report.json"
+    },
+    "automation": {
+      "status": "通过",
+      "scope": "真实 UI / API / PostgreSQL / Daemon / 本地 Agent Runtime",
+      "duration_seconds": 92.4,
+      "evidence": "evidence/automation/report.json"
+    },
+    "handbook-browser": {
+      "status": "通过",
+      "scope": "20 项图示跳转、8 张实拍、人工记录与桌面/窄屏；仅文档检查",
+      "evidence": "evidence/checks/handbook-browser.json"
+    },
+    "task-delivery-contract": {
+      "status": "通过",
+      "scope": "真实 UI / API / PostgreSQL / Daemon / 本地 Agent Runtime",
+      "duration_seconds": 419.2,
+      "evidence": "evidence/task-delivery-contract/report.json"
+    },
+    "thinking-mode": {
+      "status": "通过",
+      "scope": "真实 UI / API / PostgreSQL / Daemon / 本地 Agent Runtime",
+      "duration_seconds": 271.6,
+      "evidence": "evidence/thinking-mode/report.json"
+    },
+    "service-restoration": {
+      "status": "通过",
+      "scope": "3000/8080/8081 就绪、原配对 Computer 在线、测试 Computer 已清理",
+      "evidence": "evidence/checks/service-restoration.json"
+    }
+  },
+  "notes": [
+    "12 份真实产品 E2E 文件、13 个场景全部通过；涉及 Agent 的场景均实际调用本地 Runtime，并检查用户可见结果与持久化状态。",
+    "另有 14 项真实 PostgreSQL 检查通过；文档交互、原型和静态检查不计入产品 E2E。",
+    "首次未通过的原因及最终复跑结果保留在 evidence/checks/retest-history.json。",
+    "下方人工试走用于你的独立验收，默认均为未试走。",
+    "本地服务已恢复；原 Lead 任务保持 in_review，等待用户本人验收。"
+  ],
+  "e2e_files": 12,
+  "e2e_scenarios": 13
+}

@@ -1,0 +1,26 @@
+{
+  "status": "passed",
+  "unique_test_count": 14,
+  "tests": [
+    "TestAgentInboxPostgresOrderSingleClaimAndOfflineRecovery",
+    "TestAgentRevisionPostgresPublicationAndTeamPin",
+    "TestHumanResultDecisionPersistsWithoutInventedChecks",
+    "TestLegacyCompoundingMigrationPostgres",
+    "TestMessageClaimInitialContractKeepsUserDecision",
+    "TestMessageTaskClaimPostgres",
+    "TestMessageTaskConvertAndNumberLookupPostgres",
+    "TestRejectedTaskReturnsToOriginalTeamInbox",
+    "TestSelectionAgentInitiationAndIndependentReview",
+    "TestSelectionPostgresPlanBudgetAndDecision",
+    "TestSharedTeamParticipationRequiresOwnersAndPreservesScope",
+    "TestTaskDeliveryPostgresChildrenAndBypass",
+    "TestTaskDeliveryPostgresLifecycle",
+    "TestTaskThreadFollowupProtectsDraftWithoutSelectingRun"
+  ],
+  "logs": [
+    "service-validation.log",
+    "rework-regression.log",
+    "legacy-migration.log"
+  ],
+  "dependencies": "real PostgreSQL; migration test creates an isolated database and drops only its own database"
+}

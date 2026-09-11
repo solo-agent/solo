@@ -1,0 +1,18 @@
+{
+  "recorded_at": "2026-09-09T15:43:34Z",
+  "account_display_name": "lili",
+  "workspace": {
+    "id": "08c23ef4-e86c-407b-a6c3-9dc6292c4236",
+    "name": "本轮功能验收"
+  },
+  "channel": {
+    "id": "fb252655-8ab5-4237-ac3f-d1cee8929a19",
+    "name": "pm-交付验收",
+    "url": "http://localhost:3000/dashboard?channel=fb252655-8ab5-4237-ac3f-d1cee8929a19"
+  },
+  "database_verified": true,
+  "tasks": 0,
+  "agents": 0,
+  "screenshot": "screenshots/A01-workspace.png",
+  "runtime_blocker": "Current lili account has no online Computer; online Studio Mac belongs to Fred. No permissions changed."
+}

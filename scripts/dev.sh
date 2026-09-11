@@ -14,7 +14,7 @@ command -v npm     >/dev/null 2>&1 || missing+=("npm")
 command -v docker  >/dev/null 2>&1 || missing+=("docker")
 if [ "${#missing[@]}" -gt 0 ]; then
   echo "✗ Missing prerequisites: ${missing[*]}" >&2
-  echo "  Please install: Go 1.22+, Node.js 20+, Docker" >&2
+  echo "  Please install: Go 1.25+, Node.js 20+, Docker" >&2
   exit 1
 fi
 

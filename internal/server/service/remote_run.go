@@ -148,6 +148,13 @@ func (dm *DaemonManager) AcceptRemoteRun(ctx context.Context, computerID, runID,
 	if err := json.Unmarshal(delivery.Payload, &taskReq); err != nil || taskReq.TaskID == "" {
 		return nil, errors.New("stored Run payload is invalid")
 	}
+	var capabilities []string
+	if daemon, ok := dm.GetDaemon(computerID); ok {
+		capabilities = daemon.Capabilities
+	}
+	if err := validateRevisionRuntime(taskReq, capabilities); err != nil {
+		return nil, err
+	}
 	delivery.TaskID = taskReq.TaskID
 	if taskReq.AgentID == "" {
 		taskReq.AgentID = agentID
@@ -158,7 +165,7 @@ func (dm *DaemonManager) AcceptRemoteRun(ctx context.Context, computerID, runID,
 	if taskReq.ModelConfig.Provider == "" {
 		taskReq.ModelConfig.Provider = runProvider
 	}
-	if taskReq.ChannelID != "" && taskReq.ModelConfig.Provider != "" {
+	if taskReq.CodeReview == nil && taskReq.ChannelID != "" && taskReq.ModelConfig.Provider != "" {
 		supportsRollover := false
 		if daemon, ok := dm.GetDaemon(computerID); ok {
 			supportsRollover = hasCapability(daemon.Capabilities, contextRolloverCapability)
@@ -308,6 +315,7 @@ func (dm *DaemonManager) deliverRemoteRunEvent(taskID, attemptID string, sourceS
 
 func (stream *remoteRunStream) pump(ctx context.Context, history []remoteDeliveryEvent) {
 	defer close(stream.events)
+	defer stream.close()
 	seen := make(map[string]bool)
 	deliver := func(item remoteDeliveryEvent) bool {
 		key := fmt.Sprintf("%s:%d", item.attemptID, item.sourceSeq)
@@ -317,7 +325,8 @@ func (stream *remoteRunStream) pump(ctx context.Context, history []remoteDeliver
 		seen[key] = true
 		select {
 		case stream.events <- item.event:
-			return item.event.Event != "done"
+			// Older daemons omit done after a terminal result.
+			return item.event.Event != "done" && item.event.Event != "error" && item.event.Event != "complete"
 		case <-ctx.Done():
 			return false
 		case <-stream.done:

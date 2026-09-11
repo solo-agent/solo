@@ -17,6 +17,10 @@ import type { Task, CreateTaskInput, UpdateTaskInput, TaskStatus } from '@/lib/t
 // ---- Backend response shapes ----
 
 interface TaskResponse {
+  waiting?: boolean;
+  version?: number;
+  contract?: Task['contract'];
+  current_submission_id?: string;
   id: string;
   task_number: number;
   channel_id: string;
@@ -44,6 +48,7 @@ interface TaskResponse {
 function mapTask(resp: TaskResponse): Task {
   return {
     id: resp.id,
+    waiting: resp.waiting, version: resp.version, contract: resp.contract, current_submission_id: resp.current_submission_id,
     channel_id: resp.channel_id,
     title: resp.title,
     description: resp.description || '',
@@ -135,6 +140,7 @@ export function useTasks(filters?: TaskFilters) {
 
   useEffect(() => {
     const unsub = onEvent((event) => {
+      if ((event.type === 'task.created' || event.type === 'task.updated') && (!channelFilter || event.channel_id === channelFilter)) void loadTasks();
       if (event.type === 'task.created') {
         // Filter by channel if one is specified
         if (channelFilter && event.channel_id !== channelFilter) return;
@@ -213,11 +219,12 @@ export function useTasks(filters?: TaskFilters) {
     });
 
     return unsub;
-  }, [channelFilter, filters?.status, onEvent]);
+  }, [channelFilter, filters?.status, onEvent, loadTasks]);
 
   const createTask = useCallback(async (input: CreateTaskInput): Promise<Task> => {
     const res = await apiClient.post<TaskResponse>('/api/v1/tasks', {
       channel_id: input.channel_id,
+      contract: input.contract, assignee: input.assignee,
       title: input.title,
       description: input.description || '',
       priority: input.priority || 'normal',
@@ -237,6 +244,7 @@ export function useTasks(filters?: TaskFilters) {
   const updateTask = useCallback(async (channelId: string, taskId: string, input: UpdateTaskInput): Promise<Task> => {
     const res = await apiClient.patch<TaskResponse>(`/api/v1/channels/${channelId}/tasks/${taskId}`, {
       title: input.title,
+      contract: input.contract, expected_task_version: input.expected_task_version,
       description: input.description,
       status: input.status,
       priority: input.priority,

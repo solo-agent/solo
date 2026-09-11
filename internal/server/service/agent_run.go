@@ -181,6 +181,8 @@ type UpdateSessionMetadataInput struct {
 }
 
 type StartRunInput struct {
+	ReviewSubmissionID    string
+	SelectionTaskID       string
 	AgentID               string
 	DaemonID              string
 	SessionID             string
@@ -408,6 +410,9 @@ func (s *AgentRunService) StartRun(ctx context.Context, input StartRunInput) (*A
 // transaction. Message wake single-flight uses it so assigning the wake slot
 // and creating the Run cannot be observed separately.
 func (s *AgentRunService) startRunTx(ctx context.Context, tx pgx.Tx, input StartRunInput) (*AgentRun, error) {
+	if err := validateSelectionRunTx(ctx, tx, input); err != nil {
+		return nil, err
+	}
 	if input.Status == "" {
 		input.Status = AgentRunStatusQueued
 	}
@@ -437,6 +442,9 @@ func (s *AgentRunService) startRunTx(ctx context.Context, tx pgx.Tx, input Start
 	))
 	if err != nil {
 		return nil, err
+	}
+	if input.Source == "code_gate" {
+		return run, nil
 	}
 	if err := NewBudgetService(s.pool).ReserveRunTx(ctx, tx, runID, input.AgentID); err != nil {
 		return nil, err

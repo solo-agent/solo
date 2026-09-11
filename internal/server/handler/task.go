@@ -3,7 +3,9 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -43,21 +45,24 @@ func NewTaskHandler(pool *pgxpool.Pool, hub realtime.Broadcaster, agentSvc *serv
 // --- Request/Response types ---
 
 type CreateTaskRequest struct {
-	Title        string     `json:"title"`
-	Description  string     `json:"description,omitempty"`
-	Priority     string     `json:"priority,omitempty"`
-	DueDate      *time.Time `json:"due_date,omitempty"`
-	ChannelID    string     `json:"channel_id,omitempty"`
-	ParentTaskID string     `json:"parent_task_id,omitempty"`
-	Assignee     string     `json:"assignee,omitempty"`
+	Contract     *service.TaskContract `json:"contract,omitempty"`
+	Title        string                `json:"title"`
+	Description  string                `json:"description,omitempty"`
+	Priority     string                `json:"priority,omitempty"`
+	DueDate      *time.Time            `json:"due_date,omitempty"`
+	ChannelID    string                `json:"channel_id,omitempty"`
+	ParentTaskID string                `json:"parent_task_id,omitempty"`
+	Assignee     string                `json:"assignee,omitempty"`
 }
 
 type UpdateTaskRequest struct {
-	Title       *string    `json:"title,omitempty"`
-	Description *string    `json:"description,omitempty"`
-	Status      *string    `json:"status,omitempty"`
-	Priority    *string    `json:"priority,omitempty"`
-	DueDate     *time.Time `json:"due_date,omitempty"`
+	Contract            *service.TaskContract `json:"contract,omitempty"`
+	ExpectedTaskVersion int64                 `json:"expected_task_version,omitempty"`
+	Title               *string               `json:"title,omitempty"`
+	Description         *string               `json:"description,omitempty"`
+	Status              *string               `json:"status,omitempty"`
+	Priority            *string               `json:"priority,omitempty"`
+	DueDate             *time.Time            `json:"due_date,omitempty"`
 }
 
 type ConvertToTaskRequest struct {
@@ -65,32 +70,40 @@ type ConvertToTaskRequest struct {
 }
 
 type TaskResponse struct {
-	ID               string  `json:"id"`
-	TaskNumber       int     `json:"task_number"`
-	ChannelID        string  `json:"channel_id"`
-	CreatorID        string  `json:"creator_id"`
-	CreatorName      string  `json:"creator_name,omitempty"`
-	Title            string  `json:"title"`
-	Description      string  `json:"description,omitempty"`
-	Status           string  `json:"status"`
-	ClaimerID        string  `json:"claimer_id,omitempty"`
-	ClaimerName      string  `json:"claimer_name,omitempty"`
-	ClaimerDeleted   bool    `json:"claimer_deleted"`
-	Priority         string  `json:"priority"`
-	DueDate          *string `json:"due_date,omitempty"`
-	MessageID        string  `json:"message_id,omitempty"`
-	ParentTaskID     *string `json:"parent_task_id,omitempty"`
-	SubtaskCount     int     `json:"subtask_count,omitempty"`
-	DoneSubtaskCount int     `json:"done_subtask_count,omitempty"`
-	ArtifactStatus   string  `json:"artifact_status,omitempty"`
-	CreatedAt        string  `json:"created_at"`
-	UpdatedAt        string  `json:"updated_at"`
-	ClientMsgID      string  `json:"client_msg_id,omitempty"`
-	Deduplicated     bool    `json:"deduplicated,omitempty"`
+	Waiting             bool                  `json:"waiting"`
+	CanReview           bool                  `json:"can_review"`
+	Version             int64                 `json:"version"`
+	Contract            *service.TaskContract `json:"contract,omitempty"`
+	CurrentSubmissionID string                `json:"current_submission_id,omitempty"`
+	ID                  string                `json:"id"`
+	TaskNumber          int                   `json:"task_number"`
+	ChannelID           string                `json:"channel_id"`
+	CreatorID           string                `json:"creator_id"`
+	CreatorName         string                `json:"creator_name,omitempty"`
+	Title               string                `json:"title"`
+	Description         string                `json:"description,omitempty"`
+	Status              string                `json:"status"`
+	ClaimerID           string                `json:"claimer_id,omitempty"`
+	ClaimerName         string                `json:"claimer_name,omitempty"`
+	ClaimerDeleted      bool                  `json:"claimer_deleted"`
+	Priority            string                `json:"priority"`
+	DueDate             *string               `json:"due_date,omitempty"`
+	MessageID           string                `json:"message_id,omitempty"`
+	ParentTaskID        *string               `json:"parent_task_id,omitempty"`
+	SubtaskCount        int                   `json:"subtask_count,omitempty"`
+	DoneSubtaskCount    int                   `json:"done_subtask_count,omitempty"`
+	ArtifactStatus      string                `json:"artifact_status,omitempty"`
+	CreatedAt           string                `json:"created_at"`
+	UpdatedAt           string                `json:"updated_at"`
+	ClientMsgID         string                `json:"client_msg_id,omitempty"`
+	Deduplicated        bool                  `json:"deduplicated,omitempty"`
 }
 
 func toTaskResponse(t *service.Task) TaskResponse {
 	r := TaskResponse{
+		CanReview: t.CanReview,
+		Waiting:   t.Waiting,
+		Version:   t.Version, Contract: t.Contract, CurrentSubmissionID: t.CurrentSubmissionID,
 		ID:               t.ID,
 		TaskNumber:       t.TaskNumber,
 		ChannelID:        t.ChannelID,
@@ -190,6 +203,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	svcReq := service.TaskCreateRequest{
+		Contract:     req.Contract,
 		Title:        req.Title,
 		Description:  req.Description,
 		Priority:     req.Priority,
@@ -205,6 +219,8 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "not a channel member")
 		case err == service.ErrTaskInvalidTransition:
 			writeError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, service.ErrTaskDeliveryInvalid):
+			h.writeTaskLifecycleError(w, err)
 		case err == service.ErrTaskAssigneeNotFound:
 			writeError(w, http.StatusNotFound, err.Error())
 		case err == service.ErrTaskAssigneeAmbiguous:
@@ -366,6 +382,10 @@ func (h *TaskHandler) Get(w http.ResponseWriter, r *http.Request) {
 	task, err := h.svc.GetTask(r.Context(), channelID, taskID, userID)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrTaskDeliveryInvalid), errors.Is(err, service.ErrTaskVersionConflict), errors.Is(err, service.ErrTaskContractRequired), errors.Is(err, service.ErrTaskReviewLimit):
+			h.writeTaskLifecycleError(w, err)
+		case errors.Is(err, service.ErrTaskReferenceAmbiguous), errors.Is(err, service.ErrTaskSourceExists):
+			writeError(w, http.StatusConflict, err.Error())
 		case err == service.ErrTaskNotFound:
 			writeError(w, http.StatusNotFound, "task not found")
 		case err == service.ErrTaskNotChannelMember:
@@ -401,6 +421,7 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	svcReq := service.TaskUpdateRequest{
+		Contract: req.Contract, ExpectedTaskVersion: req.ExpectedTaskVersion,
 		Title:       req.Title,
 		Description: req.Description,
 		Status:      req.Status,
@@ -411,6 +432,10 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 	task, err := h.svc.UpdateTask(r.Context(), channelID, taskID, userID, svcReq)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrTaskDeliveryInvalid), errors.Is(err, service.ErrTaskVersionConflict), errors.Is(err, service.ErrTaskContractRequired), errors.Is(err, service.ErrTaskReviewLimit):
+			h.writeTaskLifecycleError(w, err)
+		case errors.Is(err, service.ErrTaskReferenceAmbiguous), errors.Is(err, service.ErrTaskSourceExists):
+			writeError(w, http.StatusConflict, err.Error())
 		case err == service.ErrTaskNotFound:
 			writeError(w, http.StatusNotFound, "task not found")
 		case err == service.ErrTaskNotChannelMember:
@@ -506,6 +531,10 @@ func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.svc.DeleteTask(r.Context(), channelID, taskID, userID); err != nil {
 		switch {
+		case errors.Is(err, service.ErrTaskDeliveryInvalid), errors.Is(err, service.ErrTaskVersionConflict), errors.Is(err, service.ErrTaskContractRequired), errors.Is(err, service.ErrTaskReviewLimit):
+			h.writeTaskLifecycleError(w, err)
+		case errors.Is(err, service.ErrTaskReferenceAmbiguous), errors.Is(err, service.ErrTaskSourceExists):
+			writeError(w, http.StatusConflict, err.Error())
 		case err == service.ErrTaskNotFound:
 			writeError(w, http.StatusNotFound, "task not found")
 		case err == service.ErrTaskNotChannelMember:
@@ -555,25 +584,46 @@ func (h *TaskHandler) Claim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve task_number to UUID
-	t, err := h.svc.GetTask(r.Context(), channelID, taskID, userID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "task not found")
+	var input struct {
+		Contract *service.TaskContract `json:"contract"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&input); err != nil && err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid claim contract")
 		return
 	}
 
-	// Check @mention priority claim window (P25-04-B)
-	if h.agentSvc != nil {
-		allowed, reason := h.agentSvc.CheckClaimWindow(t.ID, userID)
-		if !allowed {
-			writeError(w, http.StatusConflict, reason)
-			return
+	// Existing Tasks retain mention priority; ordinary message creation and claim are atomic.
+	t, err := h.svc.GetTask(r.Context(), channelID, taskID, userID)
+	var task *service.Task
+	created := false
+	checkWindow := func(id string) error {
+		if h.agentSvc != nil {
+			if allowed, _ := h.agentSvc.CheckClaimWindow(id, userID); !allowed {
+				return service.ErrTaskAlreadyClaimed
+			}
 		}
+		return nil
+	}
+	if err == nil && input.Contract != nil {
+		if t.MessageID == "" {
+			err = service.ErrTaskVersionConflict
+		} else {
+			task, created, err = h.svc.ClaimMessageTask(r.Context(), channelID, t.MessageID, userID, checkWindow, input.Contract)
+		}
+	} else if err == nil {
+		if err = checkWindow(t.ID); err == nil {
+			task, err = h.svc.ClaimTask(r.Context(), channelID, t.ID, userID)
+		}
+	} else if errors.Is(err, service.ErrTaskNotFound) {
+		task, created, err = h.svc.ClaimMessageTask(r.Context(), channelID, taskID, userID, checkWindow, input.Contract)
 	}
 
-	task, err := h.svc.ClaimTask(r.Context(), channelID, t.ID, userID)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrTaskDeliveryInvalid), errors.Is(err, service.ErrTaskVersionConflict), errors.Is(err, service.ErrTaskContractRequired), errors.Is(err, service.ErrTaskReviewLimit):
+			h.writeTaskLifecycleError(w, err)
+		case errors.Is(err, service.ErrTaskReferenceAmbiguous), errors.Is(err, service.ErrTaskSourceExists):
+			writeError(w, http.StatusConflict, err.Error())
 		case err == service.ErrTaskNotFound:
 			writeError(w, http.StatusNotFound, "task not found")
 		case err == service.ErrTaskNotChannelMember:
@@ -594,11 +644,15 @@ func (h *TaskHandler) Claim(w http.ResponseWriter, r *http.Request) {
 
 	// Close the claim window on successful claim within the window
 	if h.agentSvc != nil {
-		h.agentSvc.CloseClaimWindow(t.ID)
+		h.agentSvc.CloseClaimWindow(task.ID)
 	}
 
 	resp := toTaskResponse(task)
 	writeJSON(w, http.StatusOK, resp)
+
+	if created && h.hub != nil {
+		h.hub.BroadcastToChannel(task.ChannelID, ws.Envelope(ws.EventTaskCreated, resp))
+	}
 
 	// Broadcast task.updated event
 	var dueDateStr string
@@ -657,6 +711,10 @@ func (h *TaskHandler) Unclaim(w http.ResponseWriter, r *http.Request) {
 	task, err := h.svc.UnclaimTask(r.Context(), channelID, t.ID, userID)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrTaskDeliveryInvalid), errors.Is(err, service.ErrTaskVersionConflict), errors.Is(err, service.ErrTaskContractRequired), errors.Is(err, service.ErrTaskReviewLimit):
+			h.writeTaskLifecycleError(w, err)
+		case errors.Is(err, service.ErrTaskReferenceAmbiguous), errors.Is(err, service.ErrTaskSourceExists):
+			writeError(w, http.StatusConflict, err.Error())
 		case err == service.ErrTaskNotFound:
 			writeError(w, http.StatusNotFound, "task not found")
 		case err == service.ErrTaskNotChannelMember:
@@ -711,7 +769,107 @@ func (h *TaskHandler) Unclaim(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) Submit(w http.ResponseWriter, r *http.Request) {
-	h.lifecycleAction(w, r, h.svc.SubmitTask)
+	actorID, task, ok := h.deliveryTask(w, r)
+	if !ok {
+		return
+	}
+	var req service.TaskSubmitRequest
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&req)
+	if err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, 400, "invalid submission body: "+err.Error())
+		return
+	}
+	var updated *service.Task
+	if task.Contract == nil && errors.Is(err, io.EOF) {
+		updated, err = h.svc.SubmitTask(r.Context(), task.ChannelID, task.ID, actorID)
+	} else {
+		updated, err = h.svc.SubmitDelivery(r.Context(), task.ChannelID, task.ID, actorID, r.Header.Get("X-Solo-Run-ID"), req)
+	}
+	if err != nil {
+		h.writeTaskLifecycleError(w, err)
+		return
+	}
+	h.writeTaskUpdate(w, updated)
+}
+
+func (h *TaskHandler) deliveryTask(w http.ResponseWriter, r *http.Request) (string, *service.Task, bool) {
+	if chi.URLParam(r, "channelID") == "" {
+		return h.globalLifecycleTask(w, r)
+	}
+	actorID, ok := requireUserID(r)
+	if !ok {
+		writeError(w, 401, "not authenticated")
+		return "", nil, false
+	}
+	task, err := h.svc.GetTask(r.Context(), chi.URLParam(r, "channelID"), chi.URLParam(r, "taskID"), actorID)
+	if err != nil {
+		h.writeTaskLifecycleError(w, err)
+		return "", nil, false
+	}
+	return actorID, task, true
+}
+
+func (h *TaskHandler) Submissions(w http.ResponseWriter, r *http.Request) {
+	actorID, task, ok := h.deliveryTask(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.svc.ListSubmissions(r.Context(), task.ChannelID, task.ID, actorID)
+	if err != nil {
+		h.writeTaskLifecycleError(w, err)
+		return
+	}
+	writeJSON(w, 200, items)
+}
+
+func (h *TaskHandler) Metrics(w http.ResponseWriter, r *http.Request) {
+	actorID, task, ok := h.deliveryTask(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.svc.TaskMetrics(r.Context(), task.ChannelID, task.ID, actorID)
+	if err != nil {
+		h.writeTaskLifecycleError(w, err)
+		return
+	}
+	writeJSON(w, 200, result)
+}
+
+func (h *TaskHandler) Observe(w http.ResponseWriter, r *http.Request) {
+	actorID, task, ok := h.deliveryTask(w, r)
+	if !ok {
+		return
+	}
+	var req service.TaskObservationRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&req); err != nil {
+		writeError(w, 400, "invalid observation")
+		return
+	}
+	id, err := h.svc.RecordTaskObservation(r.Context(), task.ChannelID, task.ID, actorID, req)
+	if err != nil {
+		h.writeTaskLifecycleError(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]string{"id": id})
+}
+
+func (h *TaskHandler) Review(w http.ResponseWriter, r *http.Request) {
+	actorID, task, ok := h.deliveryTask(w, r)
+	if !ok {
+		return
+	}
+	var req service.TaskReviewRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&req); err != nil {
+		writeError(w, 400, "invalid review body: "+err.Error())
+		return
+	}
+	req.CodeGateRunID = r.Header.Get("X-Solo-Run-ID")
+	updated, err := h.svc.ReviewDelivery(r.Context(), task.ChannelID, task.ID, actorID, req)
+	if err != nil {
+		h.writeTaskLifecycleError(w, err)
+		return
+	}
+	h.writeTaskUpdate(w, updated)
 }
 
 func (h *TaskHandler) Accept(w http.ResponseWriter, r *http.Request) {
@@ -849,6 +1007,14 @@ func (h *TaskHandler) globalLifecycleTask(w http.ResponseWriter, r *http.Request
 
 func (h *TaskHandler) writeTaskLifecycleError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, service.ErrTaskDeliveryInvalid):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrTaskVersionConflict), errors.Is(err, service.ErrTaskContractRequired), errors.Is(err, service.ErrTaskReviewLimit):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, service.ErrTaskNotReviewer):
+		writeError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, service.ErrTaskReferenceAmbiguous), errors.Is(err, service.ErrTaskSourceExists):
+		writeError(w, http.StatusConflict, err.Error())
 	case err == service.ErrTaskNotFound:
 		writeError(w, http.StatusNotFound, "task not found")
 	case err == service.ErrTaskNotChannelMember:
@@ -886,6 +1052,12 @@ func (h *TaskHandler) ConvertToTask(w http.ResponseWriter, r *http.Request) {
 	task, err := h.svc.ConvertMessageToTask(r.Context(), channelID, messageID, userID)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrTaskDeliveryInvalid):
+			writeError(w, 400, err.Error())
+		case errors.Is(err, service.ErrTaskNotFound):
+			writeError(w, 404, "message not found")
+		case errors.Is(err, service.ErrTaskReferenceAmbiguous):
+			writeError(w, 409, err.Error())
 		case err == service.ErrTaskNotChannelMember:
 			writeError(w, http.StatusForbidden, "not a channel member")
 		default:
@@ -898,6 +1070,8 @@ func (h *TaskHandler) ConvertToTask(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
+	messageID = task.MessageID
 
 	// Ensure a thread exists for the converted message so task discussion is
 	// organized under the thread.
@@ -1151,6 +1325,10 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.svc.ValidateContract(r.Context(), req.ChannelID, userID, req.Contract); err != nil {
+		h.writeTaskLifecycleError(w, err)
+		return
+	}
 	// insert a user message first, then convert to task.
 	// Agents receive the original message format with @mention context preserved,
 	// not a stripped system notification.
@@ -1217,21 +1395,13 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 		h.hub.BroadcastToChannel(req.ChannelID, msgPayload)
 	}
 
-	// Convert message to task
-	task, err := h.svc.ConvertMessageToTask(r.Context(), req.ChannelID, msgID, userID)
+	task, err := h.svc.CreateTask(r.Context(), req.ChannelID, userID, service.TaskCreateRequest{
+		Title: req.Title, Description: req.Description, Priority: req.Priority, DueDate: req.DueDate,
+		MessageID: msgID, ParentTaskID: req.ParentTaskID, Assignee: req.Assignee, Contract: req.Contract,
+	})
 	if err != nil {
-		slog.Error("failed to convert message to task", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to create task")
+		h.writeTaskLifecycleError(w, err)
 		return
-	}
-	if req.Description != "" {
-		description := req.Description
-		task, err = h.svc.UpdateTask(r.Context(), req.ChannelID, task.ID, userID, service.TaskUpdateRequest{Description: &description})
-		if err != nil {
-			slog.Error("failed to preserve task description", "error", err, "task_id", task.ID)
-			writeError(w, http.StatusInternalServerError, "failed to create task")
-			return
-		}
 	}
 
 	// Create thread for the task message
@@ -1279,6 +1449,10 @@ func (h *TaskHandler) CreateGlobal(w http.ResponseWriter, r *http.Request) {
 
 	// Trigger agents for auto-claim
 	if h.agentSvc != nil {
+		if task.ClaimerID != "" {
+			go h.agentSvc.TriggerAgentForTask(context.Background(), task.ChannelID, task.ID, task.ClaimerID, task.TaskNumber, task.Title, task.Description, nil, nil)
+			return
+		}
 		contentForMentions := task.Title
 		if task.Description != "" {
 			contentForMentions += " " + task.Description
@@ -1355,6 +1529,7 @@ func (h *TaskHandler) UpdateGlobal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	svcReq := service.TaskUpdateRequest{
+		Contract: req.Contract, ExpectedTaskVersion: req.ExpectedTaskVersion,
 		Title:       req.Title,
 		Description: req.Description,
 		Status:      req.Status,
@@ -1365,6 +1540,10 @@ func (h *TaskHandler) UpdateGlobal(w http.ResponseWriter, r *http.Request) {
 	updated, err := h.svc.UpdateTask(r.Context(), task.ChannelID, taskID, userID, svcReq)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrTaskDeliveryInvalid), errors.Is(err, service.ErrTaskVersionConflict), errors.Is(err, service.ErrTaskContractRequired), errors.Is(err, service.ErrTaskReviewLimit):
+			h.writeTaskLifecycleError(w, err)
+		case errors.Is(err, service.ErrTaskReferenceAmbiguous), errors.Is(err, service.ErrTaskSourceExists):
+			writeError(w, http.StatusConflict, err.Error())
 		case err == service.ErrTaskNotFound:
 			writeError(w, http.StatusNotFound, "task not found")
 		case err == service.ErrTaskNotChannelMember:
@@ -1456,6 +1635,10 @@ func (h *TaskHandler) DeleteGlobal(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.svc.DeleteTask(r.Context(), task.ChannelID, taskID, userID); err != nil {
 		switch {
+		case errors.Is(err, service.ErrTaskDeliveryInvalid), errors.Is(err, service.ErrTaskVersionConflict), errors.Is(err, service.ErrTaskContractRequired), errors.Is(err, service.ErrTaskReviewLimit):
+			h.writeTaskLifecycleError(w, err)
+		case errors.Is(err, service.ErrTaskReferenceAmbiguous), errors.Is(err, service.ErrTaskSourceExists):
+			writeError(w, http.StatusConflict, err.Error())
 		case err == service.ErrTaskNotFound:
 			writeError(w, http.StatusNotFound, "task not found")
 		case err == service.ErrTaskNotChannelMember:

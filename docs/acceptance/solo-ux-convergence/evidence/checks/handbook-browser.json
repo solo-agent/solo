@@ -1,0 +1,31 @@
+{
+  "status": "passed",
+  "tool": "Tabbit Browser",
+  "request_id": "handbook-qa-owned-preview",
+  "map_entries": 20,
+  "criteria": 20,
+  "images_loaded": 8,
+  "manual_record_entries": 20,
+  "desktop": {
+    "width": 1440,
+    "height": 1160,
+    "horizontal_overflow": false
+  },
+  "mobile": {
+    "width": 390,
+    "height": 844,
+    "horizontal_overflow": false
+  },
+  "anchor_jump": "UX-18",
+  "manual_selections_reset": true,
+  "scope": "仅验证交付文档交互与布局；不计为产品 E2E",
+  "final_request_id": "handbook-final-image",
+  "final_status": "验收通过",
+  "all_20_case_records_passed": true,
+  "final_image": "../../入口去向总图.png",
+  "final_viewport": {
+    "width": 1440,
+    "height": 1280
+  },
+  "finished": true
+}

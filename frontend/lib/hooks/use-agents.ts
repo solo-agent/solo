@@ -11,7 +11,7 @@ import type { Agent, CreateAgentInput, UpdateAgentInput } from '@/lib/types';
 
 // ---- Backend response shape ----
 
-interface AgentResponse {
+export interface AgentResponse {
   id: string;
   name: string;
   description: string;
@@ -32,7 +32,7 @@ interface AgentResponse {
 
 // ---- Mapping helpers ----
 
-function mapAgent(resp: AgentResponse): Agent {
+export function mapAgent(resp: AgentResponse): Agent {
   return {
     id: resp.id,
     name: resp.name,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +12,8 @@ import (
 
 // failedStartRetryInterval is how long to wait before retrying after a process
 // exits immediately (indicating a CLI misconfiguration, not a transient failure).
+const RunSnapshotCapability = "run_snapshot_v1"
+
 const failedStartRetryInterval = 30 * time.Second
 
 // AgentSessionManager manages a pool of Agent and Thinking-node sessions.
@@ -788,7 +791,8 @@ func entryProviderSessionID(entry *agentSessionEntry) string {
 }
 
 func sessionConfigMatches(entry *agentSessionEntry, config AgentConfig) bool {
-	return entry.AgentConfig.Model == config.Model
+	previous := entry.AgentConfig
+	return previous.SkillsDigest == config.SkillsDigest && previous.AgentRevisionID == config.AgentRevisionID && previous.TeamVersionID == config.TeamVersionID && previous.Model == config.Model && previous.Provider == config.Provider && previous.SystemPrompt == config.SystemPrompt && previous.ThinkingRuntimePrompt == config.ThinkingRuntimePrompt && previous.Effort == config.Effort && previous.RelationshipsMarkdown == config.RelationshipsMarkdown && slices.Equal(previous.CustomArgs, config.CustomArgs)
 }
 
 func persistentSessionID(session *PersistentSession) string {

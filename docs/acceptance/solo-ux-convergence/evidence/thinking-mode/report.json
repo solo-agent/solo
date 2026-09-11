@@ -1,0 +1,23 @@
+{
+  "stats": {
+    "startTime": "2026-09-11T11:10:59.497Z",
+    "duration": 271645.228,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "results": [
+    {
+      "title": "Thinking mode uses real local Agent sessions end to end",
+      "status": "passed",
+      "duration_ms": 271270,
+      "retry": 0,
+      "attachments": [],
+      "errors": []
+    }
+  ],
+  "additional_evidence": [
+    "persisted-thinking-state.json"
+  ]
+}

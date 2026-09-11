@@ -10,6 +10,7 @@
 
 'use client';
 
+import { TaskDeliveryDialog } from '@/components/tasks/task-delivery-dialog';
 import { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AlertCircle, RefreshCw, MessageSquare, Circle, SquareCheckBig } from 'lucide-react';
@@ -117,6 +118,7 @@ export function DMView({
   const [threadMessage, setThreadMessage] = useState<Message | null>(null);
   const [threadTask, setThreadTask] = useState<Task | null>(null);
   const [artifactPreview, setArtifactPreview] = useState<ArtifactPreview | null>(null);
+  const [deliveryTaskId, setDeliveryTaskId] = useState<string | null>(null);
   const [artifactHistory, setArtifactHistory] = useState<TaskArtifact[]>([]);
   const [artifactReviewBusy, setArtifactReviewBusy] = useState(false);
   const [threadPanelWidth, setThreadPanelWidth] = useState(400);
@@ -409,6 +411,8 @@ export function DMView({
       setArtifactReviewBusy(true);
       try {
         if (!taskId) throw new Error('missing task id');
+        const current = await apiClient.get<Task>(`/api/v1/tasks/${taskId}`);
+        if (current.contract) { closeArtifactPreview(); setDeliveryTaskId(taskId); return; }
         const path = `/api/v1/tasks/${taskId}/${data.action === 'accept' ? 'accept' : 'reject'}`;
         const updated = await apiClient.post<Task>(path, data.action === 'reject' ? { reason } : undefined);
         handleTaskActionComplete(updated);
@@ -835,6 +839,7 @@ export function DMView({
           <iframe ref={artifactFrameRef} title={artifactPreview.title} src={artifactPreview.previewUrl} tabIndex={0} className="min-h-0 flex-1 bg-white" />
         </div>
       )}
+      {deliveryTaskId && <TaskDeliveryDialog taskId={deliveryTaskId} open onOpenChange={(open) => { if (!open) setDeliveryTaskId(null); }} onComplete={handleTaskActionComplete} />}
     </div>
   );
 }

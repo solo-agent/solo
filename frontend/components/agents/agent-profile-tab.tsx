@@ -8,8 +8,11 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { AgentRevisionsPanel } from './agent-revisions-panel';
+import { AgentWorkPanel } from './agent-work-panel';
 import { Pencil, Check, X, AlertCircle, RefreshCw } from 'lucide-react';
 import { apiClient, ApiError } from '@/lib/api-client';
+import { mapAgent, type AgentResponse } from '@/lib/hooks/use-agents';
 import { useToast } from '@/components/ui/toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -184,22 +187,8 @@ export function AgentProfileTab({ agentId, showHeader = true, onUpdated }: Agent
     setIsLoading(true);
     setError(null);
     try {
-      const res = await apiClient.get<Record<string, unknown>>(`/api/v1/agents/${agentId}`);
-      setAgent({
-        id: res.id as string,
-        name: res.name as string,
-        description: (res.description as string) || '',
-        owner_id: res.owner_id as string,
-        model_provider: (res.model_provider as string) || '',
-        model_name: (res.model_name as string) || '',
-        system_prompt: (res.system_prompt as string) || '',
-        is_active: (res.is_active as boolean) ?? false,
-        avatar_url: (res.avatar_url as string) || null,
-        custom_env: (res.custom_env as Record<string, string>) ?? {},
-        custom_args: (res.custom_args as string[]) ?? [],
-        created_at: res.created_at as string,
-        updated_at: res.updated_at as string,
-      } as Agent);
+      const res = await apiClient.get<AgentResponse>(`/api/v1/agents/${agentId}`);
+      setAgent(mapAgent(res));
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.status === 404 ? t('agentProfileAgentNotFound') : err.message);
@@ -292,6 +281,8 @@ export function AgentProfileTab({ agentId, showHeader = true, onUpdated }: Agent
         </>
       )}
 
+      <AgentWorkPanel key={`work-${agentId}`} agentId={agentId} ownerId={agent.owner_id} />
+      <AgentRevisionsPanel key={`revisions-${agentId}`} agent={agent} />
       <div className={detailSectionClass('space-y-3')}>
         <h4>
           <span className={detailSectionTitleClass()}>

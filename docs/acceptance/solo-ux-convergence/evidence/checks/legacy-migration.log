@@ -1,0 +1,4 @@
+=== RUN   TestLegacyCompoundingMigrationPostgres
+--- PASS: TestLegacyCompoundingMigrationPostgres (1.69s)
+PASS
+ok  	github.com/solo-ai/solo/internal/server/service	1.846s

@@ -143,22 +143,25 @@ func (s *AgentRelationshipService) Create(ctx context.Context, userID string, re
 	return &rel, nil
 }
 
-func (s *AgentRelationshipService) List(ctx context.Context, userID, agentID string) ([]AgentRelationship, error) {
+func (s *AgentRelationshipService) List(ctx context.Context, userID, agentID string, channelIDs ...string) ([]AgentRelationship, error) {
+	channelID := ""
+	if len(channelIDs) > 0 {
+		channelID = channelIDs[0]
+	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT r.id::text, r.from_agent_id::text, r.to_agent_id::text,
-		       r.rel_type, r.weight, r.instruction, fa.home_channel_id::text,
+		       r.rel_type, r.weight, r.instruction, r.channel_id::text,
 		       r.created_at, r.updated_at
 		  FROM agent_relationships r
 		  JOIN agents fa ON fa.id = r.from_agent_id
 		  JOIN agents ta ON ta.id = r.to_agent_id
-		  JOIN channels c ON c.id = fa.home_channel_id
-		 WHERE fa.owner_id = $1::uuid AND ta.owner_id = $1::uuid
-		   AND ($3 = '' OR c.workspace_id::text = $3)
+		  JOIN channels c ON c.id = r.channel_id
+		 WHERE ((fa.owner_id = $1::uuid AND ta.owner_id = $1::uuid) OR EXISTS(SELECT 1 FROM channel_members m WHERE m.channel_id=r.channel_id AND m.member_type='user' AND m.member_id=$1))
+		   AND ($3 = '' OR c.workspace_id::text = $3) AND ($4='' OR r.channel_id::text=$4)
 		   AND fa.is_active = true AND ta.is_active = true
-		   AND fa.home_channel_id = ta.home_channel_id
 		   AND ($2 = '' OR r.from_agent_id::text = $2 OR r.to_agent_id::text = $2)
 		 ORDER BY r.created_at DESC
-	`, userID, agentID, serverworkspace.FilterID(ctx))
+	`, userID, agentID, serverworkspace.FilterID(ctx), channelID)
 	if err != nil {
 		return nil, err
 	}
@@ -189,14 +192,13 @@ func (s *AgentRelationshipService) Update(ctx context.Context, userID, id string
 
 	var fromAgentID, toAgentID, channelID string
 	err = tx.QueryRow(ctx, `
-		SELECT r.from_agent_id::text, r.to_agent_id::text, fa.home_channel_id::text
+		SELECT r.from_agent_id::text, r.to_agent_id::text, r.channel_id::text
 		  FROM agent_relationships r
 		  JOIN agents fa ON fa.id = r.from_agent_id
 		  JOIN agents ta ON ta.id = r.to_agent_id
 		 WHERE r.id = $1
 		   AND fa.owner_id = $2::uuid AND ta.owner_id = $2::uuid
-		   AND fa.is_active = true AND ta.is_active = true
-		   AND fa.home_channel_id = ta.home_channel_id
+		   AND fa.is_active = true AND ta.is_active = true AND r.channel_id IS NOT NULL
 	`, id, userID).Scan(&fromAgentID, &toAgentID, &channelID)
 	if err == pgx.ErrNoRows {
 		return nil, ErrRelationshipNotFound
@@ -229,9 +231,8 @@ func (s *AgentRelationshipService) Update(ctx context.Context, userID, id string
 		   AND fa.id = r.from_agent_id AND ta.id = r.to_agent_id
 		   AND fa.owner_id = $2::uuid AND ta.owner_id = $2::uuid
 		   AND fa.is_active = true AND ta.is_active = true
-		   AND fa.home_channel_id = ta.home_channel_id
 		RETURNING r.id::text, r.from_agent_id::text, r.to_agent_id::text,
-		          r.rel_type, r.weight, r.instruction, fa.home_channel_id::text,
+		          r.rel_type, r.weight, r.instruction, r.channel_id::text,
 		          r.created_at, r.updated_at
 	`, id, userID, req.Weight, req.Instruction, req.RelType).Scan(
 		&rel.ID, &rel.FromAgentID, &rel.ToAgentID, &rel.RelType, &rel.Weight,
@@ -260,8 +261,7 @@ func lockRelationshipChannel(ctx context.Context, tx pgx.Tx, userID, fromAgentID
 		   AND fa.owner_id = $3::uuid
 		   AND ta.owner_id = $3::uuid
 		   AND fa.is_active = true
-		   AND ta.is_active = true
-		   AND fa.home_channel_id = ta.home_channel_id
+		   AND ta.is_active = true AND fa.home_channel_id = ta.home_channel_id
 	`, fromAgentID, toAgentID, userID).Scan(&channelID)
 	if err == pgx.ErrNoRows {
 		return "", ErrRelationshipNotFound
@@ -293,11 +293,11 @@ func wouldCreateAssignsToCycle(
 			SELECT $2::uuid
 			UNION
 			SELECT r.to_agent_id
-			  FROM agent_relationships r
+			  FROM agent_relationship_scopes r
 			  JOIN reachable current ON current.agent_id = r.from_agent_id
 			  JOIN agents source ON source.id = r.from_agent_id
 			 WHERE r.rel_type = 'assigns_to'
-			   AND source.home_channel_id = $1::uuid
+			   AND r.channel_id = $1::uuid
 			   AND ($4 = '' OR r.id::text <> $4)
 		)
 		SELECT EXISTS(
@@ -315,7 +315,7 @@ func (s *AgentRelationshipService) Delete(ctx context.Context, userID, id string
 		  JOIN agents fa ON fa.id = r.from_agent_id
 		  JOIN agents ta ON ta.id = r.to_agent_id
 		 WHERE r.id = $1
-		   AND fa.owner_id = $2::uuid AND ta.owner_id = $2::uuid
+		   AND (fa.owner_id = $2::uuid OR ta.owner_id = $2::uuid)
 		   AND fa.is_active = true AND ta.is_active = true
 	`, id, userID).Scan(&fromID, &toID)
 
@@ -324,7 +324,7 @@ func (s *AgentRelationshipService) Delete(ctx context.Context, userID, id string
 		USING agents fa, agents ta
 		WHERE r.id = $1
 		  AND fa.id = r.from_agent_id AND ta.id = r.to_agent_id
-		  AND fa.owner_id = $2::uuid AND ta.owner_id = $2::uuid
+		  AND (fa.owner_id = $2::uuid OR ta.owner_id = $2::uuid)
 		  AND fa.is_active = true AND ta.is_active = true
 	`, id, userID)
 	if err != nil {

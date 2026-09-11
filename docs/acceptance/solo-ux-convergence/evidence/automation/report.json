@@ -1,0 +1,35 @@
+{
+  "stats": {
+    "startTime": "2026-09-11T10:09:35.754Z",
+    "duration": 92439.21500000001,
+    "expected": 2,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "results": [
+    {
+      "title": "keeps the Channel automation page visible across navigation, reload, and locale changes",
+      "status": "passed",
+      "duration_ms": 2803,
+      "retry": 0,
+      "attachments": [
+        "evidence/automation/automation-workspace-en.png"
+      ],
+      "errors": []
+    },
+    {
+      "title": "creates from the real UI, avoids duplicate work, runs the Agent, and resumes a missed schedule once",
+      "status": "passed",
+      "duration_ms": 89002,
+      "retry": 0,
+      "attachments": [
+        "evidence/automation/automation-time-picker-zh.png",
+        "evidence/automation/automation-list-zh.png",
+        "evidence/automation/automation-database-final-state.json",
+        "evidence/automation/automation-final-workspace-en.png"
+      ],
+      "errors": []
+    }
+  ]
+}

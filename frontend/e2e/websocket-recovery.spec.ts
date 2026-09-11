@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { registerVerified } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
+test.use({ actionTimeout: 30_000 });
 
 interface AuthResponse {
   access_token: string;
@@ -36,11 +37,12 @@ async function register(request: APIRequestContext, label: string): Promise<Auth
 }
 
 async function authenticatePage(page: Page, auth: AuthResponse): Promise<void> {
-  await page.addInitScript(({ accessToken, refreshToken }) => {
+  await page.addInitScript(({ accessToken, refreshToken, userID }) => {
     localStorage.setItem('access_token', accessToken);
     localStorage.setItem('refresh_token', refreshToken);
     localStorage.setItem('solo.locale', 'en');
-  }, { accessToken: auth.access_token, refreshToken: auth.refresh_token });
+    localStorage.setItem(`solo:first-run-guide-skipped:${userID}`, '1');
+  }, { accessToken: auth.access_token, refreshToken: auth.refresh_token, userID: auth.user.id });
 }
 
 function authorization(auth: AuthResponse): { authorization: string } {

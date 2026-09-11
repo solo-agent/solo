@@ -1,12 +1,15 @@
+import { selectValue } from './support/select';
+import { codexE2EArgs } from './support/runtime';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { acquireLocalComputer, type LocalComputerLease } from './support/local-computer';
-import { registerVerified } from './support/auth';
+import { registerVerified, requestAuthenticated } from './support/auth';
 
 const apiBase = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
+const runtimeTimeout = 300_000;
 const password = 'SoloE2E-2026!';
 const daemonLogPath = join(process.cwd(), '..', 'daemon.log');
 
@@ -31,6 +34,23 @@ function providerSessionIDForNode(nodeID: string): string {
      WHERE node.id = '${nodeID}'
   `).provider_session_id;
 }
+
+function injectedPromptForNode(agentID: string, nodeID: string): string {
+  if (process.env.SOLO_E2E_PROVIDER !== 'codex') {
+    return readFileSync(join(homedir(), '.solo', 'agents', agentID, 'workspace', '.solo', 'system-prompt.md'), 'utf8');
+  }
+  const directory = join(homedir(), '.codex', 'sessions');
+  const sessionID = providerSessionIDForNode(nodeID);
+  const path = readdirSync(directory, { recursive: true, encoding: 'utf8' }).find((file) => file.endsWith(`-${sessionID}.jsonl`));
+  expect(path, `Actual Codex session ${sessionID}`).toBeTruthy();
+  return readFileSync(join(directory, path!), 'utf8').split('\n').filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((record) => record.type === 'response_item' && record.payload?.role === 'developer')
+    .flatMap((record) => record.payload.content.map((item: { text?: string }) => item.text ?? '')).join('\n');
+}
+
+let activeWorkspaceID = '';
+let activeUserID = '';
 
 interface AuthResponse {
   access_token: string;
@@ -80,26 +100,43 @@ interface AgentRun {
 }
 
 async function authenticate(request: APIRequestContext): Promise<AuthResponse> {
-  const credentials = { email: 'thinking-e2e@solo.local', password };
+  const credentials = { email: process.env.SOLO_E2E_EMAIL ?? 'thinking-e2e@solo.local', password };
   const login = await request.post(`${apiBase}/api/v1/auth/login`, { data: credentials });
-  if (login.ok()) return login.json();
+  if (login.ok()) return prepareWorkspace(request, await login.json());
 
   const register = await registerVerified(request, apiBase, {
     data: { ...credentials, display_name: 'Thinking E2E' },
   });
   if (!register.ok()) throw new Error(`E2E authentication failed: ${register.status()} ${await register.text()}`);
-  return register.json();
+  return prepareWorkspace(request, await register.json());
+}
+
+async function prepareWorkspace(request: APIRequestContext, auth: AuthResponse): Promise<AuthResponse> {
+  const headers = { authorization: `Bearer ${auth.access_token}` };
+  const response = await request.get(`${apiBase}/api/v1/workspaces`, { headers });
+  if (!response.ok()) throw new Error(`Workspace fixture: ${response.status()} ${await response.text()}`);
+  const workspaces = await response.json() as { id: string; is_personal: boolean; created_by: string }[];
+  let personal = workspaces.find((item) => item.is_personal);
+  if (!personal) {
+    const created = await request.post(`${apiBase}/api/v1/workspaces`, { headers, data: { name: 'Private E2E workspace' } });
+    if (!created.ok()) throw new Error(`Create private Workspace: ${created.status()} ${await created.text()}`);
+    personal = await created.json() as typeof workspaces[number];
+  }
+  activeWorkspaceID = personal.id;
+  activeUserID = personal.created_by;
+  databaseJSON(`WITH updated AS (UPDATE users SET onboarding_completed_at=now() WHERE id='${activeUserID}' RETURNING 1) SELECT to_json(EXISTS(SELECT 1 FROM updated))::text`);
+  return auth;
 }
 
 async function api<T>(
   request: APIRequestContext,
-  token: string,
+  token: AuthResponse,
   method: 'get' | 'post' | 'delete',
   path: string,
   data?: unknown,
 ): Promise<T> {
-  const response = await request[method](`${apiBase}${path}`, {
-    headers: { authorization: `Bearer ${token}` },
+  const response = await requestAuthenticated(request, apiBase, token, method, path, {
+    headers: { authorization: `Bearer ${token.access_token}`, 'X-Workspace-ID': activeWorkspaceID },
     data,
   });
   if (!response.ok()) throw new Error(`${method.toUpperCase()} ${path}: ${response.status()} ${await response.text()}`);
@@ -133,10 +170,12 @@ async function expectReadableFlowNode(page: Page, title: string) {
 }
 
 async function expectNoCrossingEdges(page: Page) {
-  const crossings = await page.locator('.react-flow__edge path').evaluateAll((paths) => {
-    const segments = paths.flatMap((path) => {
-      const values = (path.getAttribute('d') ?? '').match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
-      return values.length >= 4 ? [{ a: { x: values[0], y: values[1] }, b: { x: values[2], y: values[3] } }] : [];
+  const edgePaths = page.locator('.react-flow__edge path.react-flow__edge-path');
+  await expect(edgePaths).toHaveCount((await page.locator('.react-flow__node').count()) - 1);
+  await expect.poll(() => edgePaths.evaluateAll((paths) => {
+    const segments = paths.map((element) => {
+      const path = element as SVGPathElement;
+      return { a: path.getPointAtLength(0), b: path.getPointAtLength(path.getTotalLength()) };
     });
     const side = (a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }) =>
       (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
@@ -153,11 +192,10 @@ async function expectNoCrossingEdges(page: Page) {
       }
     }
     return count;
-  });
-  expect(crossings).toBe(0);
+  }), { timeout: 10000, intervals: [100, 200, 500] }).toBe(0);
 }
 
-async function nodeMessages(request: APIRequestContext, token: string, channelID: string, nodeID: string) {
+async function nodeMessages(request: APIRequestContext, token: AuthResponse, channelID: string, nodeID: string) {
   return api<MessageList>(request, token, 'get',
     `/api/v1/channels/${channelID}/messages?limit=100&thinking_node_id=${nodeID}`);
 }
@@ -177,12 +215,14 @@ async function expectThinkingProcessClosed(nodeID: string, force: boolean) {
 }
 
 async function expectProviderProcessEnded(sessionID: string, force: boolean) {
-  const message = force ? 'claude: persistent session ended' : 'claude: persistent session closed';
+  const provider = process.env.SOLO_E2E_PROVIDER ?? 'claude';
+  const message = `${provider}: persistent session ${force ? 'ended' : 'closed'}`;
   await expect.poll(() => {
     try {
       return readFileSync(daemonLogPath, 'utf8').split('\n').some((line) =>
         line.includes(`"msg":"${message}"`)
-        && line.includes(`"session_id":"${sessionID}"`));
+        && line.includes(`"session_id":"${sessionID}"`)
+        && (provider !== 'codex' || line.includes('"reaped":true')));
     } catch {
       return false;
     }
@@ -216,7 +256,7 @@ async function expectThinkingSessionResumed(nodeID: string, sessionID: string) {
 
 async function waitForReadyFork(
   request: APIRequestContext,
-  token: string,
+  token: AuthResponse,
   channelID: string,
   nodeID: string,
 ) {
@@ -224,18 +264,18 @@ async function waitForReadyFork(
     const space = await api<ThinkingSpace>(request, token, 'get', `/api/v1/channels/${channelID}/thinking`);
     const node = space.nodes.find((candidate) => candidate.id === nodeID);
     return Boolean(node && !node.fork_handoff_pending && node.fork_handoff_at && node.inherited_handoff?.includes('# Handoff'));
-  }, { timeout: 180000, intervals: [1000, 2000, 3000] }).toBe(true);
+  }, { timeout: runtimeTimeout, intervals: [1000, 2000, 3000] }).toBe(true);
 }
 
 async function waitForAgentMessage(
   page: Page,
   request: APIRequestContext,
-  token: string,
+  token: AuthResponse,
   channelID: string,
   nodeID: string,
   agentID: string,
   content: string,
-  timeout = 60000,
+  timeout = runtimeTimeout,
 ) {
   await expect.poll(async () => {
     const list = await nodeMessages(request, token, channelID, nodeID);
@@ -254,7 +294,7 @@ async function sendNodeInstruction(page: Page, instruction: string) {
 async function sendNodeInstructionAndWait(
   page: Page,
   request: APIRequestContext,
-  token: string,
+  token: AuthResponse,
   channelID: string,
   nodeID: string,
   agentID: string,
@@ -280,7 +320,7 @@ async function sendNodeInstructionAndWait(
 async function sendNodeInstructionAndObserveActivity(
   page: Page,
   request: APIRequestContext,
-  token: string,
+  token: AuthResponse,
   channelID: string,
   nodeID: string,
   siblingNodeID: string,
@@ -301,18 +341,18 @@ async function sendNodeInstructionAndObserveActivity(
     getComputedStyle(element, '::before').animationName), {
     timeout: 10000,
   }).toBe('team-agent-halo-pulse');
-  await expect(node.locator('[data-agent-activity-kind="tool"]')).toBeVisible({ timeout: 120000 });
+  await expect(node.locator('[data-agent-activity-kind="tool"]')).toBeVisible({ timeout: runtimeTimeout });
 
   // The parent and child intentionally reuse the same FE Agent. Activity must
   // remain scoped to the exact Thinking run/node, never to every node by agent_id.
   await expect(sibling.locator('[data-agent-activity-kind]')).toHaveCount(0);
-  await waitForAgentMessage(page, request, token, channelID, nodeID, agentID, content, 180000);
+  await waitForAgentMessage(page, request, token, channelID, nodeID, agentID, content, runtimeTimeout);
 }
 
 async function sendAutoSplitAndWait(
   page: Page,
   request: APIRequestContext,
-  token: string,
+  token: AuthResponse,
   channelID: string,
   instruction: string,
   title: string,
@@ -336,7 +376,10 @@ async function sendAutoSplitAndWait(
   throw lastError;
 }
 
+test.use({ actionTimeout: 30000 });
+
 test('Thinking mode uses real local Agent sessions end to end', async ({ page, request }) => {
+  test.setTimeout(process.env.SOLO_E2E_PROVIDER === 'codex' ? 2_400_000 : 900_000);
   const auth = await authenticate(request);
   const suffix = Date.now().toString(36);
   const channelName = `thinking-e2e-${suffix}`;
@@ -360,34 +403,43 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
 
   try {
     localComputer = await acquireLocalComputer(request, apiBase, auth.access_token);
-    channel = await api<Entity>(request, auth.access_token, 'post', '/api/v1/channels', {
+    channel = await api<Entity>(request, auth, 'post', '/api/v1/channels', {
       name: channelName,
       description: 'Real Thinking mode E2E data',
     });
 
     for (const role of ['Lead', 'FE', 'BE', 'QA']) {
-      agents.push(await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
+      agents.push(await api<Entity>(request, auth, 'post', `/api/v1/channels/${channel.id}/agents`, {
         name: `${role}-${suffix}`,
         computer_id: localComputer.id,
-        model_provider: 'claude',
-        model_name: 'sonnet',
-        system_prompt: `You are the ${role} in a real Solo end-to-end test. When a user message starts with E2E:, follow it literally and immediately, including any explicitly requested Bash tool step. Never skip, simulate, background, or replace that tool step. Send the requested visible payload using solo message send to the incoming message's target. If the instruction explicitly requests a second hidden Handoff protocol message, send it separately after the visible payload. Do not add explanations, acknowledgements, punctuation, or any other visible message. When Solo asks for a final Thinking handoff, first run the foreground Bash command sleep 8, wait for it to finish, then follow the requested handoff format exactly and include the branch's concrete payloads.`,
+        model_provider: process.env.SOLO_E2E_PROVIDER ?? 'claude',
+        model_name: process.env.SOLO_E2E_MODEL ?? 'sonnet',
+      custom_args: process.env.SOLO_E2E_PROVIDER === 'codex' ? codexE2EArgs : [],
+        system_prompt: `You are the ${role} in a real Solo end-to-end test. On an introduction send READY_${role} once using solo message send and stop. When a user message starts with E2E:, follow it literally and immediately, including any explicitly requested Bash tool step. Never skip, simulate, background, or replace that tool step. Send the requested visible payload using solo message send to the incoming message's target. If the instruction explicitly requests a second hidden Handoff protocol message, send it separately after the visible payload. Do not add explanations, acknowledgements, punctuation, or any other visible message. When Solo asks for a final Thinking handoff, first run the foreground Bash command sleep 8, wait for it to finish, then follow the requested handoff format exactly and include the branch's concrete payloads.`,
       }));
     }
+    // Each real Agent must have an actual finished welcome Run. Checking only
+    // the active list can mistake a still-queued Inbox item for completion.
+    await Promise.all(agents.map((createdAgent) => expect.poll(() => databaseJSON<boolean>(`
+      SELECT to_json(count(*) > 0 AND bool_and(finished_at IS NOT NULL))
+      FROM agent_runs WHERE agent_id='${createdAgent.id}' AND channel_id='${channel!.id}'
+    `), { timeout: runtimeTimeout, intervals: [1000, 2000, 3000] }).toBe(true)));
     const [lead, fe, be, qa] = agents;
     for (const child of [fe, be, qa]) {
-      await api(request, auth.access_token, 'post', '/api/v1/agent-relationships', {
+      await api(request, auth, 'post', '/api/v1/agent-relationships', {
         from_agent_id: lead.id,
         to_agent_id: child.id,
         rel_type: 'assigns_to',
       });
     }
 
-    await page.addInitScript(({ accessToken, refreshToken }) => {
+    await page.addInitScript(({ accessToken, refreshToken, workspaceID, userID }) => {
       localStorage.setItem('access_token', accessToken);
       localStorage.setItem('refresh_token', refreshToken);
+    localStorage.setItem('solo_active_workspace_id', workspaceID);
+    localStorage.setItem(`solo_active_workspace_id:${userID}`, workspaceID);
       localStorage.setItem('solo.locale', 'en');
-    }, { accessToken: auth.access_token, refreshToken: auth.refresh_token });
+    }, { accessToken: auth.access_token, refreshToken: auth.refresh_token, workspaceID: activeWorkspaceID, userID: activeUserID });
 
     await page.goto(`/dashboard?channel=${channel.id}`);
     await page.getByRole('button', { name: 'Thinking', exact: true }).last().click();
@@ -399,7 +451,7 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
     await expect(flowNode(page, qa.name)).toBeVisible();
     await expectNoCrossingEdges(page);
 
-    let space = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+    let space = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel.id}/thinking`);
     const root = space.nodes.find((node) => !node.parent_id);
     const feNode = space.nodes.find((node) => node.agent_id === fe.id);
     const beNode = space.nodes.find((node) => node.agent_id === be.id);
@@ -409,10 +461,10 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
     expect(beNode).toBeTruthy();
 
     await expect.poll(async () => {
-      const activeRuns = await api<AgentRun[]>(request, auth.access_token, 'get', '/api/v1/agent-runs/active');
+      const activeRuns = await api<AgentRun[]>(request, auth, 'get', '/api/v1/agent-runs/active');
       return (activeRuns ?? []).some((run) => agents.some((agent) => agent.id === run.agent_id)
         && run.channel_id === channel!.id);
-    }, { timeout: 180000, intervals: [1000, 2000, 3000] }).toBe(false);
+    }, { timeout: runtimeTimeout, intervals: [1000, 2000, 3000] }).toBe(false);
 
     // Splitting an untouched parent must not wake its Agent or invent a
     // Handoff from unrelated workspace memory.
@@ -421,7 +473,7 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
     await page.getByPlaceholder('Name this branch').fill(emptyTitle);
     await page.getByRole('button', { name: 'Create', exact: true }).click();
     await expectReadableFlowNode(page, emptyTitle);
-    space = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+    space = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel.id}/thinking`);
     const emptyNode = space.nodes.find((node) => node.title === emptyTitle)!;
     expect(emptyNode).toMatchObject({ parent_id: beNode!.id, agent_id: be.id, fork_handoff_pending: false, checkpoint_status: 'missing' });
     expect(emptyNode.inherited_handoff).toBeFalsy();
@@ -439,52 +491,52 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
        WHERE child.id = '${emptyNode.id}'
     `);
     expect(emptyPersisted).toEqual({ parent_run_count: 0, child_message_count: 0 });
-    await page.getByTestId(`rf__node-${root!.id}`).click();
+    await selectValue(page, 'Current branch', root!.id);
+    await expectReadableFlowNode(page, channelName);
 
-    await sendNodeInstructionAndWait(page, request, auth.access_token, channel.id, root!.id, lead.id,
+    await sendNodeInstructionAndWait(page, request, auth, channel.id, root!.id, lead.id,
       `E2E: send exactly ${rootAck}`, rootAck);
 
     // Reproduce a long-lived Agent invoking an older solo binary that does
     // not forward SOLO_NODE_ID. Runtime-owned scope must keep the reply in
     // Root and out of the normal channel conversation.
-    await sendNodeInstructionAndWait(page, request, auth.access_token, channel.id, root!.id, lead.id,
+    await sendNodeInstructionAndWait(page, request, auth, channel.id, root!.id, lead.id,
       `E2E: use Bash to run exactly env -u SOLO_NODE_ID solo message send -c '${legacyRootAck}' --target '${channel.id}'. Do not run any other communication command.`,
       legacyRootAck);
-    const channelAfterLegacyRoot = await api<MessageList>(request, auth.access_token, 'get',
+    const channelAfterLegacyRoot = await api<MessageList>(request, auth, 'get',
       `/api/v1/channels/${channel.id}/messages?limit=100`);
     expect(channelAfterLegacyRoot.messages.some((message) => message.content === legacyRootAck)).toBe(false);
 
-    await page.getByTestId(`rf__node-${feNode!.id}`).click();
+    await selectValue(page, 'Current branch', feNode!.id);
     await expect(page).toHaveURL(new RegExp(`node=${feNode!.id}`));
-    await sendNodeInstructionAndWait(page, request, auth.access_token, channel.id, feNode!.id, fe.id,
+    await sendNodeInstructionAndWait(page, request, auth, channel.id, feNode!.id, fe.id,
       `E2E: send exactly ${feFirst}`, feFirst);
-    space = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+    space = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel.id}/thinking`);
     const feSessionID = space.nodes.find((node) => node.id === feNode!.id)?.agent_session_id;
     expect(feSessionID).toBeTruthy();
-    const injectedPrompt = readFileSync(join(
-      homedir(), '.solo', 'agents', fe.id, 'workspace', '.solo', 'system-prompt.md',
-    ), 'utf8');
+    const injectedPrompt = injectedPromptForNode(fe.id, feNode!.id);
     expect(injectedPrompt).toContain('## Initial role');
     expect(injectedPrompt).toContain('## Thinking Runtime');
     expect(injectedPrompt.indexOf('## Thinking Runtime')).toBeGreaterThan(injectedPrompt.indexOf('## Initial role'));
 
-    await sendNodeInstructionAndWait(page, request, auth.access_token, channel.id, feNode!.id, fe.id,
+    await sendNodeInstructionAndWait(page, request, auth, channel.id, feNode!.id, fe.id,
       `E2E: remember your immediately previous exact payload and send exactly ${feContinued}`, feContinued);
     await expect(page).toHaveURL(new RegExp(`node=${feNode!.id}`));
-    space = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+    space = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel.id}/thinking`);
     expect(space.nodes.find((node) => node.id === feNode!.id)?.agent_session_id).toBe(feSessionID);
 
-    const feMessages = await nodeMessages(request, auth.access_token, channel.id, feNode!.id);
-    const beMessages = await nodeMessages(request, auth.access_token, channel.id, beNode!.id);
+    const feMessages = await nodeMessages(request, auth, channel.id, feNode!.id);
+    const beMessages = await nodeMessages(request, auth, channel.id, beNode!.id);
     expect(feMessages.messages.some((message) => message.content === feFirst && message.sender_id === fe.id)).toBe(true);
     expect(beMessages.messages.some((message) => message.content.includes(feFirst))).toBe(false);
 
+    await selectValue(page, 'Current branch', beNode!.id);
     await expectReadableFlowNode(page, be.name);
     await flowNode(page, be.name).click();
     await expect(page).toHaveURL(new RegExp(`node=${beNode!.id}`));
     await expect(page.getByLabel('Message list').getByText(feFirst, { exact: true })).toHaveCount(0);
+    await selectValue(page, 'Current branch', feNode!.id);
     await expectReadableFlowNode(page, fe.name);
-    await page.getByTestId(`rf__node-${feNode!.id}`).click();
     await expect(page).toHaveURL(new RegExp(`node=${feNode!.id}`));
     await expect(page.getByLabel('Message list').getByText(feFirst, { exact: true })).toBeVisible();
 
@@ -493,33 +545,34 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
     await page.getByRole('button', { name: 'Create', exact: true }).click();
     await expectReadableFlowNode(page, manualTitle);
     await expectNoCrossingEdges(page);
-    space = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+    space = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel.id}/thinking`);
     const manualNode = space.nodes.find((node) => node.title === manualTitle)!;
     expect(manualNode).toMatchObject({ parent_id: feNode!.id, source: 'manual', agent_id: fe.id });
     expect(manualNode.agent_session_id).toBeFalsy();
     expect(manualNode.fork_handoff_pending).toBe(true);
     await expect(page).toHaveURL(new RegExp(`node=${manualNode.id}`));
     await expect(page.getByPlaceholder('Explore this branch...')).toBeDisabled();
-    await waitForReadyFork(request, auth.access_token, channel.id, manualNode.id);
+    await waitForReadyFork(request, auth, channel.id, manualNode.id);
     await expect(page.getByPlaceholder('Explore this branch...')).toBeEnabled({ timeout: 30000 });
 
-    await page.getByTestId(`rf__node-${feNode!.id}`).click();
+    await selectValue(page, 'Current branch', feNode!.id);
     const blockedParentReturn = page.getByRole('button', { name: 'Return', exact: true });
     await expect(blockedParentReturn).toBeDisabled();
     await expect(blockedParentReturn).toHaveAttribute('title', 'Return every child branch before returning this branch');
-    const blockedParentResponse = await request.post(
-      `${apiBase}/api/v1/channels/${channel.id}/thinking/nodes/${feNode!.id}/return`,
-      { headers: { authorization: `Bearer ${auth.access_token}` } },
+    const blockedParentResponse = await requestAuthenticated(
+      request, apiBase, auth, 'post', `/api/v1/channels/${channel.id}/thinking/nodes/${feNode!.id}/return`,
+      { headers: { authorization: `Bearer ${auth.access_token}`, 'X-Workspace-ID': activeWorkspaceID } },
     );
     expect(blockedParentResponse.status()).toBe(409);
     expect(await blockedParentResponse.text()).toContain('all child nodes must be returned first');
-    await page.getByTestId(`rf__node-${manualNode.id}`).click();
+    await selectValue(page, 'Current branch', manualNode.id);
+    await expectReadableFlowNode(page, manualTitle);
     await expect(page).toHaveURL(new RegExp(`node=${manualNode.id}`));
 
     await sendNodeInstructionAndObserveActivity(
       page,
       request,
-      auth.access_token,
+      auth,
       channel.id,
       manualNode.id,
       feNode!.id,
@@ -528,10 +581,10 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
       childAck,
     );
     await expect.poll(async () => {
-      const current = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+      const current = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel!.id}/thinking`);
       return current.nodes.find((node) => node.id === manualNode.id)?.checkpoint_handoff;
     }, { timeout: 60000, intervals: [1000, 2000, 3000] }).toContain(childAck);
-    space = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+    space = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel.id}/thinking`);
     const checkpointedChild = space.nodes.find((node) => node.id === manualNode.id)!;
     expect(checkpointedChild.checkpoint_status).toBe('fresh');
     const checkpointBeforeRefresh = checkpointedChild.checkpoint_handoff_at;
@@ -547,23 +600,23 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
     await expect(childContext.locator('[data-handoff-kind="active"]')).toContainText(childAck);
     await expect(childContext).toContainText('Current');
 
-    await sendNodeInstructionAndWait(page, request, auth.access_token, channel.id, manualNode.id, fe.id,
+    await sendNodeInstructionAndWait(page, request, auth, channel.id, manualNode.id, fe.id,
       `E2E: send exactly ${childLater}. Do not send any hidden Handoff protocol message.`, childLater);
     await expect.poll(async () => {
-      const current = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+      const current = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel!.id}/thinking`);
       return current.nodes.find((node) => node.id === manualNode.id)?.checkpoint_status;
     }, { timeout: 30000, intervals: [500, 1000, 2000] }).toBe('stale');
     await expect(childContext).toContainText('Needs refresh');
     await childContext.getByRole('button', { name: 'Refresh Current State' }).click();
     await expect(childContext).toContainText('Refreshing…');
     await expect.poll(async () => {
-      const current = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+      const current = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel!.id}/thinking`);
       const refreshed = current.nodes.find((node) => node.id === manualNode.id);
       return refreshed?.checkpoint_status === 'fresh'
         && refreshed.checkpoint_handoff_at !== checkpointBeforeRefresh
         && refreshed.checkpoint_handoff?.includes(childLater);
-    }, { timeout: 180000, intervals: [1000, 2000, 3000] }).toBe(true);
-    space = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+    }, { timeout: runtimeTimeout, intervals: [1000, 2000, 3000] }).toBe(true);
+    space = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel.id}/thinking`);
     expect(space.nodes.find((node) => node.id === manualNode.id)?.agent_session_id).toBe(childSessionID);
     await expect(childContext).toContainText('Current');
 
@@ -572,67 +625,68 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
     await expect(page.getByRole('button', { name: 'Returning…', exact: true })).toBeVisible();
     await expect(page.getByPlaceholder('Explore this branch...')).toBeDisabled();
     await expect.poll(async () => {
-      const current = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+      const current = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel!.id}/thinking`);
       return current.nodes.find((node) => node.id === manualNode.id)?.returned_at;
-    }, { timeout: 180000, intervals: [1000, 2000, 3000] }).toBeTruthy();
+    }, { timeout: runtimeTimeout, intervals: [1000, 2000, 3000] }).toBeTruthy();
     await expectThinkingProcessClosed(manualNode.id, false);
     await expectProviderProcessEnded(childProviderSessionID, false);
     await expect(page).toHaveURL(new RegExp(`node=${manualNode.id}`));
     await expect(page.getByLabel('Message list').getByText(childAck, { exact: true }).first()).toBeVisible();
     await expect(page.getByPlaceholder('Explore this branch...')).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Returned', exact: true })).toBeDisabled();
-    const rejectedSplit = await request.post(
-      `${apiBase}/api/v1/channels/${channel.id}/thinking/nodes/${manualNode.id}/children`,
+    const rejectedSplit = await requestAuthenticated(
+      request, apiBase, auth, 'post', `/api/v1/channels/${channel.id}/thinking/nodes/${manualNode.id}/children`,
       {
-        headers: { authorization: `Bearer ${auth.access_token}` },
+        headers: { authorization: `Bearer ${auth.access_token}`, 'X-Workspace-ID': activeWorkspaceID },
         data: { title: `Rejected-${suffix}` },
       },
     );
     expect(rejectedSplit.status()).toBe(409);
     expect(await rejectedSplit.text()).toContain('returned thinking nodes are closed');
-    const rejectedMessage = await request.post(`${apiBase}/api/v1/channels/${channel.id}/messages`, {
-      headers: { authorization: `Bearer ${auth.access_token}` },
+    const rejectedMessage = await requestAuthenticated(request, apiBase, auth, 'post', `/api/v1/channels/${channel.id}/messages`, {
+      headers: { authorization: `Bearer ${auth.access_token}`, 'X-Workspace-ID': activeWorkspaceID },
       data: { content: `REJECTED_${suffix}`, thinking_node_id: manualNode.id },
     });
     expect(rejectedMessage.status()).toBe(409);
     expect(await rejectedMessage.text()).toContain('returned thinking nodes are closed');
-    await page.getByTestId(`rf__node-${feNode!.id}`).click();
+    await selectValue(page, 'Current branch', feNode!.id);
     await expect(page).toHaveURL(new RegExp(`node=${feNode!.id}`));
-    await page.getByTestId(`rf__node-${manualNode.id}`).click();
+    await selectValue(page, 'Current branch', manualNode.id);
     await expect(page).toHaveURL(new RegExp(`node=${manualNode.id}`));
     await expect(page.getByLabel('Message list').getByText(childAck, { exact: true }).first()).toBeVisible();
     await expect(page.getByPlaceholder('Explore this branch...')).toBeDisabled();
-    await page.getByTestId(`rf__node-${feNode!.id}`).click();
+    await selectValue(page, 'Current branch', feNode!.id);
     await expect(page).toHaveURL(new RegExp(`node=${feNode!.id}`));
     const handoffMessage = page.getByRole('listitem').filter({ hasText: `Handoff returned from ${manualTitle}:` });
     await expect(handoffMessage).toContainText(childAck);
     await expect(handoffMessage.getByRole('heading', { name: 'Handoff', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Return', exact: true })).toBeEnabled();
-    const parentMessages = await nodeMessages(request, auth.access_token, channel.id, feNode!.id);
+    const parentMessages = await nodeMessages(request, auth, channel.id, feNode!.id);
     const persistedHandoff = parentMessages.messages.find((message) =>
       message.content.startsWith(`Handoff returned from ${manualTitle}:`));
     expect(persistedHandoff?.content_type).toBe('thinking_handoff');
-    await sendNodeInstructionAndWait(page, request, auth.access_token, channel.id, feNode!.id, fe.id,
+    await sendNodeInstructionAndWait(page, request, auth, channel.id, feNode!.id, fe.id,
       'E2E: inspect the returned child Handoffs. Find the full value beginning CHILD_ACK_. Send one payload formed by concatenating the literal prefix RETURNED_SEEN_ and that full value.', returnedAck);
 
-    await sendAutoSplitAndWait(page, request, auth.access_token, channel.id,
+    await sendAutoSplitAndWait(page, request, auth, channel.id,
       `E2E: first send exactly two visible lines using one solo message send command. First line: ${autoAck}. Second line: [[split: ${autoTitle}]]. After that send a second hidden protocol message beginning exactly [[handoff:checkpoint]], followed by Markdown # Handoff headings that include ${autoAck} as a confirmed conclusion.`, autoTitle);
     await expectReadableFlowNode(page, autoTitle);
     await expectNoCrossingEdges(page);
-    space = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+    space = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel.id}/thinking`);
     const autoNode = space.nodes.find((node) => node.title === autoTitle)!;
-    await waitForReadyFork(request, auth.access_token, channel.id, autoNode.id);
+    await waitForReadyFork(request, auth, channel.id, autoNode.id);
     await expect.poll(async () => {
-      const current = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+      const current = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel!.id}/thinking`);
       return current.nodes.find((node) => node.id === feNode!.id)?.checkpoint_handoff;
     }, { timeout: 60000, intervals: [1000, 2000, 3000] }).toContain(autoAck);
 
+    await selectValue(page, 'Current branch', beNode!.id);
     await expectReadableFlowNode(page, be.name);
     await flowNode(page, be.name).click();
-    await sendNodeInstructionAndWait(page, request, auth.access_token, channel.id, beNode!.id, be.id,
+    await sendNodeInstructionAndWait(page, request, auth, channel.id, beNode!.id, be.id,
       'E2E: inspect the sibling Handoffs. Find the full value beginning AUTO_ACK_. Send one payload formed by concatenating the literal prefix SIBLING_SEEN_ and that full value.', siblingAck);
 
-    space = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+    space = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel.id}/thinking`);
     expect(space.nodes.find((node) => node.title === autoTitle)).toMatchObject({ parent_id: feNode!.id, source: 'auto', agent_id: fe.id });
     const returnedManual = space.nodes.find((node) => node.id === manualNode.id)!;
     expect(returnedManual.returning_at).toBeFalsy();
@@ -680,7 +734,8 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
     expect(persistedReturn.fork_ready).toBe(true);
     expect(persistedReturn.protocol_message_count).toBe(0);
 
-    await page.getByTestId(`rf__node-${feNode!.id}`).click();
+    await selectValue(page, 'Current branch', feNode!.id);
+    await expectReadableFlowNode(page, fe.name);
     await expect(page).toHaveURL(new RegExp(`node=${feNode!.id}`));
     await page.reload();
     await expect(flowNode(page, manualTitle)).toBeVisible();
@@ -696,17 +751,17 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
     await channelComposer.press('Enter');
     await expect(page.getByLabel('Message list').getByText(normalMessage, { exact: true })).toBeVisible();
     await expect.poll(async () => {
-      const list = await api<MessageList>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/messages?limit=100`);
+      const list = await api<MessageList>(request, auth, 'get', `/api/v1/channels/${channel!.id}/messages?limit=100`);
       return list.messages.some((message) => message.sender_type === 'agent'
         && message.sender_id === lead.id && !message.thinking_node_id && message.content === normalAck);
-    }, { timeout: 180000, intervals: [1000, 2000, 3000] }).toBe(true);
+    }, { timeout: runtimeTimeout, intervals: [1000, 2000, 3000] }).toBe(true);
     await expect(page.getByLabel('Message list').getByText(normalAck, { exact: true })).toBeVisible();
     await expect.poll(async () => {
-      const activeRuns = await api<AgentRun[]>(request, auth.access_token, 'get', '/api/v1/agent-runs/active');
-      return (activeRuns ?? []).some((run) => run.agent_id === lead.id && run.channel_id === channel.id);
-    }, { timeout: 180000, intervals: [1000, 2000, 3000] }).toBe(false);
+      const activeRuns = await api<AgentRun[]>(request, auth, 'get', '/api/v1/agent-runs/active');
+      return (activeRuns ?? []).some((run) => run.agent_id === lead.id && run.channel_id === channel!.id);
+    }, { timeout: runtimeTimeout, intervals: [1000, 2000, 3000] }).toBe(false);
 
-    const normalMessages = await api<MessageList>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/messages?limit=100`);
+    const normalMessages = await api<MessageList>(request, auth, 'get', `/api/v1/channels/${channel.id}/messages?limit=100`);
     const normalRoot = normalMessages.messages.find((message) => message.sender_type === 'user' && message.content === normalMessage);
     expect(normalRoot).toBeTruthy();
     const normalRootItem = page.getByRole('listitem').filter({ hasText: normalMessage }).first();
@@ -716,28 +771,28 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
     await threadComposer.fill(`E2E: send exactly ${threadAck}`);
     await threadComposer.press('Enter');
     await expect.poll(async () => {
-      const list = await api<ThreadMessageList>(request, auth.access_token, 'get',
-        `/api/v1/channels/${channel.id}/messages/${normalRoot!.id}/thread`);
+      const list = await api<ThreadMessageList>(request, auth, 'get',
+        `/api/v1/channels/${channel!.id}/messages/${normalRoot!.id}/thread`);
       return list.messages.some((message) => message.sender_type === 'agent'
         && message.sender_id === lead.id && message.content === threadAck);
-    }, { timeout: 180000, intervals: [1000, 2000, 3000] }).toBe(true);
+    }, { timeout: runtimeTimeout, intervals: [1000, 2000, 3000] }).toBe(true);
     await expect(page.getByText(threadAck, { exact: true })).toBeVisible();
     await expect.poll(async () => {
-      const activeRuns = await api<AgentRun[]>(request, auth.access_token, 'get', '/api/v1/agent-runs/active');
-      return (activeRuns ?? []).some((run) => run.agent_id === lead.id && run.channel_id === channel.id);
-    }, { timeout: 180000, intervals: [1000, 2000, 3000] }).toBe(false);
+      const activeRuns = await api<AgentRun[]>(request, auth, 'get', '/api/v1/agent-runs/active');
+      return (activeRuns ?? []).some((run) => run.agent_id === lead.id && run.channel_id === channel!.id);
+    }, { timeout: runtimeTimeout, intervals: [1000, 2000, 3000] }).toBe(false);
 
-    const cleanupSpace = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+    const cleanupSpace = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel.id}/thinking`);
     const cleanupNodes = [root!.id, feNode!.id, beNode!.id].map((nodeID) => {
       const node = cleanupSpace.nodes.find((candidate) => candidate.id === nodeID)!;
       expect(node.agent_session_id).toBeTruthy();
       return { node, providerSessionID: providerSessionIDForNode(node.id) };
     });
     const archivedChannelID = channel.id;
-    await api(request, auth.access_token, 'delete', `/api/v1/channels/${archivedChannelID}`);
+    await api(request, auth, 'delete', `/api/v1/channels/${archivedChannelID}`);
     channel = null;
-    const archivedThinking = await request.get(`${apiBase}/api/v1/channels/${archivedChannelID}/thinking`, {
-      headers: { authorization: `Bearer ${auth.access_token}` },
+    const archivedThinking = await requestAuthenticated(request, apiBase, auth, 'get', `/api/v1/channels/${archivedChannelID}/thinking`, {
+      headers: { authorization: `Bearer ${auth.access_token}`, 'X-Workspace-ID': activeWorkspaceID },
     });
     expect(archivedThinking.status()).toBe(404);
     for (const cleanup of cleanupNodes) {
@@ -759,9 +814,9 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
     expect(persistedArchive.node_count).toBeGreaterThanOrEqual(6);
   } finally {
     await page.close();
-    if (channel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
+    if (channel) await api(request, auth, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
     for (const member of agents.reverse()) {
-      await api(request, auth.access_token, 'delete', `/api/v1/agents/${member.id}`).catch(() => undefined);
+      await api(request, auth, 'delete', `/api/v1/agents/${member.id}`).catch(() => undefined);
     }
     await localComputer?.release(request);
   }
@@ -769,6 +824,7 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
 
 test('Thinking idle runtime sleeps and resumes the real provider session', async ({ page, request }) => {
   test.skip(process.env.SOLO_E2E_EXPECT_IDLE_REAPER !== '1', 'requires a short-TTL daemon started through make rebuild');
+  test.setTimeout(process.env.SOLO_E2E_PROVIDER === 'codex' ? 900000 : 600000);
 
   const auth = await authenticate(request);
   const suffix = `idle-${Date.now().toString(36)}`;
@@ -780,39 +836,46 @@ test('Thinking idle runtime sleeps and resumes the real provider session', async
 
   try {
     localComputer = await acquireLocalComputer(request, apiBase, auth.access_token);
-    channel = await api<Entity>(request, auth.access_token, 'post', '/api/v1/channels', {
+    channel = await api<Entity>(request, auth, 'post', '/api/v1/channels', {
       name: `thinking-${suffix}`,
       description: 'Real short-TTL Thinking runtime E2E data',
     });
-    runtimeAgent = await api<Entity>(request, auth.access_token, 'post', `/api/v1/channels/${channel.id}/agents`, {
+    runtimeAgent = await api<Entity>(request, auth, 'post', `/api/v1/channels/${channel.id}/agents`, {
       name: `Runtime-${suffix}`,
       computer_id: localComputer.id,
-      model_provider: 'claude',
-      model_name: 'sonnet',
+      model_provider: process.env.SOLO_E2E_PROVIDER ?? 'claude',
+      model_name: process.env.SOLO_E2E_MODEL ?? 'sonnet',
+      custom_args: process.env.SOLO_E2E_PROVIDER === 'codex' ? codexE2EArgs : [],
       system_prompt: 'You are a real Solo idle lifecycle test Agent. When a message starts with E2E:, immediately send exactly the requested payload using solo message send to the incoming target. Do not send any other visible text.',
     });
+    await expect.poll(() => databaseJSON<boolean>(`
+      SELECT to_json(count(*) > 0 AND bool_and(finished_at IS NOT NULL))
+      FROM agent_runs WHERE agent_id='${runtimeAgent!.id}' AND channel_id='${channel!.id}'
+    `), { timeout: runtimeTimeout }).toBe(true);
 
-    await page.addInitScript(({ accessToken, refreshToken }) => {
+    await page.addInitScript(({ accessToken, refreshToken, workspaceID, userID }) => {
       localStorage.setItem('access_token', accessToken);
       localStorage.setItem('refresh_token', refreshToken);
+    localStorage.setItem('solo_active_workspace_id', workspaceID);
+    localStorage.setItem(`solo_active_workspace_id:${userID}`, workspaceID);
       localStorage.setItem('solo.locale', 'en');
-    }, { accessToken: auth.access_token, refreshToken: auth.refresh_token });
+    }, { accessToken: auth.access_token, refreshToken: auth.refresh_token, workspaceID: activeWorkspaceID, userID: activeUserID });
     await page.goto(`/dashboard?channel=${channel.id}`);
     await page.getByRole('button', { name: 'Thinking', exact: true }).last().click();
     await expect(flowNode(page, channel.name)).toBeVisible({ timeout: 30000 });
 
-    let space = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+    let space = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel.id}/thinking`);
     const root = space.nodes.find((node) => !node.parent_id)!;
     expect(root.agent_id).toBe(runtimeAgent.id);
     await flowNode(page, channel.name).click();
-    await sendNodeInstructionAndWait(page, request, auth.access_token, channel.id, root.id, runtimeAgent.id,
+    await sendNodeInstructionAndWait(page, request, auth, channel.id, root.id, runtimeAgent.id,
       `E2E: send exactly ${firstAck}`, firstAck);
     await expect.poll(async () => {
-      const activeRuns = await api<AgentRun[]>(request, auth.access_token, 'get', '/api/v1/agent-runs/active');
+      const activeRuns = await api<AgentRun[]>(request, auth, 'get', '/api/v1/agent-runs/active');
       return (activeRuns ?? []).some((run) => run.agent_id === runtimeAgent!.id && run.channel_id === channel!.id);
-    }, { timeout: 180000, intervals: [500, 1000, 2000] }).toBe(false);
+    }, { timeout: runtimeTimeout, intervals: [500, 1000, 2000] }).toBe(false);
 
-    space = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+    space = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel.id}/thinking`);
     const nodeSessionID = space.nodes.find((node) => node.id === root.id)?.agent_session_id;
     expect(nodeSessionID).toBeTruthy();
     const providerSessionID = providerSessionIDForNode(root.id);
@@ -837,10 +900,10 @@ test('Thinking idle runtime sleeps and resumes the real provider session', async
     expect(sleepingState.returned).toBe(false);
     expect(sleepingState.first_message_count).toBe(1);
 
-    await sendNodeInstructionAndWait(page, request, auth.access_token, channel.id, root.id, runtimeAgent.id,
+    await sendNodeInstructionAndWait(page, request, auth, channel.id, root.id, runtimeAgent.id,
       `E2E: send exactly ${resumedAck}`, resumedAck);
     await expectThinkingSessionResumed(root.id, providerSessionID);
-    space = await api<ThinkingSpace>(request, auth.access_token, 'get', `/api/v1/channels/${channel.id}/thinking`);
+    space = await api<ThinkingSpace>(request, auth, 'get', `/api/v1/channels/${channel.id}/thinking`);
     expect(space.nodes.find((node) => node.id === root.id)?.agent_session_id).toBe(nodeSessionID);
     expect(providerSessionIDForNode(root.id)).toBe(providerSessionID);
     const resumedState = databaseJSON<{ message_count: number }>(`
@@ -852,8 +915,8 @@ test('Thinking idle runtime sleeps and resumes the real provider session', async
     expect(resumedState.message_count).toBe(2);
   } finally {
     await page.close();
-    if (channel) await api(request, auth.access_token, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
-    if (runtimeAgent) await api(request, auth.access_token, 'delete', `/api/v1/agents/${runtimeAgent.id}`).catch(() => undefined);
+    if (channel) await api(request, auth, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
+    if (runtimeAgent) await api(request, auth, 'delete', `/api/v1/agents/${runtimeAgent.id}`).catch(() => undefined);
     await localComputer?.release(request);
   }
 });

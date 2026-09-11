@@ -404,3 +404,86 @@ func automationRunFixture(t *testing.T, pool *pgxpool.Pool, automationID, channe
 	}
 	return taskID
 }
+
+func TestAutomationContractWaitsForAcceptanceAndOpenChildren(t *testing.T) {
+	pool := automationTestPool(t)
+	ctx := context.Background()
+	owner, channel, author := automationTestFixture(t, pool)
+	tasks := NewTaskService(pool)
+	svc := NewAutomationService(pool, tasks, nil, nil)
+	contract := &TaskContract{Requirements: []TaskRequirement{{ID: "R1", Text: "verified"}}, Gate: TaskGate{Kind: "human", ReviewerID: owner}}
+	automation, err := svc.Create(ctx, channel, owner, AutomationInput{Name: "contract loop", TaskTitle: "verified round", TargetAgentID: author, ScheduleType: AutomationScheduleDaily, ScheduleHour: 9, Timezone: "UTC", Contract: contract})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if automation.CompletionPolicy != AutomationCompletionReview {
+		t.Fatal("contract did not require review")
+	}
+	task, err := tasks.CreateTask(ctx, channel, owner, TaskCreateRequest{Title: "round", Assignee: author, Contract: contract})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := NewAgentRunService(pool).StartRun(ctx, StartRunInput{AgentID: author, ChannelID: channel, TriggerType: AgentRunTriggerTask})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = NewAgentRunService(pool).LinkTask(ctx, LinkRunTaskInput{RunID: run.ID, TaskID: task.ID, Role: AgentRunTaskRolePrimary, Confidence: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = NewAgentRunService(pool).FinishRun(ctx, FinishRunInput{RunID: run.ID, Status: AgentRunStatusCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO automation_runs(automation_id,source,status,scheduled_for,task_id) VALUES($1,'manual','running',now(),$2)`, automation.ID, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = svc.reconcileRuns(ctx); err != nil {
+		t.Fatal(err)
+	}
+	current, err := tasks.GetTask(ctx, channel, task.ID, owner)
+	if err != nil || current.Status != TaskStatusInProgress {
+		t.Fatalf("Run bypassed gate: %+v %v", current, err)
+	}
+	if _, err = svc.RunNow(ctx, channel, automation.ID, owner); !errors.Is(err, ErrAutomationAlreadyActive) {
+		t.Fatalf("loop overlapped: %v", err)
+	}
+	task, err = tasks.SubmitDelivery(ctx, channel, task.ID, author, run.ID, TaskSubmitRequest{ExpectedTaskVersion: task.Version, IdempotencyKey: "round-submit", ArtifactVersion: "v1", Handoff: TaskHandoff{Summary: "verified"}, Evidence: []TaskEvidence{{ID: "E1", Description: "test", Content: "ok"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = svc.reconcileRuns(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.RunNow(ctx, channel, automation.ID, owner); !errors.Is(err, ErrAutomationAlreadyActive) {
+		t.Fatalf("review did not hold loop: %v", err)
+	}
+	if _, err = tasks.ReviewDelivery(ctx, channel, task.ID, owner, TaskReviewRequest{SubmissionID: task.CurrentSubmissionID, ArtifactVersion: "v1", IdempotencyKey: "round-review", Decision: "accepted", Reason: "verified", Checks: []TaskCheck{{RequirementID: "R1", Passed: true, Reason: "verified", EvidenceIDs: []string{"E1"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = svc.reconcileRuns(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err = pool.QueryRow(ctx, `SELECT status FROM automation_runs WHERE task_id=$1`, task.ID).Scan(&status); err != nil || status != "completed" {
+		t.Fatalf("accepted round not complete: %s %v", status, err)
+	}
+	// Legacy auto completion still waits for children under the same parent row lock.
+	parent, err := tasks.CreateTask(ctx, channel, owner, TaskCreateRequest{Title: "legacy parent", Assignee: author})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tasks.CreateTask(ctx, channel, owner, TaskCreateRequest{Title: "open child", ParentTaskID: parent.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO automation_runs(automation_id,source,status,scheduled_for,task_id) VALUES($1,'manual','running',now(),$2)`, automation.ID, parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = NewAgentRunService(pool).LinkTask(ctx, LinkRunTaskInput{RunID: run.ID, TaskID: parent.ID, Role: AgentRunTaskRolePrimary, Confidence: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err = svc.reconcileRuns(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = pool.QueryRow(ctx, `SELECT status FROM automation_runs WHERE task_id=$1`, parent.ID).Scan(&status); err != nil || status != "running" {
+		t.Fatalf("open child bypassed: %s %v", status, err)
+	}
+}

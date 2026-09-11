@@ -4,6 +4,30 @@ interface RegistrationOptions {
   data: { email: string; password: string; display_name?: string };
 }
 
+// Long real-runtime suites can outlive the access JWT. Refresh through the
+// actual authentication service and retry only the rejected request once.
+export async function requestAuthenticated(
+  request: APIRequestContext,
+  apiBase: string,
+  auth: { access_token: string; refresh_token: string },
+  method: 'get' | 'post' | 'patch' | 'delete',
+  path: string,
+  options: { headers: Record<string, string>; data?: unknown },
+): Promise<APIResponse> {
+  const send = () => {
+    options.headers.authorization = `Bearer ${auth.access_token}`;
+    return request[method](`${apiBase}${path}`, options);
+  };
+  const response = await send();
+  if (response.status() !== 401 || path.startsWith('/api/v1/auth/')) return response;
+  const refreshed = await request.post(`${apiBase}/api/v1/auth/refresh`, { data: { refresh_token: auth.refresh_token } });
+  if (!refreshed.ok()) throw new Error(`E2E session refresh failed: ${refreshed.status()}`);
+  const tokens = await refreshed.json() as { access_token: string; refresh_token: string };
+  auth.access_token = tokens.access_token;
+  auth.refresh_token = tokens.refresh_token;
+  return send();
+}
+
 export async function registerVerified(
   request: APIRequestContext,
   apiBase: string,

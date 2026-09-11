@@ -60,6 +60,7 @@ function toInput(item: Automation): AutomationInput {
     schedule_weekday: item.schedule_weekday,
     timezone: item.timezone,
     completion_policy: item.completion_policy,
+    contract: item.contract,
     enabled: item.enabled,
   };
 }
@@ -276,6 +277,7 @@ export function AutomationWorkspace({ channelId, agents, onTaskCreated }: Automa
             </div>
             <div>
               <Label className="mb-1.5 block">{t('automationCompletionPolicy')}</Label>
+              <Label className="mb-3 block space-y-2"><span className="block">每轮验收要求（可选，每行一项）</span><Textarea aria-label="每轮验收要求" className="min-h-24 resize-y font-body font-normal" value={form.contract?.requirements.map((r) => r.text).join('\n') ?? ''} onChange={(event) => setForm((current) => ({ ...current, completion_policy: 'review_required', contract: event.target.value.trim() ? { requirements: event.target.value.split('\n').map((text, i) => ({ id: `R${i + 1}`, text })), gate: current.contract?.gate ?? { kind: 'human', reviewer_id: '', max_revisions: 3 } } : undefined }))} /></Label>
               <Select aria-label={t('automationCompletionPolicy')} size="md" value={form.completion_policy} onChange={(value) => setForm((current) => ({ ...current, completion_policy: value as AutomationCompletionPolicy }))} options={[
                 { value: 'auto_complete', label: t('automationCompletionAuto') },
                 { value: 'review_required', label: t('automationCompletionReview') },

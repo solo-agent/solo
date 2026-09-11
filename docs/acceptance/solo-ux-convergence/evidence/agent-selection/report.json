@@ -1,0 +1,20 @@
+{
+  "stats": {
+    "startTime": "2026-09-11T10:08:04.790Z",
+    "duration": 80549.121,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "results": [
+    {
+      "title": "paired Selection executes fixed cases and receiver checks before owner publication",
+      "status": "passed",
+      "duration_ms": 80169,
+      "retry": 0,
+      "attachments": [],
+      "errors": []
+    }
+  ]
+}

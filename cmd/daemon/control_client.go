@@ -437,7 +437,7 @@ func (client *daemonControlClient) forwardTaskEvents(ctx context.Context, runID,
 				_, err := client.machineRequest(ctx, http.MethodPost, "/internal/v1/daemon/runs/"+url.PathEscape(runID)+"/events", payload)
 				if err == nil {
 					deliveredSeq = event.Seq
-					if event.Event == "done" {
+					if event.Event == "done" || event.Event == "error" || event.Event == "complete" {
 						delivered = true
 						return
 					}

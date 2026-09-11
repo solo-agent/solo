@@ -177,7 +177,7 @@ func (s *ChannelService) AddMember(ctx context.Context, channelID, requesterID, 
 			   JOIN channels home ON home.id=a.home_channel_id
 			   JOIN channels target ON target.id=$2
 			   JOIN workspace_members wm ON wm.workspace_id=target.workspace_id AND wm.user_id=a.owner_id
-			  WHERE a.id=$1 AND a.is_active=true AND home.workspace_id=target.workspace_id`, memberID, channelID,
+			  WHERE a.id=$1 AND a.is_active=true `, memberID, channelID,
 		).Scan(&kind, &ownerID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {

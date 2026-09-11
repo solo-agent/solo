@@ -53,6 +53,7 @@ async function authenticate(request: APIRequestContext): Promise<AuthResponse> {
     data: { ...credentials, display_name: 'Automation E2E' },
   });
   if (!response.ok()) throw new Error(`register: ${response.status()} ${await response.text()}`);
+  databaseExec(`UPDATE users SET onboarding_completed_at=now() WHERE email='${credentials.email}'`);
   return response.json();
 }
 
@@ -153,6 +154,7 @@ test.describe('automation workspace navigation', () => {
     });
     if (!registration.ok()) throw new Error(`register: ${registration.status()} ${await registration.text()}`);
     const auth = await registration.json() as AuthResponse;
+    databaseExec(`UPDATE users SET onboarding_completed_at=now() WHERE email='${navigationCredentials.email}'`);
     await authenticatePage(page, auth);
 
     let channel: Entity | null = null;
@@ -400,6 +402,14 @@ test.describe('real Channel automations', () => {
       const englishWorkspace = page.getByTestId('automation-workspace');
       await expect(englishWorkspace.getByText('Every day · 23:59 · Asia/Shanghai')).toBeVisible();
       await expect(englishWorkspace.getByRole('button', { name: 'Run now' })).toBeVisible();
+      const pausedCard = englishWorkspace.locator(`[data-automation-id="${stored.id}"]`);
+      await pausedCard.getByRole('button', { name: 'Pause', exact: true }).click();
+      await expect(pausedCard.getByRole('button', { name: 'Resume', exact: true })).toBeVisible();
+      expect(databaseJSON<boolean>(`SELECT to_json(enabled) FROM automations WHERE id='${stored.id}'`)).toBe(false);
+      const countBeforePause = automationState(channel.id, automationName).run_count;
+      databaseExec(`UPDATE automations SET next_run_at=now()-interval '1 day' WHERE id='${stored.id}'`);
+      const pausedAt = Date.now();
+      await expect.poll(() => { expect(automationState(channel!.id, automationName).run_count).toBe(countBeforePause); return Date.now()-pausedAt; }, { intervals: [1000], timeout: 25000 }).toBeGreaterThan(17000);
       const finalWorkspacePath = testInfo.outputPath('automation-final-workspace-en.png');
       await englishWorkspace.screenshot({ path: finalWorkspacePath });
       await testInfo.attach('automation-final-workspace-en', {

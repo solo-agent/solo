@@ -51,7 +51,7 @@ export function AddAgentModal({
 
   useEffect(() => {
     if (!open) return;
-    apiClient.get<WorkspaceAgent[]>('/api/v1/agents')
+    apiClient.get<WorkspaceAgent[]>('/api/v1/agents?owned=true')
       .then((items) => setWorkspaceAgents(items.filter((item) => item.owner_id === user?.id && item.home_channel_id !== channelId)))
       .catch(() => setWorkspaceAgents([]));
   }, [open, channelId, user?.id]);

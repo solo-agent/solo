@@ -1,0 +1,24 @@
+{
+  "stats": {
+    "startTime": "2026-09-11T10:11:19.385Z",
+    "duration": 419193.5,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  },
+  "results": [
+    {
+      "title": "real author submits evidence; human and independent Agent accept exact submissions",
+      "status": "passed",
+      "duration_ms": 418686,
+      "retry": 0,
+      "attachments": [
+        "evidence/task-delivery-contract/exported-team-lockfile.json",
+        "evidence/task-delivery-contract/pinned-delivery-verified.png",
+        "evidence/task-delivery-contract/delivery-database-state.json"
+      ],
+      "errors": []
+    }
+  ]
+}

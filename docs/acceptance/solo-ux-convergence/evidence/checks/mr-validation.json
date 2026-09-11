@@ -1,0 +1,91 @@
+{
+  "status": "passed",
+  "toolchain": "go1.25.0",
+  "database": "solo_mr_37b116feba0542f39ec377e0af9345b8",
+  "checks": [
+    {
+      "name": "migrate",
+      "command": [
+        "go",
+        "run",
+        "./cmd/migrate",
+        "up"
+      ],
+      "exit_code": 0,
+      "seconds": 5.3
+    },
+    {
+      "name": "vet",
+      "command": [
+        "go",
+        "vet",
+        "./..."
+      ],
+      "exit_code": 0,
+      "seconds": 6.2
+    },
+    {
+      "name": "tests",
+      "command": [
+        "go",
+        "test",
+        "./...",
+        "-json",
+        "-count=1"
+      ],
+      "exit_code": 0,
+      "seconds": 22.2
+    },
+    {
+      "name": "linux-build",
+      "command": [
+        "go",
+        "build",
+        "-o",
+        "/tmp/solo-mr-validation/",
+        "./cmd/server",
+        "./cmd/daemon",
+        "./cmd/solo",
+        "./cmd/migrate"
+      ],
+      "exit_code": 0,
+      "seconds": 7.6
+    },
+    {
+      "name": "frontend-types",
+      "command": [
+        "./node_modules/.bin/tsc",
+        "--noEmit",
+        "--incremental",
+        "false"
+      ],
+      "cwd": "frontend",
+      "exit_code": 0
+    },
+    {
+      "name": "frontend-lint",
+      "command": [
+        "npm",
+        "run",
+        "lint"
+      ],
+      "cwd": "frontend",
+      "exit_code": 0,
+      "errors": 0,
+      "warnings": 47
+    }
+  ],
+  "tests": {
+    "passed": 974,
+    "failed": 0,
+    "skipped": []
+  },
+  "database_cleaned": true,
+  "date": "2026-09-11",
+  "notes": [
+    "All Go tests use the real isolated PostgreSQL database after applying all repository migrations. Passed count includes subtests.",
+    "The first full Go test attempt against the development database failed because of an extra agents_active_home_channel constraint absent from the repository migrations; that database was not altered.",
+    "The original go 1.22 declaration failed vet for the existing os.Root / crypto/rand APIs. Minimum Go was aligned to 1.25 across go.mod, CI, release, Docker and development instructions, and all checks were rerun with go1.25.0.",
+    "The original 13 real product E2E scenarios were executed on the existing make-managed local runtime using Go 1.26.3. These MR build checks are additional evidence, not replacements for E2E."
+  ]
+}

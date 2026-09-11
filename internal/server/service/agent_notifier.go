@@ -43,7 +43,7 @@ func (n *AgentNotifier) NotifyRejected(ctx context.Context, taskID, actorID, rea
 	if err != nil {
 		return err
 	}
-	return n.notifyAgent(ctx, info.ClaimerID, fmt.Sprintf("Task #%d %s was rejected by @%s.\nReason: %s", info.TaskNumber, info.Title, info.ActorName, reason))
+	return n.resumeTask(ctx, taskID, info, fmt.Sprintf("Task #%d %s was rejected by @%s.\nReason: %s", info.TaskNumber, info.Title, info.ActorName, reason))
 }
 
 func (n *AgentNotifier) NotifyClosed(ctx context.Context, taskID, actorID string) error {
@@ -59,7 +59,28 @@ func (n *AgentNotifier) NotifyReopened(ctx context.Context, taskID, actorID stri
 	if err != nil {
 		return err
 	}
-	return n.notifyAgent(ctx, info.ClaimerID, fmt.Sprintf("Task #%d %s was reopened by @%s.", info.TaskNumber, info.Title, info.ActorName))
+	return n.resumeTask(ctx, taskID, info, fmt.Sprintf("Task #%d %s was reopened by @%s.", info.TaskNumber, info.Title, info.ActorName))
+}
+
+// Rework is execution in the original team, not an owner-DM conversation.
+// Selection owns its own bounded retries; never enqueue a second execution.
+func (n *AgentNotifier) resumeTask(ctx context.Context, taskID string, info *taskNotifyInfo, content string) error {
+	if n.agentSvc == nil || info.ClaimerID == "" {
+		return nil
+	}
+	var channelID string
+	var active, selection bool
+	err := n.pool.QueryRow(ctx, `SELECT channel_id::text,
+ EXISTS(SELECT 1 FROM agents WHERE id=tasks.claimer_id AND is_active),
+ EXISTS(SELECT 1 FROM agent_selection_tasks WHERE task_id=tasks.id)
+ FROM tasks WHERE id=$1`, taskID).Scan(&channelID, &active, &selection)
+	if err != nil || !active || selection {
+		return err
+	}
+	if !n.agentSvc.TriggerAgentForTask(ctx, channelID, taskID, info.ClaimerID, info.TaskNumber, info.Title, content, nil, nil) {
+		return fmt.Errorf("could not queue Task %s in its original team", taskID)
+	}
+	return nil
 }
 
 type taskNotifyInfo struct {

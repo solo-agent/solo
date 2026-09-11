@@ -144,8 +144,8 @@ func TestChannelAgentOwnershipAndRemovalBoundaries(t *testing.T) {
 	if err := svc.AddMember(ctx, sharedID, ownerID, "agent", agentID); err != nil {
 		t.Fatalf("owner AddMember: %v", err)
 	}
-	if err := svc.AddMember(ctx, foreignChannelID, ownerID, "agent", agentID); err == nil {
-		t.Fatalf("owner connected Agent across Workspaces")
+	if err := svc.AddMember(ctx, foreignChannelID, ownerID, "agent", agentID); err != nil {
+		t.Fatalf("owner could not bring existing Agent into their joined Workspace: %v", err)
 	}
 	members, err := svc.ListMembers(ctx, sharedID, ownerID)
 	if err != nil {

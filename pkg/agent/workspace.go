@@ -13,6 +13,10 @@ import (
 // AgentConfig is the local cache of Agent configuration stored in
 // solo-config.json inside the agent's workspace root.
 type AgentConfig struct {
+	SkillsDigest          string            `json:"skills_digest,omitempty"`
+	AgentRevisionID       string            `json:"agent_revision_id,omitempty"`
+	TeamVersionID         string            `json:"team_version_id,omitempty"`
+	RelationshipsMarkdown string            `json:"relationships_markdown,omitempty"`
 	AgentID               string            `json:"agent_id"`
 	Name                  string            `json:"name"`
 	SystemPrompt          string            `json:"system_prompt"`

@@ -87,6 +87,10 @@ func TestStreamingAgentTaskSettlesRunWhenSessionDispatchFails(t *testing.T) {
 			ctx := context.Background()
 			ownerID := agentRunUser(t, pool)
 			agentID := agentRunAgent(t, pool, ownerID)
+			// Dispatch now uses the persisted Run snapshot, not a mutable caller configuration.
+			if _, err := pool.Exec(ctx, `UPDATE agents SET model_provider=$2 WHERE id=$1`, agentID, tt.provider); err != nil {
+				t.Fatal(err)
+			}
 			channelID := agentRunChannel(t, pool, ownerID)
 			t.Cleanup(func() {
 				_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = $1`, agentID)

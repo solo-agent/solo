@@ -28,7 +28,18 @@ E2E_CORS_ORIGINS="http://localhost:$E2E_FRONTEND_PORT,http://127.0.0.1:$E2E_FRON
 RESTORE_STATE_DIR="$E2E_TMP_ROOT/solo-restored-daemon-$E2E_SERVER_PORT"
 ORDINARY_DAEMON_ID="$(sed -n 's/^DAEMON_ID=//p' "$REPO_ROOT/.env" 2>/dev/null | tail -1 | tr -d '"'"'"'[:space:]' || true)"
 ORDINARY_DAEMON_ID="${ORDINARY_DAEMON_ID:-daemon-01}"
+ORDINARY_DAEMON_PROFILE="${SOLO_DAEMON_PROFILE-$(sed -n 's/^SOLO_DAEMON_PROFILE=//p' "$REPO_ROOT/.env" 2>/dev/null | tail -1 | tr -d '\"'"'"'[:space:]' || true)}"
 ORDINARY_CREDENTIAL_FILE="${SOLO_DAEMON_CREDENTIAL_FILE:-$HOME/.solo/daemon/credentials.json}"
+if [ -n "$ORDINARY_DAEMON_PROFILE" ]; then
+  if [[ ! "$ORDINARY_DAEMON_PROFILE" =~ ^[a-zA-Z0-9_-]{1,64}$ ]]; then
+    echo "ERROR: invalid ordinary Daemon profile" >&2
+    exit 2
+  fi
+  ORDINARY_CREDENTIAL_FILE="$HOME/.solo/daemons/$ORDINARY_DAEMON_PROFILE/credentials.json"
+  if [ "$ORDINARY_DAEMON_PROFILE" = "default" ]; then
+    ORDINARY_CREDENTIAL_FILE="$HOME/.solo/daemon/credentials.json"
+  fi
+fi
 ORDINARY_COMPUTER_ID="$(sed -n 's/.*"computer_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$ORDINARY_CREDENTIAL_FILE" 2>/dev/null | head -1 || true)"
 case "$ORDINARY_DAEMON_ID" in
   *[!a-zA-Z0-9_-]*)
@@ -64,7 +75,7 @@ restore_local_stack() {
              WHERE c.daemon_id = '$E2E_DAEMON_ID' AND c.daemon_id LIKE 'daemon-e2e-%'
           ),
           released_tasks AS (
-            UPDATE tasks SET status = 'todo', claimer_id = NULL, updated_at = now()
+            UPDATE tasks SET status = 'closed', updated_at = now()
              WHERE claimer_id IN (SELECT id FROM e2e_agents) AND status IN ('in_progress', 'in_review')
           ),
           cancelled_runs AS (
@@ -103,6 +114,7 @@ restore_local_stack() {
       cd "$REPO_ROOT" && make rebuild \
         SERVER_PORT="$E2E_SERVER_PORT" DAEMON_PORT="$E2E_DAEMON_PORT" FRONTEND_PORT="$E2E_FRONTEND_PORT" \
         DAEMON_SERVER_URL="http://127.0.0.1:$E2E_SERVER_PORT" SOLO_DAEMON_STATE_DIR="$RESTORE_STATE_DIR" \
+        SOLO_DAEMON_PROFILE="$ORDINARY_DAEMON_PROFILE" SOLO_DAEMON_CREDENTIAL_FILE="$ORDINARY_CREDENTIAL_FILE" \
         CORS_ALLOWED_ORIGINS="$E2E_CORS_ORIGINS" GOCACHE="$E2E_GOCACHE"
     )
     restore_status=$?
@@ -156,8 +168,10 @@ trap 'exit 129' HUP
 
 echo "=== Starting isolated E2E Daemon: $E2E_DAEMON_ID ==="
 (
+  export SOLO_DAEMON_PROFILE=""
   export DAEMON_ID="$E2E_DAEMON_ID"
   export DAEMON_SERVER_URL="http://127.0.0.1:$E2E_SERVER_PORT"
+  export SOLO_DAEMON_STATE_DIR="$E2E_STATE_DIR"
   export SOLO_DAEMON_CREDENTIAL_FILE="$E2E_STATE_DIR/credentials.json"
   export SOLO_E2E_DAEMON_ID="$E2E_DAEMON_ID"
   unset SOLO_COMPUTER_ID SOLO_COMPUTER_CREDENTIAL SOLO_ENROLLMENT_TOKEN
@@ -165,6 +179,7 @@ echo "=== Starting isolated E2E Daemon: $E2E_DAEMON_ID ==="
   cd "$REPO_ROOT"
   MAKE_ARGS=(
     rebuild
+    "SOLO_DAEMON_PROFILE="
     "DAEMON_ID=$DAEMON_ID"
     "DAEMON_SERVER_URL=$DAEMON_SERVER_URL"
     "SERVER_PORT=$E2E_SERVER_PORT"

@@ -19,6 +19,28 @@ func NewThreadService(pool *pgxpool.Pool) *ThreadService {
 	return &ThreadService{pool: pool}
 }
 
+func (s *ThreadService) Unfollow(ctx context.Context, actorID, threadID string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "agent-work:"+actorID); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO thread_subscriptions(actor_id,thread_id,followed) SELECT $1,t.id,false FROM threads t WHERE t.id=$2 AND EXISTS(SELECT 1 FROM channel_members m WHERE m.channel_id=t.channel_id AND m.member_id=$1) ON CONFLICT(thread_id,actor_id) DO UPDATE SET followed=false,updated_at=now()`, actorID, threadID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrThreadNotFound
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM agent_pending_message_wakes WHERE agent_id=$1 AND thread_id=$2 AND NOT requires_visible_result`, actorID, threadID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // ThreadMessage represents a message in a thread for agent context.
 type ThreadMessage struct {
 	ID            string    `json:"id"`

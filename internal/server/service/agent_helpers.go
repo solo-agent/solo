@@ -54,12 +54,6 @@ func (s *AgentService) TriggerAgentGreeting(ctx context.Context, channelID, agen
 		channelID,
 	).Scan(&channelName)
 
-	daemon, err := s.dm.ResolveDaemonForAgent(ctx, agentID, "llm")
-	if err != nil {
-		slog.Warn("TriggerAgentGreeting: no available daemon", "agent_id", agentID, "error", err)
-		return
-	}
-
 	// Build greeting content — use custom greeting if provided, otherwise generic.
 	greetingContent := greeting
 	if greetingContent == "" {
@@ -98,7 +92,9 @@ func (s *AgentService) TriggerAgentGreeting(ctx context.Context, channelID, agen
 		"channel_id", channelID,
 	)
 
-	go s.handleStreamingAgentTask(context.Background(), daemon, taskReq, ag)
+	if err := s.enqueueAgentWork(ctx, taskReq); err != nil {
+		slog.Warn("queue Agent greeting", "agent_id", ag.ID, "error", err)
+	}
 }
 
 // BroadcastMemberEvent broadcasts a member.added / member.removed event to the

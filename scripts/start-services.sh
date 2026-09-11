@@ -9,6 +9,24 @@ cd "$REPO_ROOT"
 PID_DIR="$REPO_ROOT/.pids"
 mkdir -p "$PID_DIR"
 
+# Rebuild the selected paired runtime instead of leaving it on installed binaries.
+if [ -n "${SOLO_DAEMON_PROFILE:-}" ]; then
+  if [[ ! "$SOLO_DAEMON_PROFILE" =~ ^[a-zA-Z0-9_-]{1,64}$ ]]; then
+    echo "ERROR: invalid SOLO_DAEMON_PROFILE" >&2
+    exit 1
+  fi
+  export SOLO_DAEMON_STATE_DIR="$HOME/.solo/daemons/$SOLO_DAEMON_PROFILE"
+  if [ "$SOLO_DAEMON_PROFILE" = "default" ]; then
+    export SOLO_DAEMON_STATE_DIR="$HOME/.solo/daemon"
+  fi
+  export SOLO_DAEMON_CREDENTIAL_FILE="$SOLO_DAEMON_STATE_DIR/credentials.json"
+  if [ ! -f "$SOLO_DAEMON_CREDENTIAL_FILE" ]; then
+    echo "ERROR: selected Daemon profile is not paired" >&2
+    exit 1
+  fi
+  export DAEMON_ID="$SOLO_DAEMON_PROFILE"
+fi
+
 STARTED_PIDS=()
 STARTED_PIDFILES=()
 

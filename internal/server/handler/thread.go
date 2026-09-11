@@ -721,7 +721,7 @@ func (h *ThreadHandler) UnfollowThread(w http.ResponseWriter, r *http.Request) {
 	if len(parts) == 2 {
 		threadSuffix = parts[1]
 	}
-	if threadSuffix == "" {
+	if len(threadSuffix) < 8 || len(threadSuffix) > 36 || strings.Trim(threadSuffix, "0123456789abcdefABCDEF-") != "" {
 		writeError(w, http.StatusBadRequest, "target must include a thread short ID suffix (e.g. '#general:abc123')")
 		return
 	}
@@ -734,9 +734,9 @@ func (h *ThreadHandler) UnfollowThread(w http.ResponseWriter, r *http.Request) {
 	err := h.pool.QueryRow(r.Context(),
 		`SELECT t.id, t.channel_id FROM threads t
 		 JOIN messages m ON m.id = t.root_message_id
-		 WHERE m.id::text LIKE $1 || '%'
-		 LIMIT 1`,
-		threadSuffix+"%",
+		 WHERE m.id::text LIKE $1 || '%' AND EXISTS(SELECT 1 FROM channel_members cm WHERE cm.channel_id=t.channel_id AND cm.member_id=$2)
+ AND (SELECT count(*) FROM threads t2 JOIN messages m2 ON m2.id=t2.root_message_id JOIN channel_members cm2 ON cm2.channel_id=t2.channel_id AND cm2.member_id=$2 WHERE m2.id::text LIKE $1 || '%')=1`,
+		threadSuffix, userID,
 	).Scan(&threadID, &channelID)
 	if err != nil {
 		if isNotFound(err) {
@@ -748,11 +748,8 @@ func (h *ThreadHandler) UnfollowThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mark as unfollowed — delete any thread_reads record for this user.
-	_, err = h.pool.Exec(r.Context(),
-		`DELETE FROM thread_reads WHERE user_id = $1 AND thread_id = $2`,
-		userID, threadID,
-	)
+	// Persist exit independently of read cursors.
+	err = service.NewThreadService(h.pool).Unfollow(r.Context(), userID, threadID)
 	if err != nil {
 		slog.Error("failed to unfollow thread", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")

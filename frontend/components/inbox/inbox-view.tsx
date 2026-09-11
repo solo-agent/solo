@@ -13,6 +13,8 @@ import { buildDashboardHref } from '@/lib/dashboard-url';
 import { useToast } from '@/components/ui/toast';
 import type { TabBarTab } from '@/components/ui/tab-bar';
 import type { InboxAction, InboxItem as InboxItemType, Message, TaskArtifact } from '@/lib/types';
+import { TaskDeliveryDialog } from '@/components/tasks/task-delivery-dialog';
+import type { Task } from '@/lib/types';
 import { t } from '@/lib/i18n';
 
 const ThreadPanel = lazy(() =>
@@ -55,6 +57,7 @@ export function InboxView() {
   useInboxUnread();
 
   const [section, setSection] = useState('pending');
+  const [deliveryTaskId, setDeliveryTaskId] = useState<string | null>(null);
 
   const handleClearAll = useCallback(async () => {
     await clearAll();
@@ -193,6 +196,8 @@ export function InboxView() {
     reason?: string,
   ) => {
     try {
+      const task = await apiClient.get<Task>(`/api/v1/tasks/${item.task_id}`);
+      if (task.contract) { setDeliveryTaskId(task.id); return; }
       await apiClient.post(
         `/api/v1/tasks/${item.task_id}/${decision}`,
         decision === 'reject' ? { reason } : undefined,
@@ -226,6 +231,8 @@ export function InboxView() {
 
       setArtifactReviewBusy(true);
       try {
+        const task = await apiClient.get<Task>(`/api/v1/tasks/${taskId}`);
+        if (task.contract) { closeArtifactPreview(); setDeliveryTaskId(task.id); return; }
         const path = `/api/v1/tasks/${taskId}/${data.action === 'accept' ? 'accept' : 'reject'}`;
         await apiClient.post(path, data.action === 'reject' ? { reason } : undefined);
         await Promise.all([refetchPendingActions(), refetchHandledActions()]);
@@ -387,6 +394,7 @@ export function InboxView() {
         )}
       </div>
 
+      {deliveryTaskId && <TaskDeliveryDialog taskId={deliveryTaskId} open onOpenChange={(open) => { if (!open) setDeliveryTaskId(null); }} onComplete={() => { void refetchPendingActions(); void refetchHandledActions(); }} />}
       {artifactPreview && (
         <div
           role="dialog"

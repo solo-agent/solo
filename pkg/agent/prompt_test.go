@@ -84,7 +84,8 @@ func TestBuildSystemPrompt_RelationshipsBeforeMessaging(t *testing.T) {
 	)
 	assertHas(t, p, "Agent Relationships — CHECK BEFORE ACTING")
 	assertHas(t, p, "cat /tmp/bot-workspace/RELATIONSHIPS.md")
-	assertHas(t, p, "Re-read it before processing any task")
+	assertHas(t, p, "fixed relationship snapshot for this Run and channel")
+	assertHas(t, p, "Relationship edits take effect in a subsequent Run")
 	assertNotHas(t, p, "work independently")
 
 	relationships := strings.Index(p, "## Agent Relationships")

@@ -1,0 +1,20 @@
+=== RUN   TestAgentInboxPostgresOrderSingleClaimAndOfflineRecovery
+2026/09/11 17:27:18 INFO task created task_id=def7dccd-206b-46b6-9737-0bf7d0dde0a9 task_number=1 channel_id=448b16b8-9ee8-4ae8-8fd7-9073cd8cea1d creator_id=37a85ebd-755b-481d-9e82-0c20a9502784 title="explicit task"
+--- PASS: TestAgentInboxPostgresOrderSingleClaimAndOfflineRecovery (0.24s)
+=== RUN   TestRejectedTaskReturnsToOriginalTeamInbox
+2026/09/11 17:27:18 INFO task created task_id=7c518927-678b-4765-88fd-d2c8b7304294 task_number=1 channel_id=fe17994e-0361-4d46-a4a5-22c1d69b25a8 creator_id=f69c7779-ac3f-42c1-acdf-d353dd489dd5 title="return to same team"
+2026/09/11 17:27:18 INFO TriggerAgentForTask: created thread for task task_id=7c518927-678b-4765-88fd-d2c8b7304294 thread_id=b39577de-b98e-41e8-b45d-c2839f4a2f3d
+2026/09/11 17:27:18 INFO triggering agent for task agent_id=4b9e2dba-4b80-4b67-88d1-8fb350fe3915 task_id=7c518927-678b-4765-88fd-d2c8b7304294 channel_id=fe17994e-0361-4d46-a4a5-22c1d69b25a8 thread_id=b39577de-b98e-41e8-b45d-c2839f4a2f3d
+2026/09/11 17:27:18 INFO triggering agent for task agent_id=4b9e2dba-4b80-4b67-88d1-8fb350fe3915 task_id=7c518927-678b-4765-88fd-d2c8b7304294 channel_id=fe17994e-0361-4d46-a4a5-22c1d69b25a8 thread_id=b39577de-b98e-41e8-b45d-c2839f4a2f3d
+--- PASS: TestRejectedTaskReturnsToOriginalTeamInbox (0.08s)
+=== RUN   TestSelectionAgentInitiationAndIndependentReview
+--- PASS: TestSelectionAgentInitiationAndIndependentReview (0.09s)
+=== RUN   TestTaskDeliveryPostgresLifecycle
+2026/09/11 17:27:18 INFO task created task_id=70b62326-1b28-4fa1-9764-ecc994e90dd2 task_number=1 channel_id=2d38f901-0cdf-4265-b8d9-0d9a4daf2a09 creator_id=c50a67f4-105f-4a98-8130-1788bb154358 title="versioned delivery"
+2026/09/11 17:27:18 INFO task updated task_id=70b62326-1b28-4fa1-9764-ecc994e90dd2 channel_id=2d38f901-0cdf-4265-b8d9-0d9a4daf2a09 user_id=c50a67f4-105f-4a98-8130-1788bb154358 new_status=in_review
+--- PASS: TestTaskDeliveryPostgresLifecycle (0.07s)
+=== RUN   TestHumanResultDecisionPersistsWithoutInventedChecks
+2026/09/11 17:27:18 INFO task created task_id=e6f09375-dd19-4216-b3a9-bb497adabf0d task_number=1 channel_id=98afd7bc-73b8-4166-9ef3-0a9cac52efa2 creator_id=c37e6e9a-f808-43b8-8d6a-180336c733ab title="Human result decision"
+--- PASS: TestHumanResultDecisionPersistsWithoutInventedChecks (0.04s)
+PASS
+ok  	github.com/solo-ai/solo/internal/server/service	3.691s

@@ -77,6 +77,10 @@ stop_service frontend
 stop_service daemon
 stop_service server
 
+if [ -n "${SOLO_DAEMON_PROFILE:-}" ]; then
+  "$PID_DIR/solo" daemon stop --profile "$SOLO_DAEMON_PROFILE"
+fi
+
 for entry in "server:$SERVER_PORT" "daemon:$DAEMON_PORT" "frontend:$FRONTEND_PORT"; do
   service="${entry%%:*}"
   port="${entry##*:}"

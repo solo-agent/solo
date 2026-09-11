@@ -1,0 +1,131 @@
+{
+  "recorded_at": "2026-09-10T10:59:12+08:00",
+  "status": "incomplete",
+  "account": "lili",
+  "workspace_id": "08c23ef4-e86c-407b-a6c3-9dc6292c4236",
+  "channel_id": "fb252655-8ab5-4237-ac3f-d1cee8929a19",
+  "checks": {
+    "browser": "真实 Tabbit 页面，Browser Use 观察；Playwright CLI 返回 BROWSER_RUNTIME_UNAVAILABLE，未通过其执行动作",
+    "create_task_form": "填写固定样例后显示验收方式和审核者；取消，未提交",
+    "available_computer": "唯一可选 Computer 为 Offline",
+    "database": "BEGIN READ ONLY 查询确认频道 task_count=0、agent_count=0",
+    "api_readyz": "ok",
+    "daemon_health": {
+      "status": "ok",
+      "control_connected": true
+    },
+    "services": "复用原 make 栈；本轮未重启",
+    "offline_algorithms": "5 次实际 self-check 全部通过；不代表 Solo 产品 E2E",
+    "html_interactions": "未执行；保留原浏览器本地文件策略限制"
+  },
+  "screenshots": [
+    "screenshots/A02-create-task.jpg",
+    "screenshots/A00-computer-offline.jpg"
+  ],
+  "cases": [
+    {
+      "id": "PM-01",
+      "status": "阻塞",
+      "evidence": "创建表单已核对，未提交；Computer 离线"
+    },
+    {
+      "id": "PM-02",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-03",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-04",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-05",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-06",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-07",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-08",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-09",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-10",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-11",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-12",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-13",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-14",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-15",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-16",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-17",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-18",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-19",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    },
+    {
+      "id": "PM-20",
+      "status": "未执行",
+      "evidence": "本轮尚未开始实际执行"
+    }
+  ],
+  "user_input_needed": [
+    "让 lili 已授权的 Computer 上线，或由用户正常登录拥有在线 Computer 的账号",
+    "PM-16 需要双方明确控制的验收身份与各自已授权 Computer"
+  ]
+}

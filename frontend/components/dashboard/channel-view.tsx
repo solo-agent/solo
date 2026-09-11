@@ -4,6 +4,8 @@
 
 'use client';
 
+import { TeamVersionsPanel } from '@/components/agents/team-versions-panel';
+import { TaskDeliveryDialog } from '@/components/tasks/task-delivery-dialog';
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Users, Loader2, SquareCheckBig, Plus, Network, Maximize2, Minimize2, BrainCircuit, Sparkles, CalendarClock, Pin, Settings2, X } from 'lucide-react';
@@ -21,6 +23,7 @@ import { MessageList } from './message-list';
 import { MessageInput } from './message-input';
 import { MemberList } from './member-list';
 import { AddAgentModal } from './add-agent-modal';
+import { CreateTaskModal } from '@/components/tasks/create-task-modal';
 import { TaskBoard } from '@/components/tasks/task-board';
 import { AutomationWorkspace } from '@/components/tasks/automation-workspace';
 import { RelationshipWorkspace } from '@/components/relationships/relationship-workspace';
@@ -164,6 +167,7 @@ export function ChannelView({
   const [workspaceDetail, setWorkspaceDetail] = useState<WorkspaceDetail | null>(null);
   const [threadTask, setThreadTask] = useState<Task | null>(null);
   const [artifactPreview, setArtifactPreview] = useState<ArtifactPreview | null>(null);
+  const [deliveryTaskId, setDeliveryTaskId] = useState<string | null>(null);
   const [artifactHistory, setArtifactHistory] = useState<TaskArtifact[]>([]);
   const [artifactReviewBusy, setArtifactReviewBusy] = useState(false);
   const [relationships, setRelationships] = useState<AgentRelationship[]>([]);
@@ -235,6 +239,7 @@ export function ChannelView({
   const [mutedMembers, setMutedMembers] = useState<MutedMember[]>([]);
   const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>([]);
   const [moderationOpen, setModerationOpen] = useState(false);
+  const [createTaskOpen, setCreateTaskOpen] = useState(false);
   const loadModeration = useCallback(async () => {
     if (channel.type !== 'channel') return;
     try {
@@ -507,12 +512,12 @@ export function ChannelView({
 
   const loadRelationships = useCallback(async () => {
     try {
-      const rels = await apiClient.get<AgentRelationship[]>('/api/v1/agent-relationships');
+      const rels = await apiClient.get<AgentRelationship[]>(`/api/v1/agent-relationships?channel_id=${channel.id}`);
       setRelationships(rels);
     } catch {
       setRelationships([]);
     }
-  }, []);
+  }, [channel.id]);
 
   useEffect(() => {
     if (workspaceView === 'team' || mainPanel === 'relationship') {
@@ -877,6 +882,8 @@ export function ChannelView({
       setArtifactReviewBusy(true);
       try {
         if (!taskId) throw new Error('missing task id');
+        const current = await apiClient.get<Task>(`/api/v1/tasks/${taskId}`);
+        if (current.contract) { closeArtifactPreview(); setDeliveryTaskId(taskId); return; }
         const path = `/api/v1/tasks/${taskId}/${data.action === 'accept' ? 'accept' : 'reject'}`;
         const updated = await apiClient.post<Task>(path, data.action === 'reject' ? { reason } : undefined);
         handleTaskActionComplete(updated);
@@ -1095,6 +1102,7 @@ export function ChannelView({
                   <span className="truncate rounded-md border border-border bg-brutal-primary-light px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase text-muted-foreground">{selectedThinkingNode.agent_name}</span>
                 )}
               </div>
+              {!isThinking && channel.type === 'channel' && <TeamVersionsPanel key={channel.id} channel={channel} />}
               {moderation?.can_manage && !isThinking && (
                 <button type="button" className="btn-brutal btn-brutal-sm flex h-8 w-8 items-center justify-center p-0" onClick={() => setModerationOpen(true)} aria-label={t('channelModeration')} title={t('channelModeration')}>
                   <Settings2 className="h-4 w-4" />
@@ -1281,8 +1289,8 @@ export function ChannelView({
         'hidden min-w-0 flex-1 flex-col overflow-hidden bg-brutal-cream lg:flex',
         isWorkspaceFullscreen && 'fixed inset-0 z-[80] h-screen border-4 border-black',
       )} id="channel-workspace-panel">
-        <div className="flex h-14 flex-shrink-0 items-center justify-between gap-3 border-b-2 border-black px-4">
-          <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-h-14 flex-shrink-0 items-center justify-between gap-3 border-b-2 border-black px-4 py-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 [&>button]:shrink-0">
             <button
               type="button"
               onClick={() => pushDashboardState({ view: 'team', panel: 'conversation', nodeId: null })}
@@ -1401,7 +1409,10 @@ export function ChannelView({
 
         {workspaceView === 'task' && (
           <div className="flex flex-1 flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto px-4 py-4">
+
+            {moderation?.can_post !== false && <div className="px-4 pt-3"><Button size="sm" onClick={() => setCreateTaskOpen(true)}>{t('createTask')}</Button></div>}
+            <CreateTaskModal open={createTaskOpen} onOpenChange={setCreateTaskOpen} channelId={channel.id} onSubmit={async (input) => { const result = await apiClient.post<Task>('/api/v1/tasks', input); await refetchTasks(); return result; }} />
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
               <TaskBoard
                 tasks={taskBoardTasks}
                 isLoading={tasksLoading}
@@ -1574,6 +1585,7 @@ export function ChannelView({
         </div>
       </Dialog>
 
+      {deliveryTaskId && <TaskDeliveryDialog taskId={deliveryTaskId} open onOpenChange={(open) => { if (!open) setDeliveryTaskId(null); }} onComplete={handleTaskActionComplete} />}
     </div>
   );
 }

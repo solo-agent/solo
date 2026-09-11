@@ -1,0 +1,139 @@
+{
+  "selection_id": "2dcd92db-b20c-4c7f-8af5-d0b03e708f5e",
+  "plan": {
+    "cases": [
+      {
+        "input": "[20,22]",
+        "title": "Actual arithmetic regression",
+        "requirements": [
+          {
+            "id": "R1",
+            "text": "Execute the frozen revision with python3 .agents/skills/ux-check/scripts/check.py <channel UUID> <Task number>, without editing or replacing it. Its actual numeric output for [20,22] must equal 42. Submit the script-produced E1 JSON unchanged; any missing program output or substitute calculation fails this requirement."
+          }
+        ]
+      }
+    ],
+    "change": "修正加法结果 mtwr02d0",
+    "problem": "The actual arithmetic program returned 40 for [20,22].",
+    "channel_id": "d030a2d5-9f7c-4315-b12c-fe3ce4971044",
+    "team_check": "Parse the exact candidate E1 output; independently verify the supplied input sums to the reported result 42.",
+    "computer_id": "ed2d8dc4-1601-4989-a373-a9568731cfc1",
+    "token_budget": 2000000,
+    "idempotency_key": "ux-comparison-mtwr02d0",
+    "receiver_agent_id": "1d7c8685-a9cf-4a0b-8f4f-d25519efef5d",
+    "reviewer_agent_id": "ada69d36-9de5-4995-9737-4473a0be8e6e",
+    "candidate_revision_id": "9f4c6fe8-b0dd-47da-bd2e-b292d60b3565"
+  },
+  "decisions": [
+    {
+      "decision": "accepted",
+      "reason": "用户采用到 #ux-team-mtwr02d0：修正加法结果 mtwr02d0",
+      "evidence": {
+        "tasks": [
+          {
+            "arm": "baseline",
+            "title": "Actual arithmetic regression",
+            "status": "closed",
+            "task_id": "27024af4-11f7-4fac-bf5f-fd42129d736e",
+            "version": 8,
+            "attempts": 3,
+            "verified": false,
+            "case_index": 0,
+            "channel_id": "5e0fcca4-8b1a-4f65-8d05-f0bcd974977b",
+            "last_error": "Execution attempts exhausted without an accepted delivery",
+            "submission_id": "ae854493-5fb1-4966-aae4-656a4fb98a21",
+            "consumed_current": true,
+            "input_submission_id": null
+          },
+          {
+            "arm": "candidate",
+            "title": "Actual arithmetic regression",
+            "status": "done",
+            "task_id": "05a0da17-99d7-4fd0-8382-7647c825fc70",
+            "version": 3,
+            "attempts": 1,
+            "verified": true,
+            "case_index": 0,
+            "channel_id": "cf243899-cf15-4a19-9cb6-33833ea51104",
+            "last_error": "",
+            "submission_id": "21500d69-1e69-4669-b6ab-1d99ddfa1032",
+            "consumed_current": true,
+            "input_submission_id": null
+          },
+          {
+            "arm": "receiver",
+            "title": "Actual arithmetic regression",
+            "status": "done",
+            "task_id": "676e1c16-c065-46fd-996b-904ecf3af6d9",
+            "version": 3,
+            "attempts": 1,
+            "verified": true,
+            "case_index": 0,
+            "channel_id": "29f78779-6fb1-4a64-bd6d-5762b3ad6063",
+            "last_error": "",
+            "submission_id": "00be9bf5-2286-4f04-9fda-5ca498db1bd1",
+            "consumed_current": true,
+            "input_submission_id": "21500d69-1e69-4669-b6ab-1d99ddfa1032"
+          }
+        ],
+        "trials": [
+          {
+            "arm": "baseline",
+            "runs": 3,
+            "agent_id": "5cc861c2-e258-4183-ac77-f2da761d62a9",
+            "channel_id": "5e0fcca4-8b1a-4f65-8d05-f0bcd974977b",
+            "active_runs": 0,
+            "config_valid": true,
+            "token_budget": 2000000,
+            "unknown_runs": 0,
+            "actual_tokens": 730283,
+            "accounted_tokens": 730283,
+            "execution_seconds": 127.763866
+          },
+          {
+            "arm": "candidate",
+            "runs": 1,
+            "agent_id": "f5873f52-2296-49bd-b337-aa4fd3af7496",
+            "channel_id": "cf243899-cf15-4a19-9cb6-33833ea51104",
+            "active_runs": 0,
+            "config_valid": true,
+            "token_budget": 2000000,
+            "unknown_runs": 0,
+            "actual_tokens": 42140,
+            "accounted_tokens": 42140,
+            "execution_seconds": 20.043735
+          },
+          {
+            "arm": "receiver",
+            "runs": 1,
+            "agent_id": "8dac11a4-2e93-4e5d-b02c-8571b74ed8a7",
+            "channel_id": "29f78779-6fb1-4a64-bd6d-5762b3ad6063",
+            "active_runs": 0,
+            "config_valid": true,
+            "token_budget": 2000000,
+            "unknown_runs": 0,
+            "actual_tokens": 268124,
+            "accounted_tokens": 268124,
+            "execution_seconds": 38.143511
+          },
+          {
+            "arm": "reviewer",
+            "runs": 5,
+            "agent_id": "1a1802e2-9d99-4d90-9735-71f33dcaaa9d",
+            "channel_id": "b9657bf7-6758-4530-878a-673466197908",
+            "active_runs": 0,
+            "config_valid": true,
+            "token_budget": 2000000,
+            "unknown_runs": 0,
+            "actual_tokens": 620921,
+            "accounted_tokens": 620921,
+            "execution_seconds": 102.065035
+          }
+        ]
+      }
+    }
+  ],
+  "delivery_task": "21bb03ef-28f6-4ba4-a468-5ab03975c04a",
+  "applied_version": "e1529c24-7f6b-4574-ac2b-4ff5c026a7ff",
+  "current_team_version": "ca03fd88-642b-45d7-a16a-5bbbae64bfb4"
+}

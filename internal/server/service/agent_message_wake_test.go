@@ -9,12 +9,42 @@ import (
 	"github.com/solo-ai/solo/pkg/agent"
 )
 
+func TestDeletedAgentDMWakeIsRetiredWithoutLosingMessages(t *testing.T) {
+	pool := agentRunTestPool(t)
+	ctx := context.Background()
+	owner := agentRunUser(t, pool)
+	agentID := agentRunAgent(t, pool, owner)
+	channel := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO channels(id,name,type,created_by) VALUES($1,'retained-dm','dm',$2)`, channel, owner); err != nil {
+		t.Fatal(err)
+	}
+	taskSubmitMember(t, pool, channel, "agent", agentID)
+	message := agentRunMessage(t, pool, channel, owner)
+	if _, err := pool.Exec(ctx, `INSERT INTO agent_pending_message_wakes(agent_id,channel_id,scope_key,first_message_seq,latest_message_seq,requires_visible_result) SELECT $1,$2,'channel',seq,seq,true FROM messages WHERE id=$3`, agentID, channel, message); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agents SET is_active=false WHERE id=$1`, agentID); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewAgentService(pool, NewDaemonManager(pool, nil), nil, nil)
+	for i := 0; i < 2; i++ {
+		if err := svc.advancePendingMessageWake(ctx, agentID, channel); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var preserved, empty bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM messages WHERE id=$1) AND EXISTS(SELECT 1 FROM channel_members WHERE channel_id=$2 AND member_id=$3),NOT EXISTS(SELECT 1 FROM agent_pending_message_wakes WHERE agent_id=$3) AND NOT EXISTS(SELECT 1 FROM agent_message_wake_slots WHERE agent_id=$3) AND NOT EXISTS(SELECT 1 FROM agent_runs WHERE agent_id=$3)`, message, channel, agentID).Scan(&preserved, &empty); err != nil || !preserved || !empty {
+		t.Fatal("retired wake lost history or remained queued", preserved, empty, err)
+	}
+}
+
 func TestMessageWakeCoalescesEveryPersistedMessageAndClaimsNextRun(t *testing.T) {
 	pool := agentRunTestPool(t)
 	ctx := context.Background()
 	ownerID := agentRunUser(t, pool)
 	agentID := agentRunAgent(t, pool, ownerID)
 	channelID := agentRunChannel(t, pool, ownerID)
+	taskSubmitMember(t, pool, channelID, "agent", agentID)
 	messageIDs := []string{
 		agentRunMessage(t, pool, channelID, ownerID),
 		agentRunMessage(t, pool, channelID, ownerID),
@@ -258,6 +288,7 @@ func TestDaemonLostRunRequeuesItsPersistedRange(t *testing.T) {
 	ownerID := agentRunUser(t, pool)
 	agentID := agentRunAgent(t, pool, ownerID)
 	channelID := agentRunChannel(t, pool, ownerID)
+	taskSubmitMember(t, pool, channelID, "agent", agentID)
 	messageID := agentRunMessage(t, pool, channelID, ownerID)
 	var seq int64
 	if err := pool.QueryRow(ctx, `SELECT seq FROM messages WHERE id = $1`, messageID).Scan(&seq); err != nil {

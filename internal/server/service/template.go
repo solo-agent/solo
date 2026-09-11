@@ -78,6 +78,8 @@ type TemplateRelationship struct {
 }
 
 type TemplateProvisionRequest struct {
+	Formation       *TeamFormationPlan
+	FormationCaller *teamFormationCaller
 	OwnerID         string
 	WorkspaceID     string
 	TemplateID      string
@@ -92,11 +94,14 @@ type TemplateProvisionRequest struct {
 }
 
 type ProvisionedTemplateMember struct {
-	Ref       string `json:"ref"`
-	Role      string `json:"role"`
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	AvatarURL string `json:"avatar_url"`
+	Reused          bool           `json:"reused,omitempty"`
+	SelectionReason string         `json:"selection_reason,omitempty"`
+	Evidence        *TeamCandidate `json:"evidence,omitempty"`
+	Ref             string         `json:"ref"`
+	Role            string         `json:"role"`
+	ID              string         `json:"id"`
+	Name            string         `json:"name"`
+	AvatarURL       string         `json:"avatar_url"`
 }
 
 type TemplateProvisionResult struct {
@@ -477,6 +482,14 @@ func (s *TemplateService) provisionChannelTx(ctx context.Context, tx pgx.Tx, req
 		return nil, ErrTemplateRuntimeUnavailable
 	}
 
+	selections := map[string]TeamCandidate{}
+	if req.Formation != nil {
+		selections, err = resolveFormationMembers(ctx, tx, req.FormationCaller, tmpl, *req.Formation)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if targetChannelID == "" {
 		channelID = uuid.New().String()
 		err = tx.QueryRow(ctx, `
@@ -518,12 +531,22 @@ func (s *TemplateService) provisionChannelTx(ctx context.Context, tx pgx.Tx, req
 	membersByRef := make(map[string]ProvisionedTemplateMember, len(tmpl.Members))
 	resultMembers := make([]ProvisionedTemplateMember, 0, len(tmpl.Members))
 	for _, member := range tmpl.Members {
-		agentID := uuid.New().String()
+		selected := selections[member.Ref]
+		agentID := selected.ID
+		reused := agentID != ""
+		if !reused {
+			agentID = uuid.New().String()
+		}
 		name, nameErr := uniqueAgentNameInChannel(ctx, tx, channelID, member.Name)
 		if nameErr != nil {
 			return nil, nameErr
 		}
-		if _, err := tx.Exec(ctx, `
+		provider, model, runtime := req.ModelProvider, req.ModelName, runtimeValue
+		if req.Formation != nil {
+			provider, model, runtime = selected.ModelProvider, selected.ModelName, selected.RuntimeID
+		}
+		if !reused {
+			if _, err := tx.Exec(ctx, `
 			INSERT INTO agents (
 				id, name, description, owner_id, model_provider, model_name,
 				system_prompt, runtime_id, custom_env, custom_args,
@@ -532,9 +555,19 @@ func (s *TemplateService) provisionChannelTx(ctx context.Context, tx pgx.Tx, req
 				$1, $2, $3, $4, $5, $6, $7, $8,
 				'{}'::jsonb, '[]'::jsonb, $9, $10, 'agent'
 			)
-		`, agentID, name, member.Description, req.OwnerID, req.ModelProvider,
-			req.ModelName, member.Instructions, runtimeValue, member.AvatarURL, channelID); err != nil {
-			return nil, fmt.Errorf("create agent %s: %w", name, err)
+		`, agentID, name, member.Description, req.OwnerID, provider,
+				model, member.Instructions, runtime, member.AvatarURL, channelID); err != nil {
+				return nil, fmt.Errorf("create agent %s: %w", name, err)
+			}
+		} else {
+			var collision bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM channel_members cm JOIN agents a ON a.id=cm.member_id AND cm.member_type='agent' WHERE cm.channel_id=$1 AND lower(a.name)=lower($2) AND a.is_active)`, channelID, selected.Name).Scan(&collision); err != nil {
+				return nil, err
+			}
+			if collision {
+				return nil, fmt.Errorf("%w: reused member name %s is ambiguous in the new Channel", ErrInvalidTeamFormationPlan, selected.Name)
+			}
+			name = selected.Name
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO channel_members (channel_id, member_type, member_id, role)
@@ -545,22 +578,59 @@ func (s *TemplateService) provisionChannelTx(ctx context.Context, tx pgx.Tx, req
 		resultMember := ProvisionedTemplateMember{
 			Ref: member.Ref, Role: member.Role, ID: agentID, Name: name, AvatarURL: member.AvatarURL,
 		}
+		if req.Formation != nil {
+			resultMember.Reused = reused
+			resultMember.SelectionReason = formationMemberReason(selected, reused)
+			if reused {
+				resultMember.Evidence = &selected
+				if err := tx.QueryRow(ctx, `SELECT COALESCE(avatar_url,'') FROM agents WHERE id=$1`, agentID).Scan(&resultMember.AvatarURL); err != nil {
+					return nil, err
+				}
+			}
+		}
 		membersByRef[member.Ref] = resultMember
 		resultMembers = append(resultMembers, resultMember)
 	}
 
-	relationshipIDs := make([]string, 0, len(tmpl.Relationships))
-	for _, relationship := range tmpl.Relationships {
+	relationships := tmpl.Relationships
+	if req.Formation != nil && len(req.Formation.Relationships) > 0 {
+		relationships = req.Formation.Relationships
+	}
+	relationshipIDs := make([]string, 0, len(relationships))
+	for _, relationship := range relationships {
 		from := membersByRef[relationship.FromRef]
 		to := membersByRef[relationship.ToRef]
 		relationshipID := uuid.New().String()
+		proposalID := ""
+		if req.Formation != nil && strings.TrimSpace(relationship.Instruction) == "" {
+			relationship.Instruction = "Input: goal, scope and relevant evidence. Report back with changes, verification evidence, risks, rollback and next action."
+		}
+		if relationship.Type == RelAssignsTo {
+			cycle, err := wouldCreateAssignsToCycle(ctx, tx, channelID, from.ID, to.ID, "")
+			if err != nil {
+				return nil, err
+			}
+			if cycle {
+				return nil, ErrRelationshipCycle
+			}
+		}
+		if from.Reused || to.Reused {
+			if err := tx.QueryRow(ctx, `INSERT INTO agent_relationship_proposals(channel_id,from_agent_id,to_agent_id,rel_type,instruction,proposed_by,approved_owner_ids) VALUES($1,$2,$3,$4,$5,$6,ARRAY[$6]::uuid[]) RETURNING id::text`, channelID, from.ID, to.ID, relationship.Type, relationship.Instruction, req.OwnerID).Scan(&proposalID); err != nil {
+				return nil, err
+			}
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO agent_relationships (
-				id, from_agent_id, to_agent_id, rel_type, weight, instruction
-			) VALUES ($1, $2, $3, $4, $5, $6)
+				id, from_agent_id, to_agent_id, rel_type, weight, instruction, channel_id
+			) VALUES ($1, $2, $3, $4, $5, $6, $7)
 		`, relationshipID, from.ID, to.ID, relationship.Type,
-			relationship.Weight, relationship.Instruction); err != nil {
+			relationship.Weight, relationship.Instruction, channelID); err != nil {
 			return nil, fmt.Errorf("create relationship %s -> %s: %w", from.Name, to.Name, err)
+		}
+		if proposalID != "" {
+			if _, err := tx.Exec(ctx, `UPDATE agent_relationship_proposals SET status='accepted',relationship_id=$2 WHERE id=$1`, proposalID, relationshipID); err != nil {
+				return nil, err
+			}
 		}
 		relationshipIDs = append(relationshipIDs, relationshipID)
 	}
@@ -624,8 +694,8 @@ func uniqueAgentNameInChannel(ctx context.Context, tx pgx.Tx, channelID, request
 		var exists bool
 		if err := tx.QueryRow(ctx, `
 			SELECT EXISTS(
-				SELECT 1 FROM agents
-				 WHERE home_channel_id = $1 AND lower(name) = lower($2) AND is_active = true
+				SELECT 1 FROM agents a
+ WHERE lower(a.name)=lower($2) AND a.is_active AND (a.home_channel_id=$1 OR EXISTS(SELECT 1 FROM channel_members cm WHERE cm.channel_id=$1 AND cm.member_type='agent' AND cm.member_id=a.id))
 			)
 		`, channelID, candidate).Scan(&exists); err != nil {
 			return "", err

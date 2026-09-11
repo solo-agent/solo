@@ -63,6 +63,7 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
       id,
       name,
       onBlur,
+      'aria-label': ariaLabel,
       ...props
     },
     ref,
@@ -160,6 +161,10 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
       if (disabled) return;
       switch (e.key) {
         case 'Escape':
+          if (open) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
           setOpen(false);
           break;
         case 'Enter':
@@ -207,7 +212,7 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
           disabled={disabled}
           aria-haspopup="listbox"
           aria-expanded={open}
-          aria-label={props['aria-label']}
+          aria-label={ariaLabel}
           className={cn(
             'inline-flex w-full items-center justify-between gap-1',
             'bg-white text-black font-heading font-bold',
@@ -253,6 +258,7 @@ export const Select = React.forwardRef<HTMLDivElement, SelectProps>(
                   <li
                     key={opt.value}
                     role="option"
+                    data-value={opt.value}
                     aria-selected={isSelected}
                     aria-disabled={opt.disabled}
                     onMouseDown={(e) => e.preventDefault()}

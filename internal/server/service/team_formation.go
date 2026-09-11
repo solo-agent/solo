@@ -38,7 +38,7 @@ type relationshipDocumentGenerator interface {
 }
 
 // TeamFormationService authorizes Lucy and turns one official template into a
-// fresh Channel-scoped Agent team. The source message is the idempotency key.
+// Channel team with eligible owned members. The source message is the idempotency key.
 type TeamFormationService struct {
 	pool        *pgxpool.Pool
 	mdGen       relationshipDocumentGenerator
@@ -68,9 +68,12 @@ type TeamFormationRequest struct {
 }
 
 type TeamFormationPlan struct {
-	IntentSummary string               `json:"intent_summary"`
-	Channel       TeamFormationChannel `json:"channel"`
-	TemplateID    string               `json:"template_id"`
+	ReuseExisting *bool                   `json:"reuse_existing,omitempty"`
+	Members       []TeamMemberRequirement `json:"members,omitempty"`
+	Relationships []TemplateRelationship  `json:"relationships,omitempty"`
+	IntentSummary string                  `json:"intent_summary"`
+	Channel       TeamFormationChannel    `json:"channel"`
+	TemplateID    string                  `json:"template_id"`
 }
 
 type TeamFormationChannel struct {
@@ -95,11 +98,14 @@ type TeamFormationResult struct {
 }
 
 type TeamFormationResultMember struct {
-	Ref       string `json:"ref"`
-	Role      string `json:"role"`
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	AvatarURL string `json:"avatar_url"`
+	Reused          bool           `json:"reused,omitempty"`
+	SelectionReason string         `json:"selection_reason,omitempty"`
+	Evidence        *TeamCandidate `json:"evidence,omitempty"`
+	Ref             string         `json:"ref"`
+	Role            string         `json:"role"`
+	ID              string         `json:"id"`
+	Name            string         `json:"name"`
+	AvatarURL       string         `json:"avatar_url"`
 }
 
 type teamFormationCaller struct {
@@ -368,6 +374,8 @@ func (s *TeamFormationService) provision(
 		ModelName:       caller.ModelName,
 		RuntimeID:       caller.RuntimeID,
 		AllowNameSuffix: true,
+		Formation:       &plan,
+		FormationCaller: caller,
 	})
 	if err != nil {
 		return nil, err
@@ -421,6 +429,19 @@ func (s *TeamFormationService) provision(
 		cardMetadata); err != nil {
 		return nil, fmt.Errorf("persist Lucy result card: %w", err)
 	}
+	// Detailed past-work notes belong to the requesting owner. New teammates
+	// receive the selected identities and conditions, not another Channel's notes.
+	publicMembers := append([]TeamFormationResultMember(nil), result.Members...)
+	for i := range publicMembers {
+		publicMembers[i].Evidence = nil
+		if publicMembers[i].Reused {
+			publicMembers[i].SelectionReason = "复用已满足本次职责、工具、Computer 权限和预算条件的成员。"
+		}
+	}
+	publicMetadata, err := json.Marshal(map[string]any{"formation_id": result.FormationID, "template_id": result.TemplateID, "channel_id": result.ChannelID, "channel_name": result.ChannelName, "members": publicMembers, "member_count": len(publicMembers)})
+	if err != nil {
+		return nil, err
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO messages (
 			id, channel_id, sender_type, sender_id, content, content_type,
@@ -431,7 +452,7 @@ func (s *TeamFormationService) provision(
 		)
 	`, uuid.New().String(), result.ChannelID, uuid.Nil.String(),
 		fmt.Sprintf("Team created from the %s template.", result.TemplateID),
-		cardMetadata); err != nil {
+		publicMetadata); err != nil {
 		return nil, fmt.Errorf("persist template kickoff: %w", err)
 	}
 

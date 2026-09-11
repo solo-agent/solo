@@ -25,6 +25,16 @@ func TestBuildPromptFromMessagesPreservesSystemContext(t *testing.T) {
 }
 
 func TestBuildCodexArgs(t *testing.T) {
+	t.Run("Solo injected CLI survives login profile PATH", func(t *testing.T) {
+		args := buildCodexArgs(&ExecuteOptions{Env: map[string]string{"SOLO_AGENT_ID": "test-agent"}, CustomArgs: []string{"-c", "allow_login_shell=true"}})
+		joined := strings.Join(args, " ")
+		if !strings.Contains(joined, "-c allow_login_shell=false -c allow_login_shell=true") {
+			t.Fatalf("missing Solo default or explicit override order: %v", args)
+		}
+		if strings.Contains(strings.Join(buildCodexArgs(&ExecuteOptions{}), " "), "allow_login_shell") {
+			t.Fatal("changed standalone SDK shell behavior")
+		}
+	})
 	t.Run("default args", func(t *testing.T) {
 		opts := &ExecuteOptions{}
 		args := buildCodexArgs(opts)

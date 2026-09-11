@@ -19,6 +19,7 @@ import (
 	"github.com/solo-ai/solo/internal/server/workspace"
 	serverworkspace "github.com/solo-ai/solo/internal/server/workspace"
 	"github.com/solo-ai/solo/pkg/agent"
+	"github.com/solo-ai/solo/pkg/skillloader"
 )
 
 const (
@@ -64,14 +65,15 @@ func NewAgentHandler(pool *pgxpool.Pool, dm *service.DaemonManager, hub realtime
 // --- Request/Response types ---
 
 type CreateAgentRequest struct {
-	Name          string            `json:"name"`
-	Description   string            `json:"description,omitempty"`
-	SystemPrompt  string            `json:"system_prompt,omitempty"`
-	ModelProvider string            `json:"model_provider,omitempty"`
-	ModelName     string            `json:"model_name,omitempty"`
-	CustomEnv     map[string]string `json:"custom_env,omitempty"`
-	CustomArgs    []string          `json:"custom_args,omitempty"`
-	ComputerID    string            `json:"computer_id"`
+	Skills        []skillloader.Bundle `json:"skills,omitempty"`
+	Name          string               `json:"name"`
+	Description   string               `json:"description,omitempty"`
+	SystemPrompt  string               `json:"system_prompt,omitempty"`
+	ModelProvider string               `json:"model_provider,omitempty"`
+	ModelName     string               `json:"model_name,omitempty"`
+	CustomEnv     map[string]string    `json:"custom_env,omitempty"`
+	CustomArgs    []string             `json:"custom_args,omitempty"`
+	ComputerID    string               `json:"computer_id"`
 }
 
 type UpdateAgentRequest struct {
@@ -86,22 +88,23 @@ type UpdateAgentRequest struct {
 }
 
 type AgentResponse struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	Description   string            `json:"description,omitempty"`
-	OwnerID       string            `json:"owner_id"`
-	HomeChannelID string            `json:"home_channel_id"`
-	Kind          string            `json:"kind"`
-	ModelProvider string            `json:"model_provider"`
-	ModelName     string            `json:"model_name"`
-	SystemPrompt  string            `json:"system_prompt"`
-	IsActive      bool              `json:"is_active"`
-	AvatarURL     string            `json:"avatar_url,omitempty"`
-	CustomEnv     map[string]string `json:"custom_env,omitempty"`
-	CustomArgs    []string          `json:"custom_args,omitempty"`
-	ComputerID    string            `json:"computer_id,omitempty"`
-	CreatedAt     string            `json:"created_at"`
-	UpdatedAt     string            `json:"updated_at"`
+	Skills        []skillloader.Bundle `json:"skills,omitempty"`
+	ID            string               `json:"id"`
+	Name          string               `json:"name"`
+	Description   string               `json:"description,omitempty"`
+	OwnerID       string               `json:"owner_id"`
+	HomeChannelID string               `json:"home_channel_id"`
+	Kind          string               `json:"kind"`
+	ModelProvider string               `json:"model_provider"`
+	ModelName     string               `json:"model_name"`
+	SystemPrompt  string               `json:"system_prompt"`
+	IsActive      bool                 `json:"is_active"`
+	AvatarURL     string               `json:"avatar_url,omitempty"`
+	CustomEnv     map[string]string    `json:"custom_env,omitempty"`
+	CustomArgs    []string             `json:"custom_args,omitempty"`
+	ComputerID    string               `json:"computer_id,omitempty"`
+	CreatedAt     string               `json:"created_at"`
+	UpdatedAt     string               `json:"updated_at"`
 }
 
 // Create handles POST /api/v1/channels/{channelID}/agents.
@@ -118,7 +121,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req CreateAgentRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 6<<20)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -170,6 +173,15 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	skills, err := skillloader.NormalizeBundles(req.Skills)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	skillsBytes := []byte(`[]`)
+	if len(skills) > 0 {
+		skillsBytes, _ = json.Marshal(skills)
+	}
 	tx, err := h.pool.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create agent")
@@ -225,13 +237,13 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		`INSERT INTO agents (
 			id, name, description, owner_id, model_provider, model_name,
 			system_prompt, runtime_id, custom_env, custom_args,
-			avatar_url, home_channel_id, kind
+			avatar_url, home_channel_id, kind, skills
 		 )
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'agent')
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'agent', $13)
 		 RETURNING created_at, updated_at`,
 		agentID, name, req.Description, userID, modelProvider, modelName, systemPrompt,
 		computerID,
-		customEnvBytes, customArgsBytes, avatarURL, channelID,
+		customEnvBytes, customArgsBytes, avatarURL, channelID, skillsBytes,
 	).Scan(&createdAt, &updatedAt)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -263,6 +275,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, AgentResponse{
+		Skills:        skills,
 		ID:            agentID,
 		Name:          name,
 		Description:   req.Description,
@@ -366,8 +379,8 @@ func (h *AgentHandler) ListWorkspace(w http.ResponseWriter, r *http.Request) {
 		       a.created_at,a.updated_at
 		  FROM agents a
 		  JOIN channels c ON c.id=a.home_channel_id
-		 WHERE c.workspace_id=$1 AND a.is_active=true AND a.kind='agent'
-		 ORDER BY a.name,a.created_at`, serverworkspace.ID(r), userID)
+		 WHERE (c.workspace_id=$1 OR EXISTS(SELECT 1 FROM channel_members m JOIN channels target ON target.id=m.channel_id WHERE m.member_id=a.id AND m.member_type='agent' AND target.workspace_id=$1) OR ($3 AND a.owner_id=$2)) AND (NOT $3 OR a.owner_id=$2) AND a.is_active=true AND a.kind='agent' AND NOT EXISTS(SELECT 1 FROM agent_selection_trials internal_trial JOIN agent_selections internal_selection ON internal_selection.id=internal_trial.selection_id WHERE internal_trial.agent_id=a.id AND COALESCE(internal_selection.plan->>'reviewer_agent_id','')<>'')
+		 ORDER BY a.name,a.created_at`, serverworkspace.ID(r), userID, r.URL.Query().Get("owned") == "true")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list Workspace Agents")
 		return
@@ -414,7 +427,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		        COALESCE(home_channel_id::text, ''), kind, model_provider, model_name,
 		        system_prompt, is_active, COALESCE(avatar_url, ''),
 		        custom_env, custom_args, COALESCE(runtime_id, ''),
-		        created_at, updated_at
+		        created_at, updated_at, skills
 		 FROM agents
 		 WHERE id = $1 AND owner_id = $2 AND is_active = true`,
 		agentID, userID,
@@ -423,7 +436,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&a.ModelProvider, &a.ModelName, &a.SystemPrompt,
 		&a.IsActive, &a.AvatarURL,
 		&customEnvBytes, &customArgsBytes, &a.ComputerID,
-		&createdAt, &updatedAt)
+		&createdAt, &updatedAt, &a.Skills)
 	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "agent not found")
@@ -572,7 +585,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		       SELECT 1 FROM agent_runs WHERE agent_id = agents.id AND finished_at IS NULL
 		   ))
 		 RETURNING id, name, COALESCE(description, ''), owner_id,
-		           home_channel_id, kind, model_provider, model_name,
+		           COALESCE(home_channel_id::text, ''), kind, model_provider, model_name,
 		           system_prompt, is_active, COALESCE(avatar_url, ''),
 		           custom_env, custom_args, COALESCE(runtime_id, ''),
 		           created_at, updated_at`,

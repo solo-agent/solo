@@ -1,0 +1,20 @@
+{
+  "document_cases": 20,
+  "result_controls": 20,
+  "copyable_code_blocks": 13,
+  "local_links": "all targets exist",
+  "skill_packages": 3,
+  "code_sample_wrong_baseline": "rejected by actual Python check",
+  "code_sample_correct_implementation": "accepted by actual Python check",
+  "original_code_fixture": "clean",
+  "product_runtime_walkthrough": "not run",
+  "browser_render_check": "blocked by browser local-file URL policy",
+  "real_product_screenshots": "A01、A02 及 Computer 离线实拍已保存；A03～A14 待补",
+  "database_preparation": "Workspace and channel created through UI and verified in real PostgreSQL",
+  "latest_walkthrough_record": "现场试走记录.json",
+  "latest_algorithm_self_checks": {
+    "recorded_at": "2026-09-10T10:59:12+08:00",
+    "count": 5,
+    "status": "passed; no product Runtime executed"
+  }
+}

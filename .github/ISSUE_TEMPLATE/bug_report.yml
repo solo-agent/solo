@@ -58,6 +58,6 @@ body:
     id: versions
     attributes:
       label: Go / Node / Docker versions
-      description: e.g. go1.22.3, node v20.10.0, Docker 24.0.7
+      description: e.g. go1.25.0, node v20.10.0, Docker 24.0.7
     validations:
       required: true

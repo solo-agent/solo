@@ -244,10 +244,10 @@ func loadThinkingTeam(ctx context.Context, tx pgx.Tx, channelID string) ([]think
 	}
 	edgeRows, err := tx.Query(ctx, `
 		SELECT r.from_agent_id::text, r.to_agent_id::text
-		  FROM agent_relationships r
+		  FROM agent_relationship_scopes r
 		  JOIN channel_members f ON f.channel_id = $1 AND f.member_type = 'agent' AND f.member_id = r.from_agent_id
 		  JOIN channel_members t ON t.channel_id = $1 AND t.member_type = 'agent' AND t.member_id = r.to_agent_id
-		 WHERE r.rel_type = 'assigns_to'`, channelID)
+		 WHERE r.rel_type = 'assigns_to' AND r.channel_id=$1`, channelID)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -1,0 +1,35 @@
+=== RUN   TestAgentInboxPostgresOrderSingleClaimAndOfflineRecovery
+2026/09/11 17:08:38 INFO task created task_id=ada72100-44ec-4b9b-9376-0712cee2054a task_number=1 channel_id=cf7e8b55-9c5c-4304-b7ec-cbc1fd45c528 creator_id=99c3a209-2226-43db-b9b8-fd8997ea6c3e title="explicit task"
+--- PASS: TestAgentInboxPostgresOrderSingleClaimAndOfflineRecovery (0.39s)
+=== RUN   TestAgentRevisionPostgresPublicationAndTeamPin
+2026/09/11 17:08:39 INFO task created task_id=f657d3a5-3f92-48d1-bb75-b17cac4a3e0b task_number=1 channel_id=0c448dc3-ae47-47be-8cd4-421ea60e22f9 creator_id=1f014972-e838-41f8-b2ad-60f97b9251e3 title="candidate regression"
+--- PASS: TestAgentRevisionPostgresPublicationAndTeamPin (0.14s)
+=== RUN   TestSelectionAgentInitiationAndIndependentReview
+--- PASS: TestSelectionAgentInitiationAndIndependentReview (0.12s)
+=== RUN   TestSelectionPostgresPlanBudgetAndDecision
+--- PASS: TestSelectionPostgresPlanBudgetAndDecision (0.31s)
+=== RUN   TestTaskThreadFollowupProtectsDraftWithoutSelectingRun
+2026/09/11 17:08:39 INFO task created task_id=ebab6126-8bc3-4c68-9bdb-04ef9d3dfc65 task_number=1 channel_id=e58741a8-545f-4f25-8303-6cd9097f5499 creator_id=1dff6a6d-2da5-4f22-b76d-a1531640a43e title="follow-up target"
+--- PASS: TestTaskThreadFollowupProtectsDraftWithoutSelectingRun (0.09s)
+=== RUN   TestTaskDeliveryPostgresLifecycle
+2026/09/11 17:08:39 INFO task created task_id=d51b991b-1505-4bd1-92ef-0d87c923a2f3 task_number=1 channel_id=2075490a-786d-48ff-9075-18fc35c24322 creator_id=a5b40201-87c2-4d61-9026-5384cd150a58 title="versioned delivery"
+2026/09/11 17:08:39 INFO task updated task_id=d51b991b-1505-4bd1-92ef-0d87c923a2f3 channel_id=2075490a-786d-48ff-9075-18fc35c24322 user_id=a5b40201-87c2-4d61-9026-5384cd150a58 new_status=in_review
+--- PASS: TestTaskDeliveryPostgresLifecycle (0.08s)
+=== RUN   TestTaskDeliveryPostgresChildrenAndBypass
+2026/09/11 17:08:39 INFO task created task_id=82f58d8b-d562-44fc-b3a5-af8451af4bed task_number=1 channel_id=23ec96e7-478d-4dea-a819-8a97c31b55be creator_id=c0f3648a-0345-44b2-a3ed-0ff5c11a3c24 title=parent
+2026/09/11 17:08:39 INFO task created task_id=75f2fc3d-8c15-4f93-80e2-20998ee05ef7 task_number=2 channel_id=23ec96e7-478d-4dea-a819-8a97c31b55be creator_id=c0f3648a-0345-44b2-a3ed-0ff5c11a3c24 title="open child"
+--- PASS: TestTaskDeliveryPostgresChildrenAndBypass (0.04s)
+=== RUN   TestHumanResultDecisionPersistsWithoutInventedChecks
+2026/09/11 17:08:39 INFO task created task_id=f3dfbdd2-6e18-4a1d-86d4-57b6e509e162 task_number=1 channel_id=22ad1714-95a3-45b4-a42b-4653f99023b1 creator_id=ae9f8bc1-86a6-4cbd-be0c-8934ad77f155 title="Human result decision"
+--- PASS: TestHumanResultDecisionPersistsWithoutInventedChecks (0.05s)
+=== RUN   TestMessageTaskClaimPostgres
+--- PASS: TestMessageTaskClaimPostgres (0.08s)
+=== RUN   TestMessageTaskConvertAndNumberLookupPostgres
+2026/09/11 17:08:39 INFO task created task_id=60ee876e-6da0-45eb-808a-11a69c890c50 task_number=2 channel_id=5c639d12-e9c7-4b69-9176-56b59e341ceb creator_id=1a6ed47e-3734-42d1-bbe6-6c18ed559cbb title=child
+--- PASS: TestMessageTaskConvertAndNumberLookupPostgres (0.08s)
+=== RUN   TestMessageClaimInitialContractKeepsUserDecision
+--- PASS: TestMessageClaimInitialContractKeepsUserDecision (0.07s)
+=== RUN   TestSharedTeamParticipationRequiresOwnersAndPreservesScope
+--- PASS: TestSharedTeamParticipationRequiresOwnersAndPreservesScope (0.17s)
+PASS
+ok  	github.com/solo-ai/solo/internal/server/service	4.808s
