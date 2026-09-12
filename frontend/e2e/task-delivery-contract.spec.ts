@@ -2,7 +2,10 @@ import { selectValue } from './support/select';
 import { codexE2EArgs } from './support/runtime';
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { acquireLocalComputer } from './support/local-computer';
 import { registerVerified, requestAuthenticated } from './support/auth';
 import { acceptPairedSelection } from './support/paired-selection';
@@ -70,6 +73,11 @@ test('real author submits evidence; human and independent Agent accept exact sub
     await review.locator('summary').filter({ hasText: /^提交版本/ }).first().click();
     await expect(review.getByText('source ·', { exact: false })).toBeVisible();
     await expect(review.getByText('verification ·', { exact: false })).toBeVisible();
+    const actualSource = readFileSync(join(homedir(), '.solo', 'agents', author.id, 'workspace', 'double.py'), 'utf8');
+    const persisted = JSON.parse(sql(`SELECT json_build_object('artifact_version',artifact_version,'evidence',evidence) FROM task_submissions WHERE id='${humanTask.submission}'`)) as { artifact_version: string; evidence: { id: string; content?: string }[] };
+    expect(persisted.evidence.find(item => item.id === 'source')?.content).toBe(actualSource);
+    expect(persisted.artifact_version).toBe(createHash('sha256').update(actualSource).digest('hex'));
+    expect(persisted.evidence.find(item => item.id === 'verification')?.content).toBeTruthy();
     await review.getByLabel('确认此项通过').check();
     await review.getByLabel('R1 检查依据').fill('已核对源代码与三个输入的实际执行输出。');
     await review.getByLabel('审核结论与原因').fill('要求和当前提交一致，边界输入测试通过。');
@@ -91,6 +99,7 @@ test('real author submits evidence; human and independent Agent accept exact sub
     await expect.poll(() => sql(`SELECT status FROM tasks WHERE id='${agentTask.id}'`), { timeout: 300_000, intervals: [1000, 2000, 5000] }).toBe('done');
     expect(sql(`SELECT count(*) FROM task_reviews r JOIN task_submissions s ON s.id=r.submission_id WHERE s.task_id='${agentTask.id}' AND r.reviewer_id='${reviewer.id}' AND r.decision='accepted'`)).toBe('1');
     expect(sql(`SELECT count(*) FROM agent_run_task_links l JOIN agent_runs r ON r.id=l.run_id JOIN agent_sessions s ON s.id=r.session_id WHERE l.task_id='${agentTask.id}' AND l.role='related' AND r.agent_id='${reviewer.id}' AND s.external_session_id<>''`)).toBe('1');
+    await expect.poll(() => sql(`SELECT count(*) FROM agent_run_task_links l JOIN agent_runs r ON r.id=l.run_id JOIN tasks t ON t.id=l.task_id WHERE t.id='${agentTask.id}' AND l.role='related' AND r.agent_id='${reviewer.id}' AND r.status='completed' AND EXISTS (SELECT 1 FROM messages m JOIN threads th ON th.id=m.thread_id WHERE th.root_message_id=t.message_id AND m.sender_id=r.agent_id AND m.metadata->>'agent_run_id'=r.id::text)`), { timeout: 60_000 }).toBe('1');
     await page.reload();
     // The completed result and immutable history must remain visible after a reload.
     await expect(page.getByText(`Double independent ${suffix}`, { exact: true }).first()).toBeVisible();

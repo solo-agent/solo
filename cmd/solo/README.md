@@ -162,3 +162,19 @@ solo message send -c "I'll take this one" --target '#my-channel:abc123'
 ```bash
 solo task list -c my-channel --status todo --output json | jq '.data[] | {n: .task_number, title: .title}'
 ```
+
+## Exact file delivery and review
+
+For file-based submissions, add `--artifact solution.py --evidence-id E1` to
+`solo task submit -c <channel> -n <number> --file submission.json`. The CLI fills
+the selected evidence from the real UTF-8 file, preserves every newline and
+computes its SHA256 and `artifact_version`. The file must be nonempty, at most
+64000 bytes, and inside the current working directory. Other evidence remains in the JSON.
+Use the evidence ID required by the task. Git/code Gate submissions continue
+using their full commit version without `--artifact`.
+
+Reviewers can run `solo task evidence -c <channel> -n <number> --submission <id>
+--evidence E1 --output review.py` to export that exact immutable submission.
+The command validates an evidence digest when present, rejects URI-only content,
+and writes a new file inside the current working directory. It does not execute
+the file or decide whether the artifact meets the task requirements.

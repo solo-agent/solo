@@ -573,6 +573,8 @@ func handleTask(args []string, baseURL, token string) {
 		handleTaskCreate(args[1:], baseURL, token)
 	case "unclaim":
 		handleTaskUnclaim(args[1:], baseURL, token)
+	case "evidence":
+		handleTaskEvidence(args[1:], baseURL, token)
 	case "submit", "accept", "reject", "close", "reopen", "review", "submissions", "get", "worktree", "wait", "waits", "resolve-wait":
 		handleTaskLifecycle(args[1:], baseURL, token, args[0])
 	default:
@@ -890,7 +892,14 @@ func handleTaskLifecycle(args []string, baseURL, token, action string) {
 	fs.StringVar(&reason, "r", "", "Reason for reject")
 	fs.StringVar(&reason, "reason", "", "Reason for reject")
 	fs.StringVar(&file, "file", "", "JSON request file for versioned submit or review (- reads stdin)")
+	artifact := fs.String("artifact", "", "Submit the exact UTF-8 file as inline evidence and its SHA256 as artifact_version")
+	evidenceID := fs.String("evidence-id", "source", "Evidence ID for --artifact; preserve any ID required by the Task")
 	fs.Parse(args)
+	if *artifact != "" && (action != "submit" || file == "" || strings.TrimSpace(*evidenceID) == "") {
+		fmt.Fprintln(os.Stderr, "solo: --artifact requires task submit --file and a nonempty --evidence-id")
+		doExit(exitUsage)
+		return
+	}
 
 	if channel == "" {
 		fmt.Fprintln(os.Stderr, "solo: error: -c <channel_id> is required")
@@ -918,6 +927,15 @@ func handleTaskLifecycle(args []string, baseURL, token, action string) {
 	}
 	if file != "" {
 		reqBody = readTaskJSON(file)
+	}
+	if *artifact != "" {
+		var artifactErr error
+		reqBody, artifactErr = withTaskArtifact(reqBody, *artifact, *evidenceID)
+		if artifactErr != nil {
+			fmt.Fprintln(os.Stderr, "solo:", artifactErr)
+			doExit(exitUsage)
+			return
+		}
 	}
 	method := http.MethodPost
 	if action == "submissions" || action == "get" || action == "waits" {
@@ -1722,12 +1740,13 @@ func printUsage() {
   solo task update   -n <number> -c <channel_id> -s <status>
   solo task create   -c <channel_id> --title <title> [--description <desc>] [--priority <p0-p3>] [--parent <n>] [--assignee <agent>]
   solo task unclaim  -n <number> -c <channel_id>
-  solo task submit   -n <number> -c <channel_id> [--file <json|->]
+  solo task submit   -n <number> -c <channel_id> [--file <json|->] [--artifact <file> --evidence-id <id>]
   solo task wait     -n <number> -c <channel_id> --file <json|->
   solo task waits    -n <number> -c <channel_id>
   solo task resolve-wait -n <number> -c <channel_id> --file <json|->
   solo task get|submissions|worktree -n <number> -c <channel_id>
   solo task review   -n <number> -c <channel_id> --file <json|->
+  solo task evidence -n <number> -c <channel_id> --submission <id> --evidence <id> --output <new-file>
   solo team agreements -c <channel_id>
   solo team propose-agreement -c <channel_id> --file <json|->
   solo work list

@@ -137,7 +137,7 @@ func (s *AgentService) dispatchTaskReview(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	prompt := fmt.Sprintf("Review Task #%d, submission %s. You are the designated independent reviewer; do not claim or implement the task. Inspect its immutable handoff and evidence below. Check every requirement against the submitted artifact version. Use solo task review -n %d -c %s --file <json-file> with submission_id, artifact_version, decision (accepted/rejected/needs_human), reason, checks [{requirement_id,passed,evidence_ids,reason}], optional evidence, and a unique idempotency_key. Acceptance requires every requirement to pass with evidence. Unknown evidence, inability to reproduce, or a required human decision must not be marked passed. After recording the review, send a brief visible explanation to the task thread using solo message send.\nSubmission:\n%s", number, submissionID, number, channelID, data)
+	prompt := taskReviewPrompt(number, channelID, messageID, submissionID, data)
 	var seenSeq int64
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(max(seq),0) FROM messages WHERE channel_id=$1 AND thread_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid AND NOT is_deleted`, channelID, threadID).Scan(&seenSeq); err != nil {
 		return false, err
@@ -198,4 +198,12 @@ func (s *AgentService) dispatchTaskReview(ctx context.Context) (bool, error) {
 	}
 	go s.runStreamingAgentTask(context.Background(), daemon, req, ag, run)
 	return true, nil
+}
+
+func taskReviewPrompt(number int, channelID, messageID, submissionID string, submission []byte) string {
+	target := channelID
+	if messageID != "" {
+		target += ":" + messageID
+	}
+	return fmt.Sprintf("[target=%s msg=%s type=system]\nReview Task #%d, submission %s. This is the current review's reply target; earlier Session message targets are unrelated. You are the designated independent reviewer; do not claim or implement the task. Inspect its immutable handoff and evidence below. Check every requirement against the submitted artifact version. For inline source, use solo task evidence -n %d -c %s --submission %s --evidence <evidence-id> --output <new-local-file> to export the exact submitted bytes. The command checks any evidence SHA256; do not retype source or calculate a digest mentally. Run the exported artifact against the public specification, including exact whitespace and boundary behavior where specified. Do not invent new requirements. A rejection must include a reproducible input, the required result and the observed result; preserve already-correct behavior during rework. Use solo task review -n %d -c %s --file <json-file> with submission_id, artifact_version, decision (accepted/rejected/needs_human), reason, checks [{requirement_id,passed,evidence_ids,reason}], optional evidence, and a unique idempotency_key. Acceptance requires every requirement to pass with actual executed evidence; a claim of verification alone is insufficient. Missing or non-reproducible evidence must not be marked passed. After recording the review, send one brief visible explanation with solo message send --target '%s', then finish this turn.\nSubmission:\n%s", target, messageID, number, submissionID, number, channelID, submissionID, number, channelID, target, submission)
 }
