@@ -206,6 +206,42 @@ test('real author submits evidence; human and independent Agent accept exact sub
     await testInfo.attach('delivery-runs-state', { body: Buffer.from(sql(`SELECT json_agg(json_build_object('id',r.id,'agent_id',r.agent_id,'status',r.status,'finished_at',r.finished_at,'actual_tokens',u.actual_tokens)) FROM agent_runs r LEFT JOIN agent_run_token_usage u ON u.run_id=r.id WHERE r.agent_id IN (${agents.map(id => `'${id}'`).join(',')})`)), contentType: 'application/json' });
     await testInfo.attach('delivery-database-state', { body: Buffer.from(sql(`SELECT json_agg(json_build_object('task_id',t.id,'status',t.status,'submission_id',s.id,'artifact_version',s.artifact_version,'handoff',s.handoff,'run_id',r.id,'revision_id',r.agent_revision_id,'team_version_id',r.team_version_id,'reviews',(SELECT json_agg(json_build_object('reviewer_id',v.reviewer_id,'decision',v.decision)) FROM task_reviews v WHERE v.submission_id=s.id))) FROM tasks t JOIN task_submissions s ON s.id=t.current_submission_id JOIN agent_runs r ON r.id=s.run_id WHERE t.id IN ('${humanTask.id}','${agentTask.id}','${pinnedTask.id}')`)), contentType: 'application/json' });
     await api('post', `/api/v1/channels/${channel.id}/team-versions`, { version_id: 'live', reason: 'Release test pin after verification' });
+
+    // Deliberately omit the first visible reply to exercise the real recovery
+    // path after a successful submission, with an unrelated greeting in history.
+    const recoveryAgent = await api<{ id: string }>('post', `/api/v1/channels/${channel.id}/agents`, {
+      name: `Recovery${suffix}`, computer_id: computer.id, model_provider: original.model_provider, model_name: original.model_name, custom_args: original.custom_args ?? [],
+      system_prompt: 'On introduction send REMINDER_READY with solo message send and stop. On the assigned recovery Task, create recovery.txt containing RECOVERY_ARTIFACT, get the current Task version, and submit exactly once with solo task submit --file plus --artifact recovery.txt --evidence-id source. Include a complete handoff with summary RECOVERY_ARTIFACT and a unique idempotency key. This is an explicit recovery exercise: on this first Task turn, intentionally omit all solo message send calls and return only FIRST_TURN_ONLY after submission. When the current incoming system reminder says the previous turn lacked a visible message, send exactly RECOVERED_DELIVERY using the explicit target in that CURRENT reminder and stop. If that reminder lacks an explicit target, return MISSING_REPLY_TARGET without guessing. Never reuse the introduction target or resubmit an existing delivery.',
+    });
+    agents.push(recoveryAgent.id);
+    await expect.poll(() => sql(`SELECT count(*) FROM agent_runs WHERE agent_id='${recoveryAgent.id}' AND status='completed'`), { timeout: runtimeTimeout }).toBe('1');
+    const recoveryTask = await api<{ id: string; message_id: string }>('post', `/api/v1/channels/${channel.id}/tasks`, {
+      title: `Reminder recovery ${suffix}`, assignee: recoveryAgent.id,
+      contract: { requirements: [{ id: 'R1', text: 'Deliver recovery.txt containing RECOVERY_ARTIFACT. After the automatic reminder, the result must be visible in this Task thread.' }], gate: { kind: 'human', reviewer_id: userId, max_revisions: 3 } },
+    });
+    await expect.poll(() => sql(`SELECT status FROM tasks WHERE id='${recoveryTask.id}'`), { timeout: runtimeTimeout }).toBe('in_review');
+    const recoveryRun = sql(`SELECT run_id FROM agent_run_task_links WHERE task_id='${recoveryTask.id}' AND role='primary'`);
+    await expect.poll(() => sql(`SELECT count(*) FROM agent_run_events WHERE run_id='${recoveryRun}' AND type='result_reminder'`), { timeout: 60_000 }).toBe('1');
+    await expect.poll(() => sql(`SELECT status FROM agent_runs WHERE id='${recoveryRun}'`), { timeout: 60_000 }).toBe('completed');
+    expect(sql(`SELECT count(*) FROM task_submissions WHERE task_id='${recoveryTask.id}'`)).toBe('1');
+    const recoveryState = JSON.parse(sql(`SELECT json_build_object('run_id',r.id,'status',r.status,'actual_tokens',u.actual_tokens,'submission_id',s.id,'artifact_version',s.artifact_version,'source',(SELECT e->>'content' FROM jsonb_array_elements(s.evidence) e WHERE e->>'id'='source'),'reply_id',(SELECT m.id FROM messages m JOIN threads th ON th.id=m.thread_id WHERE th.root_message_id=t.message_id AND m.sender_id=r.agent_id AND m.metadata->>'agent_run_id'=r.id::text AND m.content='RECOVERED_DELIVERY')) FROM tasks t JOIN task_submissions s ON s.id=t.current_submission_id JOIN agent_runs r ON r.id=s.run_id JOIN agent_run_token_usage u ON u.run_id=r.id WHERE t.id='${recoveryTask.id}'`));
+    const recoverySource = readFileSync(join(homedir(), '.solo', 'agents', recoveryAgent.id, 'workspace', 'recovery.txt'), 'utf8');
+    expect(recoveryState.source).toBe(recoverySource);
+    expect(recoverySource).toContain('RECOVERY_ARTIFACT');
+    expect(recoveryState.artifact_version).toBe(createHash('sha256').update(recoverySource).digest('hex'));
+    expect(recoveryState.actual_tokens).toBeGreaterThan(0);
+    expect(recoveryState.reply_id).toBeTruthy();
+    await page.goto(`/dashboard?channel=${channel.id}&thread=${recoveryTask.message_id}`);
+    await expect(page.locator('[data-thread-panel]').getByText('RECOVERED_DELIVERY', { exact: true })).toBeVisible();
+    await testInfo.attach('recovered-task-thread', { body: await page.screenshot(), contentType: 'image/png' });
+    await page.goto(`/dashboard?channel=${channel.id}&view=task`);
+    await page.locator(`[data-task-id="${recoveryTask.id}"]`).getByRole('button', { name: '查看成果', exact: true }).click();
+    await page.getByRole('dialog').getByLabel('确认此项通过').check();
+    await page.getByRole('dialog').getByLabel('R1 检查依据').fill('实际文件与提交一致；首次遗漏消息后，系统已在原 Task 线程补发结果，同一 Run 正常完成。');
+    await page.getByRole('dialog').getByLabel('审核结论与原因').fill('源码、SHA、补发消息与实际用量均已核对。');
+    await page.getByRole('dialog').getByRole('button', { name: '通过验收', exact: true }).click();
+    await expect.poll(() => sql(`SELECT status FROM tasks WHERE id='${recoveryTask.id}'`)).toBe('done');
+    await testInfo.attach('recovered-delivery-state', { body: Buffer.from(JSON.stringify({ ...recoveryState, task_id: recoveryTask.id, task_status: sql(`SELECT status FROM tasks WHERE id='${recoveryTask.id}'`) }, null, 2)), contentType: 'application/json' });
   } finally {
     for (const id of agents.reverse()) await api('delete', `/api/v1/agents/${id}`).catch(() => undefined);
     for (const id of evaluationChannels) await api('delete', `/api/v1/channels/${id}`).catch(() => undefined);

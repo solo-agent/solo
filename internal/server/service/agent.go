@@ -64,7 +64,7 @@ const (
 	agentFailureProviderTransient     = "provider_transient"
 	agentFailureConfiguration         = "configuration"
 	agentFailureContextExhausted      = "context_exhausted"
-	agentResultReminderPrompt         = "Your previous turn ended without a user-visible message. Re-check the original goal and the latest conversation state. If the goal already has a visible result, you may stop. Otherwise, send the result the user still needs with `solo message send` to the original target. Do not repeat unrelated content."
+	agentResultReminderPrompt         = "Your previous turn ended without a visible message in this Run's required conversation. Reuse the work already completed; do not repeat implementation or resubmit an existing delivery. Send a brief actual result to the exact target below, then finish this turn. For a Task already in_review, report the submitted result and that its designated reviewer handles the next step. A message in another channel or thread does not satisfy this reply."
 	contextRolloverCapability         = "context_rollover_v1"
 	continuityMessagePrefix           = "# Session Continuity"
 	continuityPacketLimit             = 2000
@@ -972,15 +972,18 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 			}
 			if visibleErr == nil && heldErr == nil && !visible && !held && !taskReq.ResultReminderAttempt {
 				recordContext()
-				updated, updateErr := runSvc.UpdateStatus(ctx, UpdateRunStatusInput{
-					RunID: run.ID, Status: AgentRunStatusQueued, ActivityText: agentActivityResultReminder,
-				})
+				reminder, updateErr := s.resultReminderMessage(ctx, run)
+				var updated *AgentRun
+				if updateErr == nil {
+					updated, updateErr = runSvc.UpdateStatus(ctx, UpdateRunStatusInput{
+						RunID: run.ID, Status: AgentRunStatusQueued, ActivityText: agentActivityResultReminder,
+					})
+				}
 				if updateErr == nil {
 					run = updated
 					s.appendAndBroadcastRunEvent(ctx, runSvc, run, ag.ID, agentName, AgentRunEventResultReminder, "retrying once for a visible result", "", map[string]any{"attempt": 1})
 					s.broadcastAgentRun(taskReq.ChannelID, "agent.run.updated", runPayload(run, ag.ID, agentName, taskReq.OriginTaskID))
 
-					reminder := agent.Message{Role: agent.RoleUser, Content: agentResultReminderPrompt, SenderID: "system"}
 					reminderReq := taskReq
 					reminderReq.TaskID = uuid.NewString()
 					reminderReq.Messages = []agent.Message{reminder}

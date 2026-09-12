@@ -19,6 +19,10 @@
 
 ## 验收顺序与成功条件
 
+### 第二轮补发结果的恢复设计
+
+首轮定向 CSV 单成员试验 `bc3398e8-d196-46dc-86dc-6a5a9bc6599c` 的代码 4/4 通过、证据和成果落库，但 Run 因 `missing_visible_result` 失败。真实轨迹显示首次只提交未发消息；公共 `result_reminder` 丢失当前 target，补发到了频道。修复位于前端状态所依赖的公共 Run 恢复路径：从当前 Run 的 channel/thread/Thinking 归属和 PostgreSQL Thread 根消息生成明确地址，再交给原 Daemon/Runtime 执行。保留原 Run、一次提醒上限、用量累计、持久化与 `HasVisibleMessage` 校验；无法解析目标则保留失败，不猜地址。频道、DM、线程及 Thinking 共用该路径，Thinking 身份继续由原运行凭据绑定。无 API、数据库或前端迁移。真实 PostgreSQL 检查目标归属，另用真实 Agent 故意在首次提交后省略消息，验证补发在原线程可见、Run 正常结束且用量完整。
+
 1. 保存可复现的旧线程、文件换行/哈希、审核误判和启动超时证据；编写会在原行为失败的最小检查。
 2. 真实文件和 PostgreSQL 检查；针对失败类别跑真实前端/API/数据库/本地 Runtime 小批次。新失败改变下一步修复，不用重复抽取最好结果。
 3. 明确相对路径题的连续斜杠要求，保持原 oracle 不变并建立新数据版本。旧结果与歧义说明保留，不能在原实验中改题。

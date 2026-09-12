@@ -9,6 +9,24 @@ import (
 	"github.com/solo-ai/solo/pkg/agent"
 )
 
+func (s *AgentService) resultReminderMessage(ctx context.Context, run *AgentRun) (agent.Message, error) {
+	if run.ChannelID == "" {
+		return agent.Message{}, fmt.Errorf("visible-result reminder has no Run channel")
+	}
+	target, rootMessageID := run.ChannelID, ""
+	if run.ThreadID != "" {
+		if err := s.pool.QueryRow(ctx, `SELECT root_message_id::text FROM threads WHERE id=$1 AND channel_id=$2`, run.ThreadID, run.ChannelID).Scan(&rootMessageID); err != nil {
+			return agent.Message{}, fmt.Errorf("resolve visible-result reminder thread: %w", err)
+		}
+		target += ":" + rootMessageID
+	}
+	content := fmt.Sprintf("[target=%s msg=%s type=system]\n%s\nUse solo message send --target '%s' with the result as its message body. This is the current Run's target; ignore earlier introduction or Session targets.", target, rootMessageID, agentResultReminderPrompt, target)
+	if run.ThinkingNodeID != "" {
+		content += fmt.Sprintf("\nRemain in the current Thinking node %s; its identity is already bound by the Runtime.", run.ThinkingNodeID)
+	}
+	return agent.Message{Role: agent.RoleUser, Content: content, SenderID: "system"}, nil
+}
+
 // resolveMentionedNames resolves agent IDs to their display names.
 func (s *AgentService) resolveMentionedNames(ctx context.Context, agentIDs []string) []string {
 	if len(agentIDs) == 0 {
