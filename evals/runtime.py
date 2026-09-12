@@ -28,6 +28,31 @@ def response_metadata(entries, started_at, finished_at):
             'first_recorded_response_seconds': (first_response - start).total_seconds() if first_response else None}
 
 
+def codex_metadata(entries, started_at, finished_at):
+    start, finish = (datetime.fromisoformat(value.replace('Z', '+00:00')) for value in [started_at, finished_at])
+    models, efforts, block_types = set(), set(), set()
+    first_response = None
+    for entry in entries:
+        if not entry.get('timestamp'):
+            continue
+        timestamp = datetime.fromisoformat(entry['timestamp'].replace('Z', '+00:00'))
+        if not start <= timestamp <= finish:
+            continue
+        payload = entry.get('payload', {})
+        if entry.get('type') == 'turn_context':
+            if payload.get('model'):
+                models.add(payload['model'])
+            if payload.get('effort'):
+                efforts.add(payload['effort'])
+        kind = payload.get('type')
+        if entry.get('type') == 'response_item' and (kind in {'reasoning', 'function_call', 'custom_tool_call'} or (kind == 'message' and payload.get('role') == 'assistant')):
+            block_types.add(kind)
+            first_response = min(first_response, timestamp) if first_response else timestamp
+    return {'response_models': [], 'runtime_models': sorted(models), 'runtime_efforts': sorted(efforts),
+            'response_block_types': sorted(block_types),
+            'first_recorded_response_seconds': (first_response - start).total_seconds() if first_response else None}
+
+
 def collect_runtime(report):
     ids = sorted({str(UUID(r['id'])) for t in report['trials'] for r in t.get('runs', [])})
     records = {}
@@ -42,30 +67,38 @@ def collect_runtime(report):
         row = records.get(ident, {})
         result = {'run_id': ident, 'response_models': [], 'status': 'unverified'}
         runs.append(result)
-        if row.get('source') != 'claude':
-            result['reason'] = 'Response-model attribution is currently supported only for Claude Code transcripts'
+        if row.get('source') not in {'claude', 'codex'}:
+            result['reason'] = 'Runtime attribution is supported only for Claude Code and Codex transcripts'
             continue
         if not row.get('transcript_path') or not row.get('started_at') or not row.get('finished_at'):
             result['reason'] = 'Missing transcript path or completed Run time range'
             continue
         try:
             path = Path(row['transcript_path']).resolve()
-            if not path.is_relative_to((Path.home() / '.claude/projects').resolve()):
-                raise ValueError('Transcript is outside the local Claude projects directory')
+            codex_home = Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex')
+            roots = [Path.home() / '.claude/projects'] if row['source'] == 'claude' else [codex_home / 'sessions', codex_home / 'archived_sessions']
+            if not any(path.is_relative_to(root.resolve()) for root in roots):
+                raise ValueError('Transcript is outside the local provider session directories')
             if path not in cache:
                 raw = path.read_bytes()
                 cache[path] = (hashlib.sha256(raw).hexdigest(), [json.loads(line) for line in raw.splitlines() if line.strip()])
             sha, entries = cache[path]
-            metadata = response_metadata(entries, row['started_at'], row['finished_at'])
+            parse = response_metadata if row['source'] == 'claude' else codex_metadata
+            metadata = parse(entries, row['started_at'], row['finished_at'])
             result.update(**metadata, transcript_sha256=sha, started_at=row['started_at'], finished_at=row['finished_at'])
             result.update(status='observed' if metadata['response_models'] else 'unverified', reason=None if metadata['response_models'] else 'No provider response model in this Run time range')
+            if metadata.get('runtime_models'):
+                result.update(status='context_observed', reason='Codex turn_context records runtime configuration, not a provider response model')
         except (OSError, ValueError, TypeError, AttributeError) as error:
             result['reason'] = type(error).__name__ + ': unable to verify local transcript metadata'
-    return {'scope': 'Read-only response identifiers and block types, not verified immutable weights or effective effort. No thinking content is exported. First recorded response time is not streaming time-to-first-token. Requested thinking overrides are recorded separately and do not prove provider behavior.',
+    return {'scope': 'Read-only response identifiers and block types. Codex runtime_models/runtime_efforts are turn_context configuration, not provider response identifiers or verified weights. No thinking content is exported. First recorded response time is not streaming time-to-first-token. Requested overrides do not prove provider behavior.',
             'requested_provider': report.get('provider'), 'requested_model': report.get('model'),
             'requested_thinking': report.get('requested_thinking'),
             'response_models': sorted({model for run in runs for model in run['response_models']}),
-            'observed_thinking_runs': sum(bool({'thinking', 'redacted_thinking'} & set(run.get('response_block_types', []))) for run in runs),
+            'runtime_models': sorted({model for run in runs for model in run.get('runtime_models', [])}),
+            'runtime_efforts': sorted({effort for run in runs for effort in run.get('runtime_efforts', [])}),
+            'context_observed_runs': sum(run['status'] == 'context_observed' for run in runs),
+            'observed_thinking_runs': sum(bool({'thinking', 'redacted_thinking', 'reasoning'} & set(run.get('response_block_types', []))) for run in runs),
             'observed_runs': sum(run['status'] == 'observed' for run in runs), 'total_runs': len(ids), 'runs': runs}
 
 

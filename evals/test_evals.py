@@ -65,6 +65,23 @@ class Graders(unittest.TestCase):
 
 
 class Decisions(unittest.TestCase):
+    def test_codex_metadata_distinguishes_context_from_response_and_bounds_runs(self):
+        from runtime import codex_metadata
+        entries = [
+            {'timestamp': '2026-09-12T01:00:00Z', 'type': 'turn_context', 'payload': {'model': 'old', 'effort': 'high'}},
+            {'timestamp': '2026-09-12T01:02:00Z', 'type': 'turn_context', 'payload': {'model': 'gpt-6-astra', 'effort': 'low'}},
+            {'timestamp': '2026-09-12T01:02:00Z', 'type': 'response_item', 'payload': {'type': 'message', 'role': 'user', 'content': 'must not be exported'}},
+            {'timestamp': '2026-09-12T01:02:01Z', 'type': 'response_item', 'payload': {'type': 'reasoning', 'content': 'must not be exported'}},
+            {'timestamp': '2026-09-12T01:02:02Z', 'type': 'response_item', 'payload': {'type': 'function_call', 'arguments': 'must not be exported'}},
+            {'timestamp': '2026-09-12T01:02:03Z', 'type': 'response_item', 'payload': {'type': 'function_call_output', 'output': 'must not be exported'}},
+            {'timestamp': '2026-09-12T01:02:04Z', 'type': 'response_item', 'payload': {'type': 'message', 'role': 'assistant', 'content': 'must not be exported'}},
+            {'timestamp': '2026-09-12T01:04:00Z', 'type': 'turn_context', 'payload': {'model': 'next', 'effort': 'high'}},
+        ]
+        self.assertEqual(codex_metadata(entries, '2026-09-12T01:01:00Z', '2026-09-12T09:03:00+08:00'), {
+            'response_models': [], 'runtime_models': ['gpt-6-astra'], 'runtime_efforts': ['low'],
+            'response_block_types': ['function_call', 'message', 'reasoning'], 'first_recorded_response_seconds': 61})
+        self.assertEqual(codex_metadata(entries[:1], '2026-09-12T01:01:00Z', '2026-09-12T01:03:00Z')['runtime_models'], [])
+
     def test_submit_rejects_nonlocal_or_nonregular_handoff_before_runtime(self):
         import os
         import tempfile

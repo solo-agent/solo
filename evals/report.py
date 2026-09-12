@@ -85,9 +85,11 @@ def render(report, output):
     models=', '.join(runtime.get('response_models',[])) or '未核实'
     thinking={'disabled':'请求关闭（兼容性试验）','unchanged':'保持现有设置'}.get(report.get('requested_thinking'),'未记录')
     runtime_link=' · <a href="runtime.json">型号归因证据</a>' if (output/'runtime.json').exists() else ''
+    runtime_context='<p>Codex 运行时上下文（不等同于服务端响应型号）：'+h(', '.join(runtime.get('runtime_models', [])))+' · 推理档位：'+h(', '.join(runtime.get('runtime_efforts', [])))+' · 已核对 Runs：'+h(runtime.get('context_observed_runs', 0))+'/'+h(runtime.get('total_runs', 0))+'</p>' if runtime.get('runtime_models') else ''
     page=f'''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Solo 自动评测报告</title>
 <style>body{{font:15px/1.6 system-ui,sans-serif;margin:40px auto;padding:0 24px;max-width:1300px;color:#222;background:#faf9f6}}h1{{font-size:28px}}table{{border-collapse:collapse;width:100%;background:white;margin:20px 0}}th,td{{padding:10px;text-align:left;border-bottom:1px solid #deddd8;vertical-align:top}}th{{background:#eeede8;white-space:nowrap}}a{{color:#275d68}}.fail td:nth-child(4){{color:#a03523}}.pass td:nth-child(4){{color:#28603a}}pre{{white-space:pre-wrap;overflow-wrap:anywhere}}.scroll{{overflow:auto}}select{{font:inherit;padding:6px}}small{{color:#666}}</style>
 <h1>Solo 自动评测报告</h1><p>状态：<b>{h(report['status'])}</b> · Runtime：{h(report.get('provider'))} · 请求型号：{h(report.get('model'))} · {len(report['trials'])}/{report.get('planned_trials')} 次</p>
+{runtime_context}
 <p>响应型号：{h(models)} · 已核实 Run：{h(runtime.get('observed_runs','未知'))}/{h(runtime.get('total_runs','未知'))}{runtime_link}。响应标识不证明供应商内部权重固定；实际思考强度未核实。</p>
 <p>思考输出设置：{h(thinking)} · 观测到思考响应的 Run：{h(runtime.get('observed_thinking_runs','未知'))}。请求设置不代表供应商已生效；未核实 Run 不计为关闭成功。</p>
 <p>真实 Solo Task → 本地 Agent → 实际文件 → 独立容器判卷 → PostgreSQL 与前端成果核对。失败和缺失数据保留。</p>
