@@ -822,7 +822,7 @@ test('Thinking mode uses real local Agent sessions end to end', async ({ page, r
   }
 });
 
-test('Thinking idle runtime sleeps and resumes the real provider session', async ({ page, request }) => {
+test('Thinking idle runtime sleeps and resumes the real provider session', async ({ page, request }, testInfo) => {
   test.skip(process.env.SOLO_E2E_EXPECT_IDLE_REAPER !== '1', 'requires a short-TTL daemon started through make rebuild');
   test.setTimeout(process.env.SOLO_E2E_PROVIDER === 'codex' ? 900000 : 600000);
 
@@ -913,6 +913,17 @@ test('Thinking idle runtime sleeps and resumes the real provider session', async
          AND content IN ('${firstAck}', '${resumedAck}')
     `);
     expect(resumedState.message_count).toBe(2);
+    // A visible reply does not mean the provider has finished reporting usage.
+    await expect.poll(() => databaseJSON<boolean>(`
+      SELECT to_json(count(*) > 0 AND bool_and(r.status='completed' AND r.finished_at IS NOT NULL AND u.actual_tokens IS NOT NULL))
+      FROM agent_runs r LEFT JOIN agent_run_token_usage u ON u.run_id=r.id
+      WHERE r.agent_id='${runtimeAgent!.id}'
+    `), { timeout: runtimeTimeout }).toBe(true);
+    await testInfo.attach('thinking-idle-runs-state', { body: Buffer.from(JSON.stringify(databaseJSON(`
+      SELECT json_agg(json_build_object('id',r.id,'agent_id',r.agent_id,'status',r.status,'finished_at',r.finished_at,'actual_tokens',u.actual_tokens))
+      FROM agent_runs r LEFT JOIN agent_run_token_usage u ON u.run_id=r.id WHERE r.agent_id='${runtimeAgent.id}'
+    `))), contentType: 'application/json' });
+    await testInfo.attach('thinking-idle-resumed', { body: await page.screenshot(), contentType: 'image/png' });
   } finally {
     await page.close();
     if (channel) await api(request, auth, 'delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);
