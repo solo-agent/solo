@@ -1695,22 +1695,22 @@ func parseCodexSessionFileForWindow(path string, startedAt, finishedAt time.Time
 			if !startedAt.IsZero() && evt.Timestamp.IsZero() {
 				continue
 			}
-			inWindow := (startedAt.IsZero() || evt.Timestamp.IsZero() || !evt.Timestamp.Before(startedAt.Add(-time.Second))) &&
+			inWindow := (startedAt.IsZero() || evt.Timestamp.IsZero() || !evt.Timestamp.Before(startedAt)) &&
 				(finishedAt.IsZero() || evt.Timestamp.IsZero() || !evt.Timestamp.After(finishedAt))
 			if !inWindow {
-				if !startedAt.IsZero() && !evt.Timestamp.IsZero() && evt.Timestamp.Before(startedAt.Add(-time.Second)) && evt.Payload.Info.TotalTokenUsage != nil {
+				if !startedAt.IsZero() && !evt.Timestamp.IsZero() && evt.Timestamp.Before(startedAt) && evt.Payload.Info.TotalTokenUsage != nil {
 					u := codexTokenUsage(evt.Payload.Info.TotalTokenUsage)
 					totalBefore = &u
 				}
 				continue
 			}
-			usage := evt.Payload.Info.LastTokenUsage
+			usage := evt.Payload.Info.TotalTokenUsage
 			if usage == nil {
-				usage = evt.Payload.Info.TotalTokenUsage
+				usage = evt.Payload.Info.LastTokenUsage
 			}
 			if usage != nil {
 				result.usage = codexTokenUsage(usage)
-				if evt.Payload.Info.LastTokenUsage == nil && evt.Payload.Info.TotalTokenUsage != nil {
+				if evt.Payload.Info.TotalTokenUsage != nil {
 					u := result.usage
 					totalInWindow = &u
 				}
@@ -1739,7 +1739,8 @@ func codexTokenUsage(raw *codexRawTokenUsage) TokenUsage {
 	if cachedTokens == 0 {
 		cachedTokens = raw.CacheReadInputTokens
 	}
-	return TokenUsage{InputTokens: raw.InputTokens, OutputTokens: raw.OutputTokens + raw.ReasoningOutputTokens, CacheReadTokens: cachedTokens}
+	// Codex input/output totals already include cached input/reasoning output.
+	return TokenUsage{InputTokens: max(0, raw.InputTokens-cachedTokens), OutputTokens: raw.OutputTokens, CacheReadTokens: cachedTokens}
 }
 
 func subtractTokenUsage(current, previous TokenUsage) TokenUsage {
