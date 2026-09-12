@@ -85,7 +85,7 @@ test('joint owners authorize existing Agents; real work consumes seven correctio
   await expect.poll(() => sql(`SELECT count(*) FROM agent_work_marks WHERE agent_id='${a.id}' AND status='open'`), { timeout: runtimeTimeout }).toBe('1');
   const runID = sql(`SELECT r.id::text FROM agent_runs r JOIN agent_run_task_links link ON link.run_id=r.id WHERE link.task_id='${workTask.id}' AND r.finished_at IS NULL ORDER BY r.started_at DESC LIMIT 1`);
   const taskThread = sql(`SELECT id::text FROM threads WHERE root_message_id='${workTask.message_id}'`);
-  for (let i = 1; i <= 7; i++) await api(owner, 'post', `/api/v1/channels/${channel.id}/messages`, { content: `CORRECTION_${i}: use green and include this label in the final response.`, thread_id: taskThread, client_msg_id: crypto.randomUUID() }, workspace.id);
+  for (let i = 1; i <= 7; i++) await api(owner, 'post', `/api/v1/channels/${channel.id}/messages`, { content: `CORRECTION_${i}: include the literal ASCII word "green" (not a color emoji) and this label in the final response.`, thread_id: taskThread, client_msg_id: crypto.randomUUID() }, workspace.id);
   expect(sql(`SELECT count(*) FROM messages WHERE thread_id='${taskThread}' AND metadata->>'correction_of_run_id'='${runID}'`)).toBe('7');
   const second = await api<{ id: string }>(owner, 'post', `/api/v1/channels/${home.id}/messages`, { content: `@${a.name} SECOND_REQUEST: acknowledge this independent request by sending exactly SECOND_DONE in this channel.`, client_msg_id: crypto.randomUUID() });
   await expect.poll(() => sql(`SELECT count(*) FROM agent_pending_message_wakes WHERE agent_id='${a.id}' AND channel_id='${home.id}'`)).toBe('1');
