@@ -92,18 +92,25 @@ class Decisions(unittest.TestCase):
                 self.assertIn('channel number filename', result.stdout + result.stderr)
                 self.assertNotIn('Traceback', result.stderr)
 
-    def test_runtime_models_use_only_actual_responses_in_the_current_run(self):
-        from runtime import response_models
+    def test_runtime_metadata_uses_only_actual_responses_without_exporting_thinking(self):
+        from runtime import response_metadata
         entries = json.loads('''[
-          {"type":"assistant","timestamp":"2026-09-12T01:00:00Z","message":{"model":"old-session-model"}},
+          {"type":"assistant","timestamp":"2026-09-12T01:00:00Z","message":{"model":"old-session-model","content":[{"type":"image"}]}},
           {"type":"user","timestamp":"2026-09-12T01:02:00Z","message":{"model":"sonnet"}},
-          {"type":"assistant","timestamp":"2026-09-12T01:02:00Z","message":{"model":"MiniMax-M3"}},
-          {"type":"assistant","timestamp":"2026-09-12T01:02:01Z","message":{"model":"MiniMax-M3"}},
-          {"type":"assistant","timestamp":"2026-09-12T01:02:02Z","message":{"model":"<synthetic>"}},
+          {"type":"assistant","timestamp":"2026-09-12T01:02:00Z","message":{"model":"MiniMax-M3","content":[{"type":"thinking","thinking":"must not be exported"}]}},
+          {"type":"assistant","timestamp":"2026-09-12T01:02:01Z","message":{"model":"MiniMax-M3","content":[{"type":"text","text":"public answer"},{"type":"tool_use","input":{}}]}},
+          {"type":"assistant","timestamp":"2026-09-12T01:02:02Z","message":{"model":"<synthetic>","content":[{"type":"image"}]}},
           {"type":"assistant","timestamp":"2026-09-12T01:04:00Z","message":{"model":"next-run-model"}}
         ]''')
-        self.assertEqual(response_models(entries, '2026-09-12T01:01:00+00:00', '2026-09-12T09:03:00+08:00'), ['MiniMax-M3'])
-        self.assertEqual(response_models(entries[:2], '2026-09-12T01:01:00Z', '2026-09-12T01:03:00Z'), [])
+        self.assertEqual(response_metadata(entries, '2026-09-12T01:01:00+00:00', '2026-09-12T09:03:00+08:00'), {'response_models':['MiniMax-M3'], 'response_block_types':['text','thinking','tool_use'], 'first_recorded_response_seconds':60})
+        self.assertEqual(response_metadata(entries[:2], '2026-09-12T01:01:00Z', '2026-09-12T01:03:00Z'), {'response_models':[], 'response_block_types':[], 'first_recorded_response_seconds':None})
+        self.assertEqual(response_metadata(entries[3:4], '2026-09-12T01:01:00Z', '2026-09-12T01:03:00Z')['response_block_types'], ['text','tool_use'])
+
+    def test_thinking_experiment_rejects_unsupported_runtime_before_starting_services(self):
+        script = Path(__file__).with_name('run.py')
+        result = subprocess.run([sys.executable, str(script), '--disable-thinking', '--provider', 'codex'], capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('--disable-thinking requires the Claude Runtime', result.stderr)
 
     def test_paired_adoption_and_failure_gates(self):
         from report import compare

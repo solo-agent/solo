@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read actual response-model metadata without changing trial scores or settings."""
+"""Read actual response metadata without changing trial scores or settings."""
 import argparse
 from datetime import datetime
 import hashlib
@@ -10,9 +10,11 @@ import subprocess
 from uuid import UUID
 
 
-def response_models(entries, started_at, finished_at):
+def response_metadata(entries, started_at, finished_at):
     start, finish = (datetime.fromisoformat(value.replace('Z', '+00:00')) for value in [started_at, finished_at])
     models = set()
+    block_types = set()
+    first_response = None
     for entry in entries:
         if entry.get('type') != 'assistant' or not entry.get('timestamp'):
             continue
@@ -20,7 +22,10 @@ def response_models(entries, started_at, finished_at):
         model = entry.get('message', {}).get('model')
         if start <= timestamp <= finish and model and not model.startswith('<'):
             models.add(model)
-    return sorted(models)
+            first_response = min(first_response, timestamp) if first_response else timestamp
+            block_types.update(block['type'] for block in entry.get('message', {}).get('content', []) if isinstance(block, dict) and isinstance(block.get('type'), str))
+    return {'response_models': sorted(models), 'response_block_types': sorted(block_types),
+            'first_recorded_response_seconds': (first_response - start).total_seconds() if first_response else None}
 
 
 def collect_runtime(report):
@@ -51,14 +56,16 @@ def collect_runtime(report):
                 raw = path.read_bytes()
                 cache[path] = (hashlib.sha256(raw).hexdigest(), [json.loads(line) for line in raw.splitlines() if line.strip()])
             sha, entries = cache[path]
-            models = response_models(entries, row['started_at'], row['finished_at'])
-            result.update(response_models=models, transcript_sha256=sha, started_at=row['started_at'], finished_at=row['finished_at'])
-            result.update(status='observed' if models else 'unverified', reason=None if models else 'No provider response model in this Run time range')
+            metadata = response_metadata(entries, row['started_at'], row['finished_at'])
+            result.update(**metadata, transcript_sha256=sha, started_at=row['started_at'], finished_at=row['finished_at'])
+            result.update(status='observed' if metadata['response_models'] else 'unverified', reason=None if metadata['response_models'] else 'No provider response model in this Run time range')
         except (OSError, ValueError, TypeError, AttributeError) as error:
             result['reason'] = type(error).__name__ + ': unable to verify local transcript metadata'
-    return {'scope': 'Provider-reported response identifiers, not verified immutable weights; effective upstream effort is unknown. Scores and model settings are unchanged.',
+    return {'scope': 'Read-only response identifiers and block types, not verified immutable weights or effective effort. No thinking content is exported. First recorded response time is not streaming time-to-first-token. Requested thinking overrides are recorded separately and do not prove provider behavior.',
             'requested_provider': report.get('provider'), 'requested_model': report.get('model'),
+            'requested_thinking': report.get('requested_thinking'),
             'response_models': sorted({model for run in runs for model in run['response_models']}),
+            'observed_thinking_runs': sum(bool({'thinking', 'redacted_thinking'} & set(run.get('response_block_types', []))) for run in runs),
             'observed_runs': sum(run['status'] == 'observed' for run in runs), 'total_runs': len(ids), 'runs': runs}
 
 

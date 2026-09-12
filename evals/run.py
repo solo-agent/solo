@@ -23,11 +23,13 @@ def main():
     p.add_argument('--repetitions',type=int,default=3)
     p.add_argument('--model',default='sonnet')
     p.add_argument('--provider',choices=['claude','codex'],default='claude')
+    p.add_argument('--disable-thinking',action='store_true',help='Claude compatibility experiment: set MAX_THINKING_TOKENS=0 only on evaluation Agents; default leaves their settings unchanged')
     p.add_argument('--candidate',type=Path)
     p.add_argument('--generate-from',type=Path,help='Generate a reusable method through a real Solo Task using only this development report')
     p.add_argument('--output',type=Path)
     p.add_argument('--timeout',type=int,default=360)
     args=p.parse_args()
+    if args.disable_thinking and args.provider!='claude': p.error('--disable-thinking requires the Claude Runtime')
     if not 1<=args.repetitions<=20: p.error('repetitions must be 1..20')
     if not 10<=args.timeout<=1800: p.error('timeout must be 10..1800 seconds')
     strategies=args.strategies.split(',')
@@ -59,6 +61,7 @@ def main():
     env=os.environ.copy()
     env.update(CI='1',SOLO_EVAL_DATASET=str(dataset),SOLO_EVAL_OUTPUT=str(output),SOLO_EVAL_STRATEGIES=args.strategies,
                SOLO_EVAL_REPETITIONS=str(args.repetitions),SOLO_E2E_PROVIDER=args.provider,SOLO_E2E_MODEL=args.model,
+               SOLO_EVAL_DISABLE_THINKING='1' if args.disable_thinking else '0',
                SOLO_EVAL_TRIAL_TIMEOUT=str(args.timeout*1000),SOLO_EVAL_IMAGE='python:3.12-alpine@sha256:b64631e04e4920160c50fbe8d8df828f7f35f06f425cb44aa09bca53e708a35a')
     for key in ['SOLO_EVAL_CASES','SOLO_EVAL_SPLIT','SOLO_EVAL_CANDIDATE']:
         env.pop(key,None)

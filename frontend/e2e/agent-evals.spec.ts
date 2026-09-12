@@ -45,6 +45,11 @@ test('real Solo Agent evaluation with independent executable grading', async ({ 
   if (strategies.includes('evolved')) expect(candidate.trim().length).toBeGreaterThan(0);
   const provider = process.env.SOLO_E2E_PROVIDER ?? 'claude';
   const model = process.env.SOLO_E2E_MODEL ?? 'sonnet';
+  const thinkingFlag = process.env.SOLO_EVAL_DISABLE_THINKING ?? '0';
+  expect(['0', '1']).toContain(thinkingFlag);
+  const disableThinking = thinkingFlag === '1';
+  if (disableThinking) expect(provider).toBe('claude');
+  const agentCustomEnv: Record<string, string> = disableThinking ? { MAX_THINKING_TOKENS: '0' } : {};
   const deadlineMs = Number(process.env.SOLO_EVAL_TRIAL_TIMEOUT ?? '360000');
   const tokenLimit = Number(process.env.SOLO_EVAL_TOKEN_LIMIT ?? '3000000');
   const trials: Trial[] = [];
@@ -52,6 +57,7 @@ test('real Solo Agent evaluation with independent executable grading', async ({ 
     dataset_sha256: digest(readFileSync(dataset, 'utf8')), grader_sha256: digest(readFileSync(join(root, 'evals/grade.py'), 'utf8')),
     product_commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), image: process.env.SOLO_EVAL_IMAGE, runner_sha256: digest(readFileSync(__filename, 'utf8')), worker_sha256: digest(workerPrompt), reviewer_sha256: digest(reviewerPrompt), candidate_sha256: candidate ? digest(candidate) : null,
     provider, model, repetitions, strategies, cases: cases.map(c => c.id), planned_trials: cases.length * strategies.length * repetitions,
+    requested_thinking: disableThinking ? 'disabled' : 'unchanged', agent_custom_env: agentCustomEnv,
     trial_timeout_ms: deadlineMs, token_qualification_limit: tokenLimit, human_interventions: 0,
     human_minutes: null, trials, cleanup_errors: [] as string[] };
   const save = () => { writeFileSync(join(output, 'report.json.tmp'), JSON.stringify(report, null, 2)); renameSync(join(output, 'report.json.tmp'), join(output, 'report.json')); };
@@ -95,8 +101,9 @@ test('real Solo Agent evaluation with independent executable grading', async ({ 
           channelID = channel.id; trial.channel_id = channelID;
           const create = async (role: string, systemPrompt: string) => {
             const agent = await api<Agent>('post', `/api/v1/channels/${channelID}/agents`, { name: `${role}${trial.id.slice(0, 8)}`, computer_id: computer.id,
-              model_provider: provider, model_name: model, custom_args: provider === 'codex' ? codexE2EArgs : [], system_prompt: systemPrompt });
+              model_provider: provider, model_name: model, custom_env: agentCustomEnv, custom_args: provider === 'codex' ? codexE2EArgs : [], system_prompt: systemPrompt });
             agents.push(agent);
+            expect(sql(`SELECT COALESCE(custom_env->>'MAX_THINKING_TOKENS','') FROM agents WHERE id=${quote(agent.id)}`)).toBe(disableThinking ? '0' : '');
             await expect.poll(() => sql(`SELECT count(*) FROM agent_runs WHERE agent_id=${quote(agent.id)} AND finished_at IS NOT NULL`), { timeout: 120000 }).toBe('1');
             await api('post', `/api/v1/agents/${agent.id}/attention`, { policy: 'nothing' });
             return agent;
