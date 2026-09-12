@@ -19,8 +19,21 @@ class Graders(unittest.TestCase):
                 new['instruction']=old['instruction']
             self.assertEqual(old,new)
 
+    def test_v3_only_clarifies_csv_terminators_without_changing_oracles(self):
+        directory=Path(__file__).with_name('datasets')
+        previous=json.loads((directory/'solo-skills-v2.json').read_text())
+        current=json.loads((directory/'solo-skills-v3.json').read_text())
+        self.assertEqual(len(previous),len(current))
+        for old,new in zip(previous,current):
+            self.assertEqual(new.pop('suite'),'solo-skills-v3')
+            self.assertEqual(old.pop('suite'),'solo-skills-v2')
+            if old['id']=='csv-export':
+                self.assertEqual(new['instruction'],old['instruction'].replace('Use \n record terminators and standard double-quote escaping.','Terminate every record with \n, including the header and the final record; use standard double-quote escaping.'))
+                new['instruction']=old['instruction']
+            self.assertEqual(old,new)
+
     def test_dataset_references_and_negative_controls(self):
-        cases=json.loads(Path(__file__).with_name('datasets').joinpath('solo-skills-v2.json').read_text())
+        cases=json.loads(Path(__file__).with_name('datasets').joinpath('solo-skills-v3.json').read_text())
         self.assertEqual(len(cases),20)
         self.assertEqual(len({c['id'] for c in cases}),20)
         self.assertEqual(sum(c['split']=='holdout' for c in cases),10)
@@ -124,7 +137,7 @@ class Decisions(unittest.TestCase):
             path=Path(directory)/'report.json'
             path.write_text(json.dumps({'status':'completed','trials':[{'split':'holdout'}]}))
             with self.assertRaisesRegex(ValueError,'development'):
-                learning_case(path,Path(__file__).with_name('datasets')/'solo-skills-v2.json')
+                learning_case(path,Path(__file__).with_name('datasets')/'solo-skills-v3.json')
     def test_fixed_public_dataset_and_oracles(self):
         import gzip,hashlib
         directory=Path(__file__).parent

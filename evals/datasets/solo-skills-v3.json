@@ -1,0 +1,1558 @@
+[
+  {
+    "id": "csv-money",
+    "suite": "solo-skills-v3",
+    "split": "dev",
+    "entry_point": "totals",
+    "instruction": "Repair totals(text). Parse CSV columns account,amount using CSV quoting (commas and embedded newlines allowed). Sum exact decimal amounts by account, including refunds. Return a dict sorted by account with two-decimal string totals rounded HALF_UP only after summing. Header-only input returns {}. Do not use binary float for money.",
+    "starter": "def totals(text):\n    return {line.split(\",\")[0]: line.split(\",\")[1] for line in text.splitlines()[1:]}\n",
+    "reference": "import csv,io\nfrom decimal import Decimal,ROUND_HALF_UP\ndef totals(text):\n result={}\n for row in csv.DictReader(io.StringIO(text)):\n  result[row['account']]=result.get(row['account'],Decimal(0))+Decimal(row['amount'])\n return {k:format(v.quantize(Decimal('.01'),rounding=ROUND_HALF_UP),'.2f') for k,v in sorted(result.items())}\n",
+    "checks": [
+      {
+        "args": [
+          "account,amount\na,0.1\na,0.2\n"
+        ],
+        "expected": {
+          "a": "0.30"
+        },
+        "key_order": [
+          "a"
+        ]
+      },
+      {
+        "args": [
+          "account,amount\n\"a,b\",2.005\n\"a,b\",-1\n"
+        ],
+        "expected": {
+          "a,b": "1.01"
+        },
+        "key_order": [
+          "a,b"
+        ]
+      },
+      {
+        "args": [
+          "account,amount\n"
+        ],
+        "expected": {},
+        "key_order": []
+      },
+      {
+        "args": [
+          "account,amount\n\"a\nb\",1\nz,-0.005\n"
+        ],
+        "expected": {
+          "a\nb": "1.00",
+          "z": "-0.01"
+        },
+        "key_order": [
+          "a\nb",
+          "z"
+        ]
+      },
+      {
+        "args": [
+          "account,amount\na,999999.995\na,-0.005\n"
+        ],
+        "expected": {
+          "a": "999999.99"
+        },
+        "key_order": [
+          "a"
+        ]
+      },
+      {
+        "args": [
+          "account,amount\nz,2\na,1\nz,-1\n"
+        ],
+        "expected": {
+          "a": "1.00",
+          "z": "1.00"
+        },
+        "key_order": [
+          "a",
+          "z"
+        ]
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "event-latest",
+    "suite": "solo-skills-v3",
+    "split": "dev",
+    "entry_point": "latest",
+    "instruction": "Repair latest(events). Each event has id,at (timezone-aware ISO8601),value. Return one original event per id, choosing the latest instant, with later input winning equal instants; sort output by id. Z and UTC offsets are supported. Any naive timestamp raises ValueError. Do not mutate inputs.",
+    "starter": "def latest(events):\n    return list({e[\"id\"]: e for e in events}.values())\n",
+    "reference": "from datetime import datetime\ndef latest(events):\n result={}\n for e in events:\n  t=datetime.fromisoformat(e['at'].replace('Z','+00:00'))\n  if t.tzinfo is None: raise ValueError('timezone required')\n  if e['id'] not in result or t>=result[e['id']][0]: result[e['id']]=(t,e)\n return [result[k][1] for k in sorted(result)]\n",
+    "checks": [
+      {
+        "args": [
+          []
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          [
+            {
+              "id": "x",
+              "at": "2026-01-01T00:00:00Z",
+              "value": 2
+            },
+            {
+              "id": "x",
+              "at": "2025-12-31T23:00:00Z",
+              "value": 1
+            }
+          ]
+        ],
+        "expected": [
+          {
+            "id": "x",
+            "at": "2026-01-01T00:00:00Z",
+            "value": 2
+          }
+        ]
+      },
+      {
+        "args": [
+          [
+            {
+              "id": "z",
+              "at": "2026-01-01T08:00:00+08:00",
+              "value": 1
+            },
+            {
+              "id": "z",
+              "at": "2026-01-01T00:00:00Z",
+              "value": 2
+            },
+            {
+              "id": "a",
+              "at": "2026-01-01T00:00:00-05:00",
+              "value": 3
+            }
+          ]
+        ],
+        "expected": [
+          {
+            "id": "a",
+            "at": "2026-01-01T00:00:00-05:00",
+            "value": 3
+          },
+          {
+            "id": "z",
+            "at": "2026-01-01T00:00:00Z",
+            "value": 2
+          }
+        ]
+      },
+      {
+        "args": [
+          [
+            {
+              "id": "x",
+              "at": "2026-01-01T00:00:00",
+              "value": 1
+            }
+          ]
+        ],
+        "error": "ValueError"
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "dependency-order",
+    "suite": "solo-skills-v3",
+    "split": "dev",
+    "entry_point": "order",
+    "instruction": "Repair order(graph), mapping node -> prerequisite list. Include nodes referenced only as prerequisites. Return a topological order, choosing the lexicographically smallest currently available node at every step. Empty graph returns []. Duplicate edges are ignored; any cycle including a self-loop raises ValueError.",
+    "starter": "def order(graph):\n    return sorted(graph)\n",
+    "reference": "import heapq\ndef order(graph):\n nodes=set(graph)|{d for ds in graph.values() for d in ds}\n deps={n:set(graph.get(n,[])) for n in nodes}\n ready=[n for n in nodes if not deps[n]]; heapq.heapify(ready); result=[]\n while ready:\n  n=heapq.heappop(ready); result.append(n)\n  for k in nodes:\n   if n in deps[k]:\n    deps[k].remove(n)\n    if not deps[k]: heapq.heappush(ready,k)\n if len(result)!=len(nodes): raise ValueError('cycle')\n return result\n",
+    "checks": [
+      {
+        "args": [
+          {
+            "deploy": [
+              "test"
+            ],
+            "test": [
+              "build"
+            ],
+            "build": []
+          }
+        ],
+        "expected": [
+          "build",
+          "test",
+          "deploy"
+        ]
+      },
+      {
+        "args": [
+          {
+            "b": [
+              "a",
+              "a"
+            ],
+            "c": []
+          }
+        ],
+        "expected": [
+          "a",
+          "b",
+          "c"
+        ]
+      },
+      {
+        "args": [
+          {}
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          {
+            "a": [
+              "b"
+            ],
+            "b": [
+              "a"
+            ]
+          }
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          {
+            "a": [
+              "a"
+            ]
+          }
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          {
+            "z": [
+              "a"
+            ],
+            "b": []
+          }
+        ],
+        "expected": [
+          "a",
+          "b",
+          "z"
+        ]
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "nested-redaction",
+    "suite": "solo-skills-v3",
+    "split": "dev",
+    "entry_point": "redact",
+    "instruction": "Repair redact(value). Recursively traverse dicts/lists without changing the input. Replace the entire value of case-insensitive exact keys password,token,api_key with \"[REDACTED]\", regardless of value type. Preserve other keys, scalar types and strings, including text merely containing those words.",
+    "starter": "def redact(value):\n    return {k: \"[REDACTED]\" if \"token\" in k else v for k,v in value.items()}\n",
+    "reference": "def redact(value):\n if isinstance(value,dict): return {k:'[REDACTED]' if k.lower() in {'password','token','api_key'} else redact(v) for k,v in value.items()}\n if isinstance(value,list): return [redact(v) for v in value]\n return value\n",
+    "checks": [
+      {
+        "args": [
+          {
+            "PASSWORD": null,
+            "token_count": 12
+          }
+        ],
+        "expected": {
+          "PASSWORD": "[REDACTED]",
+          "token_count": 12
+        }
+      },
+      {
+        "args": [
+          [
+            {
+              "API_KEY": {
+                "x": 1
+              }
+            },
+            {
+              "nested": {
+                "token": "a",
+                "ok": false
+              }
+            }
+          ]
+        ],
+        "expected": [
+          {
+            "API_KEY": "[REDACTED]"
+          },
+          {
+            "nested": {
+              "token": "[REDACTED]",
+              "ok": false
+            }
+          }
+        ]
+      },
+      {
+        "args": [
+          "password token"
+        ],
+        "expected": "password token"
+      },
+      {
+        "args": [
+          null
+        ],
+        "expected": null
+      },
+      {
+        "args": [
+          {
+            "a": [],
+            "b": [
+              1,
+              true,
+              "x"
+            ]
+          }
+        ],
+        "expected": {
+          "a": [],
+          "b": [
+            1,
+            true,
+            "x"
+          ]
+        }
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "retry-delay",
+    "suite": "solo-skills-v3",
+    "split": "dev",
+    "entry_point": "delay",
+    "instruction": "Repair delay(attempt,base,cap,retry_after). attempt is a nonnegative integer; base and cap are nonnegative numbers. Return min(cap, retry_after) when retry_after is supplied (including zero), otherwise min(cap, base * 2**attempt). Negative attempt/base/cap/retry_after raises ValueError. Large attempts such as 100000 must not overflow.",
+    "starter": "def delay(attempt,base,cap,retry_after=None):\n    return min(cap,retry_after or base*2**attempt)\n",
+    "reference": "def delay(attempt,base,cap,retry_after=None):\n if attempt<0 or base<0 or cap<0 or (retry_after is not None and retry_after<0): raise ValueError('negative')\n if retry_after is not None: return min(cap,retry_after)\n value=base\n for _ in range(attempt):\n  if value==0 or value>=cap: break\n  value=min(cap,value*2)\n return min(cap,value)\n",
+    "checks": [
+      {
+        "args": [
+          2,
+          3,
+          20,
+          null
+        ],
+        "expected": 12
+      },
+      {
+        "args": [
+          4,
+          2,
+          30,
+          0
+        ],
+        "expected": 0
+      },
+      {
+        "args": [
+          100000,
+          1,
+          100,
+          null
+        ],
+        "expected": 100
+      },
+      {
+        "args": [
+          100000,
+          0,
+          100,
+          null
+        ],
+        "expected": 0
+      },
+      {
+        "args": [
+          -1,
+          1,
+          10,
+          null
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          1,
+          1,
+          10,
+          -2
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          0,
+          3,
+          0,
+          null
+        ],
+        "expected": 0
+      },
+      {
+        "args": [
+          0,
+          2.5,
+          100,
+          null
+        ],
+        "expected": 2.5
+      },
+      {
+        "args": [
+          100000,
+          1.0,
+          100.0,
+          null
+        ],
+        "expected": 100.0
+      },
+      {
+        "args": [
+          0,
+          -1,
+          10,
+          null
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          0,
+          1,
+          -10,
+          null
+        ],
+        "error": "ValueError"
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "markdown-section",
+    "suite": "solo-skills-v3",
+    "split": "dev",
+    "entry_point": "section",
+    "instruction": "Repair section(text,title). Find the first exact level-2 ATX heading \"## title\" outside fenced blocks. Return following lines through but excluding the next level-1 or level-2 heading, strip only surrounding blank lines, join with \n. Level-3 headings remain. Backtick and tilde fences of 3+ markers close only with the same marker and at least opening length. Missing title returns empty string.",
+    "starter": "def section(text,title):\n    return text.split(\"## \"+title+\"\\n\")[-1].split(\"## \")[0].strip()\n",
+    "reference": "import re\ndef section(text,title):\n active=False; out=[]; marker=''; length=0\n for line in text.splitlines():\n  fence=re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$',line)\n  outside=not marker\n  if fence:\n   marks,tail=fence.groups()\n   if not marker: marker=marks[0]; length=len(marks)\n   elif marks[0]==marker and len(marks)>=length and not tail.strip(): marker=''\n  h=re.match(r'^ {0,3}(#{1,6}) +(.+?) *#* *$',line) if outside and not fence else None\n  if h and len(h[1])<=2:\n   if active: break\n   if h[1]=='##' and h[2]==title: active=True; continue\n  if active: out.append(line)\n while out and not out[0].strip(): out.pop(0)\n while out and not out[-1].strip(): out.pop()\n return '\\n'.join(out)\n",
+    "checks": [
+      {
+        "args": [
+          "## Plan\na\n### Detail\nb\n## End\nc",
+          "Plan"
+        ],
+        "expected": "a\n### Detail\nb"
+      },
+      {
+        "args": [
+          "```\n## Plan\nfake\n```\n## Plan\nreal",
+          "Plan"
+        ],
+        "expected": "real"
+      },
+      {
+        "args": [
+          "## Other\nx",
+          "Plan"
+        ],
+        "expected": ""
+      },
+      {
+        "args": [
+          "## Plan\n~~~~\n## Fake\n~~~\ninside\n~~~~\nlast\n# End",
+          "Plan"
+        ],
+        "expected": "~~~~\n## Fake\n~~~\ninside\n~~~~\nlast"
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "cursor-pagination",
+    "suite": "solo-skills-v3",
+    "split": "dev",
+    "entry_point": "collect",
+    "instruction": "Repair collect(pages,start). pages maps cursor strings to {items:list,next:string|null}. Follow pages from start until next is null, concatenating items. Empty-string cursors are valid. Missing cursor raises KeyError; revisiting a cursor raises ValueError even when its items are empty. Input objects must remain unchanged.",
+    "starter": "def collect(pages,start):\n    out=[]\n    while start:\n        page=pages[start]; out.extend(page[\"items\"]); start=page[\"next\"]\n    return out\n",
+    "reference": "def collect(pages,start):\n seen=set(); result=[]\n while start is not None:\n  if start in seen: raise ValueError('cursor cycle')\n  seen.add(start); p=pages[start]; result.extend(p['items']); start=p['next']\n return result\n",
+    "checks": [
+      {
+        "args": [
+          {
+            "a": {
+              "items": [
+                1
+              ],
+              "next": ""
+            },
+            "": {
+              "items": [
+                2
+              ],
+              "next": null
+            }
+          },
+          "a"
+        ],
+        "expected": [
+          1,
+          2
+        ]
+      },
+      {
+        "args": [
+          {
+            "x": {
+              "items": [],
+              "next": "x"
+            }
+          },
+          "x"
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          {},
+          "a"
+        ],
+        "error": "KeyError"
+      },
+      {
+        "args": [
+          {},
+          null
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          {
+            "a": {
+              "items": [
+                1,
+                1
+              ],
+              "next": null
+            }
+          },
+          "a"
+        ],
+        "expected": [
+          1,
+          1
+        ]
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "relative-path",
+    "suite": "solo-skills-v3",
+    "split": "dev",
+    "entry_point": "safe_path",
+    "instruction": "Repair safe_path(path). Normalize a nonempty slash-separated relative file path; collapse repeated slashes and ignore empty segments, collapse . and interior a/.., but reject any attempt to climb above the root, even if later segments return inside. Reject leading slash, backslash, NUL and colon anywhere. Reject paths normalizing to empty. Return normalized slash path; invalid paths raise ValueError. This is lexical validation, not a filesystem symlink resolver.",
+    "starter": "def safe_path(path):\n    return path.replace(\"../\", \"\").strip(\"/\")\n",
+    "reference": "def safe_path(path):\n if not path or path.startswith('/') or any(c in path for c in ['\\\\','\\0',':']): raise ValueError('invalid')\n out=[]\n for part in path.split('/'):\n  if part in ('','.'): continue\n  if part=='..':\n   if not out: raise ValueError('escape')\n   out.pop()\n  else: out.append(part)\n if not out: raise ValueError('empty')\n return '/'.join(out)\n",
+    "checks": [
+      {
+        "args": [
+          "a/./b/../c"
+        ],
+        "expected": "a/c"
+      },
+      {
+        "args": [
+          "../a"
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          "a/../../b"
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          "/a"
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          "a\\b"
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          "C:a"
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          "a/.."
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          "a//中文.py"
+        ],
+        "expected": "a/中文.py"
+      },
+      {
+        "args": [
+          "a\u0000b"
+        ],
+        "error": "ValueError"
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "duration-union",
+    "suite": "solo-skills-v3",
+    "split": "dev",
+    "entry_point": "covered",
+    "instruction": "Repair covered(intervals). Given numeric [start,end] intervals, return total length of their union. Overlap and touching boundaries count once; zero-length intervals contribute zero. Reject reversed intervals with ValueError. Do not reorder/mutate the input.",
+    "starter": "def covered(intervals):\n    return sum(end-start for start,end in intervals)\n",
+    "reference": "def covered(intervals):\n if any(b<a for a,b in intervals): raise ValueError('reversed')\n end=None; total=0\n for a,b in sorted(intervals):\n  if end is None or a>end: total+=b-a; end=b\n  elif b>end: total+=b-end; end=b\n return total\n",
+    "checks": [
+      {
+        "args": [
+          [
+            [
+              1,
+              4
+            ],
+            [
+              3,
+              6
+            ],
+            [
+              6,
+              8
+            ]
+          ]
+        ],
+        "expected": 7
+      },
+      {
+        "args": [
+          []
+        ],
+        "expected": 0
+      },
+      {
+        "args": [
+          [
+            [
+              -3,
+              -1
+            ],
+            [
+              -2,
+              2
+            ],
+            [
+              5,
+              5
+            ]
+          ]
+        ],
+        "expected": 5
+      },
+      {
+        "args": [
+          [
+            [
+              5,
+              1
+            ]
+          ]
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          [
+            [
+              1,
+              10
+            ],
+            [
+              2,
+              3
+            ],
+            [
+              1,
+              10
+            ]
+          ]
+        ],
+        "expected": 9
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "stable-dedupe",
+    "suite": "solo-skills-v3",
+    "split": "dev",
+    "entry_point": "dedupe",
+    "instruction": "Repair dedupe(records). Records have id,version,payload. Retain the record with greatest integer version per id; last input wins ties. Output ids in order of their first occurrence, not lexical order. Empty input returns []. Do not mutate input.",
+    "starter": "def dedupe(records):\n    return list({r[\"id\"]:r for r in records}.values())\n",
+    "reference": "def dedupe(records):\n out={}\n for r in records:\n  if r['id'] not in out or r['version']>=out[r['id']]['version']: out[r['id']]=r\n return list(out.values())\n",
+    "checks": [
+      {
+        "args": [
+          []
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          [
+            {
+              "id": "b",
+              "version": 2,
+              "payload": "new"
+            },
+            {
+              "id": "a",
+              "version": 1,
+              "payload": "a"
+            },
+            {
+              "id": "b",
+              "version": 1,
+              "payload": "old"
+            }
+          ]
+        ],
+        "expected": [
+          {
+            "id": "b",
+            "version": 2,
+            "payload": "new"
+          },
+          {
+            "id": "a",
+            "version": 1,
+            "payload": "a"
+          }
+        ]
+      },
+      {
+        "args": [
+          [
+            {
+              "id": "x",
+              "version": 1,
+              "payload": 1
+            },
+            {
+              "id": "x",
+              "version": 1,
+              "payload": 2
+            }
+          ]
+        ],
+        "expected": [
+          {
+            "id": "x",
+            "version": 1,
+            "payload": 2
+          }
+        ]
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "allocate-cents",
+    "suite": "solo-skills-v3",
+    "split": "holdout",
+    "entry_point": "allocate",
+    "instruction": "Repair allocate(total,weights). Allocate nonnegative integer cents proportionally to a list of nonnegative integer weights using largest remainders, ties by original index. Sum must equal total. Empty weights allowed only when total=0; zero total with all-zero weights returns zero shares. Negative values or positive total with zero total weight raise ValueError. Use exact integer arithmetic, including large totals.",
+    "starter": "def allocate(total,weights):\n    return [round(total*w/sum(weights)) for w in weights]\n",
+    "reference": "def allocate(total,weights):\n if total<0 or any(w<0 for w in weights): raise ValueError('negative')\n s=sum(weights)\n if not s:\n  if total: raise ValueError('zero weights')\n  return [0]*len(weights)\n parts=[total*w//s for w in weights]\n priority=sorted(range(len(weights)),key=lambda i:(-(total*weights[i]%s),i))\n for i in priority[:total-sum(parts)]: parts[i]+=1\n return parts\n",
+    "checks": [
+      {
+        "args": [
+          10,
+          [
+            1,
+            1,
+            1
+          ]
+        ],
+        "expected": [
+          4,
+          3,
+          3
+        ]
+      },
+      {
+        "args": [
+          1,
+          [
+            1,
+            1,
+            1
+          ]
+        ],
+        "expected": [
+          1,
+          0,
+          0
+        ]
+      },
+      {
+        "args": [
+          0,
+          [
+            0,
+            0
+          ]
+        ],
+        "expected": [
+          0,
+          0
+        ]
+      },
+      {
+        "args": [
+          1,
+          []
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          0,
+          []
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          -1,
+          [
+            1
+          ]
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          10,
+          [
+            0,
+            3,
+            0,
+            1
+          ]
+        ],
+        "expected": [
+          0,
+          8,
+          0,
+          2
+        ]
+      },
+      {
+        "args": [
+          10000000000000003,
+          [
+            1,
+            1,
+            1
+          ]
+        ],
+        "expected": [
+          3333333333333335,
+          3333333333333334,
+          3333333333333334
+        ]
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "dependency-closure",
+    "suite": "solo-skills-v3",
+    "split": "holdout",
+    "entry_point": "closure",
+    "instruction": "Repair closure(graph,target). Return sorted unique transitive prerequisites of target, excluding target. Missing nodes are leaves. A cycle reachable from target raises ValueError; unrelated cycles must not affect the result. A shared dependency is not a cycle.",
+    "starter": "def closure(graph,target):\n    return sorted(graph.get(target,[]))\n",
+    "reference": "def closure(graph,target):\n seen=set(); active=set()\n def visit(n):\n  if n in active: raise ValueError('cycle')\n  if n in seen: return\n  active.add(n)\n  for child in graph.get(n,[]): visit(child)\n  active.remove(n); seen.add(n)\n visit(target); seen.remove(target); return sorted(seen)\n",
+    "checks": [
+      {
+        "args": [
+          {
+            "a": [
+              "b",
+              "c"
+            ],
+            "b": [
+              "d"
+            ],
+            "c": [
+              "d"
+            ]
+          },
+          "a"
+        ],
+        "expected": [
+          "b",
+          "c",
+          "d"
+        ]
+      },
+      {
+        "args": [
+          {
+            "x": [
+              "x"
+            ]
+          },
+          "a"
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          {
+            "a": [
+              "b"
+            ],
+            "b": [
+              "a"
+            ]
+          },
+          "a"
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          {},
+          "z"
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          {
+            "a": [
+              "a"
+            ]
+          },
+          "a"
+        ],
+        "error": "ValueError"
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "csv-export",
+    "suite": "solo-skills-v3",
+    "split": "holdout",
+    "entry_point": "export_csv",
+    "instruction": "Repair export_csv(rows,columns). Return CSV text with columns as header, preserving column and row order. Terminate every record with \n, including the header and the final record; use standard double-quote escaping. Missing or null cells become empty strings; other values use str(). Commas, quotes and embedded newlines must round-trip. Always include the header, even for no rows.",
+    "starter": "def export_csv(rows,columns):\n    return \",\".join(columns)+\"\\n\"+\"\\n\".join(\",\".join(str(r.get(c,\"\")) for c in columns) for r in rows)\n",
+    "reference": "import csv,io\ndef export_csv(rows,columns):\n f=io.StringIO(newline=''); w=csv.writer(f,lineterminator='\\n'); w.writerow(columns)\n for row in rows: w.writerow(['' if row.get(c) is None else str(row[c]) for c in columns])\n return f.getvalue()\n",
+    "checks": [
+      {
+        "args": [
+          [
+            {
+              "name": "a,b",
+              "n": 2
+            }
+          ],
+          [
+            "name",
+            "n"
+          ]
+        ],
+        "expected": "name,n\n\"a,b\",2\n"
+      },
+      {
+        "args": [
+          [],
+          [
+            "a",
+            "b"
+          ]
+        ],
+        "expected": "a,b\n"
+      },
+      {
+        "args": [
+          [
+            {
+              "x": "line\n\"two\"",
+              "y": null
+            }
+          ],
+          [
+            "x",
+            "y"
+          ]
+        ],
+        "expected": "x,y\n\"line\n\"\"two\"\"\",\n"
+      },
+      {
+        "args": [
+          [
+            {
+              "b": 0,
+              "a": false
+            }
+          ],
+          [
+            "a",
+            "b",
+            "c"
+          ]
+        ],
+        "expected": "a,b,c\nFalse,0,\n"
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "canonical-json",
+    "suite": "solo-skills-v3",
+    "split": "holdout",
+    "entry_point": "canonical",
+    "instruction": "Repair canonical(value,ignored). Recursively remove dict keys exactly present in ignored, including dictionaries inside lists. Return compact JSON with dictionary keys sorted, Unicode unescaped, list order and scalar types preserved. The input must not be mutated. Inputs contain only finite JSON numbers.",
+    "starter": "import json\ndef canonical(value,ignored):\n    return json.dumps({k:v for k,v in value.items() if k not in ignored},sort_keys=True)\n",
+    "reference": "import json\ndef canonical(value,ignored):\n def clean(x):\n  if isinstance(x,dict): return {k:clean(v) for k,v in x.items() if k not in ignored}\n  if isinstance(x,list): return [clean(v) for v in x]\n  return x\n return json.dumps(clean(value),sort_keys=True,ensure_ascii=False,separators=(',',':'),allow_nan=False)\n",
+    "checks": [
+      {
+        "args": [
+          {
+            "z": 1,
+            "a": {
+              "time": 2,
+              "x": "中"
+            }
+          },
+          [
+            "time"
+          ]
+        ],
+        "expected": "{\"a\":{\"x\":\"中\"},\"z\":1}"
+      },
+      {
+        "args": [
+          [
+            {
+              "time": 2,
+              "x": null
+            },
+            false,
+            0
+          ],
+          [
+            "time"
+          ]
+        ],
+        "expected": "[{\"x\":null},false,0]"
+      },
+      {
+        "args": [
+          null,
+          []
+        ],
+        "expected": "null"
+      },
+      {
+        "args": [
+          {
+            "foo": []
+          },
+          []
+        ],
+        "expected": "{\"foo\":[]}"
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "half-open-overlap",
+    "suite": "solo-skills-v3",
+    "split": "holdout",
+    "entry_point": "conflicts",
+    "instruction": "Repair conflicts(bookings). Each booking is {id,start,end} with numeric times and unique id. Return sorted [smaller_id,larger_id] pairs whose half-open intervals overlap. Touching endpoints and zero-duration bookings do not conflict. Reversed intervals raise ValueError. Input order does not matter.",
+    "starter": "def conflicts(bookings):\n    return [[a[\"id\"],b[\"id\"]] for i,a in enumerate(bookings) for b in bookings[i+1:] if a[\"start\"]<=b[\"end\"] and b[\"start\"]<=a[\"end\"]]\n",
+    "reference": "def conflicts(bookings):\n if any(b['end']<b['start'] for b in bookings): raise ValueError('reversed')\n return sorted(sorted([a['id'],b['id']]) for i,a in enumerate(bookings) for b in bookings[i+1:] if max(a['start'],b['start'])<min(a['end'],b['end']))\n",
+    "checks": [
+      {
+        "args": [
+          [
+            {
+              "id": "z",
+              "start": 1,
+              "end": 4
+            },
+            {
+              "id": "a",
+              "start": 3,
+              "end": 5
+            },
+            {
+              "id": "b",
+              "start": 5,
+              "end": 7
+            }
+          ]
+        ],
+        "expected": [
+          [
+            "a",
+            "z"
+          ]
+        ]
+      },
+      {
+        "args": [
+          [
+            {
+              "id": "a",
+              "start": 0,
+              "end": 10
+            },
+            {
+              "id": "b",
+              "start": 5,
+              "end": 5
+            }
+          ]
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          []
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          [
+            {
+              "id": "x",
+              "start": 5,
+              "end": 1
+            }
+          ]
+        ],
+        "error": "ValueError"
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "utc-elapsed",
+    "suite": "solo-skills-v3",
+    "split": "holdout",
+    "entry_point": "elapsed",
+    "instruction": "Repair elapsed(start,end). Inputs are timezone-aware ISO8601 strings, supporting Z and offsets. Return elapsed seconds between their actual instants (fractional seconds allowed). Reversed instants or either naive timestamp raise ValueError. Equal instants return 0.",
+    "starter": "from datetime import datetime\ndef elapsed(start,end):\n    return (datetime.fromisoformat(end).replace(tzinfo=None)-datetime.fromisoformat(start).replace(tzinfo=None)).total_seconds()\n",
+    "reference": "from datetime import datetime\ndef elapsed(start,end):\n a=datetime.fromisoformat(start.replace('Z','+00:00')); b=datetime.fromisoformat(end.replace('Z','+00:00'))\n if a.tzinfo is None or b.tzinfo is None: raise ValueError('timezone')\n seconds=(b-a).total_seconds()\n if seconds<0: raise ValueError('reversed')\n return seconds\n",
+    "checks": [
+      {
+        "args": [
+          "2026-01-01T08:00:00+08:00",
+          "2026-01-01T00:01:30Z"
+        ],
+        "expected": 90.0
+      },
+      {
+        "args": [
+          "2026-01-01T00:00:00.250Z",
+          "2026-01-01T00:00:00.750Z"
+        ],
+        "expected": 0.5
+      },
+      {
+        "args": [
+          "2026-01-01T08:00:00+08:00",
+          "2026-01-01T00:00:00Z"
+        ],
+        "expected": 0.0
+      },
+      {
+        "args": [
+          "2026-01-02T00:00:00Z",
+          "2026-01-01T00:00:00Z"
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          "2026-01-01T00:00:00",
+          "2026-01-01T00:00:00Z"
+        ],
+        "error": "ValueError"
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "longest-route",
+    "suite": "solo-skills-v3",
+    "split": "holdout",
+    "entry_point": "route",
+    "instruction": "Repair route(path,routes). Routes map slash paths to arbitrary values (including false and null). Select the longest matching prefix at a segment boundary: /api matches /api and /api/x, not /apix. / is a fallback for any absolute path. Return {matched:prefix,value:...}, or null if no match. Ignore query and fragment in path. Nonabsolute path raises ValueError.",
+    "starter": "def route(path,routes):\n    return next((v for k,v in routes.items() if path.startswith(k)),None)\n",
+    "reference": "def route(path,routes):\n path=path.split('?',1)[0].split('#',1)[0]\n if not path.startswith('/'): raise ValueError('absolute path')\n matches=[k for k in routes if k=='/' or path==k or path.startswith(k.rstrip('/')+'/')]\n if not matches: return None\n key=max(matches,key=len); return {'matched':key,'value':routes[key]}\n",
+    "checks": [
+      {
+        "args": [
+          "/api/v1/x",
+          {
+            "/": "root",
+            "/api": "api",
+            "/api/v1": "v1"
+          }
+        ],
+        "expected": {
+          "matched": "/api/v1",
+          "value": "v1"
+        }
+      },
+      {
+        "args": [
+          "/apix",
+          {
+            "/api": 1
+          }
+        ],
+        "expected": null
+      },
+      {
+        "args": [
+          "/api?x=1#z",
+          {
+            "/api": false
+          }
+        ],
+        "expected": {
+          "matched": "/api",
+          "value": false
+        }
+      },
+      {
+        "args": [
+          "/",
+          {
+            "/": null
+          }
+        ],
+        "expected": {
+          "matched": "/",
+          "value": null
+        }
+      },
+      {
+        "args": [
+          "relative",
+          {
+            "/": 1
+          }
+        ],
+        "error": "ValueError"
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "frontmatter",
+    "suite": "solo-skills-v3",
+    "split": "holdout",
+    "entry_point": "frontmatter",
+    "instruction": "Repair frontmatter(text). Return {header,body}. Recognize a header only when the very first line (after optional UTF-8 BOM) is exactly ---; close on the next line exactly ---. Keep all content as strings, normalize line endings to \n, remove delimiter lines, and preserve trailing newlines in header/body. Without an opening delimiter return empty header and normalized text (without BOM) as body. An unclosed opening delimiter raises ValueError.",
+    "starter": "def frontmatter(text):\n    parts=text.split(\"---\")\n    return {\"header\":parts[1],\"body\":parts[2]}\n",
+    "reference": "def frontmatter(text):\n text=text.removeprefix('\\ufeff').replace('\\r\\n','\\n').replace('\\r','\\n')\n lines=text.splitlines(keepends=True)\n if not lines or lines[0].rstrip('\\n')!='---': return {'header':'','body':text}\n for i in range(1,len(lines)):\n  if lines[i].rstrip('\\n')=='---': return {'header':''.join(lines[1:i]),'body':''.join(lines[i+1:])}\n raise ValueError('unclosed')\n",
+    "checks": [
+      {
+        "args": [
+          "---\nname: a\n---\nbody\n"
+        ],
+        "expected": {
+          "header": "name: a\n",
+          "body": "body\n"
+        }
+      },
+      {
+        "args": [
+          "text\n---\nordinary"
+        ],
+        "expected": {
+          "header": "",
+          "body": "text\n---\nordinary"
+        }
+      },
+      {
+        "args": [
+          "﻿---\r\nname: a\r\n---\r\nx"
+        ],
+        "expected": {
+          "header": "name: a\n",
+          "body": "x"
+        }
+      },
+      {
+        "args": [
+          "---\nx"
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          ""
+        ],
+        "expected": {
+          "header": "",
+          "body": ""
+        }
+      },
+      {
+        "args": [
+          "---\n---\n"
+        ],
+        "expected": {
+          "header": "",
+          "body": ""
+        }
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "batch-boundaries",
+    "suite": "solo-skills-v3",
+    "split": "holdout",
+    "entry_point": "batches",
+    "instruction": "Repair batches(items,max_items,max_bytes). items are strings. Preserve order and duplicates, returning batches where count<=max_items and summed UTF-8 byte lengths<=max_bytes (no separator cost). Oversized single item raises ValueError; max_items<=0 or max_bytes<0 raises ValueError. Empty strings cost zero bytes. Empty input returns []. Do not emit empty batches.",
+    "starter": "def batches(items,max_items,max_bytes):\n    return [items[i:i+max_items] for i in range(0,len(items),max_items)]\n",
+    "reference": "def batches(items,max_items,max_bytes):\n if max_items<=0 or max_bytes<0: raise ValueError('limits')\n result=[]; group=[]; size=0\n for item in items:\n  n=len(item.encode('utf-8'))\n  if n>max_bytes: raise ValueError('oversized')\n  if group and (len(group)>=max_items or size+n>max_bytes): result.append(group); group=[]; size=0\n  group.append(item); size+=n\n if group: result.append(group)\n return result\n",
+    "checks": [
+      {
+        "args": [
+          [
+            "中",
+            "a",
+            "文",
+            "b"
+          ],
+          3,
+          4
+        ],
+        "expected": [
+          [
+            "中",
+            "a"
+          ],
+          [
+            "文",
+            "b"
+          ]
+        ]
+      },
+      {
+        "args": [
+          [
+            "",
+            "",
+            ""
+          ],
+          2,
+          0
+        ],
+        "expected": [
+          [
+            "",
+            ""
+          ],
+          [
+            ""
+          ]
+        ]
+      },
+      {
+        "args": [
+          [],
+          2,
+          0
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          [
+            "中"
+          ],
+          5,
+          2
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          [
+            "a"
+          ],
+          0,
+          10
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          [
+            "a"
+          ],
+          1,
+          -1
+        ],
+        "error": "ValueError"
+      },
+      {
+        "args": [
+          [
+            "a",
+            "a",
+            "a"
+          ],
+          2,
+          2
+        ],
+        "expected": [
+          [
+            "a",
+            "a"
+          ],
+          [
+            "a"
+          ]
+        ]
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  },
+  {
+    "id": "patch-config",
+    "suite": "solo-skills-v3",
+    "split": "holdout",
+    "entry_point": "merge",
+    "instruction": "Repair merge(base,patch) using JSON Merge Patch semantics: if patch is not an object, replace base entirely. For object patches, treat nonobject base as {}, recursively merge object members, delete members whose patch value is null, and replace arrays/scalars. Return a new result without mutating either argument. A missing null-valued key remains absent.",
+    "starter": "def merge(base,patch):\n    return dict(base,**patch)\n",
+    "reference": "import copy\ndef merge(base,patch):\n if not isinstance(patch,dict): return copy.deepcopy(patch)\n out=copy.deepcopy(base) if isinstance(base,dict) else {}\n for k,v in patch.items():\n  if v is None: out.pop(k,None)\n  else: out[k]=merge(out.get(k),v)\n return out\n",
+    "checks": [
+      {
+        "args": [
+          {
+            "a": {
+              "x": 1,
+              "y": 2
+            },
+            "b": [
+              1
+            ]
+          },
+          {
+            "a": {
+              "x": null,
+              "z": 3
+            },
+            "b": [
+              2
+            ]
+          }
+        ],
+        "expected": {
+          "a": {
+            "y": 2,
+            "z": 3
+          },
+          "b": [
+            2
+          ]
+        }
+      },
+      {
+        "args": [
+          {
+            "a": 1
+          },
+          null
+        ],
+        "expected": null
+      },
+      {
+        "args": [
+          null,
+          {
+            "a": {
+              "b": 1
+            },
+            "gone": null
+          }
+        ],
+        "expected": {
+          "a": {
+            "b": 1
+          }
+        }
+      },
+      {
+        "args": [
+          {
+            "a": 1
+          },
+          []
+        ],
+        "expected": []
+      },
+      {
+        "args": [
+          {},
+          {}
+        ],
+        "expected": {}
+      }
+    ],
+    "source": "Solo authored controlled maintenance task"
+  }
+]

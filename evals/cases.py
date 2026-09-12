@@ -15,7 +15,7 @@ def case(name, split, entry, requirement, starter, reference, inputs, anchor):
         except Exception as error:
             checks.append({'args': args, 'error': type(error).__name__})
     assert checks[0].get('expected') == anchor, (name, checks[0], anchor)
-    CASES.append({'id': name, 'suite': 'solo-skills-v2', 'split': split, 'entry_point': entry,
+    CASES.append({'id': name, 'suite': 'solo-skills-v3', 'split': split, 'entry_point': entry,
                   'instruction': requirement, 'starter': starter, 'reference': reference,
                   'checks': checks, 'source': 'Solo authored controlled maintenance task'})
 
@@ -186,7 +186,7 @@ case('dependency-closure', 'holdout', 'closure',
 ''', [[{'a':['b','c'],'b':['d'],'c':['d']},'a'],[{'x':['x']},'a'],[{'a':['b'],'b':['a']},'a'],[{},'z'],[{'a':['a']},'a']], ['b','c','d'])
 
 case('csv-export', 'holdout', 'export_csv',
-     'Repair export_csv(rows,columns). Return CSV text with columns as header, preserving column and row order. Use \n record terminators and standard double-quote escaping. Missing or null cells become empty strings; other values use str(). Commas, quotes and embedded newlines must round-trip. Always include the header, even for no rows.',
+     'Repair export_csv(rows,columns). Return CSV text with columns as header, preserving column and row order. Terminate every record with \n, including the header and the final record; use standard double-quote escaping. Missing or null cells become empty strings; other values use str(). Commas, quotes and embedded newlines must round-trip. Always include the header, even for no rows.',
      'def export_csv(rows,columns):\n    return ",".join(columns)+"\\n"+"\\n".join(",".join(str(r.get(c,"")) for c in columns) for r in rows)\n',
      '''import csv,io
 def export_csv(rows,columns):
@@ -279,7 +279,7 @@ def merge(base,patch):
 ''', [[{'a':{'x':1,'y':2},'b':[1]}, {'a':{'x':None,'z':3},'b':[2]}],[{'a':1},None],[None,{'a':{'b':1},'gone':None}],[{'a':1},[]],[{},{}]], {'a':{'y':2,'z':3},'b':[2]})
 
 if __name__ == '__main__':
-    target=Path(__file__).with_name('datasets')/'solo-skills-v2.json'
+    target=Path(__file__).with_name('datasets')/'solo-skills-v3.json'
     target.parent.mkdir(exist_ok=True)
     target.write_text(json.dumps(CASES,ensure_ascii=False,indent=2)+'\n')
     print(json.dumps({'cases':len(CASES),'checks':sum(len(c['checks']) for c in CASES),'path':str(target)}))
