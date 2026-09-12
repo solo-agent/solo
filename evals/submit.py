@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """Transport an Agent-written file through the real Solo CLI. This does not solve or grade tasks."""
+import argparse
 import hashlib
 import json
 from pathlib import Path
 import subprocess
-import sys
 
-channel, number, filename = sys.argv[1:4]
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('channel', help='Task channel ID')
+parser.add_argument('number', help='Task number in this channel')
+parser.add_argument('filename', help='Actual artifact file inside your working directory')
+args = parser.parse_args()
+channel, number, filename = args.channel, args.number, args.filename
 submitted=Path(filename)
 source=submitted.resolve()
 if not source.is_relative_to(Path.cwd().resolve()) or submitted.is_symlink():
@@ -24,6 +29,6 @@ body={'expected_task_version':task['version'],'idempotency_key':'eval-'+digest[:
       'artifact_version':digest,'handoff':{'summary':'EVAL_ARTIFACT '+source.name,'changes':'Submitted actual file content','risks':'Awaiting independent verification','next_steps':'Independent automatic grading'},
       'evidence':[{'id':'E1','description':'Actual file: '+source.name,'content':content}]}
 payload=Path.cwd()/'eval-submission.json'; payload.write_text(json.dumps(body))
-cli('task','submit','-c',channel,'-n',number,'--file',str(payload),'--artifact',str(source),'--evidence-id','E1')
-cli('message','send','--target',channel+':'+task['message_id'][:8],'-c','EVAL_ARTIFACT '+source.name+' SHA256 '+digest)
-print('Submitted',digest)
+updated=json.loads(cli('task','submit','-c',channel,'-n',number,'--file',str(payload),'--artifact',str(source),'--evidence-id','E1'))
+print(json.dumps({'task_id':updated['id'],'status':updated['status'],'submission_id':updated['current_submission_id'],'artifact_sha256':digest}),flush=True)
+print(cli('message','send','--target',channel+':'+task['message_id'][:8],'-c','EVAL_ARTIFACT '+source.name+' SHA256 '+digest),end='')

@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
 import unittest
 from grade import execute, grade
@@ -50,6 +52,15 @@ class Graders(unittest.TestCase):
 
 
 class Decisions(unittest.TestCase):
+    def test_submit_help_and_missing_arguments_need_no_runtime(self):
+        script = Path(__file__).with_name('submit.py')
+        for args, code in [(['--help'], 0), ([], 2)]:
+            with self.subTest(args=args):
+                result = subprocess.run([sys.executable, str(script), *args], capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, code, result.stderr)
+                self.assertIn('channel number filename', result.stdout + result.stderr)
+                self.assertNotIn('Traceback', result.stderr)
+
     def test_runtime_models_use_only_actual_responses_in_the_current_run(self):
         from runtime import response_models
         entries = json.loads('''[
