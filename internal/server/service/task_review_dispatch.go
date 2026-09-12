@@ -74,7 +74,8 @@ func (s *AgentService) dispatchTaskReview(ctx context.Context) (bool, error) {
 	var submissionID, taskID, channelID, reviewerID, messageID string
 	var number int
 	var sub TaskSubmission
-	err = tx.QueryRow(ctx, `SELECT d.submission_id::text,t.id::text,t.channel_id::text,d.reviewer_id::text,COALESCE(t.message_id::text,''),t.task_number,s.task_version,s.contract,s.handoff,s.artifact_version,s.evidence
+	var dueDate *time.Time
+	err = tx.QueryRow(ctx, `SELECT d.submission_id::text,t.id::text,t.channel_id::text,d.reviewer_id::text,COALESCE(t.message_id::text,''),t.task_number,s.task_version,s.contract,s.handoff,s.artifact_version,s.evidence,t.due_date
 	 FROM task_review_deliveries d JOIN task_submissions s ON s.id=d.submission_id JOIN tasks t ON t.id=s.task_id
 	 LEFT JOIN agent_runs r ON r.id=d.run_id
 	 WHERE t.status='in_review' AND t.current_submission_id=d.submission_id AND t.version=s.task_version+1
@@ -82,7 +83,7 @@ func (s *AgentService) dispatchTaskReview(ctx context.Context) (bool, error) {
  AND EXISTS(SELECT 1 FROM agent_inbox_heads h WHERE h.agent_id=d.reviewer_id AND h.kind='review' AND h.work_id=d.submission_id::text)
  AND NOT EXISTS(SELECT 1 FROM agent_runs busy WHERE busy.agent_id=d.reviewer_id AND busy.finished_at IS NULL)
 	 AND (r.id IS NULL OR r.status NOT IN ('queued','thinking','running','streaming','waiting_input','waiting_approval'))
-	 ORDER BY d.next_attempt_at FOR UPDATE OF t,d SKIP LOCKED LIMIT 1`).Scan(&submissionID, &taskID, &channelID, &reviewerID, &messageID, &number, &sub.TaskVersion, &sub.Contract, &sub.Handoff, &sub.ArtifactVersion, &sub.Evidence)
+	 ORDER BY d.next_attempt_at FOR UPDATE OF t,d SKIP LOCKED LIMIT 1`).Scan(&submissionID, &taskID, &channelID, &reviewerID, &messageID, &number, &sub.TaskVersion, &sub.Contract, &sub.Handoff, &sub.ArtifactVersion, &sub.Evidence, &dueDate)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -137,7 +138,7 @@ func (s *AgentService) dispatchTaskReview(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	prompt := taskReviewPrompt(number, channelID, messageID, submissionID, data)
+	prompt := taskReviewPrompt(number, channelID, messageID, submissionID, data) + taskDueDateContext(dueDate)
 	var seenSeq int64
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(max(seq),0) FROM messages WHERE channel_id=$1 AND thread_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid AND NOT is_deleted`, channelID, threadID).Scan(&seenSeq); err != nil {
 		return false, err
@@ -198,6 +199,13 @@ func (s *AgentService) dispatchTaskReview(ctx context.Context) (bool, error) {
 	}
 	go s.runStreamingAgentTask(context.Background(), daemon, req, ag, run)
 	return true, nil
+}
+
+func taskDueDateContext(dueDate *time.Time) string {
+	if dueDate == nil {
+		return ""
+	}
+	return "\nTask due date (UTC): " + dueDate.UTC().Format(time.RFC3339Nano) + "."
 }
 
 func taskReviewPrompt(number int, channelID, messageID, submissionID string, submission []byte) string {

@@ -2720,7 +2720,12 @@ func (s *AgentService) triggerAgentForTask(ctx context.Context, channelID, taskI
 	}
 
 	var contract *TaskContract
-	if err := s.pool.QueryRow(ctx, `SELECT contract FROM tasks WHERE id=$1`, taskID).Scan(&contract); err == nil && contract != nil {
+	var dueDate *time.Time
+	contractErr := s.pool.QueryRow(ctx, `SELECT contract,due_date FROM tasks WHERE id=$1`, taskID).Scan(&contract, &dueDate)
+	if contractErr == nil {
+		taskContent += taskDueDateContext(dueDate)
+	}
+	if contractErr == nil && contract != nil {
 		data, _ := json.Marshal(contract)
 		taskContent += fmt.Sprintf("\nDelivery contract: %s\nBefore submitting, run solo task get -n %d -c %s and use its current version. Submit with solo task submit -n %d -c %s --file <json-file>. JSON fields: expected_task_version, idempotency_key, artifact_version, handoff {summary,changes,risks,next_steps}, evidence [{id,description,content}]. For a file artifact, add --artifact <actual-file> --evidence-id <required-id> to preserve exact source bytes and compute the digest. Keep explicitly required evidence IDs and inline content; use URI + SHA256 only when the delivery instructions permit an external reference. Include actual verification for every requirement and preserve exact public output formats during fixes. Task completion requires the designated reviewer; never call legacy accept or change status directly.", data, taskNumber, channelID, taskNumber, channelID)
 		taskContent += "\n" + agent.TaskVerificationGuidance

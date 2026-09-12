@@ -52,6 +52,24 @@ class Graders(unittest.TestCase):
 
 
 class Decisions(unittest.TestCase):
+    def test_submit_rejects_nonlocal_or_nonregular_handoff_before_runtime(self):
+        import os
+        import tempfile
+        script = Path(__file__).with_name('submit.py')
+        with tempfile.TemporaryDirectory() as workspace, tempfile.TemporaryDirectory() as outside:
+            work = Path(workspace)
+            (work / 'solution.py').write_text('def f(): return 1\n')
+            external = Path(outside) / 'handoff.json'
+            external.write_text('{}')
+            (work / 'link.json').symlink_to(external)
+            os.mkfifo(work / 'pipe.json')
+            for path in [external, work / 'link.json', work, work / 'pipe.json']:
+                with self.subTest(path=path.name):
+                    result = subprocess.run([sys.executable, str(script), 'channel', '1', 'solution.py', '--file', str(path)], cwd=work, capture_output=True, text=True, timeout=5)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn('regular file from your own working directory', result.stderr)
+                    self.assertNotIn('Traceback', result.stderr)
+
     def test_submit_help_and_missing_arguments_need_no_runtime(self):
         script = Path(__file__).with_name('submit.py')
         for args, code in [(['--help'], 0), ([], 2)]:

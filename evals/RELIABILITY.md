@@ -70,3 +70,19 @@
 下一版保持一份公共 TaskVerificationGuidance，覆盖作者、审核派发和新 Session。对明确要求保留原文片段的任务，要求保留行终止符的原始片段，并执行“保留输出与明确移除片段重建规范化输入”的不变量；预期值不得复制实现的同一切分/解析方式。已有失败必须先对照需求、输入、解释与预期值排清，再扩充测试。规则不包含题目名称、固定输入、目标输出或参考实现，不改原契约或判卷器。
 
 它继续经过原 frontend contract → Task dispatch/review → Run/Session → Daemon/runtime → CLI evidence/review → PostgreSQL → 成果 UI；命令与输入输出保存在既有 evidence。无新 API、表、UI 或恢复状态；错误实现仍在原 Task 返工，既有 Gate/预算/权限不变。属于需用真实复测证伪的方法修正，不预先宣称解决了审核误判。新轮仍执行全部十项固定定向试验，合格后才进入原定完整 141 次和五组真实工作流。
+
+### 完整交接与截止时间的可见性
+
+第五轮完整结果为 7/10，三次失败与缺失用量均保留。真实回执、原线程消息、七份通过产物与 PostgreSQL 一致，测试 Computer 已清理、普通 Computer 已恢复。作者仍准备 E1 源码和 E2 验证材料后重复提交：公共指导允许附加证据，但必用的 transport 只能生成 E1。另有两次 Markdown 无提交超时；实际 Task.due_date 为空，本轮作者消息也没有固定的 360 秒预算。完整证据和实施前设计在 round-05 的独立诊断文件中。
+
+领域、所有权与生命周期：作者在自己的 workspace 准备交接 JSON；transport 可选接收 --file，将它交给已有 solo task submit --file --artifact --evidence-id E1。原生命令精确填充 E1、计算 SHA，并保留其他验证证据；脚本不代写检查结果。提交版本、权限、幂等、不可变快照、审核与原线程反馈仍走现有 API，不补写已提交证据、不新增 Run 或自动重试。原三个位置参数保持兼容。
+
+截止时间复用 Task 现有 due_date，所有者仍是创建任务的用户或评测账号。前端 Task POST → handler.CreateTaskRequest → TaskService → PostgreSQL tasks.due_date 已完整支持；作者 TriggerAgentForTask 和独立审核 dispatchTaskReview 在现有查询中读取该值，使用同一个 UTC 格式片段加入本轮上下文，再沿 Inbox/Run → Daemon → 本地 Session 派发。无日期的 Task 保持原行为；日期只是任务约束，不新增过期自动取消策略。
+
+评测在介绍阶段结束、Task POST 之前计算一个绝对截止值，并同时用于 due_date、任务说明与原等待循环。时限仍为 360 秒，包含作者、必要检查、交接与审核；起点改到请求前，新增计入本地 API 请求延迟，没有宽限。新轮明确记录该时序差异，不能与旧分数混为一轮；题目、判卷、模型、思考参数和用量门槛不变。
+
+持久化、API、前端状态与兼容：复用已有 Task/Submission/Review/Run/Session、数据库列、接口、WebSocket、Task 日期与成果弹窗，不增加用户入口、控件、表、路由或迁移。学习 Task 继续用同一个 transport。既有 human/agent/code Gate、日常 Task 日期和旧 JSON 命令均保留原语义。
+
+边界与恢复：可选交接文件必须是本工作目录内的普通文件，拒绝越界、符号链接、目录和设备；JSON 结构、证据大小、任务版本和权限由原 CLI/API 校验。命令错误及消息 HELD 保留原文，提交成功回执先显示，不把再次提交当成补交证据。超时仍失败、未知用量仍未知，审核不得因临近截止默认接受。
+
+验证：实际 Python 子进程覆盖文件边界和兼容参数；复用原生 CLI 的真实文件往返检查，验证附加证据保留。最小 Go 检查覆盖无日期和 UTC 精度，前端执行类型与目标 lint 检查。新一轮真实前端/API/PostgreSQL/Runtime 核对 due_date 与同一截止值、作者及审核实际消息、首次交接 E1/E2、文件 SHA、原线程 UI、完整 Run 与用量。保持全部十项定向试验和合格后原定 141 次加五组工作流，不能以局部检查宣称 100%。
