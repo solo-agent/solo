@@ -1379,7 +1379,7 @@ func agentRunTranscriptFileWithUsage(t *testing.T, text string, inputTokens, out
 	path := t.TempDir() + "/session.jsonl"
 	raw := fmt.Sprintf(
 		`{"type":"user","timestamp":%q,"message":{"content":%q,"usage":{"input_tokens":%d,"output_tokens":%d}}}`+"\n",
-		time.Now().UTC().Format(time.RFC3339), text, inputTokens, outputTokens,
+		time.Now().UTC().Format(time.RFC3339Nano), text, inputTokens, outputTokens,
 	)
 	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
 		t.Fatalf("write transcript: %v", err)
