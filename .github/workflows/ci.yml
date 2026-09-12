@@ -98,6 +98,10 @@ jobs:
         working-directory: frontend
         run: npx tsc --noEmit
 
+      - name: Evaluation infrastructure classification
+        working-directory: frontend
+        run: npx playwright test agent-evals.spec.ts --grep 'preserves infrastructure failure classification' --reporter=line
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -117,3 +121,18 @@ jobs:
           tags: solo:ci-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  eval-graders:
+    name: Evaluation graders and adoption rules
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Pull the pinned grading environment
+        run: docker pull python:3.12-alpine@sha256:b64631e04e4920160c50fbe8d8df828f7f35f06f425cb44aa09bca53e708a35a
+      - name: Verify real isolated graders, frozen public cases and adoption gates
+        run: python3 -m unittest discover -s evals -p test_evals.py -v

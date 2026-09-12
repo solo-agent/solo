@@ -520,7 +520,7 @@ func TestCodexExecute_ExtraArgsPath(t *testing.T) {
 	}
 }
 
-func TestParseCodexSessionFileForWindowUsesLastTurnUsage(t *testing.T) {
+func TestParseCodexSessionFileForWindowUsesCumulativeRunUsage(t *testing.T) {
 	path := t.TempDir() + "/rollout.jsonl"
 	data := strings.Join([]string{
 		`{"timestamp":"2026-08-13T10:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":20,"cached_input_tokens":50},"last_token_usage":{"input_tokens":10,"output_tokens":2,"cached_input_tokens":5},"model":"gpt-5"}}}`,
@@ -532,8 +532,8 @@ func TestParseCodexSessionFileForWindowUsesLastTurnUsage(t *testing.T) {
 	}
 	started := time.Date(2026, 8, 13, 11, 0, 0, 0, time.UTC)
 	result := parseCodexSessionFileForWindow(path, started, started.Add(time.Minute))
-	if result == nil || result.usage.InputTokens != 30 || result.usage.OutputTokens != 7 || result.usage.CacheReadTokens != 9 {
-		t.Fatalf("usage=%+v, want last usage for current turn", result)
+	if result == nil || result.usage.InputTokens != 21 || result.usage.OutputTokens != 7 || result.usage.CacheReadTokens != 9 {
+		t.Fatalf("usage=%+v, want cumulative usage difference for current Run", result)
 	}
 }
 
@@ -553,7 +553,7 @@ func TestCodexPersistentTurnResultUsesExactThreadUsage(t *testing.T) {
 
 	result := codexPersistentTurnResult(false, sessionID, started, "")
 	usage := result.Usage["gpt-5.6"]
-	if usage.InputTokens != 21 || usage.OutputTokens != 6 || usage.CacheReadTokens != 7 {
+	if usage.InputTokens != 14 || usage.OutputTokens != 4 || usage.CacheReadTokens != 7 {
 		t.Fatalf("usage=%+v, want exact persistent turn usage", usage)
 	}
 }
@@ -645,5 +645,27 @@ func assertPrefix(t *testing.T, value, prefix string) {
 	t.Helper()
 	if !strings.HasPrefix(value, prefix) {
 		t.Errorf("expected prefix %q, got %q", prefix, value)
+	}
+}
+
+func TestCodexUsageCountsAllResponsesOnceWithinExactRun(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	// Numeric metadata from a real multi-response Run; no prompt or response content.
+	lines := []string{
+		`{"timestamp":"2026-09-12T09:10:47.900Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":102225,"cached_input_tokens":67584,"output_tokens":170}}}}`,
+		`{"timestamp":"2026-09-12T09:11:15Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":180000,"cached_input_tokens":140000,"output_tokens":1000},"last_token_usage":{"input_tokens":38000,"cached_input_tokens":35000,"output_tokens":800}}}}`,
+		`{"timestamp":"2026-09-12T09:11:50Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":257578,"cached_input_tokens":215680,"output_tokens":1677},"last_token_usage":{"input_tokens":40990,"cached_input_tokens":39936,"output_tokens":4}}}}`,
+	}
+	lines = append(lines, lines[2])
+	lines = append(lines, `{"timestamp":"2026-09-12T09:12:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":999999,"cached_input_tokens":215680,"output_tokens":9999}}}}`)
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	start, _ := time.Parse(time.RFC3339Nano, "2026-09-12T09:10:48.354324Z")
+	finish, _ := time.Parse(time.RFC3339Nano, "2026-09-12T09:11:50.889118Z")
+	got := parseCodexSessionFileForWindow(path, start, finish)
+	want := TokenUsage{InputTokens: 7257, OutputTokens: 1507, CacheReadTokens: 148096}
+	if got == nil || got.usage != want {
+		t.Fatalf("got %+v, want %+v (156860 total)", got, want)
 	}
 }

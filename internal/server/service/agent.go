@@ -64,7 +64,7 @@ const (
 	agentFailureProviderTransient     = "provider_transient"
 	agentFailureConfiguration         = "configuration"
 	agentFailureContextExhausted      = "context_exhausted"
-	agentResultReminderPrompt         = "Your previous turn ended without a user-visible message. Re-check the original goal and the latest conversation state. If the goal already has a visible result, you may stop. Otherwise, send the result the user still needs with `solo message send` to the original target. Do not repeat unrelated content."
+	agentResultReminderPrompt         = "Your previous turn ended without a visible message in this Run's required conversation. Reuse the work already completed; do not repeat implementation or resubmit an existing delivery. Send a brief actual result to the exact target below, then finish this turn. For a Task already in_review, report the submitted result and that its designated reviewer handles the next step. A message in another channel or thread does not satisfy this reply."
 	contextRolloverCapability         = "context_rollover_v1"
 	continuityMessagePrefix           = "# Session Continuity"
 	continuityPacketLimit             = 2000
@@ -972,15 +972,18 @@ func (s *AgentService) runStreamingAgentTask(ctx context.Context, daemon *Daemon
 			}
 			if visibleErr == nil && heldErr == nil && !visible && !held && !taskReq.ResultReminderAttempt {
 				recordContext()
-				updated, updateErr := runSvc.UpdateStatus(ctx, UpdateRunStatusInput{
-					RunID: run.ID, Status: AgentRunStatusQueued, ActivityText: agentActivityResultReminder,
-				})
+				reminder, updateErr := s.resultReminderMessage(ctx, run)
+				var updated *AgentRun
+				if updateErr == nil {
+					updated, updateErr = runSvc.UpdateStatus(ctx, UpdateRunStatusInput{
+						RunID: run.ID, Status: AgentRunStatusQueued, ActivityText: agentActivityResultReminder,
+					})
+				}
 				if updateErr == nil {
 					run = updated
 					s.appendAndBroadcastRunEvent(ctx, runSvc, run, ag.ID, agentName, AgentRunEventResultReminder, "retrying once for a visible result", "", map[string]any{"attempt": 1})
 					s.broadcastAgentRun(taskReq.ChannelID, "agent.run.updated", runPayload(run, ag.ID, agentName, taskReq.OriginTaskID))
 
-					reminder := agent.Message{Role: agent.RoleUser, Content: agentResultReminderPrompt, SenderID: "system"}
 					reminderReq := taskReq
 					reminderReq.TaskID = uuid.NewString()
 					reminderReq.Messages = []agent.Message{reminder}
@@ -2717,9 +2720,15 @@ func (s *AgentService) triggerAgentForTask(ctx context.Context, channelID, taskI
 	}
 
 	var contract *TaskContract
-	if err := s.pool.QueryRow(ctx, `SELECT contract FROM tasks WHERE id=$1`, taskID).Scan(&contract); err == nil && contract != nil {
+	var dueDate *time.Time
+	contractErr := s.pool.QueryRow(ctx, `SELECT contract,due_date FROM tasks WHERE id=$1`, taskID).Scan(&contract, &dueDate)
+	if contractErr == nil {
+		taskContent += taskDueDateContext(dueDate)
+	}
+	if contractErr == nil && contract != nil {
 		data, _ := json.Marshal(contract)
-		taskContent += fmt.Sprintf("\nDelivery contract: %s\nBefore submitting, run solo task get -n %d -c %s and use its current version. Submit with solo task submit -n %d -c %s --file <json-file>. JSON fields: expected_task_version, idempotency_key, artifact_version, handoff {summary,changes,risks,next_steps}, evidence [{id,description,content}] (or uri + sha256). Include reproducible evidence for every requirement. Task completion requires the designated reviewer; never call legacy accept or change status directly.", data, taskNumber, channelID, taskNumber, channelID)
+		taskContent += fmt.Sprintf("\nDelivery contract: %s\nBefore submitting, run solo task get -n %d -c %s and use its current version. Submit with solo task submit -n %d -c %s --file <json-file>. JSON fields: expected_task_version, idempotency_key, artifact_version, handoff {summary,changes,risks,next_steps}, evidence [{id,description,content}]. For a file artifact, add --artifact <actual-file> --evidence-id <required-id> to preserve exact source bytes and compute the digest. Keep explicitly required evidence IDs and inline content; use URI + SHA256 only when the delivery instructions permit an external reference. Include actual verification for every requirement and preserve exact public output formats during fixes. Task completion requires the designated reviewer; never call legacy accept or change status directly.", data, taskNumber, channelID, taskNumber, channelID)
+		taskContent += "\n" + agent.TaskVerificationGuidance
 	}
 	contextMsgs := []agent.Message{
 		{Role: agent.RoleUser, Content: taskContent, SenderID: "", Seq: messageSeq},

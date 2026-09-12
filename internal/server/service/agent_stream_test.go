@@ -150,7 +150,7 @@ func TestStreamingAgentTaskBindsSessionAndTranscript(t *testing.T) {
 	agentID := agentRunAgent(t, pool, ownerID)
 	channelID := agentRunChannel(t, pool, ownerID)
 	messageID := agentRunMessage(t, pool, channelID, ownerID)
-	transcriptPath := agentRunTranscriptFileWithUsage(t, "stream transcript", 3, 4)
+	var transcriptPath string
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = $1`, agentID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_sessions WHERE agent_id = $1`, agentID)
@@ -170,6 +170,8 @@ func TestStreamingAgentTaskBindsSessionAndTranscript(t *testing.T) {
 				t.Errorf("decode daemon request: %v", err)
 			}
 			gotTaskID, gotRunID = req.TaskID, req.RunID
+			// Write usage after dispatch so its timestamp belongs to this Run.
+			transcriptPath = agentRunTranscriptFileWithUsage(t, "stream transcript", 3, 4)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusAccepted)
 			_, _ = fmt.Fprintf(w, `{"task_id":%q,"status":"accepted"}`, req.TaskID)
@@ -256,7 +258,7 @@ func TestStreamingAgentTaskDoesNotAddTranscriptUsageToDaemonUsage(t *testing.T) 
 	agentID := agentRunAgent(t, pool, ownerID)
 	channelID := agentRunChannel(t, pool, ownerID)
 	messageID := agentRunMessage(t, pool, channelID, ownerID)
-	transcriptPath := agentRunTranscriptFileWithUsage(t, "stream transcript", 30, 40)
+	var transcriptPath string
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_runs WHERE agent_id = $1`, agentID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_sessions WHERE agent_id = $1`, agentID)
@@ -275,6 +277,7 @@ func TestStreamingAgentTaskDoesNotAddTranscriptUsageToDaemonUsage(t *testing.T) 
 				t.Errorf("decode daemon request: %v", err)
 			}
 			taskID = req.TaskID
+			transcriptPath = agentRunTranscriptFileWithUsage(t, "stream transcript", 30, 40)
 			w.WriteHeader(http.StatusAccepted)
 			_, _ = fmt.Fprintf(w, `{"task_id":%q,"status":"accepted"}`, taskID)
 		case r.URL.Path == "/internal/daemon/tasks/"+taskID+"/events":

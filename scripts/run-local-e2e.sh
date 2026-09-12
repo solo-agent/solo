@@ -168,6 +168,9 @@ trap 'exit 129' HUP
 
 echo "=== Starting isolated E2E Daemon: $E2E_DAEMON_ID ==="
 (
+  if [ -n "${SOLO_E2E_CODEX_BIN:-}" ]; then
+    export CODEX_BIN="$SOLO_E2E_CODEX_BIN"
+  fi
   export SOLO_DAEMON_PROFILE=""
   export DAEMON_ID="$E2E_DAEMON_ID"
   export DAEMON_SERVER_URL="http://127.0.0.1:$E2E_SERVER_PORT"

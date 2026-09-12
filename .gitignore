@@ -18,7 +18,7 @@ graphify-out/
 
 # Frontend
 frontend/.next/
-frontend/node_modules/
+frontend/node_modules
 node_modules/
 
 # Go
@@ -103,3 +103,7 @@ frontend/e2e/
 videos/
 
 .e2e-state/
+
+# Evaluation runtime evidence stays local; curated summaries can be committed.
+evals/results/
+evals/__pycache__/

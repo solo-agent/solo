@@ -1,0 +1,31 @@
+{
+  "repository": "https://github.com/openai/human-eval",
+  "commit": "6d43fb980f9fee3c892a914eda09951f772ad10d",
+  "sha256": "b796127e635a67f93fb35c04f4cb03cf06f38c8072ee7cee8833d7bee06979ef",
+  "total_cases": 164,
+  "selected_ids": [
+    "HumanEval/135",
+    "HumanEval/152",
+    "HumanEval/106",
+    "HumanEval/24",
+    "HumanEval/139",
+    "HumanEval/29",
+    "HumanEval/101",
+    "HumanEval/132",
+    "HumanEval/74",
+    "HumanEval/45",
+    "HumanEval/148",
+    "HumanEval/153",
+    "HumanEval/105",
+    "HumanEval/31",
+    "HumanEval/69",
+    "HumanEval/98",
+    "HumanEval/103",
+    "HumanEval/53",
+    "HumanEval/48",
+    "HumanEval/26"
+  ],
+  "sampling": "first 20 after ordering by sha256(\"solo-v1:\" + task_id)",
+  "license": "MIT",
+  "score_scope": "Solo complete-module local subset; not an official leaderboard score"
+}

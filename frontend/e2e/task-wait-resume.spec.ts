@@ -135,6 +135,9 @@ print('REAL_WAIT_PROTOCOL_'+mode.upper())
     expect(sql(`SELECT count(*) FROM task_waits WHERE task_id='${task.id}' AND status='resumed'`)).toBe('1');
     expect(sql(`SELECT status FROM tasks WHERE id='${task.id}'`)).toBe('done');
     expect(sql(`SELECT count(*) FROM messages WHERE channel_id='${channel.id}' AND content='INDEPENDENT_WORK_VERIFIED'`)).toBe('1');
+    // Acceptance can precede the provider's final response and usage settlement.
+    await expect.poll(() => sql(`SELECT count(*) FROM agent_runs r LEFT JOIN agent_run_token_usage u ON u.run_id=r.id WHERE r.agent_id='${agentID}' AND (r.status<>'completed' OR r.finished_at IS NULL OR u.actual_tokens IS NULL)`), { timeout: runtimeTimeout }).toBe('0');
+    await testInfo.attach('wait-runs-state', { body: Buffer.from(sql(`SELECT json_agg(json_build_object('id',r.id,'agent_id',r.agent_id,'status',r.status,'finished_at',r.finished_at,'actual_tokens',u.actual_tokens)) FROM agent_runs r LEFT JOIN agent_run_token_usage u ON u.run_id=r.id WHERE r.agent_id='${agentID}'`)), contentType: 'application/json' });
   } finally {
     if (agentID) await api('delete', `/api/v1/agents/${agentID}`).catch(() => undefined);
     await api('delete', `/api/v1/channels/${channel.id}`).catch(() => undefined);

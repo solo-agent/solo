@@ -208,6 +208,7 @@ func TestBuildSystemPrompt_TaskWorkflow(t *testing.T) {
 	assertHas(t, p, "done")
 	assertHas(t, p, "solo task submit")
 	assertHas(t, p, "solo task create")
+	assertHas(t, p, TaskVerificationGuidance)
 }
 
 func TestBuildSystemPrompt_Etiquette(t *testing.T) {

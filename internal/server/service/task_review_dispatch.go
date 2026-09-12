@@ -74,7 +74,8 @@ func (s *AgentService) dispatchTaskReview(ctx context.Context) (bool, error) {
 	var submissionID, taskID, channelID, reviewerID, messageID string
 	var number int
 	var sub TaskSubmission
-	err = tx.QueryRow(ctx, `SELECT d.submission_id::text,t.id::text,t.channel_id::text,d.reviewer_id::text,COALESCE(t.message_id::text,''),t.task_number,s.task_version,s.contract,s.handoff,s.artifact_version,s.evidence
+	var dueDate *time.Time
+	err = tx.QueryRow(ctx, `SELECT d.submission_id::text,t.id::text,t.channel_id::text,d.reviewer_id::text,COALESCE(t.message_id::text,''),t.task_number,to_jsonb(s),t.due_date
 	 FROM task_review_deliveries d JOIN task_submissions s ON s.id=d.submission_id JOIN tasks t ON t.id=s.task_id
 	 LEFT JOIN agent_runs r ON r.id=d.run_id
 	 WHERE t.status='in_review' AND t.current_submission_id=d.submission_id AND t.version=s.task_version+1
@@ -82,7 +83,7 @@ func (s *AgentService) dispatchTaskReview(ctx context.Context) (bool, error) {
  AND EXISTS(SELECT 1 FROM agent_inbox_heads h WHERE h.agent_id=d.reviewer_id AND h.kind='review' AND h.work_id=d.submission_id::text)
  AND NOT EXISTS(SELECT 1 FROM agent_runs busy WHERE busy.agent_id=d.reviewer_id AND busy.finished_at IS NULL)
 	 AND (r.id IS NULL OR r.status NOT IN ('queued','thinking','running','streaming','waiting_input','waiting_approval'))
-	 ORDER BY d.next_attempt_at FOR UPDATE OF t,d SKIP LOCKED LIMIT 1`).Scan(&submissionID, &taskID, &channelID, &reviewerID, &messageID, &number, &sub.TaskVersion, &sub.Contract, &sub.Handoff, &sub.ArtifactVersion, &sub.Evidence)
+	 ORDER BY d.next_attempt_at FOR UPDATE OF t,d SKIP LOCKED LIMIT 1`).Scan(&submissionID, &taskID, &channelID, &reviewerID, &messageID, &number, &sub, &dueDate)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -137,7 +138,7 @@ func (s *AgentService) dispatchTaskReview(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	prompt := fmt.Sprintf("Review Task #%d, submission %s. You are the designated independent reviewer; do not claim or implement the task. Inspect its immutable handoff and evidence below. Check every requirement against the submitted artifact version. Use solo task review -n %d -c %s --file <json-file> with submission_id, artifact_version, decision (accepted/rejected/needs_human), reason, checks [{requirement_id,passed,evidence_ids,reason}], optional evidence, and a unique idempotency_key. Acceptance requires every requirement to pass with evidence. Unknown evidence, inability to reproduce, or a required human decision must not be marked passed. After recording the review, send a brief visible explanation to the task thread using solo message send.\nSubmission:\n%s", number, submissionID, number, channelID, data)
+	prompt := taskReviewPrompt(number, channelID, messageID, submissionID, data) + taskDueDateContext(dueDate)
 	var seenSeq int64
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(max(seq),0) FROM messages WHERE channel_id=$1 AND thread_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid AND NOT is_deleted`, channelID, threadID).Scan(&seenSeq); err != nil {
 		return false, err
@@ -198,4 +199,19 @@ func (s *AgentService) dispatchTaskReview(ctx context.Context) (bool, error) {
 	}
 	go s.runStreamingAgentTask(context.Background(), daemon, req, ag, run)
 	return true, nil
+}
+
+func taskDueDateContext(dueDate *time.Time) string {
+	if dueDate == nil {
+		return ""
+	}
+	return "\nTask due date (UTC): " + dueDate.UTC().Format(time.RFC3339Nano) + "."
+}
+
+func taskReviewPrompt(number int, channelID, messageID, submissionID string, submission []byte) string {
+	target := channelID
+	if messageID != "" {
+		target += ":" + messageID
+	}
+	return fmt.Sprintf("[target=%s msg=%s type=system]\nReview Task #%d, submission %s. This is the current review's reply target; earlier Session message targets are unrelated. You are the designated independent reviewer; do not claim or implement the task. Inspect its immutable handoff and evidence below. Check every requirement against the submitted artifact version. For inline source, use solo task evidence -n %d -c %s --submission %s --evidence <evidence-id> --output <new-file-in-your-current-working-directory> to export the exact submitted bytes. The command checks any evidence SHA256; do not retype source or calculate a digest mentally. Run the exported artifact against the public specification, including exact whitespace and boundary behavior where specified. Do not invent new requirements. A rejection must include a reproducible input, the required result and the observed result; preserve already-correct behavior during rework. Use solo task review -n %d -c %s --file <json-file> with submission_id, artifact_version, decision (accepted/rejected/needs_human), reason, checks [{requirement_id,passed,evidence_ids,reason}], optional evidence, and a unique idempotency_key. Acceptance requires every requirement to pass with actual executed evidence; a claim of verification alone is insufficient. Missing or non-reproducible evidence must not be marked passed. After recording the review, send one brief visible explanation with solo message send --target '%s', then finish this turn.\n%s\nSubmission:\n%s", target, messageID, number, submissionID, number, channelID, submissionID, number, channelID, target, agent.TaskVerificationGuidance, submission)
 }

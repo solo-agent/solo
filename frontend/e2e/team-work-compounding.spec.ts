@@ -85,7 +85,7 @@ test('joint owners authorize existing Agents; real work consumes seven correctio
   await expect.poll(() => sql(`SELECT count(*) FROM agent_work_marks WHERE agent_id='${a.id}' AND status='open'`), { timeout: runtimeTimeout }).toBe('1');
   const runID = sql(`SELECT r.id::text FROM agent_runs r JOIN agent_run_task_links link ON link.run_id=r.id WHERE link.task_id='${workTask.id}' AND r.finished_at IS NULL ORDER BY r.started_at DESC LIMIT 1`);
   const taskThread = sql(`SELECT id::text FROM threads WHERE root_message_id='${workTask.message_id}'`);
-  for (let i = 1; i <= 7; i++) await api(owner, 'post', `/api/v1/channels/${channel.id}/messages`, { content: `CORRECTION_${i}: use green and include this label in the final response.`, thread_id: taskThread, client_msg_id: crypto.randomUUID() }, workspace.id);
+  for (let i = 1; i <= 7; i++) await api(owner, 'post', `/api/v1/channels/${channel.id}/messages`, { content: `CORRECTION_${i}: include the literal ASCII word "green" (not a color emoji) and this label in the final response.`, thread_id: taskThread, client_msg_id: crypto.randomUUID() }, workspace.id);
   expect(sql(`SELECT count(*) FROM messages WHERE thread_id='${taskThread}' AND metadata->>'correction_of_run_id'='${runID}'`)).toBe('7');
   const second = await api<{ id: string }>(owner, 'post', `/api/v1/channels/${home.id}/messages`, { content: `@${a.name} SECOND_REQUEST: acknowledge this independent request by sending exactly SECOND_DONE in this channel.`, client_msg_id: crypto.randomUUID() });
   await expect.poll(() => sql(`SELECT count(*) FROM agent_pending_message_wakes WHERE agent_id='${a.id}' AND channel_id='${home.id}'`)).toBe('1');
@@ -103,6 +103,8 @@ test('joint owners authorize existing Agents; real work consumes seven correctio
   await api(owner, 'post', `/api/v1/channels/${channel.id}/messages`, { content: `@${a.name} RESOLVE_WORK：七条补充已核对，独立请求也已完成，请处理你留下的 Follow up regression ${suffix}，并说明依据。`, client_msg_id: crypto.randomUUID() }, workspace.id);
   await expect.poll(() => sql(`SELECT status FROM agent_work_marks WHERE id='${markID}'`), { timeout: runtimeTimeout }).toBe('resolved');
   await expect.poll(() => sql(`SELECT count(*) FROM messages WHERE channel_id='${channel.id}' AND sender_id='${a.id}' AND content LIKE '%OBLIGATION_RESOLVED%'`), { timeout: runtimeTimeout }).toBe('1');
+  await expect.poll(() => sql(`SELECT count(*) FROM agent_runs r LEFT JOIN agent_run_token_usage u ON u.run_id=r.id WHERE r.agent_id IN (${agents.map(actor => `'${actor.id}'`).join(',')}) AND (r.status<>'completed' OR r.finished_at IS NULL OR u.actual_tokens IS NULL)`), { timeout: runtimeTimeout }).toBe('0');
+  await testInfo.attach('compounding-runs-state', { body: Buffer.from(sql(`SELECT json_agg(json_build_object('id',r.id,'agent_id',r.agent_id,'status',r.status,'finished_at',r.finished_at,'actual_tokens',u.actual_tokens)) FROM agent_runs r LEFT JOIN agent_run_token_usage u ON u.run_id=r.id WHERE r.agent_id IN (${agents.map(actor => `'${actor.id}'`).join(',')})`)), contentType: 'application/json' });
   await page.reload(); await page.getByText('工作记录', { exact: true }).click(); await expect(work.getByText(`Follow up regression ${suffix}`, { exact: true })).toHaveCount(0);
   await page.getByText('高级', { exact: true }).click(); await page.getByText('手动改进', { exact: true }).click(); await expect(page.getByRole('button', { name: '刷新版本' })).toBeVisible();
   await peerPage.goto(`/dashboard?channel=${channel.id}#team-records`);
