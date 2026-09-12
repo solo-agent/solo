@@ -18,7 +18,7 @@ type Trial = { id: string; case_id: string; suite: string; split: string; strate
 
 const root = resolve(__dirname, '../..');
 const base = process.env.SOLO_E2E_API_URL ?? 'http://127.0.0.1:8080';
-const dataset = resolve(process.env.SOLO_EVAL_DATASET ?? join(root, 'evals/datasets/solo-skills-v1.json'));
+const dataset = resolve(process.env.SOLO_EVAL_DATASET ?? join(root, 'evals/datasets/solo-skills-v2.json'));
 const output = resolve(process.env.SOLO_EVAL_OUTPUT ?? join(root, 'evals/results', new Date().toISOString().replaceAll(':', '-')));
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 const sql = (query: string) => execFileSync('docker', ['exec', process.env.SOLO_POSTGRES_CONTAINER ?? 'solo-postgres', 'psql', '-U', process.env.POSTGRES_USER ?? 'solo', '-d', process.env.POSTGRES_DB ?? 'solo', '-At', '-v', 'ON_ERROR_STOP=1', '-c', query], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).trim();

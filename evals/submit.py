@@ -11,8 +11,8 @@ submitted=Path(filename)
 source=submitted.resolve()
 if not source.is_relative_to(Path.cwd().resolve()) or submitted.is_symlink():
     raise SystemExit('Submit only a file from your own working directory')
-content=source.read_text()
-if not content.strip() or len(content.encode())>262144: raise SystemExit('Invalid artifact size')
+content=source.read_bytes().decode('utf-8')
+if not content.strip() or len(content.encode())>64000: raise SystemExit('Invalid artifact size')
 def cli(*args):
     p=subprocess.run(['solo',*args],capture_output=True,text=True,timeout=30)
     if p.returncode: raise RuntimeError(p.stdout+p.stderr)
@@ -24,6 +24,6 @@ body={'expected_task_version':task['version'],'idempotency_key':'eval-'+digest[:
       'artifact_version':digest,'handoff':{'summary':'EVAL_ARTIFACT '+source.name,'changes':'Submitted actual file content','risks':'Awaiting independent verification','next_steps':'Independent automatic grading'},
       'evidence':[{'id':'E1','description':'Actual file: '+source.name,'content':content}]}
 payload=Path.cwd()/'eval-submission.json'; payload.write_text(json.dumps(body))
-cli('task','submit','-c',channel,'-n',number,'--file',str(payload))
+cli('task','submit','-c',channel,'-n',number,'--file',str(payload),'--artifact',str(source),'--evidence-id','E1')
 cli('message','send','--target',channel+':'+task['message_id'][:8],'-c','EVAL_ARTIFACT '+source.name+' SHA256 '+digest)
 print('Submitted',digest)

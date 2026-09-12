@@ -4,8 +4,21 @@ import unittest
 from grade import execute, grade
 
 class Graders(unittest.TestCase):
+    def test_v2_only_clarifies_repeated_slashes_without_changing_oracles(self):
+        directory=Path(__file__).with_name('datasets')
+        previous=json.loads((directory/'solo-skills-v1.json').read_text())
+        current=json.loads((directory/'solo-skills-v2.json').read_text())
+        self.assertEqual(len(previous),len(current))
+        for old,new in zip(previous,current):
+            self.assertEqual(new.pop('suite'),'solo-skills-v2')
+            self.assertEqual(old.pop('suite'),'solo-skills-v1')
+            if old['id']=='relative-path':
+                self.assertEqual(new['instruction'],old['instruction'].replace('collapse .','collapse repeated slashes and ignore empty segments, collapse .'))
+                new['instruction']=old['instruction']
+            self.assertEqual(old,new)
+
     def test_dataset_references_and_negative_controls(self):
-        cases=json.loads(Path(__file__).with_name('datasets').joinpath('solo-skills-v1.json').read_text())
+        cases=json.loads(Path(__file__).with_name('datasets').joinpath('solo-skills-v2.json').read_text())
         self.assertEqual(len(cases),20)
         self.assertEqual(len({c['id'] for c in cases}),20)
         self.assertEqual(sum(c['split']=='holdout' for c in cases),10)
@@ -69,7 +82,7 @@ class Decisions(unittest.TestCase):
             path=Path(directory)/'report.json'
             path.write_text(json.dumps({'status':'completed','trials':[{'split':'holdout'}]}))
             with self.assertRaisesRegex(ValueError,'development'):
-                learning_case(path,Path(__file__).with_name('datasets')/'solo-skills-v1.json')
+                learning_case(path,Path(__file__).with_name('datasets')/'solo-skills-v2.json')
     def test_fixed_public_dataset_and_oracles(self):
         import gzip,hashlib
         directory=Path(__file__).parent

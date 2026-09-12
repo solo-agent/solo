@@ -15,7 +15,7 @@ def case(name, split, entry, requirement, starter, reference, inputs, anchor):
         except Exception as error:
             checks.append({'args': args, 'error': type(error).__name__})
     assert checks[0].get('expected') == anchor, (name, checks[0], anchor)
-    CASES.append({'id': name, 'suite': 'solo-skills-v1', 'split': split, 'entry_point': entry,
+    CASES.append({'id': name, 'suite': 'solo-skills-v2', 'split': split, 'entry_point': entry,
                   'instruction': requirement, 'starter': starter, 'reference': reference,
                   'checks': checks, 'source': 'Solo authored controlled maintenance task'})
 
@@ -119,7 +119,7 @@ case('cursor-pagination', 'dev', 'collect',
 ''', [[{'a':{'items':[1],'next':''},'':{'items':[2],'next':None}},'a'],[{'x':{'items':[],'next':'x'}},'x'],[{},'a'],[{},None],[{'a':{'items':[1,1],'next':None}},'a']], [1,2])
 
 case('relative-path', 'dev', 'safe_path',
-     'Repair safe_path(path). Normalize a nonempty slash-separated relative file path; collapse . and interior a/.., but reject any attempt to climb above the root, even if later segments return inside. Reject leading slash, backslash, NUL and colon anywhere. Reject paths normalizing to empty. Return normalized slash path; invalid paths raise ValueError. This is lexical validation, not a filesystem symlink resolver.',
+     'Repair safe_path(path). Normalize a nonempty slash-separated relative file path; collapse repeated slashes and ignore empty segments, collapse . and interior a/.., but reject any attempt to climb above the root, even if later segments return inside. Reject leading slash, backslash, NUL and colon anywhere. Reject paths normalizing to empty. Return normalized slash path; invalid paths raise ValueError. This is lexical validation, not a filesystem symlink resolver.',
      'def safe_path(path):\n    return path.replace("../", "").strip("/")\n',
      '''def safe_path(path):
  if not path or path.startswith('/') or any(c in path for c in ['\\\\','\\0',':']): raise ValueError('invalid')
@@ -279,7 +279,7 @@ def merge(base,patch):
 ''', [[{'a':{'x':1,'y':2},'b':[1]}, {'a':{'x':None,'z':3},'b':[2]}],[{'a':1},None],[None,{'a':{'b':1},'gone':None}],[{'a':1},[]],[{},{}]], {'a':{'y':2,'z':3},'b':[2]})
 
 if __name__ == '__main__':
-    target=Path(__file__).with_name('datasets')/'solo-skills-v1.json'
+    target=Path(__file__).with_name('datasets')/'solo-skills-v2.json'
     target.parent.mkdir(exist_ok=True)
     target.write_text(json.dumps(CASES,ensure_ascii=False,indent=2)+'\n')
     print(json.dumps({'cases':len(CASES),'checks':sum(len(c['checks']) for c in CASES),'path':str(target)}))

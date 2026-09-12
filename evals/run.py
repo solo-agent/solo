@@ -42,7 +42,7 @@ def main():
     if not (stack/'.env').exists(): p.error('stack-root needs its existing .env and paired Computer')
     node=ROOT/'frontend/node_modules/@playwright/test/cli.js'
     if not node.exists(): p.error('Install existing frontend dependencies before running evals')
-    dataset=ROOT/'evals/datasets'/('solo-skills-v1.json' if args.dataset=='native' else 'humaneval-smoke.json')
+    dataset=ROOT/'evals/datasets'/('solo-skills-v2.json' if args.dataset=='native' else 'humaneval-smoke.json')
     if args.cases and not set(args.cases.split(','))<={c['id'] for c in json.loads(dataset.read_text())}: p.error('Unknown case ID')
     if args.split and not any(c['split']==args.split for c in json.loads(dataset.read_text())): p.error('Split not present in dataset')
     image='python:3.12-alpine@sha256:b64631e04e4920160c50fbe8d8df828f7f35f06f425cb44aa09bca53e708a35a'
@@ -53,7 +53,7 @@ def main():
     output.mkdir(parents=True,exist_ok=True)
     if args.generate_from:
         dataset=output/'learning-input.json'
-        dataset.write_text(json.dumps(learning_case(args.generate_from.resolve(),ROOT/'evals/datasets/solo-skills-v1.json'),ensure_ascii=False,indent=2))
+        dataset.write_text(json.dumps(learning_case(args.generate_from.resolve(),ROOT/'evals/datasets/solo-skills-v2.json'),ensure_ascii=False,indent=2))
         args.strategies='single'; args.repetitions=1; args.cases=''; args.split=None
     env=os.environ.copy()
     env.update(CI='1',SOLO_EVAL_DATASET=str(dataset),SOLO_EVAL_OUTPUT=str(output),SOLO_EVAL_STRATEGIES=args.strategies,
