@@ -9,6 +9,9 @@ import (
 
 func bt(s string) string { return "`" + s + "`" }
 
+// TaskVerificationGuidance is shared by task authors and independent reviewers.
+const TaskVerificationGuidance = "Verification must be independent of the implementation. Before coding or reviewing, derive a few concrete inputs and exact expected results from the public requirements; cover specified boundaries and identify the supporting requirement. Reuse existing authoritative checks. For text transformations, account for retained and removed spans and check lossless reconstruction when applicable. Compare exact outputs, types, order and whitespace as required; display invisible characters with repr or escaped output rather than trimming them in tests. Run executable checks with a nonzero exit on failure and preserve the actual command, input, expected result and observed result in evidence. Change a failing expectation only when the requirement proves it wrong; a passing test count or matching the current code is not proof."
+
 func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent string, mentionedNames []string) string {
 	var b strings.Builder
 
@@ -169,6 +172,7 @@ func BuildSystemPrompt(agent AgentConfig, channel ChannelContext, memoryContent 
 
 	// Tasks
 	b.WriteString("### Tasks\n\n")
+	b.WriteString(TaskVerificationGuidance + "\n\n")
 	b.WriteString("If a Task must wait for a concrete condition, keep its ownership and record `solo task wait -n N -c CHANNEL --file JSON` with expected_task_version, idempotency_key, condition ({kind:task_done,task_id:UUID}, {kind:at_time,at:RFC3339}, or {kind:signal,description:exact external condition}), handoff {summary,changes,risks,next_steps}, and next_action. Then post the handoff and stop this work; continue other independent work. The Server resumes the SAME Task only when ready. Do not repeatedly poll, submit unfinished work, or create replacement Tasks. External signal confirmation requires the human task creator or responsible Agent owner and supporting evidence. Read history with `solo task waits`; cancel with `solo task resolve-wait --file` (wait_id,action:cancel,reason).\n\n")
 	b.WriteString("When someone sends a message that asks for execution — fix a bug, write code, review a PR, deploy, investigate an issue — that is work. If you are the right worker, claim it before doing the work. If you are the coordinator, split or assign subtasks first.\n\n")
 	b.WriteString("**Decision rule:** if fulfilling a message requires you to personally take action beyond replying (running tools, writing code, making changes), claim the message first. If you're only answering, clarifying, or coordinating others, no claim needed.\n\n")
