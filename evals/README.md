@@ -108,7 +108,7 @@ python3 evals/report.py /tmp/solo-eval-smoke/report.json
 
 ## 首版固定评测规则
 
-- 模型默认 Claude `sonnet`；可为整个实验统一指定 provider/model。报告记录请求的模型名，它可能是供应商别名，不能声称固定了供应商内部模型权重。
+- 默认使用 Claude Code Runtime，请求别名 `sonnet`；可为整个实验统一指定 provider/model。本机首轮真实响应型号经补充审计为 `MiniMax-M3`，不能把 Runtime 名称视为实际模型。新批次另存 `runtime.json`，沿已有 Run/Session 关联核对当前 Run 时间内的本地响应型号；缺失或暂不支持的 Runtime 归因显示“未核实”，不回退使用请求别名。供应商内部权重与实际思考强度仍未核实。旧成绩不改写，补充归因可运行 `python3 evals/runtime.py <report.json> --output <new-audit.json>`。
 - 同一题每个策略独立重复 3 次；新成员和目录，按题号与重复序号交替执行策略顺序。公开补充集只执行 1 次，不用于进化采用。
 - 每次任务执行最多 360 秒；介绍准备与 UI 核验耗时另计入总时间。正式实验每次全部成员用量的资格上限为 300 万 Token；这是最终资格检查，不是供应商账单的硬截断。这个上限在试跑观察正常双成员用量后、正式对照前确定。
 - 单成员由独立程序验收；双成员必须先由真实第二成员检查，之后独立程序再检查最终产物。程序不把隐藏失败答案反馈给验收集 Agent。

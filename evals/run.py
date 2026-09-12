@@ -9,6 +9,7 @@ import subprocess
 import sys
 from evolve import learning_case
 from report import render
+from runtime import collect_runtime
 
 ROOT=Path(__file__).resolve().parent.parent
 
@@ -76,6 +77,12 @@ def main():
             report['status']='incomplete'
             for trial in report['trials']:
                 if trial['status']=='running': trial.update(status='interrupted',passed=False,error='Evaluation lifecycle interrupted; not an Agent capability score')
+        try:
+            runtime=collect_runtime(report)
+            (output/'runtime.json').write_text(json.dumps(runtime,ensure_ascii=False,indent=2))
+            report['runtime']={key:value for key,value in runtime.items() if key!='runs'}
+        except (OSError,ValueError,subprocess.SubprocessError) as error:
+            report['runtime']={'response_models':[],'reason':type(error).__name__+': runtime attribution unavailable'}
         (output/'report.json.tmp').write_text(json.dumps(report,ensure_ascii=False,indent=2))
         (output/'report.json.tmp').replace(output/'report.json')
         render(report,output)

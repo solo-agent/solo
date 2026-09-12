@@ -50,6 +50,19 @@ class Graders(unittest.TestCase):
 
 
 class Decisions(unittest.TestCase):
+    def test_runtime_models_use_only_actual_responses_in_the_current_run(self):
+        from runtime import response_models
+        entries = json.loads('''[
+          {"type":"assistant","timestamp":"2026-09-12T01:00:00Z","message":{"model":"old-session-model"}},
+          {"type":"user","timestamp":"2026-09-12T01:02:00Z","message":{"model":"sonnet"}},
+          {"type":"assistant","timestamp":"2026-09-12T01:02:00Z","message":{"model":"MiniMax-M3"}},
+          {"type":"assistant","timestamp":"2026-09-12T01:02:01Z","message":{"model":"MiniMax-M3"}},
+          {"type":"assistant","timestamp":"2026-09-12T01:02:02Z","message":{"model":"<synthetic>"}},
+          {"type":"assistant","timestamp":"2026-09-12T01:04:00Z","message":{"model":"next-run-model"}}
+        ]''')
+        self.assertEqual(response_models(entries, '2026-09-12T01:01:00+00:00', '2026-09-12T09:03:00+08:00'), ['MiniMax-M3'])
+        self.assertEqual(response_models(entries[:2], '2026-09-12T01:01:00Z', '2026-09-12T01:03:00Z'), [])
+
     def test_paired_adoption_and_failure_gates(self):
         from report import compare
         rows=[{'case_id':str(case),'repetition':rep,'strategy':strategy,'passed':strategy=='evolved',
